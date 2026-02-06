@@ -80,10 +80,10 @@ MIDDLEWARE = [
     "apps.backend.retention.middleware.RetentionEnforcementMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.backend.platform.middleware.ApiV2ErrorNormalizeMiddleware",
+    "apps.backend.core_platform.middleware.ApiV2ErrorNormalizeMiddleware",
 ]
 
-ROOT_URLCONF = "apps.backend.platform.urls"
+ROOT_URLCONF = "apps.backend.core_platform.urls"
 
 TEMPLATES = [
     {
@@ -110,7 +110,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "apps.backend.platform.wsgi.application"
+WSGI_APPLICATION = "apps.backend.core_platform.wsgi.application"
 
 
 DATABASES = {
@@ -174,7 +174,7 @@ except Exception:
     pass
 STORAGES = {
     "default": {
-        "BACKEND": "apps.backend.platform.storage.DynamicMediaStorage",
+        "BACKEND": "apps.backend.core_platform.storage.DynamicMediaStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",

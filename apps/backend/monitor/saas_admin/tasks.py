@@ -44,7 +44,7 @@ def pull_local_media_job(job_id):
         return
 
     try:
-        from apps.backend.platform import storage as storage_utils
+        from apps.backend.core_platform import storage as storage_utils
     except Exception:
         job.status = "failed"
         job.error_message = "Object storage backend unavailable."

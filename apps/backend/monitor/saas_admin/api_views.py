@@ -3892,7 +3892,7 @@ def _ensure_object_storage_ready():
     if settings_obj.storage_mode != "object" or not settings_obj.is_object_configured():
         return None, JsonResponse({"detail": "object_storage_not_configured"}, status=400)
     try:
-        from apps.backend.platform import storage as storage_utils
+        from apps.backend.core_platform import storage as storage_utils
     except Exception:
         return None, JsonResponse({"detail": "object_storage_unavailable"}, status=500)
     dest_storage = storage_utils._build_object_storage(settings_obj)

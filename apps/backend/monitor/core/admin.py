@@ -977,7 +977,7 @@ def _get_app_list(request, app_label=None):
         return app_list
     if _is_super_admin_user(request.user):
         app_list = _inject_support_access_link(app_list)
-    from apps.backend.platform.admin_grouping import build_grouped_admin_app_list
+    from apps.backend.core_platform.admin_grouping import build_grouped_admin_app_list
     return build_grouped_admin_app_list(app_list)
 
 

@@ -20,7 +20,7 @@ from core import views_public as monitor_public_views
 from dashboard import views as dashboard_views
 from apps.backend.monitor.admin_views import monitor_products_hub, monitor_product_features
 from apps.backend.brand import views as brand_views
-from apps.backend.platform.views_spa import spa_serve
+from apps.backend.core_platform.views_spa import spa_serve
 from apps.backend.website import urls as website_urls
 from apps.backend.website import views as website_views
 from saas_admin.views_reports import observability_report
@@ -63,7 +63,7 @@ urlpatterns = [
     path("api/auth/logout", common_auth_api_views.api_logout),
     path("api/auth/me", monitor_auth_views.auth_me),
     path("api/auth/subscriptions", monitor_auth_views.auth_subscriptions),
-    path("api/v2/", include("apps.backend.platform.api_v2_urls")),
+    path("api/v2/", include("apps.backend.core_platform.api_v2_urls")),
     path("api/dashboard/", include("dashboard.api_urls")),
     path("api/ai-chatbot/", include("ai_chatbot.api_urls")),
     path("api/saas-admin/", include("saas_admin.api_urls")),

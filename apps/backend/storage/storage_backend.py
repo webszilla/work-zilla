@@ -2,7 +2,7 @@
 from django.utils import timezone
 import uuid
 
-from apps.backend.platform.storage import DynamicMediaStorage
+from apps.backend.core_platform.storage import DynamicMediaStorage
 
 
 storage_backend = DynamicMediaStorage()

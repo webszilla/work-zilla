@@ -14,7 +14,7 @@ def main() -> None:
         sys.path.remove(str(base_dir))
 
     os.environ.setdefault(
-        "DJANGO_SETTINGS_MODULE", "apps.backend.platform.settings"
+        "DJANGO_SETTINGS_MODULE", "apps.backend.core_platform.settings"
     )
     try:
         from django.core.management import execute_from_command_line
