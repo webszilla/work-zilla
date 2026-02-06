@@ -1,0 +1,63 @@
+{% extends "public/base.html" %}
+{% load static %}
+
+{% block content %}
+
+<div class="container mt-5" style="max-width:600px">
+
+    <h1 class="section-title text-center">HR View Login</h1>
+    <p class="text-center text-secondary">
+        Use your Company Key and HR password to access the dashboard.
+    </p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} text-center">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    {% if form.errors %}
+        <div class="alert alert-danger text-center">
+            Invalid company key or password
+        </div>
+    {% endif %}
+
+    <div class="card p-4">
+
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Company Key</label>
+                <input type="text"
+                       name="company_key"
+                       class="form-control"
+                       placeholder="Enter company key"
+                       required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password"
+                       name="password"
+                       class="form-control"
+                       placeholder="Enter password"
+                       required>
+            </div>
+
+            <button class="btn btn-primary w-100">Login</button>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block sidebar %}{% endblock %}
+
+{% block shell_class %}no-sidebar{% endblock %}
+

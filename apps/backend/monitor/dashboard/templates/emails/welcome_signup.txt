@@ -1,0 +1,8 @@
+Hello {{ name }},
+
+Welcome to Work Zilla Monitor.
+
+Login URL: {{ login_url }}
+
+Thanks,
+Work Zilla Monitor

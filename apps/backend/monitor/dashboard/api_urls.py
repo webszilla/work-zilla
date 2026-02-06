@@ -1,0 +1,58 @@
+from django.urls import path
+
+from core.subscription_utils import require_active_monitor_subscription
+from . import api_views
+
+
+def guard(view):
+    return require_active_monitor_subscription(view)
+
+urlpatterns = [
+    path("summary", guard(api_views.dashboard_summary), name="api_dashboard_summary"),
+    path("employees", guard(api_views.employees_list), name="api_employees_list"),
+    path("employees/create", guard(api_views.employees_create), name="api_employees_create"),
+    path("employees/<int:emp_id>", guard(api_views.employees_detail), name="api_employees_detail"),
+    path("employees/<int:emp_id>/update", guard(api_views.employees_update), name="api_employees_update"),
+    path("employees/<int:emp_id>/delete", guard(api_views.employees_delete), name="api_employees_delete"),
+    path("employees/screenshot-interval", guard(api_views.employees_update_interval), name="api_employees_interval"),
+    path("employees/addons", guard(api_views.employees_update_addons), name="api_employees_addons"),
+    path("screenshots", guard(api_views.screenshots_list), name="api_screenshots_list"),
+    path("screenshots/<int:shot_id>/image", guard(api_views.screenshots_image), name="api_screenshot_image"),
+    path("screenshots/<int:shot_id>/delete", guard(api_views.screenshots_delete), name="api_screenshots_delete"),
+    path("screenshots/delete-all", guard(api_views.screenshots_delete_all), name="api_screenshots_delete_all"),
+    path("screenshots/delete-employee", guard(api_views.screenshots_delete_employee), name="api_screenshots_delete_employee"),
+    path("screenshots/delete-selected", guard(api_views.screenshots_delete_selected), name="api_screenshots_delete_selected"),
+    path("activity/live", guard(api_views.activity_live), name="api_activity_live"),
+    path("work-activity", guard(api_views.work_activity_log), name="api_work_activity_log"),
+    path("app-usage", guard(api_views.app_usage), name="api_app_usage"),
+    path("app-urls", guard(api_views.app_urls_usage), name="api_app_urls"),
+    path("gaming-ott", guard(api_views.gaming_ott_usage), name="api_gaming_ott_usage"),
+    path("company", guard(api_views.company_summary), name="api_company_summary"),
+    path("company/name", guard(api_views.company_update_name), name="api_company_update_name"),
+    path("company/interval", guard(api_views.company_update_interval), name="api_company_update_interval"),
+    path("company/screenshot-privacy", guard(api_views.company_update_screenshot_privacy), name="api_company_update_screenshot_privacy"),
+    path("company/privacy", guard(api_views.company_update_privacy), name="api_company_update_privacy"),
+    path("company/support-access", guard(api_views.company_update_support), name="api_company_update_support"),
+    path("billing", api_views.billing_summary, name="api_billing_summary"),
+    path("billing-profile", api_views.billing_profile, name="api_billing_profile"),
+    path("billing/invoice/<int:transfer_id>", api_views.billing_invoice_pdf, name="api_billing_invoice"),
+    path("plans", api_views.plans_list, name="api_plans_list"),
+    path("plans/subscribe/<int:plan_id>", api_views.plans_subscribe, name="api_plans_subscribe"),
+    path("plans/rollback", api_views.plans_rollback, name="api_plans_rollback"),
+    path("bank-transfer", api_views.bank_transfer_summary, name="api_bank_transfer_summary"),
+    path("bank-transfer/<int:transfer_id>", api_views.bank_transfer_summary, name="api_bank_transfer_summary_id"),
+    path("bank-transfer/submit", api_views.bank_transfer_submit, name="api_bank_transfer_submit"),
+    path("bank-transfer/<int:transfer_id>/submit", api_views.bank_transfer_submit, name="api_bank_transfer_submit_id"),
+    path("profile", guard(api_views.profile_summary), name="api_profile_summary"),
+    path("profile/email", guard(api_views.profile_update_email), name="api_profile_update_email"),
+    path("profile/password", guard(api_views.profile_update_password), name="api_profile_update_password"),
+    path("dealer/summary", guard(api_views.dealer_summary), name="api_dealer_summary"),
+    path("dealer/plan", guard(api_views.dealer_plan_summary), name="api_dealer_plan_summary"),
+    path("dealer/subscribe", guard(api_views.dealer_subscribe), name="api_dealer_subscribe"),
+    path("dealer/billing", guard(api_views.dealer_billing_summary), name="api_dealer_billing_summary"),
+    path("dealer/bank-transfer/<int:transfer_id>", guard(api_views.dealer_bank_transfer_summary), name="api_dealer_bank_transfer_summary"),
+    path("dealer/bank-transfer/<int:transfer_id>/submit", guard(api_views.dealer_bank_transfer_submit), name="api_dealer_bank_transfer_submit"),
+    path("dealer/profile", guard(api_views.dealer_profile), name="api_dealer_profile"),
+    path("dealer/profile/password", guard(api_views.dealer_profile_password), name="api_dealer_profile_password"),
+    path("dealer/referrals", guard(api_views.dealer_referrals), name="api_dealer_referrals"),
+]

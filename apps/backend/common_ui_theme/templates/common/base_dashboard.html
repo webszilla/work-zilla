@@ -1,0 +1,38 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block page_title %}Work Zilla{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'common/css/dashboard.css' %}" />
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body>
+    <div class="wz-shell">
+      <aside class="wz-sidebar">
+        <div class="wz-brand">Work Zilla</div>
+        <nav class="wz-nav">
+          <a href="#" class="wz-nav__item">Overview</a>
+          <a href="#" class="wz-nav__item">Reports</a>
+          <a href="#" class="wz-nav__item">Settings</a>
+        </nav>
+      </aside>
+
+      <main class="wz-main">
+        <header class="wz-topbar">
+          <div class="wz-topbar__title">{% block page_title %}Dashboard{% endblock %}</div>
+          <div class="wz-topbar__actions">
+            <button class="wz-button">Help</button>
+          </div>
+        </header>
+
+        <section class="wz-content">
+          {% block content %}{% endblock %}
+        </section>
+      </main>
+    </div>
+
+    <script src="{% static 'common/js/dashboard.js' %}"></script>
+  </body>
+</html>

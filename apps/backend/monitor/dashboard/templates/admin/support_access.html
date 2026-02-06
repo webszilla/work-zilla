@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+
+<p class="help">Super Admin can temporarily access company dashboards only during active support sessions.</p>
+
+<div class="module">
+  <table>
+    <thead>
+      <tr>
+        <th>Company Name</th>
+        <th>Company Admin</th>
+        <th>Monitoring Mode</th>
+        <th>Support Access Until</th>
+        <th>Approval Duration</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ row.company_name }}</td>
+          <td>
+            {{ row.admin_name }}
+            {% if row.admin_email %}
+              <div class="help">{{ row.admin_email }}</div>
+            {% endif %}
+          </td>
+          <td>{{ row.monitoring_mode }}</td>
+          <td>
+            {% if row.support_access_until %}
+              {{ row.support_access_until|date:"Y-m-d H:i" }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ row.approved_duration }}</td>
+          <td>
+            <a class="button" href="/super-admin/user-dashboard-access/{{ row.org_id }}/open/?next=/admin/support-access/" target="_blank" rel="noopener">
+              Access Dashboard
+            </a>
+          </td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="6">No support access sessions available.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+

@@ -1,0 +1,187 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<style>
+  .ref-tabs { display: flex; gap: 10px; margin-bottom: 16px; }
+  .ref-tab { padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5f5; background: #f8fafc; cursor: pointer; }
+  .ref-tab.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  .ref-panel { display: none; }
+  .ref-panel.active { display: block; }
+  .ref-table { width: 100%; border-collapse: collapse; }
+  .ref-table th, .ref-table td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+  .ref-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #fff; }
+</style>
+
+<h1>Referral Program</h1>
+
+<div class="ref-card">
+  <h2>Settings</h2>
+  <form method="post">
+    {% csrf_token %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+      <label>
+        ORG Commission Rate (%)
+        <input type="number" step="0.01" min="0" name="commission_rate" value="{{ settings.commission_rate }}" style="width:100%;">
+      </label>
+      <label>
+        Dealer Commission Rate (%)
+        <input type="number" step="0.01" min="0" name="dealer_commission_rate" value="{{ settings.dealer_commission_rate }}" style="width:100%;">
+      </label>
+      <label>
+        Dealer Subscription Amount (Yearly)
+        <input type="number" step="0.01" min="0" name="dealer_subscription_amount" value="{{ settings.dealer_subscription_amount }}" style="width:100%;">
+      </label>
+      <label>
+        Dealer Referral Flat Amount
+        <input type="number" step="0.01" min="0" name="dealer_referral_flat_amount" value="{{ settings.dealer_referral_flat_amount }}" style="width:100%;">
+      </label>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="default" type="submit">Save Settings</button>
+    </div>
+  </form>
+</div>
+
+<div class="ref-tabs">
+  <button type="button" class="ref-tab active" data-tab="org">ORG Accounts</button>
+  <button type="button" class="ref-tab" data-tab="dealer">Dealer Accounts</button>
+</div>
+
+<div class="ref-panel active" data-panel="org">
+  <div class="ref-card">
+    <h2>ORG Referral Earnings</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>Referrer</th>
+          <th>Referred Org</th>
+          <th>Transfer</th>
+          <th>Base Amount</th>
+          <th>Rate</th>
+          <th>Commission</th>
+          <th>Status</th>
+          <th>Payout Ref</th>
+          <th>Payout Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in org_earnings %}
+          <tr>
+            <td>{{ row.referrer_org.name }}</td>
+            <td>{{ row.referred_org.name }}</td>
+            <td>{{ row.transfer_id|default:"-" }}</td>
+            <td>{{ row.base_amount }}</td>
+            <td>{{ row.commission_rate }}%</td>
+            <td>{{ row.commission_amount }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.payout_reference|default:"-" }}</td>
+            <td>{{ row.payout_date|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9">No referral earnings yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:8px;">
+      Update payouts from Django Admin lists:
+      <a href="/admin/core/referralearning/">ORG Referral Earnings</a>
+    </p>
+  </div>
+</div>
+
+<div class="ref-panel" data-panel="dealer">
+  <div class="ref-card">
+    <h2>Dealer Subscriptions</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>Dealer</th>
+          <th>Email</th>
+          <th>Referral Code</th>
+          <th>Referred By</th>
+          <th>Status</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in dealers %}
+          <tr>
+            <td>{{ row.user.username }}</td>
+            <td>{{ row.user.email|default:"-" }}</td>
+            <td>{{ row.referral_code|default:"-" }}</td>
+            <td>{% if row.referred_by %}{{ row.referred_by.user.username }}{% else %}-{% endif %}</td>
+            <td>{{ row.subscription_status }}</td>
+            <td>{{ row.subscription_start|default:"-" }}</td>
+            <td>{{ row.subscription_end|default:"-" }}</td>
+            <td>{{ row.subscription_amount }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8">No dealers yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:8px;">
+      Manage dealers here:
+      <a href="/admin/core/dealeraccount/">Dealer Accounts</a>
+    </p>
+  </div>
+
+  <div class="ref-card">
+    <h2>Dealer Referral Earnings</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>Referrer</th>
+          <th>Referred Org</th>
+          <th>Referred Dealer</th>
+          <th>Transfer</th>
+          <th>Commission</th>
+          <th>Flat</th>
+          <th>Status</th>
+          <th>Payout Ref</th>
+          <th>Payout Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in dealer_earnings %}
+          <tr>
+            <td>{{ row.referrer_dealer.user.username }}</td>
+            <td>{% if row.referred_org %}{{ row.referred_org.name }}{% else %}-{% endif %}</td>
+            <td>{% if row.referred_dealer %}{{ row.referred_dealer.user.username }}{% else %}-{% endif %}</td>
+            <td>{{ row.transfer_id|default:"-" }}</td>
+            <td>{{ row.commission_amount }}</td>
+            <td>{{ row.flat_amount }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.payout_reference|default:"-" }}</td>
+            <td>{{ row.payout_date|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9">No dealer earnings yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:8px;">
+      Update payouts from Django Admin lists:
+      <a href="/admin/core/dealerreferralearning/">Dealer Referral Earnings</a>
+    </p>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const tabs = document.querySelectorAll(".ref-tab");
+    const panels = document.querySelectorAll(".ref-panel");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.getAttribute("data-tab");
+        tabs.forEach((btn) => btn.classList.toggle("active", btn === tab));
+        panels.forEach((panel) => panel.classList.toggle("active", panel.getAttribute("data-panel") === target));
+      });
+    });
+  })();
+</script>
+{% endblock %}
+

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Work Zilla Signup</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      .page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+      .card {
+        width: 100%;
+        max-width: 460px;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 24px;
+      }
+      .muted {
+        margin: 0 0 20px 0;
+        color: #64748b;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 14px;
+      }
+      input {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #cbd5f5;
+        font-size: 14px;
+      }
+      .btn {
+        display: inline-block;
+        width: 100%;
+        padding: 10px 14px;
+        border: none;
+        border-radius: 999px;
+        background: #4f46e5;
+        color: #ffffff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .error {
+        color: #b91c1c;
+        font-size: 13px;
+        margin-top: 6px;
+      }
+      .footer {
+        margin: 18px 0 0 0;
+        text-align: center;
+        font-size: 14px;
+      }
+      .footer a {
+        color: #4f46e5;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <form method="post" class="card">
+        {% csrf_token %}
+        <h1>Create account</h1>
+        <p class="muted">Start with your company details.</p>
+        {% if form.non_field_errors %}
+          <div class="error">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <label>
+          {{ form.email.label_tag }}
+          {{ form.email }}
+          {% if form.email.errors %}
+            <div class="error">{{ form.email.errors }}</div>
+          {% endif %}
+        </label>
+        <label>
+          {{ form.company_name.label_tag }}
+          {{ form.company_name }}
+          {% if form.company_name.errors %}
+            <div class="error">{{ form.company_name.errors }}</div>
+          {% endif %}
+        </label>
+        <label>
+          {{ form.password1.label_tag }}
+          {{ form.password1 }}
+          {% if form.password1.errors %}
+            <div class="error">{{ form.password1.errors }}</div>
+          {% endif %}
+        </label>
+        <label>
+          {{ form.password2.label_tag }}
+          {{ form.password2 }}
+          {% if form.password2.errors %}
+            <div class="error">{{ form.password2.errors }}</div>
+          {% endif %}
+        </label>
+        <button class="btn" type="submit">Create account</button>
+        <p class="footer">
+          Already have an account? <a href="{% url 'common_auth:login' %}">Login</a>
+        </p>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,100 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+{% endblock %}
+
+{% block field_sets %}
+<div class="plan-grid">
+  <div class="plan-col">
+    <h2>Plan Details</h2>
+    <div class="form-row">
+      {{ adminform.form.name.errors }}
+      <label for="{{ adminform.form.name.id_for_label }}">Name:</label>
+      {{ adminform.form.name }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.employee_limit.errors }}
+      <label for="{{ adminform.form.employee_limit.id_for_label }}">Employee limit:</label>
+      {{ adminform.form.employee_limit }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.retention_days.errors }}
+      <label for="{{ adminform.form.retention_days.id_for_label }}">Retention days:</label>
+      {{ adminform.form.retention_days }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.screenshot_min_minutes.errors }}
+      <label for="{{ adminform.form.screenshot_min_minutes.id_for_label }}">Screenshot min minutes:</label>
+      {{ adminform.form.screenshot_min_minutes }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.allow_addons.errors }}
+      <label for="{{ adminform.form.allow_addons.id_for_label }}">Allow addons</label>
+      {{ adminform.form.allow_addons }}
+    </div>
+    <div class="form-row plan-inline-row">
+      <div class="plan-inline-field">
+        {{ adminform.form.allow_app_usage.errors }}
+        <label for="{{ adminform.form.allow_app_usage.id_for_label }}">Allow app usage</label>
+        {{ adminform.form.allow_app_usage }}
+      </div>
+      <div class="plan-inline-field">
+        {{ adminform.form.allow_gaming_ott_usage.errors }}
+        <label for="{{ adminform.form.allow_gaming_ott_usage.id_for_label }}">Allow Gaming / OTT Usage</label>
+        {{ adminform.form.allow_gaming_ott_usage }}
+      </div>
+    </div>
+    <div class="form-row">
+      {{ adminform.form.allow_hr_view.errors }}
+      <label for="{{ adminform.form.allow_hr_view.id_for_label }}">Allow HR View Login</label>
+      {{ adminform.form.allow_hr_view }}
+    </div>
+  </div>
+
+  <div class="plan-col">
+    <h2>Price Details</h2>
+    <div class="form-row">
+      {{ adminform.form.monthly_price.errors }}
+      <label for="{{ adminform.form.monthly_price.id_for_label }}">Monthly price:</label>
+      {{ adminform.form.monthly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.yearly_price.errors }}
+      <label for="{{ adminform.form.yearly_price.id_for_label }}">Yearly price:</label>
+      {{ adminform.form.yearly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.usd_monthly_price.errors }}
+      <label for="{{ adminform.form.usd_monthly_price.id_for_label }}">USD monthly price:</label>
+      {{ adminform.form.usd_monthly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.usd_yearly_price.errors }}
+      <label for="{{ adminform.form.usd_yearly_price.id_for_label }}">USD yearly price:</label>
+      {{ adminform.form.usd_yearly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.addon_monthly_price.errors }}
+      <label for="{{ adminform.form.addon_monthly_price.id_for_label }}">Addon monthly price:</label>
+      {{ adminform.form.addon_monthly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.addon_yearly_price.errors }}
+      <label for="{{ adminform.form.addon_yearly_price.id_for_label }}">Addon yearly price:</label>
+      {{ adminform.form.addon_yearly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.addon_usd_monthly_price.errors }}
+      <label for="{{ adminform.form.addon_usd_monthly_price.id_for_label }}">Addon USD monthly price:</label>
+      {{ adminform.form.addon_usd_monthly_price }}
+    </div>
+    <div class="form-row">
+      {{ adminform.form.addon_usd_yearly_price.errors }}
+      <label for="{{ adminform.form.addon_usd_yearly_price.id_for_label }}">Addon USD yearly price:</label>
+      {{ adminform.form.addon_usd_yearly_price }}
+    </div>
+  </div>
+</div>
+{% endblock %}
+

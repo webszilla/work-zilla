@@ -1,0 +1,47 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Contact{% endblock %}
+{% block meta_description %}Contact Work Zilla for demos, support, and product questions.{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="site-container hero-grid">
+    <div>
+      <span class="eyebrow">Contact</span>
+      <h1>Talk to the Work Zilla team.</h1>
+      <p>We reply fast for demos, pricing, and onboarding requests.</p>
+    </div>
+    <div class="hero-visual">
+      <div class="visual-card">
+        <div class="visual-title">Support</div>
+        <div class="stat-row">
+          <span>Email</span>
+          <strong>workzonemonitor@webszilla.com</strong>
+        </div>
+        <div class="stat-row">
+          <span>Phone</span>
+          <strong>+91 90928 33701</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Office</h3>
+          <p class="text-secondary mb-1">Webszilla</p>
+          <p class="text-secondary mb-1">182/C, 4th Main Road, Sadasivam Nagar, Madipakkam, Chennai - 600091</p>
+          <p class="text-secondary mb-1">Phone: <a href="tel:9092833701" class="text-decoration-none">9092833701</a></p>
+          <p class="text-secondary mb-0">Email: <a href="mailto:workzonemonitor@webszilla.com" class="text-decoration-none">workzonemonitor@webszilla.com</a></p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

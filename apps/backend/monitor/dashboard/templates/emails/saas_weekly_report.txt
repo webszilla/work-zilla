@@ -1,0 +1,27 @@
+Weekly SaaS Admin Report
+Generated at: {{ generated_at }}
+
+Overall Sales Totals
+One Week: {% for line in overall_sales.week %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+One Month: {% for line in overall_sales.month %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+One Year: {% for line in overall_sales.year %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+All Time: {% for line in overall_sales.all_time %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+
+Overall Signup Totals
+One Week: {{ overall_signups.week }}
+One Month: {{ overall_signups.month }}
+One Year: {{ overall_signups.year }}
+All Time: {{ overall_signups.all_time }}
+
+Per Product Totals
+{% for product in products %}
+{{ product.name }}
+Sales - One Week: {% for line in product.sales.week %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+Sales - One Month: {% for line in product.sales.month %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+Sales - One Year: {% for line in product.sales.year %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+Sales - All Time: {% for line in product.sales.all_time %}{{ line }}{% if not forloop.last %}, {% endif %}{% endfor %}
+Signups - One Week: {{ product.signups.week }}
+Signups - One Month: {{ product.signups.month }}
+Signups - One Year: {{ product.signups.year }}
+Signups - All Time: {{ product.signups.all_time }}
+{% endfor %}

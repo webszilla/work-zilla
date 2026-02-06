@@ -1,0 +1,25 @@
+<header class="site-header">
+  <div class="site-container header-inner">
+    <a class="brand" href="/" aria-label="Work Zilla Monitor home">
+      <span class="brand-mark">WZ</span>
+      <span class="brand-text">Work Zilla Monitor</span>
+    </a>
+
+    {% include "layout/site_menu.html" %}
+
+    <div class="header-actions">
+      {% if site_nav.is_authenticated %}
+        <a class="btn btn-outline" href="{{ site_nav.dashboard_url }}">{{ site_nav.dashboard_label }}</a>
+      {% else %}
+        <a class="btn btn-primary" href="/signup">Start Free Trial</a>
+        <a class="btn btn-outline" href="/auth/login/?next=/app/">Login</a>
+      {% endif %}
+    </div>
+
+    <button class="menu-toggle" type="button" data-menu-toggle aria-label="Toggle menu">
+      <span></span>
+      <span></span>
+    </button>
+  </div>
+</header>
+

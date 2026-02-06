@@ -1,0 +1,8 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools %}
+  <div class="admin-changelist-action">
+    <a class="button" href="{% url 'admin:saas_admin_product_changelist' %}">All Created Products</a>
+  </div>
+  {{ block.super }}
+{% endblock %}

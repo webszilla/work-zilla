@@ -1,0 +1,19 @@
+[Unit]
+Description=Work Zilla Monitoring Agent
+After=network.target
+
+[Service]
+Type=simple
+User=monitoring
+WorkingDirectory=/opt/workzilla
+Environment=MON_BASE_URL=https://yourdomain.com
+Environment=SERVER_TOKEN=replace_me
+Environment=SERVER_ID=
+Environment=SERVER_ROLE=app
+Environment=SERVER_REGION=ap-south
+ExecStart=/usr/bin/python3 /opt/workzilla/scripts/monitoring_agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

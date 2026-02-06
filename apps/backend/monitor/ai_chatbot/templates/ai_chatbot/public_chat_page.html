@@ -1,0 +1,58 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ organization_name }} | AI Chat</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+      }
+      #wz-chat-page-root {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .wz-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        text-align: center;
+        opacity: 0.7;
+        font-size: 12px;
+        padding: 8px 12px;
+        background: #0b1220;
+        color: #e2e8f0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wz-chat-page-root">
+      <noscript>Please enable JavaScript to use chat.</noscript>
+      <div style="padding: 16px; opacity: 0.7;">Loading chat...</div>
+    </div>
+
+    <footer class="wz-footer">
+      AI Chatbot Powered by Work Zilla
+    </footer>
+
+    <script>
+      window.__WZ_CHAT__ = {
+        mode: "page",
+        companySlug: "{{ company_slug }}",
+        publicCode: "{{ public_code }}",
+        apiBase: "/api/ai-chatbot"
+      };
+    </script>
+    <script
+      src="{% static 'js/ai_chatbot_widget.js' %}"
+      data-widget-key="{{ widget_key }}"
+      data-api-base="/api/ai-chatbot"
+      data-mode="page"
+    ></script>
+  </body>
+</html>

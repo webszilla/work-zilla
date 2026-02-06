@@ -1,0 +1,25 @@
+<div class="sidebar-card">
+  <h4>Account Menu</h4>
+  <ul class="sidebar-links">
+    <li>
+      <a href="/my-account/" {% if account_section == "products" %}class="text-accent"{% endif %}>
+        My Products
+      </a>
+    </li>
+    {% if not is_agent %}
+      <li>
+        <a href="/my-account/billing/" {% if account_section == "billing" %}class="text-accent"{% endif %}>
+          Billing
+        </a>
+      </li>
+    {% endif %}
+    <li>
+      <a href="/my-account/profile/" {% if account_section == "profile" %}class="text-accent"{% endif %}>
+        Profile
+      </a>
+    </li>
+    <li>
+      <a href="/auth/logout/">Signout</a>
+    </li>
+  </ul>
+</div>

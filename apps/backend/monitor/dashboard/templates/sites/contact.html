@@ -1,0 +1,32 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla Monitor | Contact Us{% endblock %}
+{% block meta_description %}Contact Work Zilla Monitor for sales, support, or partnership queries. Reach the Webszilla team in Chennai.{% endblock %}
+{% block content %}
+
+<section class="hero">
+  <div class="container">
+    <h1>Contact Us</h1>
+    <p class="lead">Talk to the Webszilla team for product, support, or partnership requests.</p>
+  </div>
+</section>
+
+<div class="container">
+  <div class="row mt-5">
+    <div class="col-md-5">
+      <div class="card p-4 h-100">
+        <h4>Parent Company</h4>
+        <p class="text-secondary mb-1">Webszilla</p>
+        <p class="text-secondary mb-1">182/C, 4th Main Road, Sadasivam Nagar, Madipakkam, Chennai - 600091</p>
+        <p class="text-secondary mb-1">Phone: <a href="tel:9092833701" class="text-decoration-none">9092833701</a></p>
+        <p class="text-secondary mb-0">Email: <a href="mailto:workzonemonitor@webszilla.com" class="text-decoration-none">workzonemonitor@webszilla.com</a></p>
+      </div>
+    </div>
+    <div class="col-md-7">
+      {% include "public/partials/enquiry_form.html" %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+

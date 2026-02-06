@@ -1,0 +1,723 @@
+{% extends "public/base.html" %}
+{% load website_extras %}
+{% block meta_title %}Work Zilla | Pricing{% endblock %}
+{% block meta_description %}Explore Work Zilla pricing for monitoring, time tracking, and HR modules.{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="site-container hero-grid">
+    <div>
+      <span class="eyebrow">Pricing</span>
+      <h1 id="pricing-hero-title" data-default="Flexible plans for growing teams.">Flexible plans for growing teams.</h1>
+      <p id="pricing-hero-subtitle" data-default="Start free, upgrade anytime, and scale with your workforce.">Start free, upgrade anytime, and scale with your workforce.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" id="pricing-hero-primary" data-default-label="Talk to Sales" data-default-href="/contact/" href="/contact/">Talk to Sales</a>
+        <a class="btn btn-outline" id="pricing-hero-secondary" data-default-label="Start Free Trial" data-default-href="/auth/signup/" href="/auth/signup/">Start Free Trial</a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="visual-card">
+        <div class="visual-title">Monthly vs Yearly</div>
+        <div class="stat-row">
+          <span>Avg savings</span>
+          <strong>20%</strong>
+        </div>
+        <div class="stat-bar"><span style="width: 68%"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="pricing-header">
+      <div>
+        <h2 class="section-title" id="pricing-header-title" data-default="Plans">Plans</h2>
+        <p class="section-lead" id="pricing-header-subtitle" data-default="Choose the plan that fits your team size and monitoring needs.">Choose the plan that fits your team size and monitoring needs.</p>
+      </div>
+      <div class="pricing-controls">
+        <div class="currency-toggle" role="tablist" aria-label="Currency">
+          <button type="button" class="active" data-currency="inr">INR</button>
+          <button type="button" data-currency="usd">USD</button>
+        </div>
+        <div class="currency-toggle" role="tablist" aria-label="Billing">
+          <button type="button" class="active" data-billing="monthly">Monthly</button>
+          <button type="button" data-billing="yearly">Yearly</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="product-tabs" id="pricing-product-tabs" role="tablist" aria-label="Products"></div>
+
+    <div class="plan-group active">
+      <div id="pricing-plans" class="feature-grid"></div>
+    </div>
+    <input type="hidden" id="pricing-csrf-token" value="{{ csrf_token }}">
+  </div>
+</section>
+
+<section class="section" id="storage-addon-section" style="display:none;">
+  <div class="site-container">
+    <div class="card p-4">
+      <h3>Extra Storage Add-On</h3>
+      <p class="text-secondary">+250 GB per slot. Stackable. Activate instantly.</p>
+      <div class="plan-price">
+        <span data-addon-price>Custom</span>
+        <span class="price-suffix-inline" data-addon-suffix></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="storage-trial-note" style="display:none;">
+  <div class="site-container">
+    <div class="card p-4">
+      <h3>Free trial included</h3>
+      <p class="text-secondary">All plans include a 7-day free trial. No credit card required. Upgrade anytime.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="storage-footer-cta" style="display:none;">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Ready to simplify your organization’s storage?</h2>
+      <p>Start with ONLINE Storage and add sync when you are ready.</p>
+      <a class="btn btn-primary" href="/auth/signup/">Start Free Trial</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Need a custom quote?</h2>
+      <p>Our team will help you choose the right plan.</p>
+      <a class="btn btn-primary" href="/contact/">Contact sales</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Get pricing guidance</h3>
+          <p class="text-secondary">Share your requirements and we will respond with the best plan.</p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% block extra_js %}
+  <script>
+    const pricingState = { currency: "inr", billing: "monthly", product: "monitor" };
+    const activePlans = {{ active_plans_json|default:"{}"|safe }};
+    const pricingCache = {};
+    const isLoggedIn = {{ is_logged_in|yesno:"true,false" }};
+    const csrfToken = document.getElementById("pricing-csrf-token")?.value || "";
+
+    function formatPrice(value, currency) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) {
+        return "Custom";
+      }
+      const prefix = currency === "usd" ? "USD" : "INR";
+      return `${prefix} ${number}`;
+    }
+
+    function updatePrices() {
+      document.querySelectorAll("[data-plan-card]").forEach((card) => {
+        const priceTarget = card.querySelector("[data-price]");
+        const suffixTarget = card.querySelector("[data-suffix]");
+        const planId = card.getAttribute("data-plan-id");
+        const plan = pricingCache[planId];
+        if (!plan) return;
+        const isFree = String(plan.name || "").toLowerCase() === "free";
+        const value = pricingState.billing === "yearly"
+          ? (pricingState.currency === "usd" ? plan.price_usdt_year : plan.price_inr_year)
+          : (pricingState.currency === "usd" ? plan.price_usdt_month : plan.price_inr_month);
+        priceTarget.textContent = isFree ? "0" : formatPrice(value, pricingState.currency);
+        if (suffixTarget) {
+          const extra = suffixTarget.dataset.extra || "";
+          if (isFree) {
+            suffixTarget.textContent = extra;
+            return;
+          }
+          const cycleText = pricingState.product === "storage"
+            ? (pricingState.billing === "monthly" ? "/org per month" : "/org per year")
+            : (pricingState.billing === "monthly" ? "/user per month" : "/user per year");
+          suffixTarget.textContent = `${cycleText}${extra}`;
+        }
+      });
+      updateAddonPrices();
+    }
+
+    function escapeHtml(value) {
+      const div = document.createElement("div");
+      div.textContent = String(value || "");
+      return div.innerHTML;
+    }
+
+    function formatStorageLabel(gbValue) {
+      const gb = Number(gbValue);
+      if (!Number.isFinite(gb) || gb <= 0) return "-";
+      if (gb >= 1024 && gb % 1024 === 0) {
+        return `${gb / 1024} TB`;
+      }
+      return `${gb} GB`;
+    }
+
+    function formatBandwidthLabel(gbValue) {
+      const gb = Number(gbValue);
+      if (!Number.isFinite(gb) || gb <= 0) return "-";
+      if (gb >= 1024) {
+        const tb = gb / 1024;
+        const rounded = Math.round(tb * 10) / 10;
+        return `${rounded} TB`;
+      }
+      return `${gb} GB`;
+    }
+
+    function formatDeviceLimit(value) {
+      const limit = Number(value);
+      if (!Number.isFinite(limit) || limit <= 0) return "-";
+      return `Up to ${limit} devices per user`;
+    }
+
+    function buildFeatureList(plan, productSlug) {
+      const limits = plan.limits || {};
+      if (productSlug === "storage") {
+        const rawUsers = limits.max_users;
+        const usersNumber = Number(rawUsers);
+        const isUnlimited = !Number.isFinite(usersNumber) || usersNumber <= 0;
+        const usersLabel = isUnlimited ? "Unlimited Users" : `${usersNumber} Users`;
+        const storageLabel = formatStorageLabel(limits.storage_gb);
+        const bandwidthLabel = formatBandwidthLabel(limits.bandwidth_limit_gb_monthly);
+        const deviceLimitLabel = formatDeviceLimit(limits.device_limit_per_user);
+        const bandwidthText = limits.is_bandwidth_limited === false
+          ? "Unlimited monthly download bandwidth"
+          : `Up to ${bandwidthLabel} monthly download bandwidth`;
+        const planKey = String(plan.name || "").toLowerCase();
+        if (planKey === "standard") {
+          return [
+            usersLabel,
+            `${storageLabel} Storage`,
+            bandwidthText,
+            deviceLimitLabel,
+            "Real-time smart sync included",
+            "Admin Controls",
+            "Free System Sync"
+          ];
+        }
+        if (planKey === "pro") {
+          return [
+            usersLabel,
+            `${storageLabel} Storage`,
+            bandwidthText,
+            deviceLimitLabel,
+            "Real-time smart sync included",
+            "Full Admin Visibility",
+            "Free System Sync"
+          ];
+        }
+        return [
+          usersLabel,
+          `${storageLabel} Storage`,
+          bandwidthText,
+          deviceLimitLabel,
+          "Real-time smart sync included",
+          "Online Access",
+          "Free System Sync"
+        ];
+      }
+      if (productSlug === "ai-chatbot") {
+        return [
+          `Website Chat Widgets: ${limits.widgets ?? "-"}`,
+          `Agents included: ${limits.included_agents ?? "-"}`,
+          `Conversations/month: ${limits.conversations_per_month ?? "-"}`,
+          "Extra agents billed separately"
+        ];
+      }
+      return [
+        `Employee limit: ${limits.employee_limit ?? "-"}`,
+        `Retention: ${limits.retention_days ?? "-"} days`,
+        `Screenshot interval: ${limits.screenshot_min_minutes ?? "-"} mins`
+      ];
+    }
+
+    function buildMonitorFeatures(plan) {
+      const limits = plan.limits || {};
+      const flags = plan.flags || {};
+      const employeeLimit = limits.employee_limit;
+      const employeeLabel = !Number.isFinite(Number(employeeLimit)) || Number(employeeLimit) === 0
+        ? "Unlimited*"
+        : employeeLimit;
+      return [
+        { text: `Employee limit: ${employeeLabel}` },
+        { text: `Retention: ${limits.retention_days ?? "-"} days` },
+        { text: `Screenshot interval: ${limits.screenshot_min_minutes ?? "-"} mins` },
+        { text: "Live activity report", ok: true },
+        { text: "App usage tracking", ok: !!flags.allow_app_usage },
+        { text: "HR view", ok: !!flags.allow_hr_view },
+        { text: "OTT/Gaming usage", ok: !!flags.allow_gaming_ott_usage }
+      ];
+    }
+
+    function buildAiChatbotFeatures(plan) {
+      const limits = plan.limits || {};
+      const flags = plan.flags || {};
+      return [
+        { text: `Website Chat Widgets: ${limits.widgets ?? "-"}` },
+        { text: `Agents included: ${limits.included_agents ?? "-"}` },
+        { text: `Conversations/month: ${limits.conversations_per_month ?? "-"}` },
+        { text: `AI replies/month: ${limits.ai_replies_per_month ?? "-"}` },
+        { text: `Chat history: ${limits.chat_history_days ?? "-"} days` },
+        { text: `Max messages/conversation: ${limits.max_messages_per_conversation ?? "-"}` },
+        { text: `Max chars/message: ${limits.max_chars_per_message ?? "-"}` },
+        { text: "Quick enquiry form", ok: true },
+        { text: "Allow Agent Add-Ons", ok: !!flags.allow_addons },
+        { text: "Remove branding", ok: !!flags.remove_branding },
+        { text: "Analytics (basic)", ok: !!flags.analytics_basic },
+        { text: "CSV export", ok: !!flags.csv_export },
+        { text: "Agent inbox", ok: !!flags.agent_inbox },
+        { text: "Extra agents billed separately" }
+      ];
+    }
+
+    function monitorPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key === "free") {
+        return "All core features enabled so you can experience the full workflow before upgrading.";
+      }
+      if (key === "basic") {
+        return "Budget-friendly monitoring for startups and small teams getting started.";
+      }
+      if (key === "plus") {
+        return "Take productivity to the next level with deeper visibility and team insights.";
+      }
+      if (key === "professional") {
+        return "Full-scale oversight for org-wide productivity with HR-ready controls.";
+      }
+      return "Visibility controls and activity insights built for teams.";
+    }
+
+    function aiChatbotPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key === "free") {
+        return "Try the AI assistant with 1 widget & essential automation to validate your use case.";
+      }
+      if (key === "starter") {
+        return "Launch a branded AI widget with starter agent capacity for small support teams.";
+      }
+      if (key === "growth") {
+        return "Scale conversations with multiple widgets, more agents, and higher monthly limits.";
+      }
+      if (key === "pro") {
+        return "Run high-volume customer support with enterprise-level limits and agent capacity.";
+      }
+      return "Launch your AI assistant with hosted widgets and agent support.";
+    }
+
+    function storagePlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key === "basic") {
+        return "Simple online storage for small teams with predictable org-level pricing.";
+      }
+      if (key === "standard") {
+        return "Built for growing teams that need admin control and more space.";
+      }
+      if (key === "pro") {
+        return "Unlimited users with 1 TB for organizations that need full visibility.";
+      }
+      return "Online storage with org-level access and predictable pricing.";
+    }
+
+    function renderPlans(data) {
+      const container = document.getElementById("pricing-plans");
+      container.innerHTML = "";
+      if (!data || !data.plans || data.plans.length === 0) {
+        container.innerHTML = '<div class="card"><h3>No plans yet</h3><p>Add plans in admin to show pricing here.</p></div>';
+        return;
+      }
+      const isStorageProduct = data.product.slug === "storage" || data.product.slug === "online-storage";
+      const normalizedSlug = isStorageProduct ? "storage" : data.product.slug;
+      const orderedPlans = [...data.plans];
+      if (isStorageProduct) {
+        const storageOrder = ["free", "basic", "standard", "pro"];
+        orderedPlans.sort((a, b) => {
+          const aName = String(a.name || "").toLowerCase();
+          const bName = String(b.name || "").toLowerCase();
+          const aIdx = storageOrder.indexOf(aName);
+          const bIdx = storageOrder.indexOf(bName);
+          if (aIdx !== -1 || bIdx !== -1) {
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            if (aIdx !== bIdx) return aIdx - bIdx;
+          }
+          const aPrice = Number(a.price_inr_month || 0);
+          const bPrice = Number(b.price_inr_month || 0);
+          if (aPrice !== bPrice) return aPrice - bPrice;
+          return aName.localeCompare(bName);
+        });
+      }
+      orderedPlans.forEach((plan) => {
+        pricingCache[String(plan.id)] = plan;
+        const isMonitor = normalizedSlug === "monitor";
+        const isChatbot = normalizedSlug === "ai-chatbot";
+        const isStorage = isStorageProduct;
+        const isFreePlan = String(plan.name || "").toLowerCase() === "free";
+        const storageTrialOnly = isStorage && isFreePlan;
+        const features = buildFeatureList(plan, normalizedSlug);
+        const monitorFeatures = isMonitor ? buildMonitorFeatures(plan) : [];
+        const chatbotFeatures = isChatbot ? buildAiChatbotFeatures(plan) : [];
+        const activePlanId = activePlans[data.product.slug]?.plan_id || null;
+        const isCurrentPlan = activePlanId === plan.id;
+        const activePlan = data.plans.find((item) => item.id === activePlanId) || null;
+        const activePlanIsFree = activePlan
+          ? String(activePlan.name || "").toLowerCase() === "free"
+          : false;
+        const trialLocked = !isStorage && isLoggedIn && !!activePlanId && !activePlanIsFree && isFreePlan;
+        const actionLabel = !isLoggedIn
+          ? (isStorage ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay") : isFreePlan ? "Take a Free Trial" : "Process to Pay")
+          : trialLocked
+          ? "Trial Unavailable"
+          : isCurrentPlan
+          ? "Current Plan"
+          : isStorage
+          ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay")
+          : isFreePlan
+          ? "Take a Free Trial"
+          : "Process to Pay";
+        const card = document.createElement("div");
+        card.className = "plan-card card";
+        card.setAttribute("data-plan-card", "1");
+        card.setAttribute("data-plan-id", plan.id);
+        const trialSuffix = (storageTrialOnly || (!isStorage && (plan.name && plan.name.toLowerCase() === "free")))
+          ? `${isMonitor ? 15 : data.trial_days} days free trial`
+          : null;
+        card.innerHTML = `
+          <h2 class="plan-title">${escapeHtml(plan.name)}</h2>
+          <p>${isMonitor
+            ? escapeHtml(monitorPlanDescription(plan.name))
+            : normalizedSlug === "ai-chatbot"
+              ? escapeHtml(aiChatbotPlanDescription(plan.name))
+              : normalizedSlug === "storage"
+                ? escapeHtml(storagePlanDescription(plan.name))
+                : "Visibility controls and activity insights built for teams."}</p>
+          <div class="plan-price">
+            <span data-price>Custom</span>
+            <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
+          </div>
+          ${isMonitor ? `
+            <ul class="plan-features">
+              ${monitorFeatures.map((item) => `
+                <li>
+                  ${item.ok === undefined
+                    ? escapeHtml(item.text)
+                    : `<span class="feature-flag ${item.ok ? "ok" : "no"}"></span>${escapeHtml(item.text)}`}
+                </li>`).join("")}
+            </ul>
+          ` : isChatbot ? `
+            <ul class="plan-features">
+              ${chatbotFeatures.map((item) => `
+                <li>
+                  ${item.ok === undefined
+                    ? escapeHtml(item.text)
+                    : `<span class="feature-flag ${item.ok ? "ok" : "no"}"></span>${escapeHtml(item.text)}`}
+                </li>`).join("")}
+            </ul>
+          ` : `
+            <ul class="plan-features">
+              ${features.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+            </ul>
+          `}
+          <button class="btn btn-outline" data-plan-action>${escapeHtml(actionLabel)}</button>
+        `;
+        const actionBtn = card.querySelector("[data-plan-action]");
+        if (isCurrentPlan || trialLocked) {
+          actionBtn.disabled = true;
+          actionBtn.style.opacity = "0.6";
+          actionBtn.style.cursor = "not-allowed";
+          actionBtn.style.pointerEvents = "none";
+        }
+        actionBtn.addEventListener("click", () => {
+          if (isCurrentPlan || trialLocked) {
+            return;
+          }
+          if (!isLoggedIn) {
+            window.location.href = "/auth/login/?next=/pricing/";
+            return;
+          }
+          if ((isStorage && storageTrialOnly) || (!isStorage && isFreePlan)) {
+            startTrial(plan.id, data.product.slug);
+            return;
+          }
+          submitCheckout(plan.id, data.product.slug);
+        });
+        container.appendChild(card);
+      });
+      updatePrices();
+    }
+
+    function setTextContentById(id, value, fallback) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = value || fallback || "";
+    }
+
+    function setButtonById(id, label, href) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (label) el.textContent = label;
+      if (href) el.setAttribute("href", href);
+    }
+
+    function updateAddonPrices() {
+      const addonSection = document.getElementById("storage-addon-section");
+      if (!addonSection || addonSection.style.display === "none") return;
+      const priceTarget = addonSection.querySelector("[data-addon-price]");
+      const suffixTarget = addonSection.querySelector("[data-addon-suffix]");
+      const addon = (window.__pricingAddons || []).find((item) => String(item.slug || "") === "extra-storage-slot")
+        || (window.__pricingAddons || [])[0];
+      if (!priceTarget || !addon) {
+        if (priceTarget) priceTarget.textContent = "Custom";
+        if (suffixTarget) suffixTarget.textContent = "";
+        return;
+      }
+      const value = pricingState.billing === "yearly"
+        ? (pricingState.currency === "usd" ? addon.price_usdt_year : addon.price_inr_year)
+        : (pricingState.currency === "usd" ? addon.price_usdt_month : addon.price_inr_month);
+      priceTarget.textContent = formatPrice(value, pricingState.currency);
+      if (suffixTarget) {
+        const cycleText = pricingState.billing === "monthly" ? "/org per month" : "/org per year";
+        suffixTarget.textContent = cycleText;
+      }
+    }
+
+    function syncPricingCopy(productSlug) {
+      const isStorage = productSlug === "storage";
+      const heroTitle = document.getElementById("pricing-hero-title");
+      const heroSubtitle = document.getElementById("pricing-hero-subtitle");
+      const headerTitle = document.getElementById("pricing-header-title");
+      const headerSubtitle = document.getElementById("pricing-header-subtitle");
+      const addonSection = document.getElementById("storage-addon-section");
+      const trialNote = document.getElementById("storage-trial-note");
+      const footerCta = document.getElementById("storage-footer-cta");
+      if (isStorage) {
+        setTextContentById("pricing-hero-title", "Simple, Transparent Pricing", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "No per-user storage confusion. Pay only for what your organization needs.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose the plan that fits your organization’s storage needs.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "Start Free Trial", "/auth/signup/");
+        setButtonById("pricing-hero-secondary", "View Pricing", "/pricing/?product=storage");
+        if (addonSection) addonSection.style.display = "";
+        if (trialNote) trialNote.style.display = "";
+        if (footerCta) footerCta.style.display = "";
+      } else {
+        if (heroTitle) heroTitle.textContent = heroTitle.dataset.default || heroTitle.textContent;
+        if (heroSubtitle) heroSubtitle.textContent = heroSubtitle.dataset.default || heroSubtitle.textContent;
+        if (headerTitle) headerTitle.textContent = headerTitle.dataset.default || headerTitle.textContent;
+        if (headerSubtitle) headerSubtitle.textContent = headerSubtitle.dataset.default || headerSubtitle.textContent;
+        const heroPrimary = document.getElementById("pricing-hero-primary");
+        const heroSecondary = document.getElementById("pricing-hero-secondary");
+        if (heroPrimary) {
+          heroPrimary.textContent = heroPrimary.dataset.defaultLabel || heroPrimary.textContent;
+          heroPrimary.setAttribute("href", heroPrimary.dataset.defaultHref || heroPrimary.getAttribute("href"));
+        }
+        if (heroSecondary) {
+          heroSecondary.textContent = heroSecondary.dataset.defaultLabel || heroSecondary.textContent;
+          heroSecondary.setAttribute("href", heroSecondary.dataset.defaultHref || heroSecondary.getAttribute("href"));
+        }
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      }
+      updateAddonPrices();
+    }
+
+    function submitCheckout(planId, productSlug) {
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = "/checkout/select/";
+      form.innerHTML = `
+        <input type="hidden" name="csrfmiddlewaretoken" value="${csrfToken}">
+        <input type="hidden" name="plan_id" value="${planId}">
+        <input type="hidden" name="product_slug" value="${productSlug}">
+        <input type="hidden" name="currency" value="${pricingState.currency}">
+        <input type="hidden" name="billing" value="${pricingState.billing}">
+      `;
+      document.body.appendChild(form);
+      form.submit();
+    }
+
+    function getCookie(name) {
+      const cookies = document.cookie ? document.cookie.split(";") : [];
+      for (const cookie of cookies) {
+        const trimmed = cookie.trim();
+        if (trimmed.startsWith(`${name}=`)) {
+          return decodeURIComponent(trimmed.substring(name.length + 1));
+        }
+      }
+      return "";
+    }
+
+    function startTrial(planId, productSlug) {
+      fetch("/api/subscription/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken")
+        },
+        body: JSON.stringify({
+          product: productSlug,
+          plan_id: planId,
+          interval: pricingState.billing
+        })
+      })
+        .then(async (response) => {
+          if (response.status === 409) {
+            submitCheckout(planId, productSlug);
+            return null;
+          }
+          if (!response.ok) {
+            throw new Error("Trial failed.");
+          }
+          return response.json();
+        })
+        .then((data) => {
+          if (data && data.redirect) {
+            window.location.href = data.redirect;
+          }
+        })
+        .catch(() => {
+          submitCheckout(planId, productSlug);
+        });
+    }
+
+    function setActive(container, selector, value, stateKey, attribute) {
+      container.querySelectorAll(selector).forEach((button) => {
+        const matches = button.dataset[attribute] === value;
+        button.classList.toggle("active", matches);
+      });
+      pricingState[stateKey] = value;
+    }
+
+    document.querySelectorAll(".currency-toggle").forEach((toggle) => {
+      toggle.addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        if (button.dataset.currency) {
+          setActive(toggle, "button", button.dataset.currency, "currency", "currency");
+        }
+        if (button.dataset.billing) {
+          setActive(toggle, "button", button.dataset.billing, "billing", "billing");
+        }
+        updatePrices();
+      });
+    });
+
+    function bindProductTabs() {
+      document.querySelectorAll(".product-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const slug = tab.dataset.product;
+          document.querySelectorAll(".product-tab").forEach((btn) => btn.classList.toggle("active", btn === tab));
+          pricingState.product = slug;
+          syncPricingCopy(slug);
+          loadPlans(slug);
+          syncEnquiryDropdown();
+        });
+      });
+    }
+
+    function renderProductTabs(products) {
+      const container = document.getElementById("pricing-product-tabs");
+      if (!container) return;
+      container.innerHTML = "";
+      const items = products || [];
+      items.forEach((product, index) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `product-tab ${pricingState.product === product.slug || (!pricingState.product && index === 0) ? "active" : ""}`;
+        btn.dataset.product = product.slug;
+        btn.textContent = product.name;
+        container.appendChild(btn);
+      });
+      bindProductTabs();
+    }
+
+    function syncEnquiryDropdown() {
+      const select = document.querySelector('select[name="product"]');
+      if (!select || !window.__pricingProducts) return;
+      const current = select.value;
+      select.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select product";
+      select.appendChild(placeholder);
+      window.__pricingProducts.forEach((product) => {
+        const opt = document.createElement("option");
+        opt.value = product.id ? String(product.id) : product.slug;
+        opt.textContent = product.name;
+        if (current && (current === opt.value)) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    }
+
+    function loadPlans(slug) {
+      fetch(`/api/public/plans?product=${slug}`)
+        .then((response) => response.json())
+        .then((data) => {
+          window.__pricingAddons = data.addons || [];
+          renderPlans(data);
+          syncPricingCopy(slug);
+        })
+        .catch(() => {
+          renderPlans({ plans: [] });
+          syncPricingCopy(slug);
+        });
+    }
+
+    function getInitialProductSlug(products) {
+      const params = new URLSearchParams(window.location.search);
+      const querySlug = (params.get("product") || "").trim();
+      if (querySlug && products.some((item) => item.slug === querySlug)) {
+        return querySlug;
+      }
+      const hashSlug = (window.location.hash || "").replace("#", "").trim();
+      if (hashSlug && products.some((item) => item.slug === hashSlug)) {
+        return hashSlug;
+      }
+      return "";
+    }
+
+    function loadProducts() {
+      fetch("/api/public/products")
+        .then((response) => response.json())
+        .then((data) => {
+          const products = (data.products || []).filter((item) => item.slug !== "ai-chat-widget");
+          window.__pricingProducts = products;
+          const monitor = products.find((item) => item.slug === "monitor");
+          const preferred = getInitialProductSlug(products);
+          pricingState.product = preferred || (monitor ? monitor.slug : (products[0]?.slug || "monitor"));
+          renderProductTabs(products);
+          loadPlans(pricingState.product);
+          syncEnquiryDropdown();
+        })
+        .catch(() => {
+          renderProductTabs([]);
+          renderPlans({ plans: [] });
+        });
+    }
+
+    loadProducts();
+  </script>
+{% endblock %}
+{% endblock %}

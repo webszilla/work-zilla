@@ -1,0 +1,77 @@
+.admin-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0 20px;
+}
+
+.admin-product-card {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 140, 160, 0.35);
+  background: rgba(25, 32, 40, 0.75);
+  color: #e6eef6;
+  text-decoration: none;
+}
+
+.admin-product-card:hover {
+  border-color: var(--wz-primary, #5aaaff);
+  color: #ffffff;
+}
+
+.admin-product-card.is-active {
+  border-color: var(--wz-primary, #5aaaff);
+  box-shadow: 0 0 0 1px var(--wz-secondary, rgba(90, 170, 255, 0.4));
+}
+
+.admin-product-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+}
+
+.admin-product-status {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(220, 235, 248, 0.75);
+}
+
+.admin-plan-cards {
+  margin-bottom: 18px;
+}
+
+.admin-actions {
+  margin: 10px 0 16px;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.plan-col h2 {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .plan-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.plan-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+}
+
+.plan-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

@@ -1,0 +1,130 @@
+:root {
+  --wz-bg: #f5f3ef;
+  --wz-surface: #ffffff;
+  --wz-text: #1e1e1e;
+  --wz-muted: #6a6a6a;
+  --wz-accent: #216869;
+  --wz-accent-strong: #183f40;
+  --wz-border: #e0dad3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Source Serif 4", "Georgia", serif;
+  color: var(--wz-text);
+  background: radial-gradient(circle at top left, #fef6ec 0%, #f5f3ef 55%, #e8e3db 100%);
+  min-height: 100vh;
+}
+
+.wz-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+}
+
+.wz-sidebar {
+  background: var(--wz-surface);
+  border-right: 1px solid var(--wz-border);
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.wz-brand {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.wz-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wz-nav__item {
+  text-decoration: none;
+  color: var(--wz-text);
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f8f4ee;
+  border: 1px solid transparent;
+}
+
+.wz-nav__item:hover {
+  border-color: var(--wz-border);
+  background: #fff9f2;
+}
+
+.wz-nav__item.is-active {
+  border-color: var(--wz-accent);
+  background: #e5f0ef;
+  color: var(--wz-accent-strong);
+}
+
+.wz-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.wz-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--wz-border);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
+}
+
+.wz-topbar__title {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.wz-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wz-button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--wz-accent);
+  background: var(--wz-accent);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wz-button:hover {
+  background: var(--wz-accent-strong);
+  border-color: var(--wz-accent-strong);
+}
+
+.wz-content {
+  padding: 28px 32px 48px;
+}
+
+@media (max-width: 900px) {
+  .wz-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .wz-sidebar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .wz-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

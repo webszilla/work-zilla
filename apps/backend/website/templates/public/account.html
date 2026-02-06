@@ -1,0 +1,445 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | My Account{% endblock %}
+{% block meta_description %}Manage your subscriptions and access your product dashboards.{% endblock %}
+{% block body_class %}account-page{% endblock %}
+
+{% block content %}
+<section class="section">
+  <div class="site-container account-layout">
+    <div class="account-header">
+      <h1 class="section-title">My Account</h1>
+      <p class="section-lead">Track subscriptions and open your product dashboards.</p>
+    </div>
+
+    <div class="account-grid">
+      <aside class="account-menu">
+        {% include "public/partials/account_sidebar.html" %}
+      </aside>
+
+      <div class="account-content card p-4">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <h2 class="section-title">My Products</h2>
+          {% if is_saas_admin %}
+            <a class="btn btn-outline btn-sm" href="/app/saas-admin/">Open SaaS Admin Dashboard</a>
+          {% endif %}
+        </div>
+        {% if subscriptions %}
+          <div class="table-responsive mt-3">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  {% if not is_agent %}
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th>Billing</th>
+                    <th>Expire Date</th>
+                  <th>Info</th>
+                  {% endif %}
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for sub in subscriptions %}
+                  {% with slug=sub.product_slug|default:"monitor" %}
+                      <tr>
+                        <td>{{ sub.product_name|default:"Monitor" }}</td>
+                        {% if not is_agent %}
+                          <td>{{ sub.plan.name }}</td>
+                          <td>
+                            {% if sub.status == "active" %}
+                              <span class="badge bg-success">Active</span>
+                            {% elif sub.status == "trialing" %}
+                              <span class="badge bg-warning text-dark">Trialing</span>
+                            {% elif sub.status == "pending" %}
+                              <span class="badge bg-warning text-dark">Awaiting Admin Approval</span>
+                            {% elif sub.status == "rejected" %}
+                              <span class="badge bg-danger">Rejected</span>
+                            {% else %}
+                              <span class="badge bg-secondary">{{ sub.status|title }}</span>
+                            {% endif %}
+                          </td>
+                          <td>{{ sub.billing_cycle|title }}</td>
+                          <td>
+                            {% if sub.end_date %}
+                              {{ sub.end_date|date:"d M Y" }}
+                            {% else %}
+                              -
+                            {% endif %}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              class="btn btn-outline btn-sm js-info-btn"
+                              data-product="{{ sub.product_name|default:'Monitor'|escapejs }}"
+                              data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
+                              data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
+                              data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
+                              data-expire="{% if sub.info_expire_date %}{{ sub.info_expire_date|date:'d M Y' }}{% else %}-{% endif %}"
+                              data-plan-paid="{% if sub.info_plan_paid_on %}{{ sub.info_plan_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                              data-plan-amount="{% if sub.info_plan_amount %}{{ sub.info_plan_currency }} {{ sub.info_plan_amount }}{% else %}-{% endif %}"
+                              data-addon-count="{% if sub.info_addon_count %}{{ sub.info_addon_count }}{% else %}0{% endif %}"
+                              data-addon-amount="{% if sub.info_addon_amount %}{{ sub.info_addon_currency }} {{ sub.info_addon_amount }}{% else %}-{% endif %}"
+                              data-addon-paid="{% if sub.info_addon_paid_on %}{{ sub.info_addon_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                            >
+                              View
+                            </button>
+                          </td>
+                        {% endif %}
+                        <td>
+                          {% if is_agent %}
+                            <a class="btn btn-outline btn-sm" href="/app/{{ slug }}/" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                          {% elif sub.status == "active" or sub.status == "trialing" %}
+                            <div class="d-flex flex-wrap gap-2">
+                              <a class="btn btn-outline btn-sm" href="/app/{{ slug }}/" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                              {% if sub.can_upgrade %}
+                                <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">Plan Upgrade</a>
+                              {% endif %}
+                            </div>
+                          {% elif sub.status == "pending" %}
+                            <span class="text-secondary">Awaiting Admin Approval</span>
+                          {% else %}
+                            {% if sub.is_free_plan %}
+                              <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">View Plans</a>
+                            {% else %}
+                              <a class="btn btn-outline btn-sm" href="/my-account/billing/renew/start/?product={{ slug }}">Renew Plan</a>
+                            {% endif %}
+                          {% endif %}
+                        </td>
+                      </tr>
+                  {% endwith %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="text-secondary">No subscriptions yet.</p>
+          <a class="btn btn-outline" href="/pricing/">View pricing</a>
+        {% endif %}
+
+        {% if not is_agent %}
+        <div class="mt-4">
+          <h3 class="section-title">Bank Transfer Pending</h3>
+          {% if pending_payment_rows %}
+            <div class="table-responsive mt-3">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Plan</th>
+                    <th>Billing</th>
+                    <th>Submitted</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in pending_payment_rows %}
+                    <tr>
+                      <td>{{ row.product_name }}</td>
+                      <td>{{ row.plan_name }}</td>
+                      <td>{{ row.billing_cycle|title }}</td>
+                      <td>
+                        {% if row.created_at %}
+                          {{ row.created_at|date:"d M Y" }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        <span class="badge bg-warning text-dark">Awaiting Admin Approval</span>
+                      </td>
+                      <td>
+                        {% if row.amount %}
+                          {{ row.currency }} {{ row.amount }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-secondary mt-2">No pending bank transfer payments.</p>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {% if not is_agent %}
+        <div class="mt-4">
+          <h3 class="section-title">My Renewals</h3>
+          {% if pending_renewal_rows %}
+            <div class="table-responsive mt-3">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Plan</th>
+                    <th>Billing</th>
+                    <th>Submitted</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in pending_renewal_rows %}
+                    <tr>
+                      <td>{{ row.product_name }}</td>
+                      <td>{{ row.plan_name }}</td>
+                      <td>{{ row.billing_cycle|title }}</td>
+                      <td>
+                        {% if row.created_at %}
+                          {{ row.created_at|date:"d M Y" }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        <span class="badge bg-warning text-dark">Awaiting Admin Approval</span>
+                      </td>
+                      <td>
+                        {% if row.amount %}
+                          {{ row.currency }} {{ row.amount }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-secondary mt-2">No renewals yet.</p>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {% if expired_subscriptions %}
+          <div class="mt-4">
+            <h3 class="section-title">Expired Plans</h3>
+            <div class="table-responsive mt-3">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    {% if not is_agent %}
+                      <th>Plan</th>
+                      <th>Status</th>
+                      <th>Billing</th>
+                      <th>Expire Date</th>
+                      <th>Info</th>
+                    {% endif %}
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for sub in expired_subscriptions %}
+                    {% with slug=sub.product_slug|default:"monitor" %}
+                        <tr>
+                          <td>{{ sub.product_name|default:"Monitor" }}</td>
+                          {% if not is_agent %}
+                            <td>{{ sub.plan.name }}</td>
+                            <td><span class="badge bg-secondary">Expired</span></td>
+                            <td>{{ sub.billing_cycle|title }}</td>
+                            <td>
+                              {% if sub.end_date %}
+                                {{ sub.end_date|date:"d M Y" }}
+                              {% else %}
+                                -
+                              {% endif %}
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-outline btn-sm js-info-btn"
+                                data-product="{{ sub.product_name|default:'Monitor'|escapejs }}"
+                                data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
+                                data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
+                                data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
+                                data-expire="{% if sub.info_expire_date %}{{ sub.info_expire_date|date:'d M Y' }}{% else %}-{% endif %}"
+                                data-plan-paid="{% if sub.info_plan_paid_on %}{{ sub.info_plan_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                                data-plan-amount="{% if sub.info_plan_amount %}{{ sub.info_plan_currency }} {{ sub.info_plan_amount }}{% else %}-{% endif %}"
+                                data-addon-count="{% if sub.info_addon_count %}{{ sub.info_addon_count }}{% else %}0{% endif %}"
+                                data-addon-amount="{% if sub.info_addon_amount %}{{ sub.info_addon_currency }} {{ sub.info_addon_amount }}{% else %}-{% endif %}"
+                                data-addon-paid="{% if sub.info_addon_paid_on %}{{ sub.info_addon_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                              >
+                                View
+                              </button>
+                            </td>
+                          {% endif %}
+                          <td>
+                            {% if sub.is_free_plan %}
+                              <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">View Plans</a>
+                            {% else %}
+                              <a class="btn btn-outline btn-sm" href="/my-account/billing/renew/start/?product={{ slug }}">Renew Plan</a>
+                            {% endif %}
+                          </td>
+                        </tr>
+                    {% endwith %}
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="info-modal" id="product-info-modal" aria-hidden="true">
+  <div class="info-modal__backdrop" data-info-close></div>
+  <div class="info-modal__panel" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
+    <div class="info-modal__header">
+      <h3 class="section-title mb-0" id="info-modal-title">Product Details</h3>
+      <button type="button" class="btn btn-outline btn-sm" data-info-close>Close</button>
+    </div>
+    <div class="table-responsive mt-3">
+      <table class="table table-striped">
+        <tbody>
+          <tr>
+            <th scope="row">Product</th>
+            <td id="info-product">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Plan</th>
+            <td id="info-plan">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Status</th>
+            <td id="info-status">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Billing Cycle</th>
+            <td id="info-billing">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Expire Date</th>
+            <td id="info-expire">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Plan Payment Date</th>
+            <td id="info-plan-paid">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Plan Amount</th>
+            <td id="info-plan-amount">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Add-on Users</th>
+            <td id="info-addon-count">0</td>
+          </tr>
+          <tr>
+            <th scope="row">Add-on Payment Date</th>
+            <td id="info-addon-paid">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Add-on Amount</th>
+            <td id="info-addon-amount">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<style>
+  .info-modal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    z-index: 999;
+  }
+  .info-modal.is-open {
+    display: block;
+  }
+  .info-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+  }
+  .info-modal__panel {
+    position: relative;
+    max-width: 720px;
+    margin: 8vh auto;
+    background: #fff;
+    border-radius: 14px;
+    padding: 20px 24px;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15);
+  }
+  .info-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  @media (max-width: 640px) {
+    .info-modal__panel {
+      margin: 6vh 16px;
+      padding: 18px;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    var modal = document.getElementById("product-info-modal");
+    if (!modal) {
+      return;
+    }
+    var closeButtons = modal.querySelectorAll("[data-info-close]");
+    var infoButtons = document.querySelectorAll(".js-info-btn");
+    function setText(id, value) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.textContent = value || "-";
+      }
+    }
+    function openModal(dataset) {
+      setText("info-product", dataset.product);
+      setText("info-plan", dataset.plan);
+      setText("info-status", dataset.status);
+      setText("info-billing", dataset.billing);
+      setText("info-expire", dataset.expire);
+      setText("info-plan-paid", dataset.planPaid);
+      setText("info-plan-amount", dataset.planAmount);
+      setText("info-addon-count", dataset.addonCount || "0");
+      setText("info-addon-paid", dataset.addonPaid);
+      setText("info-addon-amount", dataset.addonAmount);
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+    }
+    function closeModal() {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+    infoButtons.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        openModal({
+          product: btn.getAttribute("data-product"),
+          plan: btn.getAttribute("data-plan"),
+          status: btn.getAttribute("data-status"),
+          billing: btn.getAttribute("data-billing"),
+          expire: btn.getAttribute("data-expire"),
+          planPaid: btn.getAttribute("data-plan-paid"),
+          planAmount: btn.getAttribute("data-plan-amount"),
+          addonCount: btn.getAttribute("data-addon-count"),
+          addonPaid: btn.getAttribute("data-addon-paid"),
+          addonAmount: btn.getAttribute("data-addon-amount")
+        });
+      });
+    });
+    closeButtons.forEach(function (btn) {
+      btn.addEventListener("click", closeModal);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeModal();
+      }
+    });
+  })();
+</script>
+{% endblock %}

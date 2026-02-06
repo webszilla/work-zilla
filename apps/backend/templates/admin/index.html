@@ -1,0 +1,83 @@
+{% extends "admin/index.html" %}
+{% load static log i18n admin_dashboard %}
+
+{% block content %}
+  <div class="admin-dashboard">
+    <aside class="admin-dashboard__sidebar">
+      {% if app_list %}
+        {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+      {% endif %}
+      <div class="admin-dashboard__recent module" id="recent-actions-module">
+        <h2>{% translate 'Recent actions' %}</h2>
+        <h3>{% translate 'My actions' %}</h3>
+        {% get_admin_log 10 as admin_log for_user user %}
+        {% if not admin_log %}
+          <p>{% translate 'None available' %}</p>
+        {% else %}
+          <ul class="actionlist">
+            {% for entry in admin_log %}
+              <li class="{% if entry.is_addition %}addlink{% endif %}{% if entry.is_change %}changelink{% endif %}{% if entry.is_deletion %}deletelink{% endif %}">
+                <span class="visually-hidden">
+                  {% if entry.is_addition %}
+                    {% translate 'Added:' %}
+                  {% elif entry.is_change %}
+                    {% translate 'Changed:' %}
+                  {% elif entry.is_deletion %}
+                    {% translate 'Deleted:' %}
+                  {% endif %}
+                </span>
+                {% if entry.is_deletion or not entry.get_admin_url %}
+                  {{ entry.object_repr }}
+                {% else %}
+                  <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+                {% endif %}
+                <br>
+                {% if entry.content_type %}
+                  <span class="mini quiet">{% filter capfirst %}{{ entry.content_type.name }}{% endfilter %}</span>
+                {% else %}
+                  <span class="mini quiet">{% translate 'Unknown content' %}</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    </aside>
+    <section class="admin-dashboard__main">
+      <h2>Quick Dashboard</h2>
+
+      <div class="dashboard-tiles">
+        <a class="tile" href="/app/saas-admin/" target="_blank">
+          <span class="tile-icon tile-icon-saas"></span>
+          <div class="tile-text">
+            <div class="tile-title">SaaS Admin</div>
+            <div class="tile-sub">Open React admin console</div>
+          </div>
+        </a>
+
+        <a class="tile" href="{% url 'admin:saas_admin_product_changelist' %}">
+          <span class="tile-icon tile-icon-products"></span>
+          <div class="tile-text">
+            <div class="tile-title">Products</div>
+            <div class="tile-sub">Manage product catalog</div>
+          </div>
+        </a>
+
+        {% admin_product_cards as product_cards %}
+        {% for product in product_cards %}
+          {% if product.slug != "all" and product.status == "active" %}
+            <a class="tile" href="/app/saas-admin/products/{{ product.slug }}/" target="_blank">
+              <span class="tile-icon tile-icon-products"></span>
+              <div class="tile-text">
+                <div class="tile-title">{{ product.name }}</div>
+                <div class="tile-sub">Product dashboard</div>
+              </div>
+            </a>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block sidebar %}{% endblock %}

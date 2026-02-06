@@ -1,0 +1,67 @@
+<div class="card p-4 h-100">
+  <h4>Send a Message</h4>
+
+  {% if messages %}
+    {% for message in messages|slice:"-1:" %}
+      <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %}">
+        {{ message }}
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" action="{% url 'enquiry_submit' %}">
+    {% csrf_token %}
+    <input type="hidden" name="source_page" value="{{ request.path }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+
+    <div class="mb-3">
+      <label class="form-label">Name</label>
+      {{ enquiry_form.name }}
+      {% if enquiry_form.name.errors %}
+        <div class="text-danger small">{{ enquiry_form.name.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Mobile Number</label>
+      {{ enquiry_form.mobile_number }}
+      {% if enquiry_form.mobile_number.errors %}
+        <div class="text-danger small">{{ enquiry_form.mobile_number.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Email ID</label>
+      {{ enquiry_form.email }}
+      {% if enquiry_form.email.errors %}
+        <div class="text-danger small">{{ enquiry_form.email.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Select Product</label>
+      {{ enquiry_form.product }}
+      {% if enquiry_form.product.errors %}
+        <div class="text-danger small">{{ enquiry_form.product.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Details</label>
+      {{ enquiry_form.details }}
+      {% if enquiry_form.details.errors %}
+        <div class="text-danger small">{{ enquiry_form.details.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">{{ captcha_question }}</label>
+      {{ enquiry_form.captcha_answer }}
+      {% if enquiry_form.captcha_answer.errors %}
+        <div class="text-danger small">{{ enquiry_form.captcha_answer.errors|striptags }}</div>
+      {% endif %}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Submit</button>
+  </form>
+</div>

@@ -1,0 +1,57 @@
+# =====================================
+#  Django / Python
+# =====================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+*/db.sqlite3
+
+# Virtual env
+env/
+venv/
+.venv/
+.env
+.env.*
+
+# Media / collected static
+media/
+staticfiles/
+static_root/
+
+# =====================================
+#  React / Node / Frontend
+# =====================================
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build / dist
+build/
+dist/
+Output/
+.cache/
+
+# =====================================
+#  Archives / Installers / Large files
+# =====================================
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.iso
+*.exe
+*.msi
+
+# =====================================
+#  Editors / OS
+# =====================================
+.vscode/
+.idea/
+*.code-workspace
+Thumbs.db
+Desktop.ini
+.DS_Store

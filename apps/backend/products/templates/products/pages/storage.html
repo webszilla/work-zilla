@@ -1,0 +1,230 @@
+﻿{% extends "public/base.html" %}
+{% load static %}
+{% block meta_title %}ONLINE Storage | Work Zilla{% endblock %}
+{% block meta_description %}Simple, secure online storage for teams with optional system folder sync. Organization-level access and predictable pricing.{% endblock %}
+
+{% block content %}
+<section class="section z-chatbot-showcase">
+  <div class="site-container">
+    <div class="z-chatbot-header">
+      <h1 class="section-title section-title1">ONLINE Storage</h1>
+      <p class="section-lead" style="margin-bottom:0px;">
+        Simple, Secure Online Storage for Teams & Businesses
+      </p>
+    </div>
+    <div class="z-chatbot-stage">
+      <div class="z-chatbot-aura" aria-hidden="true"></div>
+      <div
+        class="z-chatbot-stage-bg"
+        style="background-image: url('{% static 'public/img/monitor-hero-image.jpg' %}');"
+        aria-hidden="true"
+      ></div>
+    </div>
+  </div>
+</section>
+
+<section class="z-hero full-bleed">
+  <div class="site-container">
+    <div class="z-hero-grid">
+      <div>
+        <span class="eyebrow">Product</span>
+        <h1>ONLINE Storage</h1>
+        <p>
+          Store, access, and manage your files securely in the cloud — with optional system folder sync at no extra cost.
+        </p>
+        <div class="z-hero-cta">
+          <a class="btn btn-primary" href="/pricing/?product=storage">Start Free 7-Day Trial</a>
+          <a class="btn btn-outline" href="/pricing/?product=storage">View Pricing</a>
+        </div>
+      </div>
+      <div class="z-hero-card">
+        <h4>Key benefits</h4>
+        <ul class="z-hero-list">
+          <li>
+            <span>Secure cloud storage</span>
+            <small>Private object storage with strict access control.</small>
+          </li>
+          <li>
+            <span>Org-level access</span>
+            <small>Admins manage users, files, and storage limits.</small>
+          </li>
+          <li>
+            <span>Simple pricing</span>
+            <small>Storage enforced per organization, not per user.</small>
+          </li>
+          <li>
+            <span>Optional system sync</span>
+            <small>Free convenience feature, not a backup guarantee.</small>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="feature-grid">
+      <div class="card">
+        <h3><i class="bi bi-shield-lock"></i> Secure Cloud Storage</h3>
+        <p>Private object storage with strict org isolation.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-people"></i> Org-level Access Control</h3>
+        <p>Admins manage users, roles, and visibility.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-arrow-repeat"></i> Optional System Folder Sync</h3>
+        <p>Free convenience sync for selected folders.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-receipt"></i> Simple Pricing</h3>
+        <p>Pay for org storage, not per-user storage.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">One Storage Platform. Built for Teams.</h2>
+    <p class="section-lead">
+      ONLINE Storage is an online file storage solution designed for organizations that need simple access control,
+      predictable pricing, and reliable cloud storage — without per-user confusion.
+      Unlike consumer drives, storage is managed at the organization level, giving admins full visibility and control.
+    </p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Key Features</h2>
+    <p class="section-lead">Everything your team needs for daily file access and control.</p>
+    <div class="feature-grid">
+      <div class="card">
+        <h3><i class="bi bi-cloud"></i> Online Cloud Storage</h3>
+        <p>Upload, download, and organize files with a Windows-style folder structure.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-lightning-charge"></i> Real-time Smart Sync</h3>
+        <p>Automatically sync files instantly when added, edited, or removed. No manual backup schedules required.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-building"></i> Organization-Level Control</h3>
+        <p>Admins manage users, view all files, and enforce storage limits easily.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-window"></i> Clean & Fast Interface</h3>
+        <p>Explorer-style layout with no clutter or distractions.</p>
+      </div>
+      <div class="card">
+        <h3><i class="bi bi-pc-display"></i> Free System Folder Sync</h3>
+        <p>Optional desktop sync client for selected folders, best-effort only.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="full-bleed-section privacy-band">
+  <div class="site-container">
+    <div class="privacy-panel light">
+      <div>
+        <h2 class="privacy-title">Optional System Folder Sync – Included Free</h2>
+        <h3 class="privacy-subtitle">Convenience sync, not a backup replacement.</h3>
+        <p>
+          ONLINE Storage includes a free system folder sync feature that lets users keep selected folders synced with
+          their online storage. This feature is provided as a convenience add-on and does not replace dedicated backup
+          or disaster recovery solutions.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/pricing/?product=storage">Start Free 7-Day Trial</a>
+          <a class="btn btn-outline" href="/pricing/?product=storage">View Pricing</a>
+        </div>
+      </div>
+      <ul>
+        <li>Pause & resume anytime.</li>
+        <li>Respects storage limits.</li>
+        <li>Admin-controlled per org and user.</li>
+        <li>No extra cost.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Secure by Design</h2>
+    <p class="section-lead">Privacy-first storage with strict isolation.</p>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Private object storage</h3>
+        <p>Storage is private by default with no public access.</p>
+      </div>
+      <div class="card">
+        <h3>Time-limited secure downloads</h3>
+        <p>Download links are secured and short-lived.</p>
+      </div>
+      <div class="card">
+        <h3>Strict org isolation</h3>
+        <p>Files and folders are isolated per organization.</p>
+      </div>
+      <div class="card">
+        <h3>Server-side permission checks</h3>
+        <p>All access is enforced on the backend.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Who is it for</h2>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Small & medium businesses</h3>
+        <p>Keep files organized with clear org-level access.</p>
+      </div>
+      <div class="card">
+        <h3>Agencies & teams</h3>
+        <p>Centralize client files and internal docs.</p>
+      </div>
+      <div class="card">
+        <h3>Startups</h3>
+        <p>Launch fast with predictable storage pricing.</p>
+      </div>
+      <div class="card">
+        <h3>Internal company storage</h3>
+        <p>Securely store team files without per-user confusion.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Ready to simplify your organization’s storage?</h2>
+      <p>Start with online storage and add sync when you are ready.</p>
+      <a class="btn btn-primary" href="/pricing/?product=storage">Start Free 7-Day Trial</a>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="contact">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Talk to the ONLINE Storage team</h3>
+          <p class="text-secondary">
+            Tell us about your storage needs and we will suggest the right plan.
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

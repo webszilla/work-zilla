@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+APP_PATH="/Applications/Work Zilla Agent.app"
+if [ -d "$APP_PATH" ]; then
+  /usr/bin/osascript <<'OSA'
+    display dialog "Work Zilla Agent is already installed. Please uninstall it first before installing again." buttons {"OK"} default button 1 with icon caution
+OSA
+  exit 1
+fi
+exit 0

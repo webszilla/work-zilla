@@ -1,0 +1,61 @@
+<form class="mt-3" method="post" data-account-form>
+  {% csrf_token %}
+  <input type="hidden" name="billing_action" value="save_profile">
+  <input type="hidden" name="phone" data-phone-hidden value="{{ billing_profile_phone|default:'' }}">
+
+  <div class="form-grid">
+    <div class="form-field">
+      <label>Contact Name *</label>
+      <input type="text" name="contact_name" value="{{ billing_profile.contact_name|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>Company Name *</label>
+      <input type="text" name="company_name" value="{{ billing_profile.company_name|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>Email *</label>
+      <input type="email" name="email" value="{{ billing_profile_email|default:'' }}" readonly>
+    </div>
+    <div class="form-field">
+      <label>Phone *</label>
+      <div class="phone-input-group">
+        <input type="text" name="phone_country" class="form-control" list="phone-country-options" data-phone-country placeholder="+91" value="{{ billing_phone_country|default:'' }}" required>
+        <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="{{ billing_phone_number|default:'' }}" required>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Address Line 1 *</label>
+      <input type="text" name="address_line1" value="{{ billing_profile.address_line1|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>Address Line 2</label>
+      <input type="text" name="address_line2" value="{{ billing_profile.address_line2|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>City *</label>
+      <input type="text" name="city" value="{{ billing_profile.city|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>Country *</label>
+      <input type="text" name="country" data-country-input list="billing-country-options" value="{{ billing_profile.country|default:'India' }}" required>
+    </div>
+    <div class="form-field">
+      <label>State *</label>
+      <input type="text" name="state" data-state-input list="billing-state-options" value="{{ billing_profile.state|default:'' }}" required>
+    </div>
+    <div class="form-field">
+      <label>Postal Code *</label>
+      <input type="text" name="postal_code" value="{{ billing_profile.postal_code|default:'' }}">
+    </div>
+    <div class="form-field">
+      <label>GSTIN</label>
+      <input type="text" name="gstin" value="{{ billing_profile.gstin|default:'' }}">
+    </div>
+  </div>
+  <datalist id="phone-country-options">
+    {% include "partials/phone_country_options.html" %}
+  </datalist>
+  <datalist id="billing-country-options"></datalist>
+  <datalist id="billing-state-options"></datalist>
+  <button class="btn btn-outline mt-3" type="submit">{{ submit_label|default:"Save Billing Details" }}</button>
+</form>

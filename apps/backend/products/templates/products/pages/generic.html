@@ -1,0 +1,56 @@
+{% extends "public/base.html" %}
+{% block meta_title %}{{ product.name }} | Work Zilla{% endblock %}
+{% block meta_description %}{{ product.short_description|default:"Work Zilla product" }}{% endblock %}
+
+{% block content %}
+<section class="z-hero full-bleed">
+  <div class="site-container">
+    <div class="z-hero-grid">
+      <div>
+        <span class="eyebrow">Product</span>
+        <h1>{{ product.name }}</h1>
+        <p>{{ product.short_description|default:"Work Zilla product overview." }}</p>
+        <div class="z-hero-cta">
+          <a class="btn btn-primary" href="/contact">Talk to sales</a>
+          <a class="btn btn-outline" href="/pricing">View plans</a>
+        </div>
+      </div>
+      <div class="z-hero-card">
+        <h4>Highlights</h4>
+        <ul class="z-hero-list">
+          <li>
+            <span>Fast onboarding</span>
+            <small>Get started in minutes with guided setup.</small>
+          </li>
+          <li>
+            <span>Secure by default</span>
+            <small>Privacy-first workflows and audit trails.</small>
+          </li>
+          <li>
+            <span>Actionable reporting</span>
+            <small>See insights that make teams better.</small>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section full-bleed-section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Talk to our team</h3>
+          <p class="text-secondary">
+            Share your requirements and we will recommend the best plan.
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

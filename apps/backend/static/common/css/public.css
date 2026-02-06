@@ -1,0 +1,23 @@
+:root {
+  --primary: var(--color-primary);
+  --secondary: var(--color-secondary);
+  --accent: var(--color-accent);
+}
+
+a {
+  color: var(--primary);
+}
+
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.text-accent {
+  color: var(--accent);
+}
+
+.bg-secondary {
+  background: var(--secondary);
+}

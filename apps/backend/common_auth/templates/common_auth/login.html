@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Work Zilla Login</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      .page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+      .card {
+        width: 100%;
+        max-width: 420px;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 24px;
+      }
+      .muted {
+        margin: 0 0 20px 0;
+        color: #64748b;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 14px;
+      }
+      input {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #cbd5f5;
+        font-size: 14px;
+      }
+      .btn {
+        display: inline-block;
+        width: 100%;
+        padding: 10px 14px;
+        border: none;
+        border-radius: 999px;
+        background: #4f46e5;
+        color: #ffffff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .error {
+        color: #b91c1c;
+        font-size: 13px;
+        margin-top: 6px;
+      }
+      .footer {
+        margin: 18px 0 0 0;
+        text-align: center;
+        font-size: 14px;
+      }
+      .footer a {
+        color: #4f46e5;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <form method="post" class="card">
+        {% csrf_token %}
+        <h1>Sign in</h1>
+        <p class="muted">Use your email and password.</p>
+        {% if form.non_field_errors %}
+          <div class="error">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <label>
+          {{ form.username.label_tag }}
+          {{ form.username }}
+          {% if form.username.errors %}
+            <div class="error">{{ form.username.errors }}</div>
+          {% endif %}
+        </label>
+        <label>
+          {{ form.password.label_tag }}
+          {{ form.password }}
+          {% if form.password.errors %}
+            <div class="error">{{ form.password.errors }}</div>
+          {% endif %}
+        </label>
+        <button class="btn" type="submit">Login</button>
+        <p class="footer">
+          No account? <a href="{% url 'common_auth:signup' %}">Create one</a>
+        </p>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+APP_PATH="/Applications/Work Zilla Agent.app"
+UNINSTALL_SRC="$APP_PATH/Contents/Resources/uninstall.sh"
+UNINSTALL_DST="/Applications/Work Zilla Agent Uninstall.command"
+
+if [ -f "$UNINSTALL_SRC" ]; then
+  cp "$UNINSTALL_SRC" "$UNINSTALL_DST"
+  chmod +x "$UNINSTALL_DST"
+fi
+
+exit 0

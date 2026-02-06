@@ -1,0 +1,254 @@
+.admin-quick-dashboard {
+  margin: 12px 0 20px;
+}
+
+.admin-quick-dashboard h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.admin-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.admin-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9dee3;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  color: #1f2937;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.admin-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.admin-tile .tile-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #eef2ff;
+  display: grid;
+  place-items: center;
+  color: #4f46e5;
+  font-size: 18px;
+}
+
+.admin-tile .tile-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.admin-tile .tile-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.admin-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.admin-monitor-grid .admin-tile {
+  background: #f9fafb;
+}
+
+.admin-changelist-action {
+  margin: 12px 0 8px;
+}
+
+.admin-changelist-action .button {
+  padding: 6px 12px;
+}
+
+/* Simple tiles */
+.dashboard-tiles {
+  display: flex;
+  gap: 16px;
+  margin: 12px 0 18px;
+}
+
+.dashboard-tiles .tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #fff;
+  text-decoration: none;
+  min-width: 260px;
+  border: 1px solid #d9dee3;
+  color: #1f2937;
+}
+
+.dashboard-tiles .tile:hover {
+  text-decoration: none;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.dashboard-tiles .tile-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  display: inline-block;
+  background: #e9eefc;
+  position: relative;
+}
+
+/* Simple “icon” shapes using CSS (no external icon libs) */
+.tile-icon-saas::after,
+.tile-icon-products::after,
+.tile-icon-monitor::after {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #2b4fe5;
+}
+
+.tile-icon-saas::after {
+  content: "S";
+}
+
+.tile-icon-products::after {
+  content: "P";
+}
+
+.tile-icon-monitor::after {
+  content: "M";
+}
+
+.dashboard-tiles .tile-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dashboard-tiles .tile-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.admin-dashboard {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.admin-dashboard__sidebar {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.admin-dashboard__sidebar .module {
+  margin-bottom: 16px;
+}
+
+.admin-dashboard__recent {
+  margin-top: 16px;
+}
+
+.admin-dashboard__recent h2 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.admin-dashboard__recent h3 {
+  font-size: 12px;
+  margin-top: 0;
+  color: #9ca3af;
+}
+
+.app-list .module caption,
+.admin-dashboard__sidebar .module caption,
+.monitor-hub__section > h2 {
+  background: var(--primary);
+  color: var(--primary-fg);
+  padding: 6px 10px;
+}
+
+.app-list .module caption a,
+.admin-dashboard__sidebar .module caption a,
+.monitor-hub__section > h2 a {
+  color: var(--primary-fg);
+}
+
+.monitor-hub__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.monitor-hub__sections {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.monitor-hub__section {
+  margin-bottom: 0;
+}
+
+.monitor-hub__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.monitor-hub__list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #263043;
+}
+
+.monitor-hub__label {
+  font-weight: 600;
+}
+
+.monitor-hub__links a {
+  margin-left: 10px;
+}
+
+@media (max-width: 1400px) {
+  .monitor-hub__sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .monitor-hub__sections {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-dashboard__main {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .admin-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-dashboard__sidebar {
+    max-height: none;
+  }
+}

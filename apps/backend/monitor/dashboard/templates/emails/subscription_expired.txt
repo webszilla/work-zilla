@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+Your subscription has expired.
+
+Plan: {{ plan_name }}
+End Date: {{ end_date }}
+
+Please renew to continue access.
+
+Thanks,
+Work Zilla Monitor

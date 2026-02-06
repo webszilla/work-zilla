@@ -1,0 +1,12 @@
+Hello {{ name }},
+
+Your add-on request is received.
+
+Add-on Users: {{ addon_count }}
+Amount: {{ currency }} {{ amount }}
+Payment Status: {{ payment_status }}
+
+{{ status_note }}
+
+Thanks,
+Work Zilla Monitor

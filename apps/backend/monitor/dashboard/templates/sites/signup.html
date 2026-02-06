@@ -1,0 +1,152 @@
+{% extends "public/base.html" %}
+{% load static %}
+
+{% block content %}
+
+<div class="container mt-5" style="max-width:700px">
+
+  <h1 class="section-title text-center">Create Your Work Zilla Account</h1>
+
+  <p class="text-center text-secondary">
+      Single signup for all Work Zilla products. Manage multiple tools from one secure account.
+  </p>
+
+  {% if request.GET.plan %}
+      <div class="alert alert-info text-center">
+          Selected Plan: <b>{{ request.GET.plan|title }}</b>
+      </div>
+  {% endif %}
+  {% if messages %}
+      {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} text-center">
+              {{ message }}
+          </div>
+      {% endfor %}
+  {% endif %}
+
+  <div class="card p-4">
+      {% if form %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger text-center">
+            {{ form.non_field_errors }}
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <form method="post" action="/auth/signup/" data-account-form>
+          {% csrf_token %}
+
+          <div class="mb-3">
+              <label class="form-label">Company Name</label>
+              <input type="text" name="company_name" class="form-control" required>
+              {% if form and form.company_name.errors %}
+                <div class="text-danger small">{{ form.company_name.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Username</label>
+              <input type="text" name="username" class="form-control" required>
+              {% if form and form.username.errors %}
+                <div class="text-danger small">{{ form.username.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Your Name</label>
+              <div class="row g-2">
+                <div class="col-md-6">
+                  <input type="text" name="first_name" class="form-control" placeholder="First name" required>
+                  {% if form and form.first_name.errors %}
+                    <div class="text-danger small">{{ form.first_name.errors|striptags }}</div>
+                  {% endif %}
+                </div>
+                <div class="col-md-6">
+                  <input type="text" name="last_name" class="form-control" placeholder="Last name" required>
+                  {% if form and form.last_name.errors %}
+                    <div class="text-danger small">{{ form.last_name.errors|striptags }}</div>
+                  {% endif %}
+                </div>
+              </div>
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control" required>
+              {% if form and form.email.errors %}
+                <div class="text-danger small">{{ form.email.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Mobile Number</label>
+              <input type="hidden" name="phone_number" data-phone-hidden value="">
+              <div class="phone-input-group">
+                <input type="text" name="phone_country" class="form-control" list="phone-country-options" data-phone-country placeholder="+91" value="+91" required>
+                <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="" required>
+              </div>
+              {% if form and form.phone_number.errors %}
+                <div class="text-danger small">{{ form.phone_number.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password1" class="form-control" required>
+              {% if form and form.password1.errors %}
+                <div class="text-danger small">{{ form.password1.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <div class="mb-3">
+              <label class="form-label">Confirm Password</label>
+              <input type="password" name="password2" class="form-control" required>
+              {% if form and form.password2.errors %}
+                <div class="text-danger small">{{ form.password2.errors|striptags }}</div>
+              {% endif %}
+          </div>
+
+          <input type="hidden" name="plan" value="{{ request.GET.plan }}">
+
+          <button class="btn btn-primary w-100">
+              Create Account
+          </button>
+
+          <p class="mt-3 text-center text-secondary">
+              Already have an account?
+              <a href="/auth/login/?next=/app/">Login</a>
+          </p>
+
+      </form>
+      <datalist id="phone-country-options">
+        {% include "partials/phone_country_options.html" %}
+      </datalist>
+  </div>
+
+</div>
+
+{% if request.user.is_authenticated %}
+  <div class="modal-overlay" style="display:flex;position:fixed;inset:0;background:rgba(15,23,42,0.6);align-items:center;justify-content:center;z-index:9999;">
+    <div class="modal-panel" style="max-width:520px;background:#0f172a;color:#e5e7eb;border:1px solid rgba(148,163,184,0.2);border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,0.45);">
+      <h5>Logout Required</h5>
+      <p class="text-secondary mb-3">
+        You are already logged in. Please logout to create a new account.
+      </p>
+      <div class="d-flex justify-content-end gap-2">
+        <a class="btn btn-danger" href="/auth/logout/?next=/auth/signup/">Logout</a>
+        <a class="btn btn-secondary" href="/app/">Back to Dashboard</a>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% endblock %}
+
+{% block sidebar %}{% endblock %}
+
+{% block shell_class %}no-sidebar{% endblock %}
+
+{% block extra_js %}
+  <script src="{% static 'public/js/account_forms.js' %}" defer></script>
+{% endblock %}
+

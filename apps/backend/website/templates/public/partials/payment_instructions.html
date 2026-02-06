@@ -1,0 +1,19 @@
+<div class="card mt-4 p-3">
+  <h3>Payment Instructions</h3>
+  <p class="text-secondary">Pay via bank transfer or UPI. After verification, we will activate your plan.</p>
+  {% if bank_account_details or seller_upi_id %}
+    <div class="form-group mb-0">
+      <label class="text-secondary">Bank Account Details</label>
+      <div class="form-control bank-details">{{ bank_account_details|default:"-"|linebreaksbr }}</div>
+      {% if seller_upi_id %}
+        <div class="bank-upi mt-2">UPI ID: {{ seller_upi_id }}</div>
+      {% endif %}
+    </div>
+  {% else %}
+    <ul class="plan-features">
+      <li>Bank: Work Zilla Payments</li>
+      <li>UPI: workzilla@bank</li>
+      <li>Reference: Your company name or email</li>
+    </ul>
+  {% endif %}
+</div>

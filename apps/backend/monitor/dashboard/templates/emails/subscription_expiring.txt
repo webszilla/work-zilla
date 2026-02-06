@@ -1,0 +1,12 @@
+Hello {{ name }},
+
+Your subscription is expiring soon.
+
+Plan: {{ plan_name }}
+Billing cycle: {{ billing_cycle }}
+Expiry date: {{ end_date }}
+
+Please renew to avoid interruption.
+
+Thanks,
+Work Zilla

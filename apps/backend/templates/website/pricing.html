@@ -1,0 +1,82 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Pricing{% endblock %}
+{% block meta_description %}Explore Work Zilla pricing for monitoring, time tracking, and HR modules.{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="site-container hero-grid">
+    <div>
+      <span class="eyebrow">Pricing</span>
+      <h1>Flexible plans for growing teams.</h1>
+      <p>Start free, upgrade anytime, and scale with your workforce.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/contact">Talk to Sales</a>
+        <a class="btn btn-outline" href="/signup">Start Free Trial</a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="visual-card">
+        <div class="visual-title">Monthly vs Yearly</div>
+        <div class="stat-row">
+          <span>Avg savings</span>
+          <strong>20%</strong>
+        </div>
+        <div class="stat-bar"><span style="width: 68%"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Plans</h2>
+    <p class="section-lead">Choose the plan that fits your team size and monitoring needs.</p>
+    <div class="feature-grid">
+      <div class="plan-card card">
+        <h3>Starter</h3>
+        <p>For small teams testing visibility.</p>
+        <div class="price-monthly">INR 0 <span class="price-suffix-inline">TRIAL</span></div>
+        <a class="btn btn-outline" href="/signup">Start trial</a>
+      </div>
+      <div class="plan-card card">
+        <h3>Growth</h3>
+        <p>For teams that need daily insights.</p>
+        <div class="price-monthly">INR 299 <span class="price-suffix-inline">/user</span></div>
+        <a class="btn btn-primary" href="/contact">Request quote</a>
+      </div>
+      <div class="plan-card card">
+        <h3>Enterprise</h3>
+        <p>Advanced controls, SSO, and custom SLAs.</p>
+        <div class="price-monthly">Custom</div>
+        <a class="btn btn-outline" href="/contact">Talk to sales</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Need a custom quote?</h2>
+      <p>Our team will help you choose the right plan.</p>
+      <a class="btn btn-primary" href="/contact">Contact sales</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Get pricing guidance</h3>
+          <p class="text-secondary">Share your requirements and we will respond with the best plan.</p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

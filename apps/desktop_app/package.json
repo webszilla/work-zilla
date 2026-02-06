@@ -1,0 +1,85 @@
+{
+  "name": "work-zilla-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite --config renderer/vite.config.js",
+    "build": "vite build --config renderer/vite.config.js",
+    "preview": "vite preview --config renderer/vite.config.js",
+    "electron": "electron .",
+    "start": "concurrently -k \"npm:dev\" \"wait-on tcp:5173 && electron .\"",
+    "dist": "npm run build && electron-builder -w --x64 --ia32"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.6.0",
+    "chokidar": "^3.6.0",
+    "fetch-cookie": "^3.1.0",
+    "form-data": "^4.0.0",
+    "keytar": "^7.9.0",
+    "node-fetch": "^3.3.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.22.3",
+    "tough-cookie": "^4.1.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.4.3",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.workzilla.agent",
+    "productName": "Work Zilla Agent",
+    "directories": {
+      "buildResources": "electron"
+    },
+    "files": [
+      "electron/**/*",
+      "renderer/dist/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": ["dmg", "zip", "pkg"],
+      "extraResources": [
+        {
+          "from": "electron/uninstall.sh",
+          "to": "uninstall.sh"
+        },
+        {
+          "from": "mac_helper/build",
+          "to": "mac_helper"
+        }
+      ]
+    },
+    "pkg": {
+      "scripts": "electron/pkg-scripts"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "electron/monitor",
+          "to": "monitor",
+          "filter": ["**/*"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "electron/installer.nsh"
+    }
+  }
+}

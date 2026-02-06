@@ -1,0 +1,18 @@
+Work Zilla Alert
+=================
+
+Alert: {{ rule.name }}
+
+Event type: {{ rule.event_type }}
+Organization: {{ org_name }}
+Product: {{ product_slug }}
+
+Window: last {{ window_minutes }} minutes
+Count: {{ count }} (threshold {{ rule.threshold_count }})
+
+Window start: {{ window_start }}
+Window end: {{ window_end }}
+
+Notes:
+- If this is expected traffic, no action is required.
+- If not, investigate rate limits, device keys, or recent deployments.

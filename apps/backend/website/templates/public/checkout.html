@@ -1,0 +1,96 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Checkout{% endblock %}
+{% block meta_description %}Confirm your plan and submit payment to activate your subscription.{% endblock %}
+
+{% block content %}
+<section class="section">
+  <div class="site-container">
+    <div class="pricing-header">
+      <div>
+        <h1 class="section-title">Checkout</h1>
+        <p class="section-lead">Confirm your plan details and submit payment for approval.</p>
+      </div>
+    </div>
+
+    {% if selected_plan %}
+      <div class="card p-4">
+        <div class="checkout-summary">
+          <div>
+            <h2 class="plan-title">{{ selected_plan.name }}</h2>
+            <p class="text-secondary">Product: {{ selected_product_slug|title }}</p>
+            <p class="text-secondary">Billing: {{ selected_billing|title }} · Currency: {{ selected_currency|upper }}</p>
+          </div>
+          <div class="plan-price">
+            <span>
+              {% if selected_currency == "usd" %}
+                USD
+                {% if selected_billing == "monthly" %}
+                  {{ selected_plan.usd_monthly_price|default:"Custom" }}
+                {% else %}
+                  {{ selected_plan.usd_yearly_price|default:"Custom" }}
+                {% endif %}
+              {% else %}
+                INR
+                {% if selected_billing == "monthly" %}
+                  {{ selected_plan.monthly_price|default:"Custom" }}
+                {% else %}
+                  {{ selected_plan.yearly_price|default:"Custom" }}
+                {% endif %}
+              {% endif %}
+            </span>
+            <span class="price-suffix-inline">
+              {% if selected_billing == "monthly" %}/user per month{% else %}/user per year{% endif %}
+            </span>
+          </div>
+        </div>
+
+        {% if not billing_profile_complete %}
+          <div class="card mt-4 p-3">
+            <h3>Company Billing Details</h3>
+            <p class="text-secondary">Fill billing details to continue with checkout.</p>
+            {% include "public/partials/billing_profile_form.html" with submit_label="Save Billing Details" %}
+          </div>
+        {% else %}
+          {% include "public/partials/payment_instructions.html" %}
+
+          <form method="post" action="/checkout/confirm/" class="mt-4" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-lg-4">
+                <div class="form-group mb-0">
+                  <label>UTR / Reference Number</label>
+                  <input class="form-control" type="text" name="utr_number" placeholder="Enter UTR / reference" required>
+                </div>
+              </div>
+              <div class="col-12 col-lg-4">
+                <div class="form-group mb-0">
+                  <label>Paid Date</label>
+                  <input class="form-control" type="date" name="paid_on" required>
+                </div>
+              </div>
+              <div class="col-12 col-lg-4">
+                <div class="form-group mb-0">
+                  <label>Bank Transfer Proof (Image)</label>
+                  <input class="form-control" type="file" name="receipt" accept="image/*" required>
+                  <div class="form-text">Upload JPG/PNG/WebP. Max 2MB.</div>
+                </div>
+              </div>
+            </div>
+            <div class="form-group mb-3">
+              <label>Notes (optional)</label>
+              <textarea class="form-control" name="notes" rows="3" placeholder="Any additional details"></textarea>
+            </div>
+            <button class="btn btn-primary" type="submit">Submit payment request</button>
+          </form>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="card p-4">
+        <h3>No plan selected</h3>
+        <p class="text-secondary">Choose a plan first to continue.</p>
+        <a class="btn btn-outline" href="/pricing/">View pricing</a>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% with f=form|default:enquiry_form %}
+<form method="post" action="{% url 'enquiry_submit' %}">
+  {% csrf_token %}
+  <input type="hidden" name="source_page" value="{{ request.path }}">
+  <input type="hidden" name="next" value="{{ request.path }}">
+
+  {% if f.non_field_errors %}
+    <div class="alert alert-danger">{{ f.non_field_errors }}</div>
+  {% endif %}
+
+  <div class="form-group">
+    <label>Name</label>
+    {{ f.name }}
+    {{ f.name.errors }}
+  </div>
+
+  <div class="form-group">
+    <label>Mobile</label>
+    {{ f.mobile_number }}
+    {{ f.mobile_number.errors }}
+  </div>
+
+  <div class="form-group">
+    <label>Email (optional)</label>
+    {{ f.email }}
+    {{ f.email.errors }}
+  </div>
+
+  <div class="form-group">
+    <label>Product</label>
+    {{ f.product }}
+    {{ f.product.errors }}
+  </div>
+
+  <div class="form-group">
+    <label>Details</label>
+    {{ f.details }}
+    {{ f.details.errors }}
+  </div>
+
+  <div class="form-group">
+    <label>Captcha: {{ captcha_question }}</label>
+    {{ f.captcha_answer }}
+    {{ f.captcha_answer.errors }}
+  </div>
+
+  <button class="btn-primary" type="submit">Submit Enquiry</button>
+</form>
+{% endwith %}
