@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+import { API_BASE } from "./apiConfig.js";
 
 function buildApiUrl(url) {
   if (url.startsWith("http://") || url.startsWith("https://")) {
