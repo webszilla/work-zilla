@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export default function ChooseFoldersScreen() {
-  const [status, setStatus] = useState({ loading: false, message: "" });
+  const [status, setStatus] = useState({ loading: false, message: "", type: "info" });
   const [folders, setFolders] = useState({ loading: true, items: [], error: "" });
 
   async function loadFolders() {
@@ -22,13 +22,35 @@ export default function ChooseFoldersScreen() {
   }, []);
 
   async function handleChoose() {
-    setStatus({ loading: true, message: "" });
+    setStatus({ loading: true, message: "", type: "info" });
     try {
       const result = await window.storageApi.chooseFolders();
-      setStatus({ loading: false, message: result?.message || "Folders updated." });
+      setStatus({ loading: false, message: result?.message || "Folders updated.", type: "success" });
       await loadFolders();
     } catch (error) {
-      setStatus({ loading: false, message: error?.message || "Unable to add folders." });
+      setStatus({
+        loading: false,
+        message: error?.message || "Unable to add folders.",
+        type: "error"
+      });
+    }
+  }
+
+  async function handleRemove(path) {
+    const confirmed = window.confirm("Remove this folder from local sync?");
+    if (!confirmed) return;
+
+    setStatus({ loading: true, message: "Removing folder...", type: "info" });
+    try {
+      await window.storageApi.removeFolder(path);
+      setStatus({ loading: false, message: "Folder removed from sync.", type: "success" });
+      await loadFolders();
+    } catch (error) {
+      setStatus({
+        loading: false,
+        message: error?.message || "Unable to remove folder.",
+        type: "error"
+      });
     }
   }
 
@@ -47,7 +69,19 @@ export default function ChooseFoldersScreen() {
             Refresh
           </button>
         </div>
-        {status.message ? <div className="text-muted mt-2">{status.message}</div> : null}
+        {status.message ? (
+          <div
+            className={
+              status.type === "error"
+                ? "alert alert-danger mt-2"
+                : status.type === "success"
+                  ? "alert alert-success mt-2"
+                  : "text-muted mt-2"
+            }
+          >
+            {status.message}
+          </div>
+        ) : null}
         {folders.error ? <div className="alert alert-danger mt-2">{folders.error}</div> : null}
         {folders.loading ? (
           <div className="text-muted mt-2">Loading folders...</div>
@@ -70,10 +104,8 @@ export default function ChooseFoldersScreen() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={async () => {
-                          await window.storageApi.removeFolder(item.path);
-                          await loadFolders();
-                        }}
+                        onClick={() => handleRemove(item.path)}
+                        disabled={status.loading}
                       >
                         Remove
                       </button>
