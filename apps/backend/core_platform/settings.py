@@ -39,10 +39,14 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-change-me")
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 
-if ENVIRONMENT == "production":
-    ALLOWED_HOSTS = ["getworkzilla.com", "www.getworkzilla.com"]
-else:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+ALLOWED_HOSTS = [
+    "getworkzilla.com",
+    "www.getworkzilla.com",
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+]
+
 
 CORS_ALLOWED_ORIGINS = _csv_env("DJANGO_CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = _csv_env("DJANGO_CSRF_TRUSTED_ORIGINS")
