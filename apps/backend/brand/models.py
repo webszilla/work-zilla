@@ -65,3 +65,67 @@ class SiteBrandSettings(models.Model):
             },
         )
         return obj
+
+
+class Product(models.Model):
+    key = models.SlugField(max_length=80, unique=True)
+    internal_code_name = models.SlugField(max_length=120, unique=True)
+    display_name = models.CharField(max_length=160)
+    tagline = models.CharField(max_length=240, blank=True)
+    description = models.TextField(blank=True)
+    logo = models.ImageField(upload_to="brand/products/", blank=True, null=True)
+    primary_color = models.CharField(max_length=20, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("display_name",)
+
+    def __str__(self) -> str:
+        return self.display_name or self.key
+
+    @classmethod
+    def get_default(cls):
+        product = cls.objects.filter(is_active=True).order_by("id").first()
+        if product:
+            return product
+        return cls(
+            key="worksuite",
+            internal_code_name="monitor",
+            display_name="Work Suite",
+        )
+
+
+class ProductAlias(models.Model):
+    CONTEXT_UI = "ui"
+    CONTEXT_MARKETING = "marketing"
+    CONTEXT_EMAIL = "email"
+    CONTEXT_CHOICES = (
+        (CONTEXT_UI, "UI"),
+        (CONTEXT_MARKETING, "Marketing"),
+        (CONTEXT_EMAIL, "Email"),
+    )
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="aliases")
+    alias_key = models.SlugField(max_length=80, default="default")
+    alias_text = models.CharField(max_length=240)
+    context = models.CharField(max_length=20, choices=CONTEXT_CHOICES, default=CONTEXT_UI)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("context", "alias_key", "alias_text")
+
+    def __str__(self) -> str:
+        return f"{self.product.display_name} ({self.context}:{self.alias_key})"
+
+
+class ProductRouteMapping(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="routes")
+    public_slug = models.SlugField(max_length=120, unique=True)
+    legacy_slugs = models.JSONField(default=list, blank=True)
+    redirect_enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("public_slug",)
+
+    def __str__(self) -> str:
+        return f"{self.public_slug} -> {self.product.key}"

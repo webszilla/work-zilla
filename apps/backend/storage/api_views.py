@@ -245,6 +245,16 @@ def org_devices_list(request):
             user_id_value = None
         if user_id_value:
             qs = qs.filter(user_id=user_id_value)
+    def device_type(value):
+        raw = (value or "").lower()
+        if "android" in raw or "ios" in raw or "iphone" in raw or "ipad" in raw:
+            return "mobile"
+        if "windows" in raw:
+            return "pc"
+        if "darwin" in raw or "mac" in raw or "os x" in raw:
+            return "laptop"
+        return "device"
+
     return JsonResponse({
         "items": [
             {
@@ -252,6 +262,8 @@ def org_devices_list(request):
                 "user_id": device.user_id,
                 "device_name": device.device_name or "",
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+                "os_info": device.os_info or "",
+                "device_type": device_type(device.os_info),
             }
             for device in qs.order_by("-last_seen")
         ]

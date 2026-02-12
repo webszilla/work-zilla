@@ -5,6 +5,7 @@ export default function MonitorScreen({ onBack }) {
   const [saving, setSaving] = useState(false);
   const [platform, setPlatform] = useState("unknown");
   const [permissions, setPermissions] = useState({ screen: "unknown", accessibility: false, needsRestart: false });
+  const [screenPrompted, setScreenPrompted] = useState(false);
   const [support, setSupport] = useState({ supported: true, reason: "" });
   const [notice, setNotice] = useState("");
   const [bannerMessage, setBannerMessage] = useState("");
@@ -31,14 +32,25 @@ export default function MonitorScreen({ onBack }) {
       setPlatform(os);
       setSupport(supportInfo);
       setForm({
-        orgId: settings.orgId || settings.companyKey || "",
+        orgId: settings.companyKey || settings.orgId || "",
         employeeName: settings.employeeName || ""
       });
-      const running = response.status === "running" || settings.monitorRunning === true;
+      let running = response.status === "running";
+      if (!running && settings.monitorRunning) {
+        try {
+          const restart = await window.storageApi.startMonitor();
+          running = restart?.ok && restart.status === "running";
+          if (!running) {
+            await window.storageApi.updateSettings({ monitorRunning: false, monitorStartedAt: "" });
+          }
+        } catch {
+          await window.storageApi.updateSettings({ monitorRunning: false, monitorStartedAt: "" });
+        }
+      }
       setIsMonitoring(running);
       setMonitorStartedAt(settings.monitorStartedAt || "");
       if (running) {
-        setBannerMessage("Work Zilla Monitor is working. You can continue using other products.");
+        setBannerMessage("Work Suite monitoring is active. You can continue using other products.");
       }
       setStatus({ loading: false, state: response.status, error: "" });
     }
@@ -84,22 +96,17 @@ export default function MonitorScreen({ onBack }) {
       }
       const perms = await window.storageApi.getMonitorPermissions();
       setPermissions(perms);
-      if (support.supported && !perms.needsRestart && (perms.screen !== "granted" || !perms.accessibility)) {
-        setShowPermissionModal(true);
-      } else {
+      if (perms.screen === "granted" && perms.accessibility && !perms.needsRestart) {
         setShowPermissionModal(false);
       }
     }
     if (platform === "darwin") {
+      setScreenPrompted(false);
       refreshPermissions();
       if (window.storageApi.onMonitorPermissionsUpdated) {
         unsubscribe = window.storageApi.onMonitorPermissionsUpdated((perms) => {
           setPermissions(perms);
-          if (support.supported && !perms.needsRestart && (perms.screen !== "granted" || !perms.accessibility)) {
-            setShowPermissionModal(true);
-          } else {
-            setShowPermissionModal(false);
-          }
+          setShowPermissionModal(false);
         });
       }
     }
@@ -112,7 +119,7 @@ export default function MonitorScreen({ onBack }) {
 
   async function startMonitoring() {
     if (!form.orgId || !form.employeeName) {
-      setStatus((prev) => ({ ...prev, error: "Org ID and User Name are required." }));
+      setStatus((prev) => ({ ...prev, error: "Company Key and User Name are required." }));
       return;
     }
     setStatus((prev) => ({ ...prev, loading: true, error: "" }));
@@ -125,12 +132,21 @@ export default function MonitorScreen({ onBack }) {
     setSaving(false);
     const response = await window.storageApi.startMonitor();
     if (!response.ok) {
+      const errorCode = String(response.error || "").toLowerCase();
       const message =
-        response.error === "missing_profile"
-          ? "Org ID and User Name are required."
-          : response.error === "not_enabled"
+        errorCode === "missing_profile"
+          ? "Company Key and User Name are required."
+          : errorCode === "not_enabled"
             ? "Monitor is not enabled for this account."
-            : response.error || "Unable to start.";
+            : errorCode === "relaunch_required"
+              ? "Restart required to enable screen capture."
+            : errorCode === "invalid company key" || errorCode === "invalid_company_key"
+              ? "Invalid Company Key. Please check and try again."
+              : errorCode === "company_key is required" || errorCode === "missing_company_key"
+                ? "Company Key is required."
+                : errorCode === "no active subscription" || errorCode === "subscription_required"
+                  ? "Subscription required to start monitoring."
+                  : response.error || "Unable to start.";
       setStatus({ loading: false, state: "stopped", error: message });
       return;
     }
@@ -138,8 +154,8 @@ export default function MonitorScreen({ onBack }) {
     await window.storageApi.updateSettings({ monitorRunning: true, monitorStartedAt: startedAt });
     setMonitorStartedAt(startedAt);
     setIsMonitoring(true);
-    setNotice("Work Zilla Monitor started");
-    setBannerMessage("Work Zilla Monitor is working. You can continue using other products.");
+    setNotice("Work Suite monitoring started");
+    setBannerMessage("Work Suite monitoring is active. You can continue using other products.");
     setStatus({ loading: false, state: response.status, error: "" });
   }
 
@@ -149,10 +165,30 @@ export default function MonitorScreen({ onBack }) {
       currentPerms = await window.storageApi.getMonitorPermissions();
       setPermissions(currentPerms);
     }
-    if (
-      platform === "darwin" &&
-      (currentPerms.needsRestart || currentPerms.screen !== "granted" || !currentPerms.accessibility)
-    ) {
+    if (platform === "darwin" && (currentPerms.screen !== "granted" || !currentPerms.accessibility)) {
+      if (currentPerms.screen !== "granted") {
+        if (!screenPrompted && window.storageApi?.requestMonitorPermissions) {
+          setScreenPrompted(true);
+          try {
+            const requested = await window.storageApi.requestMonitorPermissions();
+            setPermissions(requested);
+            if (requested.screen === "granted" && requested.accessibility && !requested.needsRestart) {
+              await startMonitoring();
+              return;
+            }
+          } catch {
+            // ignore permission request failures
+          }
+        }
+      }
+      setShowPermissionModal(true);
+      return;
+    }
+    if (platform === "darwin" && currentPerms.needsRestart) {
+      setStatus((prev) => ({
+        ...prev,
+        error: "Restart required to enable screen capture. Please restart Work Zilla Agent."
+      }));
       setShowPermissionModal(true);
       return;
     }
@@ -215,7 +251,7 @@ export default function MonitorScreen({ onBack }) {
     <div className="module-shell">
       <div className="module-header">
         <div>
-          <h2>Monitor</h2>
+          <h2>Work Suite</h2>
           <p className="text-muted">Screenshot and activity tracking will run in the background.</p>
         </div>
         <button type="button" className="btn btn-secondary" onClick={onBack}>
@@ -227,34 +263,99 @@ export default function MonitorScreen({ onBack }) {
       {bannerMessage ? <div className="banner banner-info">{bannerMessage}</div> : null}
 
       {platform === "darwin" ? (
-        <div className="alert alert-info">
-          {!support.supported
-            ? "Monitor capture is not supported on macOS yet."
-            : permissions.needsRestart
-              ? "Permissions enabled. Please restart Work Zilla Agent."
-              : permissions.screen === "unknown"
-              ? "Click Start Monitoring to check permissions."
-              : permissions.screen !== "granted"
-                ? "Screen Recording permission is required to start monitoring."
-                : !permissions.accessibility
-                  ? "Accessibility permission is required to start monitoring."
-                  : "Permissions granted. Monitoring is ready."}
-        </div>
-      ) : null}
-      {status.error && platform !== "darwin" ? <div className="alert alert-danger">{status.error}</div> : null}
+        !support.supported ? (
+          <div className="alert alert-info">Monitor capture is not supported on macOS yet.</div>
+        ) : (
+          <div
+            className={`permission-banner ${
+              permissions.screen === "granted" && permissions.accessibility ? "ok" : "warn"
+            }`}
+          >
+            <div className="permission-banner__header">
+              <div>
+                <div className="permission-banner__title">Permissions</div>
+                <div className="permission-banner__desc">
+                  Enable Screen Recording and Accessibility to start monitoring.
+                </div>
+              </div>
+              <div className="permission-banner__chips">
+                <span className={`status-chip ${permissions.screen === "granted" ? "ok" : "warn"}`}>
+                  Screen Recording: {permissions.screen === "unknown" ? "Checking" : permissions.screen === "granted" ? "Enabled" : "Not Enabled"}
+                </span>
+                <span className={`status-chip ${permissions.accessibility ? "ok" : "warn"}`}>
+                  Accessibility: {permissions.accessibility ? "Enabled" : "Not Enabled"}
+                </span>
+              </div>
+            </div>
 
-      <div className="card">
-        <div className="card-title">Monitor Setup</div>
+            <div className="permission-banner__actions">
+              {permissions.screen !== "granted" ? (
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={async () => {
+                    await window.storageApi.openMonitorSettings({ target: "screen" });
+                  }}
+                >
+                  Open Screen Recording
+                </button>
+              ) : null}
+              {!permissions.accessibility ? (
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={async () => {
+                    await window.storageApi.openMonitorSettings({ target: "accessibility" });
+                  }}
+                >
+                  Open Accessibility
+                </button>
+              ) : null}
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={async () => {
+                  if (window.storageApi?.getMonitorPermissions) {
+                    const perms = await window.storageApi.getMonitorPermissions();
+                    setPermissions(perms);
+                    if (perms.screen === "granted" && perms.accessibility && !perms.needsRestart) {
+                      setShowPermissionModal(false);
+                    }
+                  }
+                }}
+              >
+                Refresh Status
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={async () => {
+                  if (window.storageApi?.relaunchApp) {
+                    await window.storageApi.relaunchApp();
+                  }
+                }}
+                disabled={!permissions.needsRestart}
+              >
+                Restart Work Zilla Agent
+              </button>
+            </div>
+          </div>
+        )
+      ) : null}
+      {status.error ? <div className="alert alert-danger">{status.error}</div> : null}
+
+      <div className="card monitor-card">
+        <div className="card-title">Work Suite Setup</div>
         <div className="monitor-input-row">
           <label>
-            Org ID
+            Company Key
             <input
               type="text"
               value={form.orgId}
               onChange={(event) => setForm((prev) => ({ ...prev, orgId: event.target.value }))}
-              placeholder="Enter Org ID"
+              placeholder="Enter company key (e.g., zilla-17)"
               required
-              readOnly={platform === "darwin" || isMonitoring}
+              readOnly={isMonitoring}
             />
           </label>
           <label>
@@ -265,7 +366,7 @@ export default function MonitorScreen({ onBack }) {
               onChange={(event) => setForm((prev) => ({ ...prev, employeeName: event.target.value }))}
               placeholder="Enter user name"
               required
-              readOnly={platform === "darwin" || isMonitoring}
+              readOnly={isMonitoring}
             />
           </label>
           <div className="monitor-actions">
@@ -279,7 +380,6 @@ export default function MonitorScreen({ onBack }) {
                 saving ||
                 (platform === "darwin" &&
                   (!support.supported ||
-                    permissions.needsRestart ||
                     permissions.screen !== "granted" ||
                     !permissions.accessibility))
               }
@@ -289,8 +389,12 @@ export default function MonitorScreen({ onBack }) {
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => setShowStopModal(true)}
-              disabled={status.loading}
+              onClick={() => {
+                if (isMonitoring) {
+                  setShowStopModal(true);
+                }
+              }}
+              disabled={status.loading || !isMonitoring}
             >
               Stop
             </button>
@@ -298,12 +402,12 @@ export default function MonitorScreen({ onBack }) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card monitor-card">
         <div className="monitor-status-grid">
           <div>
-            <div className="card-title">Monitor Status</div>
+            <div className="card-title">Work Suite Status</div>
             <div className={`monitor-status-pill ${isMonitoring ? "running" : "stopped"}`}>{statusLabel}</div>
-            <div className="card-muted">Uses your Work Zilla monitor plan and permissions.</div>
+            <div className="card-muted">Uses your Work Suite plan and permissions.</div>
           </div>
           <div className="monitor-meta">
             <div>
@@ -318,8 +422,8 @@ export default function MonitorScreen({ onBack }) {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title">Data Policy</div>
+      <div className="card monitor-card">
+        <div className="card-title">Work Suite Data Policy</div>
         <div className="card-muted">
           Monitoring data is sent securely to your Work Zilla Admin dashboard and respects server-side permissions.
         </div>
@@ -367,24 +471,102 @@ export default function MonitorScreen({ onBack }) {
 
       {showPermissionModal ? (
         <div className="modal-backdrop">
-          <div className="modal">
-            <div className="modal-title">Enable permissions to start monitoring</div>
+          <div className="modal permission-modal">
+            <div className="permission-modal__header">
+              <div>
+                <div className="modal-title">Enable Permissions</div>
+                <div className="modal-subtitle">Required to start monitoring</div>
+              </div>
+              <div className="permission-modal__status">
+                <span className={`status-chip ${permissions.screen === "granted" ? "ok" : "warn"}`}>
+                  Screen Recording: {permissions.screen === "granted" ? "Enabled" : "Not Enabled"}
+                </span>
+                <span className={`status-chip ${permissions.accessibility ? "ok" : "warn"}`}>
+                  Accessibility: {permissions.accessibility ? "Enabled" : "Not Enabled"}
+                </span>
+              </div>
+            </div>
+
+            <div className="permission-modal__grid">
+              <div className="permission-card">
+                <div className="permission-card__title">Screen Recording</div>
+                <div className="permission-card__text">
+                  Allow Work Zilla Agent to capture your screen for monitoring screenshots.
+                </div>
+                <div className="permission-card__footer">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      await window.storageApi.openMonitorSettings({ target: "screen" });
+                    }}
+                  >
+                    Open Screen Recording
+                  </button>
+                </div>
+              </div>
+              <div className="permission-card">
+                <div className="permission-card__title">Accessibility</div>
+                <div className="permission-card__text">
+                  Enable accessibility so Work Zilla Agent can track activity reliably.
+                </div>
+                <div className="permission-card__footer">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      await window.storageApi.openMonitorSettings({ target: "accessibility" });
+                    }}
+                  >
+                    Open Accessibility
+                  </button>
+                </div>
+              </div>
+              <div className="permission-card permission-card--steps">
+                <div className="permission-card__title">Quick Steps</div>
+                <div className="permission-card__text">
+                  1. Turn on Work Zilla Agent in the list.
+                  <br />
+                  2. Return here and click Refresh.
+                  <br />
+                  3. Restart the app if asked.
+                </div>
+                <div className="permission-card__footer">
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={async () => {
+                      if (window.storageApi?.getMonitorPermissions) {
+                        const perms = await window.storageApi.getMonitorPermissions();
+                        setPermissions(perms);
+                      }
+                    }}
+                  >
+                    Refresh Status
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="modal-actions">
               <button
                 className="btn btn-secondary"
                 type="button"
                 onClick={() => setShowPermissionModal(false)}
               >
-                Cancel
+                Close
               </button>
               <button
                 className="btn btn-primary"
                 type="button"
                 onClick={async () => {
-                  await window.storageApi.openMonitorSettings();
+                  if (window.storageApi?.relaunchApp) {
+                    await window.storageApi.relaunchApp();
+                  }
                 }}
+                disabled={!permissions.needsRestart}
               >
-                Open System Settings
+                Restart App
               </button>
             </div>
           </div>

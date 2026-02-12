@@ -4,7 +4,8 @@ from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, redirect
-from django.http import JsonResponse
+from types import SimpleNamespace
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
@@ -15,6 +16,7 @@ import os
 from types import SimpleNamespace
 
 from apps.backend.enquiries.views import build_enquiry_context
+from apps.backend.brand.models import ProductRouteMapping
 from apps.backend.products.models import Product
 from core.observability import log_event
 from core.subscription_utils import is_free_plan, is_subscription_active
@@ -28,6 +30,79 @@ from core.models import (
     SubscriptionHistory,
     InvoiceSellerProfile,
 )
+
+
+def download_windows_agent(request):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    downloads_dir = os.path.join(base_dir, "static", "downloads")
+    filename = "WorkZillaAgentSetup.exe"
+    file_path = os.path.join(downloads_dir, filename)
+    if not os.path.exists(file_path):
+        raise Http404("Installer not found.")
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
+def download_mac_agent(request):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    downloads_dir = os.path.join(base_dir, "static", "downloads")
+    filename = "WorkZillaAgent.dmg"
+    file_path = os.path.join(downloads_dir, filename)
+    if not os.path.exists(file_path):
+        raise Http404("Installer not found.")
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
+def _normalize_product_slug(value, default="monitor"):
+    slug = (value or "").strip().lower()
+    if slug == "worksuite":
+        return "monitor"
+    return slug or default
+
+
+def _storage_is_free_plan(plan):
+    if not plan:
+        return False
+    prices = [
+        getattr(plan, "monthly_price", 0) or 0,
+        getattr(plan, "yearly_price", 0) or 0,
+        getattr(plan, "monthly_price_inr", 0) or 0,
+        getattr(plan, "yearly_price_inr", 0) or 0,
+        getattr(plan, "monthly_price_usd", 0) or 0,
+        getattr(plan, "yearly_price_usd", 0) or 0,
+        getattr(plan, "usd_monthly_price", 0) or 0,
+        getattr(plan, "usd_yearly_price", 0) or 0,
+    ]
+    return all(price <= 0 for price in prices)
+
+
+def _org_has_used_free_trial(org):
+    if not org:
+        return False
+    subs = (
+        Subscription.objects
+        .filter(organization=org, plan__isnull=False)
+        .select_related("plan")
+    )
+    for sub in subs:
+        if sub.plan and is_free_plan(sub.plan):
+            return True
+    history_rows = (
+        SubscriptionHistory.objects
+        .filter(organization=org, plan__isnull=False)
+        .select_related("plan")
+    )
+    for row in history_rows:
+        if row.plan and is_free_plan(row.plan):
+            return True
+    try:
+        from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+    except Exception:
+        return False
+    storage_subs = StorageOrgSubscription.objects.filter(organization=org).select_related("plan")
+    for sub in storage_subs:
+        if sub.plan is None or _storage_is_free_plan(sub.plan):
+            return True
+    return False
 
 
 def _base_context(request):
@@ -108,11 +183,14 @@ def _billing_products_for_org(org):
             slug = (product.slug or "").strip()
             if not slug or slug == "ai-chat-widget":
                 return
+            if slug == "monitor":
+                slug = "worksuite"
             if slug not in products_by_slug:
-                products_by_slug[slug] = {"slug": slug, "name": product.name}
+                name = "Work Suite" if product.slug == "monitor" else product.name
+                products_by_slug[slug] = {"slug": slug, "name": name}
             return
-        if "monitor" not in products_by_slug:
-            products_by_slug["monitor"] = {"slug": "monitor", "name": "Monitor"}
+        if "worksuite" not in products_by_slug:
+            products_by_slug["worksuite"] = {"slug": "worksuite", "name": "Work Suite"}
 
     transfers = (
         PendingTransfer.objects
@@ -254,7 +332,7 @@ def terms_view(request):
 @require_POST
 def checkout_select(request):
     plan_id = request.POST.get("plan_id")
-    product_slug = request.POST.get("product_slug") or "monitor"
+    product_slug = _normalize_product_slug(request.POST.get("product_slug"))
     currency = (request.POST.get("currency") or "inr").lower()
     billing = (request.POST.get("billing") or "monthly").lower()
 
@@ -272,10 +350,28 @@ def checkout_select(request):
 def checkout_view(request):
     context = _base_context(request)
     plan_id = request.session.get("selected_plan_id")
-    product_slug = request.session.get("selected_product_slug") or "monitor"
+    product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
     billing = request.session.get("selected_billing") or "monthly"
     plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
+    selected_product_name = product_slug.title() if product_slug else ""
+    price_suffix = "/user per month" if billing == "monthly" else "/user per year"
+    if product_slug in ("storage", "online-storage"):
+        try:
+            from apps.backend.storage.models import Plan as StoragePlan
+            storage_plan = StoragePlan.objects.filter(id=plan_id).select_related("product").first()
+            if storage_plan:
+                selected_product_name = storage_plan.product.name if storage_plan.product else "Online Storage"
+                plan = SimpleNamespace(
+                    name=storage_plan.name,
+                    monthly_price=storage_plan.monthly_price_inr,
+                    yearly_price=storage_plan.yearly_price_inr,
+                    usd_monthly_price=storage_plan.monthly_price_usd,
+                    usd_yearly_price=storage_plan.yearly_price_usd,
+                )
+                price_suffix = "/org per month" if billing == "monthly" else "/org per year"
+        except Exception:
+            pass
     org = _resolve_org_for_user(request.user)
     profile = BillingProfile.objects.filter(organization=org).first()
     user_profile = UserProfile.objects.filter(user=request.user).first()
@@ -298,9 +394,11 @@ def checkout_view(request):
 
     context.update({
         "selected_product_slug": product_slug,
+        "selected_product_name": selected_product_name,
         "selected_currency": currency,
         "selected_billing": billing,
         "selected_plan": plan,
+        "price_suffix": price_suffix,
         "billing_profile": profile,
         "billing_profile_complete": _billing_profile_complete(profile),
         "billing_profile_email": (profile.email if profile and profile.email else request.user.email),
@@ -381,7 +479,7 @@ def _storage_plan_rank(plan):
 def _latest_subscription_for_product(org, product_slug):
     if not org:
         return None
-    product_slug = (product_slug or "").strip().lower() or "monitor"
+    product_slug = _normalize_product_slug(product_slug)
     qs = Subscription.objects.filter(organization=org).select_related("plan", "plan__product")
     if product_slug == "monitor":
         qs = qs.filter(plan__product__slug__in=["monitor", None])
@@ -411,7 +509,7 @@ def subscription_start(request):
     except json.JSONDecodeError:
         payload = {}
 
-    product_slug = (payload.get("product") or "").strip().lower()
+    product_slug = _normalize_product_slug(payload.get("product"))
     plan_id = payload.get("plan_id")
     interval = (payload.get("interval") or "monthly").strip().lower()
     if interval not in ("monthly", "yearly"):
@@ -432,7 +530,7 @@ def subscription_start(request):
         plan = Plan.objects.filter(id=plan_id).select_related("product").first()
         if not plan:
             return JsonResponse({"detail": "plan_not_found"}, status=404)
-        plan_product_slug = plan.product.slug if plan.product else "monitor"
+        plan_product_slug = _normalize_product_slug(plan.product.slug if plan.product else "monitor")
         if plan_product_slug != product_slug:
             return JsonResponse({"detail": "product_mismatch"}, status=400)
 
@@ -464,7 +562,14 @@ def subscription_start(request):
         has_storage_sub = False
 
     trial_days = 7
-    if not has_history and not has_subscription and not has_storage_sub and trial_days > 0:
+    trial_available = (
+        trial_days > 0
+        and not has_history
+        and not has_subscription
+        and not has_storage_sub
+        and not _org_has_used_free_trial(org)
+    )
+    if trial_available:
         now = timezone.now()
         trial_end = now + timedelta(days=trial_days)
         if product_slug in ("storage", "online-storage"):
@@ -516,10 +621,23 @@ def subscription_start(request):
 @login_required(login_url="/auth/login/")
 def checkout_confirm(request):
     plan_id = request.session.get("selected_plan_id")
-    product_slug = request.session.get("selected_product_slug") or "monitor"
+    product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
     billing = request.session.get("selected_billing") or "monthly"
     plan = Plan.objects.filter(id=plan_id).first()
+    storage_plan = None
+    if product_slug in ("storage", "online-storage"):
+        try:
+            from apps.backend.storage.models import Plan as StoragePlan
+            storage_plan = StoragePlan.objects.filter(id=plan_id).first()
+        except Exception:
+            storage_plan = None
+        if storage_plan:
+            plan = (
+                Plan.objects
+                .filter(product__slug="storage", name__iexact=storage_plan.name)
+                .first()
+            )
     if not plan:
         messages.error(request, "Select a plan before checkout.")
         return redirect("/pricing/")
@@ -562,7 +680,13 @@ def checkout_confirm(request):
             billing_cycle=billing,
             retention_days=plan.retention_days or 30,
         )
-        amount = _plan_price(plan, currency, billing) or 0
+        if storage_plan:
+            if currency.lower() == "usd":
+                amount = storage_plan.usd_monthly_price if billing == "monthly" else storage_plan.usd_yearly_price
+            else:
+                amount = storage_plan.monthly_price_inr if billing == "monthly" else storage_plan.yearly_price_inr
+        else:
+            amount = _plan_price(plan, currency, billing) or 0
         PendingTransfer.objects.create(
             organization=org,
             user=request.user,
@@ -593,7 +717,7 @@ def checkout_confirm(request):
 
 @login_required(login_url="/auth/login/")
 def billing_renew_start(request):
-    product_slug = (request.GET.get("product") or "monitor").strip().lower()
+    product_slug = _normalize_product_slug(request.GET.get("product"))
     org = _resolve_org_for_user(request.user)
     if org:
         pending_exists = PendingTransfer.objects.filter(
@@ -635,7 +759,7 @@ def billing_renew_view(request):
     org = _resolve_org_for_user(request.user)
 
     plan_id = request.session.get("renew_plan_id")
-    product_slug = request.session.get("renew_product_slug") or "monitor"
+    product_slug = _normalize_product_slug(request.session.get("renew_product_slug"))
     currency = request.session.get("renew_currency") or "inr"
     billing = request.session.get("renew_billing") or "monthly"
     addon_count = int(request.session.get("renew_addon_count") or 0)
@@ -691,7 +815,7 @@ def billing_renew_view(request):
 @login_required(login_url="/auth/login/")
 def billing_renew_confirm(request):
     plan_id = request.session.get("renew_plan_id")
-    product_slug = request.session.get("renew_product_slug") or "monitor"
+    product_slug = _normalize_product_slug(request.session.get("renew_product_slug"))
     currency = request.session.get("renew_currency") or "inr"
     billing = request.session.get("renew_billing") or "monthly"
 
@@ -753,11 +877,8 @@ def billing_renew_confirm(request):
     with transaction.atomic():
         latest = _latest_subscription_for_product(org, product_slug)
         if latest:
-            latest.status = "pending"
-            latest.plan = plan
-            latest.billing_cycle = billing
-            latest.addon_count = addon_count
-            latest.save(update_fields=["status", "plan", "billing_cycle", "addon_count"])
+            # Keep current subscription active until the transfer is approved.
+            pass
 
         transfer = PendingTransfer.objects.create(
             organization=org,
@@ -880,7 +1001,7 @@ def account_view(request):
         slug = product.slug if product and product.slug else "monitor"
         existing_slugs.add(slug)
         sub.product_slug = slug
-        sub.product_name = product.name if product else "Monitor"
+        sub.product_name = product.name if product else "Work Suite"
         sub.plan_rank = _plan_rank(plan)
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
         sub.is_free_plan = is_free_plan(plan)
@@ -945,7 +1066,7 @@ def account_view(request):
         product = plan.product if plan else None
         slug = product.slug if product and product.slug else "monitor"
         sub.product_slug = slug
-        sub.product_name = product.name if product else "Monitor"
+        sub.product_name = product.name if product else "Work Suite"
         sub.plan_rank = _plan_rank(plan)
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
         sub.is_free_plan = is_free_plan(plan)
@@ -961,7 +1082,7 @@ def account_view(request):
             product = transfer.plan.product if transfer.plan else None
             slug = product.slug if product else "monitor"
             pending_renewal_rows.append({
-                "product_name": product.name if product else "Monitor",
+                "product_name": product.name if product else "Work Suite",
                 "product_slug": slug,
                 "plan_name": transfer.plan.name if transfer.plan else "-",
                 "billing_cycle": transfer.billing_cycle,
@@ -982,7 +1103,7 @@ def account_view(request):
         for transfer in pending_payments:
             product = transfer.plan.product if transfer.plan else None
             pending_payment_rows.append({
-                "product_name": product.name if product else "Monitor",
+                "product_name": product.name if product else "Work Suite",
                 "product_slug": product.slug if product else "monitor",
                 "plan_name": transfer.plan.name if transfer.plan else "-",
                 "billing_cycle": transfer.billing_cycle,
@@ -1038,6 +1159,19 @@ def account_view(request):
             continue
         else:
             active_subs.append(sub)
+    # Keep only latest active subscription per product
+    latest_by_slug = {}
+    for sub in active_subs:
+        slug = getattr(sub, "product_slug", None) or "monitor"
+        current = latest_by_slug.get(slug)
+        if not current:
+            latest_by_slug[slug] = sub
+            continue
+        current_date = getattr(current, "start_date", None) or getattr(current, "end_date", None)
+        sub_date = getattr(sub, "start_date", None) or getattr(sub, "end_date", None)
+        if sub_date and (not current_date or sub_date > current_date):
+            latest_by_slug[slug] = sub
+    active_subs = list(latest_by_slug.values())
     active_slugs = {sub.product_slug for sub in active_subs if getattr(sub, "product_slug", None)}
     for row in pending_payment_rows:
         if row.get("product_slug"):
@@ -1069,6 +1203,8 @@ def billing_view(request):
     org = _resolve_org_for_user(request.user)
     profile = BillingProfile.objects.filter(organization=org).first()
     product_slug = (request.GET.get("product") or "all").strip().lower()
+    if product_slug == "worksuite":
+        product_slug = "monitor"
     billing_products = _billing_products_for_org(org)
     allowed_slugs = {item["slug"] for item in billing_products}
     if product_slug != "all" and product_slug not in allowed_slugs:
@@ -1093,12 +1229,49 @@ def billing_view(request):
         if product_slug == "monitor":
             product_filter |= Q(plan__product__isnull=True)
 
-    approved_transfers = (
+    approved_transfers_qs = (
         PendingTransfer.objects
         .filter(organization=org, status="approved")
         .filter(product_filter)
         .select_related("plan", "plan__product")
         .order_by("-paid_on", "-id")
+    )
+    approved_transfers = list(approved_transfers_qs)
+    approved_plan_ids = {transfer.plan_id for transfer in approved_transfers if transfer.plan_id}
+    subscription_filter = Q()
+    if product_slug and product_slug != "all":
+        subscription_filter = Q(plan__product__slug=product_slug)
+        if product_slug == "monitor":
+            subscription_filter |= Q(plan__product__isnull=True)
+    active_subs = (
+        Subscription.objects
+        .filter(organization=org, status__in=("active", "trialing"))
+        .filter(subscription_filter)
+        .select_related("plan", "plan__product")
+        .order_by("-start_date")
+    )
+    for sub in active_subs:
+        if sub.plan_id in approved_plan_ids:
+            continue
+        plan = sub.plan
+        amount = None
+        if plan:
+            if sub.billing_cycle == "yearly":
+                amount = plan.yearly_price if plan.yearly_price is not None else plan.price
+            else:
+                amount = plan.monthly_price if plan.monthly_price is not None else plan.price
+        approved_transfers.append(SimpleNamespace(
+            id=None,
+            plan=plan,
+            billing_cycle=sub.billing_cycle,
+            amount=amount or 0,
+            currency="INR",
+            paid_on=sub.start_date,
+            status="approved"
+        ))
+    approved_transfers.sort(
+        key=lambda transfer: transfer.paid_on or getattr(transfer, "updated_at", None) or getattr(transfer, "created_at", None) or timezone.now(),
+        reverse=True,
     )
     pending_transfers = (
         PendingTransfer.objects
@@ -1128,7 +1301,7 @@ def billing_view(request):
             product = entry.plan.product if entry.plan else None
             billing_activity.append({
                 "type": "Subscription",
-                "product_name": product.name if product else "Monitor",
+                "product_name": product.name if product else "Work Suite",
                 "plan": entry.plan.name if entry.plan else "-",
                 "status": entry.status,
                 "billing_cycle": entry.billing_cycle or "monthly",
@@ -1138,7 +1311,7 @@ def billing_view(request):
         product = transfer.plan.product if transfer.plan else None
         billing_activity.append({
             "type": "Payment",
-            "product_name": product.name if product else "Monitor",
+            "product_name": product.name if product else "Work Suite",
             "plan": transfer.plan.name if transfer.plan else "-",
             "status": transfer.status,
             "billing_cycle": transfer.billing_cycle or "monthly",
@@ -1242,3 +1415,30 @@ def profile_view(request):
         "profile": profile,
     })
     return render(request, "public/profile.html", context)
+
+
+def sitemap_view(request):
+    base = request.build_absolute_uri("/").rstrip("/")
+    routes = ProductRouteMapping.objects.select_related("product").order_by("public_slug")
+
+    static_paths = [
+        "/",
+        "/pricing/",
+        "/contact/",
+        "/about/",
+        "/privacy/",
+        "/terms/",
+    ]
+    product_paths = [f"/products/{route.public_slug}/" for route in routes]
+    paths = static_paths + product_paths
+
+    xml_lines = [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">",
+    ]
+    for path in paths:
+        xml_lines.append("  <url>")
+        xml_lines.append(f"    <loc>{base}{path}</loc>")
+        xml_lines.append("  </url>")
+    xml_lines.append("</urlset>")
+    return HttpResponse("\n".join(xml_lines), content_type="application/xml")

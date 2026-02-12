@@ -6,6 +6,7 @@ import { estimateCostInr } from "../lib/aiCost.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import SaasAdminObservabilityPage from "./SaasAdminObservabilityPage.jsx";
+import { useBranding } from "../branding/BrandingContext.jsx";
 
 const emptyState = {
   loading: true,
@@ -41,6 +42,7 @@ export default function SaasAdminProductPage() {
   const { slug } = useParams();
   const location = useLocation();
   const confirm = useConfirm();
+  const { branding } = useBranding();
   const [state, setState] = useState(emptyState);
   const [activeSection, setActiveSection] = useState("organizations");
 
@@ -694,7 +696,16 @@ export default function SaasAdminProductPage() {
     }
     const term = userSearchQuery.toLowerCase();
     return users.filter((user) =>
-      [user.name, user.email, user.org_name, user.device_id, user.pc_name].some((value) =>
+      [
+        user.name,
+        user.email,
+        user.org_name,
+        user.device_id,
+        user.pc_name,
+        user.device_count,
+        user.total_utilized_space,
+        user.monthly_consumed_bandwidth,
+      ].some((value) =>
         String(value || "").toLowerCase().includes(term)
       )
     );
@@ -976,7 +987,7 @@ export default function SaasAdminProductPage() {
 
   function getProductDescription(value, slugValue) {
     if (slugValue === "monitor") {
-      return "Work Zilla Monitoring and Productivity Insights.";
+      return branding?.tagline || branding?.description || "Work Zilla Work Suite productivity insights.";
     }
     return value || "-";
   }
@@ -1613,7 +1624,12 @@ export default function SaasAdminProductPage() {
   }
 
   async function handleTransferAction(transferId, action) {
-    const actionLabel = action === "approve" ? "Approve" : "Reject";
+    const actionLabel =
+      action === "approve"
+        ? "Approve"
+        : action === "reject"
+        ? "Reject"
+        : "Delete";
     const confirmed = await confirm({
       title: `${actionLabel} Transfer`,
       message: `Are you sure you want to ${actionLabel.toLowerCase()} this transfer?`,
@@ -1837,6 +1853,10 @@ export default function SaasAdminProductPage() {
   }
 
   function getOrgStatus(row) {
+    const rowStatus = String(row.status || "").toLowerCase();
+    if (rowStatus === "active" || rowStatus === "trial" || rowStatus === "inactive" || rowStatus === "expired") {
+      return rowStatus;
+    }
     const subscription = row.subscription || null;
     if (!subscription) {
       return "inactive";
@@ -2520,15 +2540,16 @@ export default function SaasAdminProductPage() {
                 <div className="alert alert-danger mt-2">{userState.error}</div>
               ) : null}
               <div className="table-responsive mt-2">
-                <table className="table table-dark table-striped table-hover align-middle">
+                <table className="table table-dark table-striped table-hover align-middle pending-transfers-table">
                   <thead>
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
                       <th>Organization</th>
-                      <th>Device ID</th>
-                      <th>PC Name</th>
-                      <th>Action</th>
+                      <th>{isStorageProduct ? "Device Count" : "Device ID"}</th>
+                      <th>{isStorageProduct ? "Total Utilized Space" : "PC Name"}</th>
+                      {isStorageProduct ? <th>Monthly Consumed Bandwidth</th> : null}
+                      <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2538,8 +2559,9 @@ export default function SaasAdminProductPage() {
                           <td>{user.name}</td>
                           <td>{formatValue(user.email)}</td>
                           <td>{formatValue(user.org_name)}</td>
-                          <td>{formatValue(user.device_id)}</td>
-                          <td>{formatValue(user.pc_name)}</td>
+                          <td>{isStorageProduct ? formatValue(user.device_count) : formatValue(user.device_id)}</td>
+                          <td>{isStorageProduct ? formatValue(user.total_utilized_space) : formatValue(user.pc_name)}</td>
+                          {isStorageProduct ? <td>{formatValue(user.monthly_consumed_bandwidth)}</td> : null}
                           <td>
                             <button
                               type="button"
@@ -2571,7 +2593,7 @@ export default function SaasAdminProductPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="6">No users found.</td>
+                        <td colSpan={isStorageProduct ? 7 : 6}>No users found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -3075,7 +3097,7 @@ export default function SaasAdminProductPage() {
                       <th>Type</th>
                       <th>Plan</th>
                       <th>Amount</th>
-                      <th>Billing Cycle</th>
+                      <th>Billing</th>
                       <th>Created</th>
                       <th>Receipt</th>
                       <th>Action</th>
@@ -3105,34 +3127,43 @@ export default function SaasAdminProductPage() {
                                   })
                                 }
                               >
-                                View Image
+                                Image
                               </button>
                             ) : (
                               <span className="text-secondary">Not Available</span>
                             )}
                           </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-info btn-sm me-2"
-                              onClick={() => openTransferView(transfer.id)}
-                            >
-                              View
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-success btn-sm me-2"
-                              onClick={() => handleTransferAction(transfer.id, "approve")}
-                            >
-                              Approve
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleTransferAction(transfer.id, "reject")}
-                            >
-                              Reject
-                            </button>
+                          <td className="table-actions">
+                            <div className="d-flex flex-wrap gap-1 pending-action-group">
+                              <button
+                                type="button"
+                                className="btn btn-outline-info btn-sm"
+                                onClick={() => openTransferView(transfer.id)}
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-success btn-sm"
+                                onClick={() => handleTransferAction(transfer.id, "approve")}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleTransferAction(transfer.id, "reject")}
+                              >
+                                Reject
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-danger btn-sm"
+                                onClick={() => handleTransferAction(transfer.id, "delete")}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))

@@ -212,7 +212,9 @@ export default function App() {
           {current.id === "sync-status" ? <SyncStatusScreen /> : null}
           {current.id === "storage" ? <StorageUsageScreen /> : null}
           {current.id === "files" ? <StorageFilesScreen isAdmin={isAdmin} authUser={auth.user} /> : null}
-          {current.id === "choose-folders" ? <ChooseFoldersScreen /> : null}
+          {current.id === "choose-folders" ? (
+            <ChooseFoldersScreen onOpenCloud={() => setActiveScreen("files")} />
+          ) : null}
           {current.id === "activity" ? <SyncActivityScreen /> : null}
           {current.id === "errors" ? <ErrorsScreen /> : null}
           {current.id === "settings" ? (

@@ -1,0 +1,12 @@
+Hello {{ name }},
+
+Your plan change is processed.
+
+Previous Plan: {{ previous_plan }}
+New Plan: {{ new_plan }}
+Change Type: {{ change_type }}
+Billing Cycle: {{ billing_cycle }}
+Payment Status: {{ payment_status }}
+
+Thanks,
+Work Zilla Work Suite

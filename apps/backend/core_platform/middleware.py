@@ -1,6 +1,35 @@
 import json
 
+from django.http import HttpResponsePermanentRedirect
+
+from apps.backend.brand.models import ProductRouteMapping
+
 from django.http import HttpResponseForbidden, JsonResponse
+from django.db import connection
+
+
+class LegacyMonitorRedirectMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ""
+        query = request.META.get("QUERY_STRING", "")
+        suffix_query = f"?{query}" if query else ""
+
+        if path.startswith("/app/monitor"):
+            suffix = path[len("/app/monitor"):]
+            return HttpResponsePermanentRedirect(f"/app/worksuite{suffix}{suffix_query}")
+
+        if path.startswith("/products/monitor"):
+            suffix = path[len("/products/monitor"):]
+            return HttpResponsePermanentRedirect(f"/products/worksuite{suffix}{suffix_query}")
+
+        if path.startswith("/monitor") and not path.startswith("/monitoring"):
+            suffix = path[len("/monitor"):]
+            return HttpResponsePermanentRedirect(f"/worksuite{suffix}{suffix_query}")
+
+        return self.get_response(request)
 
 
 class ApiV2ErrorNormalizeMiddleware:
@@ -31,3 +60,39 @@ class ApiV2ErrorNormalizeMiddleware:
             return JsonResponse(payload, status=response.status_code)
 
         return response
+
+
+class ProductRouteRedirectMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ""
+        if not path.startswith("/products/"):
+            return self.get_response(request)
+
+        slug = path[len("/products/"):].strip("/")
+        if not slug:
+            return self.get_response(request)
+
+        route = None
+        if connection.vendor == "sqlite":
+            for candidate in (
+                ProductRouteMapping.objects
+                .select_related("product")
+                .filter(redirect_enabled=True)
+            ):
+                legacy = candidate.legacy_slugs or []
+                if slug in legacy:
+                    route = candidate
+                    break
+        else:
+            route = (
+                ProductRouteMapping.objects.select_related("product")
+                .filter(redirect_enabled=True, legacy_slugs__contains=[slug])
+                .first()
+            )
+        if route and route.public_slug and route.public_slug != slug:
+            return HttpResponsePermanentRedirect(f"/products/{route.public_slug}/")
+
+        return self.get_response(request)

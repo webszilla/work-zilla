@@ -1,0 +1,37 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content_title %}{% endblock %}
+
+{% block content %}
+  <div class="monitor-hub">
+    <div class="monitor-hub__header">
+      <h1>Work Suite Product</h1>
+      <a class="button" href="{% url 'admin:index' %}">Back to Admin</a>
+    </div>
+
+    <div class="monitor-hub__sections">
+      {% for section in sections %}
+        <div class="module monitor-hub__section">
+          <h2>{{ section.title }}</h2>
+          <ul class="monitor-hub__list">
+            {% for item in section.items %}
+              <li>
+                <span class="monitor-hub__label">{{ item.label }}</span>
+                <span class="monitor-hub__links">
+                  <a href="{{ item.list_url }}">List</a>
+                  {% if item.add_url %}
+                    <a href="{{ item.add_url }}">Add</a>
+                  {% endif %}
+                  {% if item.change_url %}
+                    <a href="{{ item.change_url }}">Edit</a>
+                  {% endif %}
+                </span>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

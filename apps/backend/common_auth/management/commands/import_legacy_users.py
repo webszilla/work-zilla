@@ -10,14 +10,14 @@ from django.utils.dateparse import parse_datetime
 
 
 class Command(BaseCommand):
-    help = "Import legacy auth_user rows from monitor/db.sqlite3 into common_auth_user."
+    help = "Import legacy auth_user rows from worksuite/db.sqlite3 into common_auth_user."
 
     def add_arguments(self, parser):
-        default_source = (settings.BASE_DIR.parent.parent / "monitor" / "db.sqlite3")
+        default_source = (settings.BASE_DIR.parent.parent / "worksuite" / "db.sqlite3")
         parser.add_argument(
             "--source",
             default=str(default_source),
-            help="Path to legacy monitor db.sqlite3",
+            help="Path to legacy worksuite db.sqlite3",
         )
         parser.add_argument(
             "--skip-existing",

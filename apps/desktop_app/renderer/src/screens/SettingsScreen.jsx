@@ -2,6 +2,7 @@
 
 export default function SettingsScreen({ theme, onThemeChange }) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });
+  const [downloadInfo, setDownloadInfo] = useState({ version: "", error: "" });
 
   useEffect(() => {
     let active = true;
@@ -12,6 +13,16 @@ export default function SettingsScreen({ theme, onThemeChange }) {
           return;
         }
         setState({ loading: false, data, error: "" });
+        try {
+          const versionResp = await window.storageApi.getWindowsAgentVersion?.();
+          if (active) {
+            setDownloadInfo({ version: versionResp?.version || "", error: "" });
+          }
+        } catch (err) {
+          if (active) {
+            setDownloadInfo({ version: "", error: err?.message || "" });
+          }
+        }
       } catch (error) {
         if (!active) {
           return;
@@ -81,6 +92,25 @@ export default function SettingsScreen({ theme, onThemeChange }) {
               >
                 Pause Sync
               </button>
+            </div>
+          </label>
+          <label>
+            Windows Agent
+            <div className="button-row">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  window.storageApi.openExternal?.("/downloads/windows-agent/");
+                }}
+              >
+                Download Windows Agent
+              </button>
+              {downloadInfo.version ? (
+                <div className="text-muted" style={{ alignSelf: "center" }}>
+                  Version: {downloadInfo.version}
+                </div>
+              ) : null}
             </div>
           </label>
         </div>

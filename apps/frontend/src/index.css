@@ -559,6 +559,43 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.table td.table-actions,
+.table th.table-actions{
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  min-width: 240px;
+}
+.pending-transfers-table th:nth-child(2),
+.pending-transfers-table td:nth-child(2){
+  width: 60px;
+}
+.pending-transfers-table th:nth-child(5),
+.pending-transfers-table td:nth-child(5){
+  width: 72px;
+}
+.pending-transfers-table th:nth-child(7),
+.pending-transfers-table td:nth-child(7){
+  width: 60px;
+}
+.pending-transfers-table th:nth-child(8),
+.pending-transfers-table td:nth-child(8){
+  width: 220px;
+}
+.pending-transfers-table{
+  table-layout: auto;
+}
+.pending-transfers-table th:nth-child(1),
+.pending-transfers-table td:nth-child(1){
+  min-width: 120px;
+}
+.pending-transfers-table td.table-actions{
+  min-width: 180px;
+}
+.pending-transfers-table .pending-action-group .btn{
+  padding: 0.2rem 0.45rem;
+  font-size: 0.78rem;
+}
 .app-shell .table tbody td{
   font-weight: 100;
   font-size: 15px;

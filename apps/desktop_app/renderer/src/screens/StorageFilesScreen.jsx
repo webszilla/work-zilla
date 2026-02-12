@@ -44,6 +44,17 @@ function sortItems(items) {
   return [...folders, ...files];
 }
 
+function formatDeviceType(value) {
+  if (!value) {
+    return "Device";
+  }
+  const key = String(value).toLowerCase();
+  if (key === "pc") return "PC";
+  if (key === "laptop") return "Laptop";
+  if (key === "mobile") return "Mobile";
+  return "Device";
+}
+
 export default function StorageFilesScreen({ isAdmin, authUser }) {
   const [state, setState] = useState(emptyState);
   const [users, setUsers] = useState(emptyUsers);
@@ -73,6 +84,8 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
     }
     return state.path.map((entry) => entry.name).join(" / ");
   }, [state.path]);
+
+  const breadcrumb = useMemo(() => state.path, [state.path]);
 
   const currentUserLabel = useMemo(() => {
     if (isAdmin) {
@@ -339,43 +352,62 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
   }, [selectedUserId, selectedDeviceId]);
 
   const sortedItems = useMemo(() => sortItems(state.items), [state.items]);
+  const folderCount = state.items.filter((item) => item.type === "folder").length;
+  const fileCount = state.items.filter((item) => item.type === "file").length;
+
+  async function handleBreadcrumbClick(index) {
+    if (index < 0) {
+      await loadRoot();
+      return;
+    }
+    const targetPath = breadcrumb.slice(0, index + 1);
+    const targetId = targetPath[targetPath.length - 1]?.id;
+    if (!targetId) {
+      await loadRoot();
+      return;
+    }
+    await loadFolder(targetId, targetPath);
+  }
 
   function TreeNode({ nodeId, label, depth }) {
     const children = tree[nodeId] || [];
     const isOpen = expanded.has(nodeId);
+    const hasChildren = children.length > 0;
     return (
       <div className="tree-node" style={{ paddingLeft: `${depth * 14}px` }}>
-        <button
-          type="button"
-          className="tree-toggle"
-          onClick={async () => {
-            if (!isOpen) {
-              await ensureTreeFolder(nodeId);
-            }
-            setExpanded((prev) => {
-              const next = new Set(prev);
-              if (next.has(nodeId)) {
-                next.delete(nodeId);
-              } else {
-                next.add(nodeId);
+        <div className="tree-row">
+          <button
+            type="button"
+            className="tree-toggle"
+            onClick={async () => {
+              if (!isOpen) {
+                await ensureTreeFolder(nodeId);
               }
-              return next;
-            });
-          }}
-        >
-          {isOpen ? "▾" : "▸"}
-        </button>
-        <button
-          type="button"
-          className={`tree-label ${state.path.some((entry) => entry.id === nodeId) ? "active" : ""}`}
-          onClick={() => {
-            const index = state.path.findIndex((entry) => entry.id === nodeId);
-            const targetPath = index >= 0 ? state.path.slice(0, index + 1) : [...state.path, { id: nodeId, name: label }];
-            loadFolder(nodeId, targetPath);
-          }}
-        >
-          {label}
-        </button>
+              setExpanded((prev) => {
+                const next = new Set(prev);
+                if (next.has(nodeId)) {
+                  next.delete(nodeId);
+                } else {
+                  next.add(nodeId);
+                }
+                return next;
+              });
+            }}
+          >
+            {hasChildren ? (isOpen ? "−" : "+") : "•"}
+          </button>
+          <button
+            type="button"
+            className={`tree-label ${state.path.some((entry) => entry.id === nodeId) ? "active" : ""}`}
+            onClick={() => {
+              const index = state.path.findIndex((entry) => entry.id === nodeId);
+              const targetPath = index >= 0 ? state.path.slice(0, index + 1) : [...state.path, { id: nodeId, name: label }];
+              loadFolder(nodeId, targetPath);
+            }}
+          >
+            {label}
+          </button>
+        </div>
         {isOpen && children.length ? (
           <div>
             {children.map((child) => (
@@ -432,7 +464,8 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
                     className={`tree-device ${selectedDeviceId === device.device_id ? "active" : ""}`}
                     onClick={() => setSelectedDeviceId(device.device_id)}
                   >
-                    {device.device_name || device.device_id}
+                    <span className="tree-device-name">{device.device_name || device.device_id}</span>
+                    <span className="tree-device-tag">{formatDeviceType(device.device_type)}</span>
                   </button>
                 ))}
               </div>
@@ -459,10 +492,8 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
           <div className="card">
             <div className="row">
               <div>
-                <div className="list-title">{currentPath}</div>
-                <div className="list-subtitle">
-                  Folders: {state.items.filter((item) => item.type === "folder").length} • Files: {state.items.filter((item) => item.type === "file").length}
-                </div>
+                <div className="list-title">File Storage</div>
+                <div className="list-subtitle">Browse and manage cloud folders.</div>
               </div>
               <div className="button-row" style={{ marginTop: 0 }}>
                 {state.path.length > 1 ? (
@@ -499,7 +530,28 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
             </div>
           </div>
 
-          <div className="card">
+          <div className="card explorer-list-panel">
+            <div className="file-list-header">
+              <div>
+                <div className="list-title">File Location</div>
+                <div className="file-location">
+                  <button type="button" className="breadcrumb-link" onClick={() => handleBreadcrumbClick(-1)}>
+                    Root
+                  </button>
+                  {breadcrumb.map((entry, index) => (
+                    <div className="breadcrumb-item" key={entry.id}>
+                      <span className="breadcrumb-sep">/</span>
+                      <button type="button" className="breadcrumb-link" onClick={() => handleBreadcrumbClick(index)}>
+                        {entry.name}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="file-counts">
+                Folders: {folderCount} • Files: {fileCount}
+              </div>
+            </div>
             {state.loading ? (
               <div className="text-muted">Loading files...</div>
             ) : sortedItems.length ? (
@@ -559,6 +611,10 @@ export default function StorageFilesScreen({ isAdmin, authUser }) {
             ) : (
               <div className="text-muted">No files found.</div>
             )}
+            <div className="file-status-bar">
+              <span>Location: {currentPath}</span>
+              <span>{folderCount + fileCount} items</span>
+            </div>
           </div>
         </div>
       </div>

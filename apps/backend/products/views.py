@@ -3,16 +3,41 @@ from django.shortcuts import render
 
 from .models import Product
 from apps.backend.enquiries.views import build_enquiry_context
+from apps.backend.brand.models import ProductRouteMapping
+from django.db import connection
 
 
 def product_marketing_view(request, slug):
     if slug == "online-storage":
         slug = "storage"
-    product = Product.objects.filter(slug=slug, is_active=True).first()
+    raw_slug = slug
+    route = ProductRouteMapping.objects.select_related("product").filter(public_slug=raw_slug).first()
+    if not route:
+        if connection.vendor == "sqlite":
+            for candidate in (
+                ProductRouteMapping.objects
+                .select_related("product")
+            ):
+                legacy = candidate.legacy_slugs or []
+                if raw_slug in legacy:
+                    route = candidate
+                    break
+        else:
+            route = (
+                ProductRouteMapping.objects.select_related("product")
+                .filter(legacy_slugs__contains=[raw_slug])
+                .first()
+            )
+    if route:
+        product_slug = route.product.internal_code_name
+    else:
+        product_slug = "monitor" if raw_slug == "worksuite" else raw_slug
+    product = Product.objects.filter(slug=product_slug, is_active=True).first()
     if not product:
         raise Http404()
+    template_slug = route.public_slug if route else raw_slug
     templates = [
-        f"products/pages/{slug}.html",
+        f"products/pages/{template_slug}.html",
         "products/pages/generic.html",
     ]
     context = build_enquiry_context(request)
@@ -29,7 +54,8 @@ def product_marketing_view(request, slug):
     context["og_title"] = og_title
     context["og_description"] = og_description
     context["og_image"] = og_image_url
-    context["canonical_url"] = request.build_absolute_uri()
+    canonical_slug = route.public_slug if route else slug
+    context["canonical_url"] = request.build_absolute_uri(f"/products/{canonical_slug}/")
     return render(request, templates, context)
 
 

@@ -1,4 +1,5 @@
 from .models import SiteBrandSettings
+from .branding import build_branding_payload
 
 
 def brand_defaults(request):
@@ -15,3 +16,18 @@ def brand_defaults(request):
         "brand_meta_description": brand.default_meta_description or "",
         "brand_og_image_url": og_image_url,
     }
+
+
+def product_branding(request):
+    product_key = ""
+    if request is not None:
+        product_key = request.GET.get("product", "")
+        if not product_key and request.path.startswith("/products/"):
+            product_key = request.path[len("/products/"):].strip("/")
+    branding = build_branding_payload(product_key, request=request)
+    branding["display_name"] = branding.get("displayName", "")
+    branding["primary_color"] = branding.get("primaryColor", "")
+    branding["public_slug"] = branding.get("publicSlug", "")
+    branding["legacy_slugs"] = branding.get("legacySlugs", [])
+    branding["logo_url"] = branding.get("logoUrl", "")
+    return {"branding": branding}

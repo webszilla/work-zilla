@@ -1,0 +1,13 @@
+{
+  "": {
+    "dependencies": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/MonitorHelper.d",
+    "object": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/MonitorHelper.o",
+    "swift-dependencies": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/master.swiftdeps"
+  },
+  "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Sources/MonitorHelper/main.swift": {
+    "object": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swift.o",
+    "swiftmodule": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swiftdeps",
+    "diagnostics": "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.dia"
+  }
+}

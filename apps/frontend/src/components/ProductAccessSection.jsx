@@ -1,8 +1,15 @@
 import { useMemo } from "react";
+import { useBranding } from "../branding/BrandingContext.jsx";
 
 export default function ProductAccessSection({ products = [], subscriptions = [], isReadOnly = false }) {
+  const { branding } = useBranding();
+  const monitorLabel =
+    branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
+  const monitorDescription =
+    branding?.description || branding?.tagline || "Workforce monitoring and productivity insights.";
   const productRouteMap = {
-    "monitor": "/app/monitor",
+    "monitor": "/app/worksuite",
+    "worksuite": "/app/worksuite",
     "ai-chatbot": "/app/ai-chatbot",
     "storage": "/app/storage",
     "ai-chat-widget": "/app/ai-chat-widget",
@@ -12,9 +19,9 @@ export default function ProductAccessSection({ products = [], subscriptions = []
   const fallbackProducts = [
     {
       slug: "monitor",
-      name: "Monitor",
+      name: monitorLabel,
       icon: "bi-display",
-      description: "Workforce monitoring and productivity insights.",
+      description: monitorDescription,
       features: ["Live activity", "Screenshots", "App usage"],
       status: "active"
     },
@@ -38,7 +45,7 @@ export default function ProductAccessSection({ products = [], subscriptions = []
 
   const productCopy = {
     "monitor": {
-      description: "Workforce monitoring and productivity insights.",
+      description: monitorDescription,
       features: ["Live activity", "Screenshots", "App usage"]
     },
     "ai-chatbot": {

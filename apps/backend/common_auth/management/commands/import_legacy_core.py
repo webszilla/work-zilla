@@ -27,14 +27,14 @@ def _parse_dt(value):
 
 
 class Command(BaseCommand):
-    help = "Import legacy core tables from monitor/db.sqlite3 into the platform DB."
+    help = "Import legacy core tables from worksuite/db.sqlite3 into the platform DB."
 
     def add_arguments(self, parser):
-        default_source = (settings.BASE_DIR.parent.parent / "monitor" / "db.sqlite3")
+        default_source = (settings.BASE_DIR.parent.parent / "worksuite" / "db.sqlite3")
         parser.add_argument(
             "--source",
             default=str(default_source),
-            help="Path to legacy monitor db.sqlite3",
+            help="Path to legacy worksuite db.sqlite3",
         )
         parser.add_argument(
             "--skip-existing",

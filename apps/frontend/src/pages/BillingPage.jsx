@@ -141,10 +141,11 @@ export default function BillingPage() {
       ? "ai-chatbot"
       : rawPath.includes("/storage")
       ? "storage"
-      : "monitor");
+      : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const productSlug = resolvedSlug;
+  const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
   const [notice, setNotice] = useState("");
   const [addonCount, setAddonCount] = useState(0);
@@ -172,14 +173,14 @@ export default function BillingPage() {
   const [approvedView, setApprovedView] = useState({ open: false, entry: null });
 
   async function refreshBilling() {
-    const data = await apiFetch(`/api/dashboard/billing?product=${productSlug}`);
+    const data = await apiFetch(`/api/dashboard/billing?product=${apiProductSlug}`);
     setState({ loading: false, error: "", data });
     setAddonCount(0);
   }
 
   async function loadPlansMeta(activeFlag) {
     try {
-      const data = await apiFetch(`/api/dashboard/plans?product=${productSlug}`);
+      const data = await apiFetch(`/api/dashboard/plans?product=${apiProductSlug}`);
       if (activeFlag && !activeFlag.current) {
         return;
       }
@@ -201,7 +202,7 @@ export default function BillingPage() {
     async function loadBilling() {
       setNotice("");
       try {
-        const data = await apiFetch(`/api/dashboard/billing?product=${productSlug}`);
+        const data = await apiFetch(`/api/dashboard/billing?product=${apiProductSlug}`);
         if (!active) {
           return;
         }
@@ -325,7 +326,7 @@ export default function BillingPage() {
     try {
         const data = await apiFetch(`/api/dashboard/plans/subscribe/${entry.plan_id}`, {
           method: "POST",
-          body: JSON.stringify({ billing_cycle: entry.billing_cycle || "monthly", addon_count: addonCountValue, product: productSlug })
+          body: JSON.stringify({ billing_cycle: entry.billing_cycle || "monthly", addon_count: addonCountValue, product: apiProductSlug })
         });
       if (data?.redirect) {
         window.location.href = data.redirect;

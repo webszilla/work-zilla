@@ -59,16 +59,20 @@
             <tbody>
               {% for transfer in approved_transfers %}
                 <tr>
-                  <td>{{ transfer.plan.product.name|default:"Monitor" }}</td>
+                  <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
                   <td>{{ transfer.currency }} {{ transfer.amount }}</td>
                   <td>{% if transfer.paid_on %}{{ transfer.paid_on|date:"d M Y" }}{% else %}-{% endif %}</td>
-                  <td><span class="badge bg-success">Approved</span></td>
+                  <td><span class="badge bg-success">{{ transfer.status|title|default:"Approved" }}</span></td>
                   <td>
-                    <a class="btn btn-outline btn-sm" href="/api/dashboard/billing/invoice/{{ transfer.id }}" target="_blank" rel="noopener noreferrer">
-                      Download
-                    </a>
+                    {% if transfer.id %}
+                      <a class="btn btn-outline btn-sm" href="/api/dashboard/billing/invoice/{{ transfer.id }}" target="_blank" rel="noopener noreferrer">
+                        Download
+                      </a>
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                 </tr>
               {% empty %}
@@ -96,7 +100,7 @@
             <tbody>
               {% for transfer in pending_transfers %}
                 <tr>
-                  <td>{{ transfer.plan.product.name|default:"Monitor" }}</td>
+                  <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
                   <td>{{ transfer.currency }} {{ transfer.amount }}</td>
@@ -129,7 +133,7 @@
               {% for row in billing_activity %}
                 <tr>
                   <td>{{ row.type }}</td>
-                  <td>{{ row.product_name|default:"Monitor" }}</td>
+                  <td>{{ row.product_name|default:branding.display_name }}</td>
                   <td>{{ row.plan }}</td>
                   <td>{{ row.billing_cycle|title }}</td>
                   <td>{{ row.status|title }}</td>

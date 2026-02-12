@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
-export default function ChooseFoldersScreen() {
+export default function ChooseFoldersScreen({ onOpenCloud }) {
   const [status, setStatus] = useState({ loading: false, message: "", type: "info" });
   const [folders, setFolders] = useState({ loading: true, items: [], error: "" });
+  const [downloadStatus, setDownloadStatus] = useState({ loading: false, message: "", type: "info" });
 
   async function loadFolders() {
     try {
@@ -54,6 +55,24 @@ export default function ChooseFoldersScreen() {
     }
   }
 
+  async function handleDownloadCloud() {
+    setDownloadStatus({ loading: true, message: "Preparing download...", type: "info" });
+    try {
+      const result = await window.storageApi.downloadFile({});
+      setDownloadStatus({
+        loading: false,
+        message: result?.path ? `Downloaded to ${result.path}` : "Download ready.",
+        type: "success"
+      });
+    } catch (error) {
+      setDownloadStatus({
+        loading: false,
+        message: error?.message || "Download failed.",
+        type: "error"
+      });
+    }
+  }
+
   return (
     <div className="screen">
       <div className="screen-header">
@@ -64,6 +83,12 @@ export default function ChooseFoldersScreen() {
         <div className="button-row">
           <button type="button" className="btn btn-primary" onClick={handleChoose} disabled={status.loading}>
             {status.loading ? "Opening..." : "Select Folders"}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={handleDownloadCloud} disabled={downloadStatus.loading}>
+            {downloadStatus.loading ? "Downloading..." : "Download Cloud Files"}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => onOpenCloud?.()}>
+            Open Cloud Files
           </button>
           <button type="button" className="btn btn-secondary" onClick={loadFolders}>
             Refresh
@@ -80,6 +105,19 @@ export default function ChooseFoldersScreen() {
             }
           >
             {status.message}
+          </div>
+        ) : null}
+        {downloadStatus.message ? (
+          <div
+            className={
+              downloadStatus.type === "error"
+                ? "alert alert-danger mt-2"
+                : downloadStatus.type === "success"
+                  ? "alert alert-success mt-2"
+                  : "text-muted mt-2"
+            }
+          >
+            {downloadStatus.message}
           </div>
         ) : null}
         {folders.error ? <div className="alert alert-danger mt-2">{folders.error}</div> : null}

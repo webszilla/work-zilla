@@ -34,7 +34,13 @@ function formatDomains(domains) {
 }
 
 function buildSnippet(widgetKey) {
-  return `<script src="/static/js/ai_chatbot_widget.js" data-widget-key="${widgetKey}"></script>`;
+  if (typeof window === "undefined") {
+    return `<script src="/static/js/ai_chatbot_widget.js" data-widget-key="${widgetKey}"></script>`;
+  }
+  const origin = window.location.origin;
+  const scriptSrc = `${origin}/static/js/ai_chatbot_widget.js`;
+  const apiBase = `${origin}/api/ai-chatbot`;
+  return `<script src="${scriptSrc}" data-widget-key="${widgetKey}" data-api-base="${apiBase}"></script>`;
 }
 
 function getQrUrl(type, widgetId) {

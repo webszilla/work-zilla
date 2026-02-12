@@ -1,0 +1,112 @@
+{% extends "public/base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div class="container">
+    <h1>SaaS Admin Observability</h1>
+    <p>Work Suite agent activity, renewals, and alerts across orgs and products.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <form class="card card-plain" method="get" action="">
+      <div class="form-row">
+        <div class="form-field">
+          <label for="org_id">Organization</label>
+          <select id="org_id" name="org_id">
+            <option value="">All</option>
+            {% for org in orgs %}
+              <option value="{{ org.id }}" {% if selected_org_id == org.id|stringformat:"s" %}selected{% endif %}>
+                {{ org.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="product">Product</label>
+          <select id="product" name="product">
+            {% for product in products %}
+              <option value="{{ product.slug }}" {% if selected_product == product.slug %}selected{% endif %}>
+                {{ product.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="days">Days</label>
+          <select id="days" name="days">
+            {% for value in "7,14,30".split(",") %}
+              <option value="{{ value }}" {% if selected_days|stringformat:"s" == value %}selected{% endif %}>Last {{ value }} days</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field form-field-action">
+          <button class="btn-primary" type="submit">Apply</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <span class="kpi-label">Activity uploads</span>
+        <span class="kpi-value">{{ summary.totals.agent_activity_upload|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Screenshot uploads</span>
+        <span class="kpi-value">{{ summary.totals.agent_screenshot_upload|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Org settings hits</span>
+        <span class="kpi-value">{{ summary.totals.agent_org_settings|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Rate limited</span>
+        <span class="kpi-value">{{ summary.totals.agent_rate_limited|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Renew submitted</span>
+        <span class="kpi-value">{{ summary.totals.renew_submitted|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Transfer approved</span>
+        <span class="kpi-value">{{ summary.totals.transfer_approved|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Pending transfers</span>
+        <span class="kpi-value">{{ summary.live.pending_transfers|default:0 }}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Expired subscriptions</span>
+        <span class="kpi-value">{{ summary.live.expired_subscriptions|default:0 }}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Daily breakdown</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Event type</th>
+            <th>Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.series %}
+            <tr>
+              <td>{{ row.date }}</td>
+              <td>{{ row.event_type }}</td>
+              <td>{{ row.count }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3">No metrics for the selected period.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,7 +1,7 @@
 from django.contrib.admin import AdminSite
 from django.urls import path
 
-from apps.backend.monitor.admin_views import monitor_products_hub
+from apps.backend.worksuite.admin_views import monitor_products_hub
 
 
 class WorkZillaAdminSite(AdminSite):
@@ -14,6 +14,11 @@ class WorkZillaAdminSite(AdminSite):
                 "monitor-products/",
                 self.admin_view(monitor_products_hub),
                 name="monitor_product_hub",
+            ),
+            path(
+                "worksuite-products/",
+                self.admin_view(monitor_products_hub),
+                name="worksuite_product_hub",
             ),
         ]
         return custom + urls

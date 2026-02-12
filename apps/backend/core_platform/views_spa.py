@@ -14,7 +14,7 @@ DIST_DIR = Path(settings.BASE_DIR) / "frontend_dist"
 def spa_serve(request, path=""):
     profile = UserProfile.objects.filter(user=request.user).first()
     if profile and profile.role == "ai_chatbot_agent":
-        if not path or path.startswith("monitor"):
+        if not path or path.startswith("worksuite") or path.startswith("monitor"):
             return redirect("/app/ai-chatbot/")
     if path and not path.endswith("/"):
         try:

@@ -345,6 +345,7 @@
         container.innerHTML = '<div class="card"><h3>No plans yet</h3><p>Add plans in admin to show pricing here.</p></div>';
         return;
       }
+      const freeEligible = data.free_eligible !== false;
       const isStorageProduct = data.product.slug === "storage" || data.product.slug === "online-storage";
       const normalizedSlug = isStorageProduct ? "storage" : data.product.slug;
       const orderedPlans = [...data.plans];
@@ -382,7 +383,7 @@
         const activePlanIsFree = activePlan
           ? String(activePlan.name || "").toLowerCase() === "free"
           : false;
-        const trialLocked = !isStorage && isLoggedIn && !!activePlanId && !activePlanIsFree && isFreePlan;
+        const trialLocked = isLoggedIn && !freeEligible && (isFreePlan || storageTrialOnly);
         const actionLabel = !isLoggedIn
           ? (isStorage ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay") : isFreePlan ? "Take a Free Trial" : "Process to Pay")
           : trialLocked
@@ -455,6 +456,9 @@
             return;
           }
           if ((isStorage && storageTrialOnly) || (!isStorage && isFreePlan)) {
+            if (!freeEligible) {
+              return;
+            }
             startTrial(plan.id, data.product.slug);
             return;
           }

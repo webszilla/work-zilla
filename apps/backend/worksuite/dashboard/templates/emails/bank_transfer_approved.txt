@@ -1,0 +1,12 @@
+Hello {{ name }},
+
+Your bank transfer has been approved.
+
+Plan: {{ plan_name }}
+Billing Cycle: {{ billing_cycle }}
+Amount: {{ currency }} {{ amount }}
+Reference: {{ reference_no }}
+Status: Approved
+
+Thanks,
+Work Zilla Work Suite

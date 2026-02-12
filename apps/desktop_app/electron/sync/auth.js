@@ -166,7 +166,21 @@ function normalizeEnabledProducts(subscriptions) {
   (subscriptions || []).forEach((sub) => {
     const status = String(sub.status || "").toLowerCase();
     if (status === "active" || status === "trialing") {
-      enabled.add(sub.product_slug);
+      const slug = String(sub.product_slug || "").toLowerCase();
+      if (!slug) {
+        enabled.add("monitor");
+        return;
+      }
+      if (slug === "worksuite") {
+        enabled.add("worksuite");
+        enabled.add("monitor");
+        return;
+      }
+      if (slug === "monitor") {
+        enabled.add("monitor");
+        return;
+      }
+      enabled.add(slug);
     }
   });
   if (enabled.has("online-storage")) {

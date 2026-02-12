@@ -21,6 +21,8 @@ const defaultSettings = {
   allowExit: true,
   allowBackground: true,
   macScreenRecordingOnboarded: false,
+  screenPermissionStatus: "unknown",
+  screenPermissionRelaunchRequired: false,
   monitorStartOnLaunch: false,
   monitorStopReasons: [],
   monitorRunning: false,

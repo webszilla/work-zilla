@@ -34,6 +34,16 @@ function nowLabel() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+function resolveCompanyKey(settings) {
+  if (settings?.companyKey) {
+    return settings.companyKey;
+  }
+  if (typeof settings?.orgId === "string" && /[a-zA-Z-]/.test(settings.orgId)) {
+    return settings.orgId;
+  }
+  return "";
+}
+
 export default class SyncService {
   constructor() {
     this.watchers = [];
@@ -375,11 +385,12 @@ export default class SyncService {
     if (!settings.deviceId) {
       throw new Error("missing_device_id");
     }
-    if (!settings.companyKey) {
+    const companyKey = resolveCompanyKey(settings);
+    if (!companyKey) {
       throw new Error("missing_company_key");
     }
     const payload = {
-      company_key: settings.companyKey,
+      company_key: companyKey,
       employee_code: settings.deviceId,
       device_id: settings.deviceId,
       pc_name: os.hostname(),
@@ -403,11 +414,12 @@ export default class SyncService {
     try {
       const settings = loadSettings();
       const employeeId = await this.ensureEmployeeId();
+      const companyKey = resolveCompanyKey(settings);
       await uploadScreenshotApi({
         filePath,
         employeeId,
         deviceId: settings.deviceId,
-        companyKey: settings.companyKey,
+        companyKey,
         pcName: os.hostname()
       });
       addActivity("Screenshot uploaded", filePath, "success");

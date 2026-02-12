@@ -9,16 +9,16 @@ from django.http import JsonResponse
 from django.urls import path, include, re_path
 from django.views.generic import RedirectView
 
-# Temporary compatibility for legacy monitor imports (e.g. "from dashboard ...").
-MONITOR_ROOT = Path(settings.BASE_DIR) / "monitor"
-if MONITOR_ROOT.is_dir() and str(MONITOR_ROOT) not in sys.path:
-    sys.path.insert(0, str(MONITOR_ROOT))
+# Temporary compatibility for legacy worksuite imports (e.g. "from dashboard ...").
+WORKSUITE_ROOT = Path(settings.BASE_DIR) / "worksuite"
+if WORKSUITE_ROOT.is_dir() and str(WORKSUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSUITE_ROOT))
 
 from core import views as monitor_core_views
 from core import views_auth as monitor_auth_views
 from core import views_public as monitor_public_views
 from dashboard import views as dashboard_views
-from apps.backend.monitor.admin_views import monitor_products_hub, monitor_product_features
+from apps.backend.worksuite.admin_views import monitor_products_hub, monitor_product_features
 from apps.backend.brand import views as brand_views
 from apps.backend.core_platform.views_spa import spa_serve
 from apps.backend.website import urls as website_urls
@@ -42,6 +42,8 @@ urlpatterns = [
     path("enquiries/", include("apps.backend.enquiries.urls")),
     path("admin/monitor-product/", monitor_product_features, name="monitor_product_features"),
     path("admin/monitor-products/", monitor_products_hub),
+    path("admin/worksuite-product/", monitor_product_features, name="worksuite_product_features"),
+    path("admin/worksuite-products/", monitor_products_hub),
     path("admin/", admin.site.urls),
     path("saas-admin/reports/observability/", observability_report, name="saas_admin_observability"),
     path("my/account/", RedirectView.as_view(url="/my-account/", permanent=False)),
@@ -55,6 +57,7 @@ urlpatterns = [
     path("api/health", health_check),
     path("api/public/products", monitor_public_views.public_products),
     path("api/public/plans", monitor_public_views.public_plans),
+    path("api/public/branding/", brand_views.public_branding),
     path("api/subscription/start", website_views.subscription_start),
     path("api/employee/register", monitor_core_views.register_employee),
     path("api/org/register", monitor_core_views.register_org),
@@ -68,7 +71,7 @@ urlpatterns = [
     path("api/ai-chatbot/", include("ai_chatbot.api_urls")),
     path("api/saas-admin/", include("saas_admin.api_urls")),
     path("api/backup/", include("apps.backend.backups.api_urls")),
-    path("api/monitoring/", include("apps.backend.monitoring.api_urls")),
+    path("api/monitoring/", include("saas_admin.monitoring.api_urls")),
     path("api/storage/media/", include("apps.backend.media_library.api_urls")),
     path("api/storage/", include("apps.backend.storage.api_urls")),
     path("api/storage/files/", include("apps.backend.storage.api_urls")),
@@ -76,7 +79,9 @@ urlpatterns = [
     path("api/activity/upload", monitor_core_views.upload_activity),
     path("api/org/settings", monitor_core_views.org_settings),
     path("api/screenshot/upload", monitor_core_views.upload_screenshot),
+    path("api/monitor/heartbeat", monitor_core_views.monitor_heartbeat),
     path("api/monitor/stop", monitor_core_views.monitor_stop_event),
+    path("api/worksuite/stop", monitor_core_views.monitor_stop_event),
     re_path(r"^app/(?P<path>.*)$", spa_serve, name="spa"),
 ]
 

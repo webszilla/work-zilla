@@ -16,10 +16,10 @@ REPO_ROOT = BASE_DIR.parent.parent
 # React build output copied here (apps/frontend/dist -> frontend_dist).
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
 
-# Ensure legacy "core"/"dashboard" imports resolve from monitor app package.
-MONITOR_ROOT = BASE_DIR / "monitor"
-if MONITOR_ROOT.is_dir() and str(MONITOR_ROOT) not in sys.path:
-    sys.path.insert(0, str(MONITOR_ROOT))
+# Ensure legacy "core"/"dashboard" imports resolve from worksuite app package.
+WORKSUITE_ROOT = BASE_DIR / "worksuite"
+if WORKSUITE_ROOT.is_dir() and str(WORKSUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSUITE_ROOT))
 
 
 def _csv_env(name, default=""):
@@ -70,12 +70,12 @@ INSTALLED_APPS = [
     "apps.backend.website.apps.WebsiteConfig",
     "apps.backend.retention.apps.RetentionConfig",
     "apps.backend.backups.apps.BackupsConfig",
-    "apps.backend.monitoring.apps.MonitoringConfig",
+    "saas_admin.monitoring.apps.MonitoringConfig",
     "apps.backend.media_library.apps.MediaLibraryConfig",
     "apps.backend.storage.apps.StorageConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",
-    "apps.backend.monitor.apps.MonitorConfig",
+    "apps.backend.worksuite.apps.MonitorConfig",
     "saas_admin.apps.SaasAdminConfig",
 ]
 
@@ -83,7 +83,9 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "apps.backend.core_platform.middleware.LegacyMonitorRedirectMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "apps.backend.core_platform.middleware.ProductRouteRedirectMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.backend.retention.middleware.RetentionEnforcementMiddleware",
@@ -110,6 +112,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "apps.backend.brand.context_processors.brand_defaults",
+                "apps.backend.brand.context_processors.product_branding",
                 "apps.backend.enquiries.context_processors.enquiry_widget",
                 "dashboard.context_processors.subscription_context",
                 "dashboard.context_processors.theme_context",

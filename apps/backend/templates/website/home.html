@@ -1,6 +1,6 @@
 {% extends "public/base.html" %}
 {% block meta_title %}Work Zilla | Modern Workforce Suite{% endblock %}
-{% block meta_description %}Work Zilla brings monitoring, time tracking, and HR workflows into one secure SaaS platform.{% endblock %}
+{% block meta_description %}Work Zilla Work Suite brings time tracking and HR workflows into one secure SaaS platform.{% endblock %}
 
 {% block content %}
 <section class="hero">
@@ -9,7 +9,7 @@
       <span class="eyebrow">Work Zilla Suite</span>
       <h1>One platform for visibility, productivity, and compliance.</h1>
       <p>
-        Monitor activity, manage time, and run HR workflows with a single login.
+        Track activity, manage time, and run HR workflows with a single login.
         Designed for growing teams that need clarity without chaos.
       </p>
       <div class="hero-actions">
@@ -43,7 +43,7 @@
   <div class="site-container">
     <h2 class="section-title">Everything you need to run a high-trust team</h2>
     <p class="section-lead">
-      Work Zilla bundles monitoring, time, and HR capabilities so leaders can focus on outcomes.
+      Work Zilla Work Suite bundles time, HR, and visibility tools so leaders can focus on outcomes.
     </p>
     <div class="feature-grid">
       <div class="card">
@@ -54,7 +54,7 @@
             <path d="M12 16v4"></path>
           </svg>
         </div>
-        <h3>Monitor</h3>
+        <h3>{{ branding.display_name|default:"Work Suite" }}</h3>
         <p>Live activity, app usage, and screenshot timelines with privacy controls.</p>
       </div>
       <div class="card">
@@ -74,8 +74,8 @@
             <path d="M9 20v-5h6v5"></path>
           </svg>
         </div>
-        <h3>HR Monitoring Options</h3>
-        <p>Monitor employee live activity, screenshots, and web URLs for HR oversight.</p>
+        <h3>HR Oversight Options</h3>
+        <p>Review employee live activity, screenshots, and web URLs for HR oversight.</p>
       </div>
       <div class="card">
         <div class="feature-icon" aria-hidden="true">
@@ -106,9 +106,9 @@
         {% endfor %}
       {% else %}
         <div class="card">
-          <h3>Monitor</h3>
-          <p>Work Zilla Monitoring and Productivity Insights.</p>
-          <a class="btn btn-outline" href="/products/monitor/">Explore</a>
+          <h3>{{ branding.display_name|default:"Work Suite" }}</h3>
+          <p>{{ branding.tagline|default:"Work Zilla Work Suite productivity insights." }}</p>
+          <a class="btn btn-outline" href="/products/{{ branding.public_slug|default:'worksuite' }}/">Explore</a>
         </div>
       {% endif %}
     </div>

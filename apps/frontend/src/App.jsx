@@ -41,6 +41,7 @@ import SaasAdminOrganizationPage from "./pages/SaasAdminOrganizationPage.jsx";
 import SaasAdminReferralsPage from "./pages/SaasAdminReferralsPage.jsx";
 import SaasAdminProfilePage from "./pages/SaasAdminProfilePage.jsx";
 import SaasAdminObservabilityPage from "./pages/SaasAdminObservabilityPage.jsx";
+import SaasAdminInboxPage from "./pages/SaasAdminInboxPage.jsx";
 import SaasAdminRetentionPolicyPage from "./pages/SaasAdminRetentionPolicyPage.jsx";
 import SaasAdminStorageSettingsPage from "./pages/SaasAdminStorageSettingsPage.jsx";
 import SaasAdminBillingPage from "./pages/SaasAdminBillingPage.jsx";
@@ -63,6 +64,7 @@ import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
 
 const emptyState = {
   loading: true,
@@ -147,14 +149,14 @@ const reactPages = [
   { label: "Agents", path: "/agents", icon: "bi-people", productOnly: "ai-chatbot", adminOnly: true },
   { label: "History", path: "/history", icon: "bi-clock-history", productOnly: "ai-chatbot", adminOnly: true },
   { label: "Chat Settings", path: "/chat-settings", icon: "bi-gear", productOnly: "ai-chatbot", adminOnly: true },
-  { label: "Live Activity", path: "/activity", icon: "bi-activity", productOnly: "monitor" },
-  { label: "Work Activity Log", path: "/work-activity", icon: "bi-clock-history", productOnly: "monitor" },
-  { label: "App Usage", path: "/app-usage", icon: "bi-bar-chart-line", requiresAppUsage: true, productOnly: "monitor" },
-  { label: "Gaming / OTT Usage", path: "/gaming-ott", icon: "bi-tv", requiresGamingOttUsage: true, productOnly: "monitor" },
-  { label: "Screenshots", path: "/screenshots", icon: "bi-camera", productOnly: "monitor" },
-  { label: "Employees", path: "/employees", icon: "bi-people", productOnly: "monitor" },
-  { label: "Company Settings", path: "/company", icon: "bi-building", adminOnly: true, productOnly: "monitor" },
-  { label: "Privacy Settings", path: "/privacy", icon: "bi-shield-lock", adminOnly: true, productOnly: "monitor" },
+  { label: "Live Activity", path: "/activity", icon: "bi-activity", productOnly: "worksuite" },
+  { label: "Work Activity Log", path: "/work-activity", icon: "bi-clock-history", productOnly: "worksuite" },
+  { label: "App Usage", path: "/app-usage", icon: "bi-bar-chart-line", requiresAppUsage: true, productOnly: "worksuite" },
+  { label: "Gaming / OTT Usage", path: "/gaming-ott", icon: "bi-tv", requiresGamingOttUsage: true, productOnly: "worksuite" },
+  { label: "Screenshots", path: "/screenshots", icon: "bi-camera", productOnly: "worksuite" },
+  { label: "Employees", path: "/employees", icon: "bi-people", productOnly: "worksuite" },
+  { label: "Company Settings", path: "/company", icon: "bi-building", adminOnly: true, productOnly: "worksuite" },
+  { label: "Privacy Settings", path: "/privacy", icon: "bi-shield-lock", adminOnly: true, productOnly: "worksuite" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
   { label: "Plans", path: "/plans", icon: "bi-clipboard-check", adminOnly: true },
   { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true },
@@ -163,6 +165,7 @@ const reactPages = [
 
 const saasAdminPages = [
   { key: "overview", label: "Overview", path: "/saas-admin", icon: "bi-grid-1x2" },
+  { key: "inbox", label: "Inbox", path: "/saas-admin/inbox", icon: "bi-inbox" },
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
@@ -183,6 +186,9 @@ const dealerPages = [
 
 
 function AppShell({ state, productPrefix, productSlug }) {
+  const { branding } = useBranding();
+  const monitorLabel =
+    branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
   const location = useLocation();
   const navigate = useNavigate();
   const [upgradeAlertMessage, setUpgradeAlertMessage] = useState("");
@@ -220,11 +226,11 @@ function AppShell({ state, productPrefix, productSlug }) {
   const themeSecondary = state.themeSecondary;
   const onboarding = state.onboarding || { enabled: false, state: "active" };
   const isSaasAdminRoute = location.pathname.startsWith("/saas-admin");
-  const isMonitorProduct = productSlug === "monitor";
+  const isMonitorProduct = productSlug === "worksuite";
   const productLabel = productSlug === "ai-chatbot"
     ? "AI Chatbot"
-    : productSlug === "monitor"
-    ? "Monitor"
+    : productSlug === "worksuite"
+    ? monitorLabel
     : productSlug === "storage"
     ? "Online Storage"
     : productSlug === "saas-admin"
@@ -241,6 +247,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isReferralsSection = location.pathname.startsWith("/saas-admin/referrals");
   const isProfileSection = location.pathname.startsWith("/saas-admin/profile");
   const isObservabilitySection = location.pathname.startsWith("/saas-admin/observability");
+  const isInboxSection = location.pathname.startsWith("/saas-admin/inbox");
   const isBillingSection = location.pathname.startsWith("/saas-admin/billing");
   const isOverviewSection =
     location.pathname === "/saas-admin" &&
@@ -253,6 +260,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     !isReferralsSection &&
     !isProfileSection &&
     !isObservabilitySection &&
+    !isInboxSection &&
     !isBillingSection;
   const basePath = productPrefix || "";
   const withBase = (path) => {
@@ -491,6 +499,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                 let isActive = false;
                 if (item.key === "overview") {
                   isActive = isOverviewSection;
+                } else if (item.key === "inbox") {
+                  isActive = isInboxSection;
                 } else if (item.key === "observability") {
                   isActive = isObservabilitySection;
                 } else if (item.key === "products") {
@@ -818,6 +828,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={isSaasAdmin ? <SaasAdminObservabilityPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/saas-admin/inbox"
+            element={isSaasAdmin ? <SaasAdminInboxPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/saas-admin/retention-policy"
             element={isSaasAdmin ? <SaasAdminRetentionPolicyPage /> : <Navigate to={withBase("/")} replace />}
           />
@@ -920,6 +934,71 @@ function AppShell({ state, productPrefix, productSlug }) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function BrandingShell({ children, getProductRoute }) {
+  const location = useLocation();
+  const match = getProductRoute(location.pathname);
+  const productSlug = match ? match.slug : "worksuite";
+  return (
+    <BrandingProvider productKey={productSlug}>
+      {children}
+    </BrandingProvider>
+  );
+}
+
+function UnauthenticatedShell({
+  loginError,
+  loginForm,
+  loginSubmitting,
+  onLoginSubmit,
+  onFormChange
+}) {
+  const { branding } = useBranding();
+  const monitorLabel =
+    branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
+
+  return (
+    <div className="page-center">
+      <div className="panel">
+        <h1>Welcome to Work Zilla {monitorLabel}</h1>
+        <p>Please log in to access the dashboard.</p>
+        {loginError ? (
+          <div className="alert alert-danger" role="alert">
+            {loginError}
+          </div>
+        ) : null}
+        <form onSubmit={onLoginSubmit} className="d-grid gap-2">
+          <input
+            type="email"
+            className="form-control"
+            placeholder="Email"
+            value={loginForm.email}
+            onChange={(event) =>
+              onFormChange((prev) => ({ ...prev, email: event.target.value }))
+            }
+          />
+          <input
+            type="password"
+            className="form-control"
+            placeholder="Password"
+            value={loginForm.password}
+            onChange={(event) =>
+              onFormChange((prev) => ({ ...prev, password: event.target.value }))
+            }
+          />
+          <button className="app-btn app-btn-primary" type="submit" disabled={loginSubmitting}>
+            {loginSubmitting ? "Signing in..." : "Login"}
+          </button>
+        </form>
+        <div className="button-row">
+          <a className="app-btn app-btn-secondary" href="/auth/signup/">
+            Create Account
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1045,20 +1124,25 @@ export default function App() {
   }
 
   const productRoutes = [
-    { prefix: "/monitor", slug: "monitor", label: "Monitor" },
+    { prefix: "/worksuite", slug: "worksuite", label: "Work Suite" },
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
   ];
+  const legacyProductRoutes = [
+    { prefix: "/monitor", slug: "worksuite", label: "Work Suite", redirectPrefix: "/worksuite" }
+  ];
 
   function getProductRoute(pathname) {
-    return productRoutes.find((route) => pathname === route.prefix || pathname.startsWith(`${route.prefix}/`)) || null;
+    const routeList = [...legacyProductRoutes, ...productRoutes];
+    return routeList.find((route) => pathname === route.prefix || pathname.startsWith(`${route.prefix}/`)) || null;
   }
 
   function getSubscriptionEntry(slug) {
+    const normalizedSlug = slug === "worksuite" ? "monitor" : slug;
     const list = state.subscriptions || [];
-    return list.find((sub) => sub.product_slug === slug) || null;
+    return list.find((sub) => sub.product_slug === normalizedSlug) || null;
   }
 
   function getSubscriptionStatus(slug) {
@@ -1078,6 +1162,10 @@ export default function App() {
   }
 
   function AccessDenied({ label, status, productSlug, planIsFree }) {
+    const { branding } = useBranding();
+    const monitorLabel =
+      branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
+    const displayLabel = productSlug === "worksuite" ? monitorLabel : label;
     const isPending = status === "pending";
     const isRejected = status === "rejected";
     const isExpired = status === "expired";
@@ -1111,15 +1199,15 @@ export default function App() {
     const actionHref = isPending
       ? "/my-account/"
       : needsPaidPlan
-      ? `/pricing/?product=${productSlug || "monitor"}`
+      ? `/pricing/?product=${productSlug || "worksuite"}`
       : isRejected || isExpired
-      ? `/my-account/billing/renew/start/?product=${productSlug || "monitor"}`
+      ? `/my-account/billing/renew/start/?product=${productSlug || "worksuite"}`
       : "/pricing/";
 
     return (
       <div className="page-center">
         <div className="panel">
-          <h1>{label} Dashboard</h1>
+          <h1>{displayLabel} Dashboard</h1>
           <p>{title}</p>
           <div className="text-secondary">{message}</div>
           <div className="button-row">
@@ -1132,8 +1220,11 @@ export default function App() {
     );
   }
 
-function ProductShell() {
-  const location = useLocation();
+  function ProductShell() {
+    const { branding } = useBranding();
+    const monitorLabel =
+      branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
+    const location = useLocation();
   const isSaasAdminPath = location.pathname.startsWith("/saas-admin");
   const isSaasAdminUser = Boolean(
     state.user?.is_superuser ||
@@ -1156,7 +1247,11 @@ function ProductShell() {
   }
 
     const match = getProductRoute(location.pathname);
-    const productSlug = match ? match.slug : "monitor";
+    if (match?.redirectPrefix && location.pathname.startsWith(match.prefix)) {
+      const nextPath = match.redirectPrefix + location.pathname.slice(match.prefix.length);
+      return <Navigate to={`${nextPath}${location.search || ""}${location.hash || ""}`} replace />;
+    }
+    const productSlug = match ? match.slug : "worksuite";
     const prefix = match ? match.prefix : "";
       const entry = getSubscriptionEntry(productSlug);
       const status = getSubscriptionStatus(productSlug);
@@ -1167,7 +1262,7 @@ function ProductShell() {
         }
         return (
           <AccessDenied
-            label={match?.label || "Monitor"}
+            label={productSlug === "worksuite" ? monitorLabel : match?.label || "Work Suite"}
             status={status}
             productSlug={productSlug}
             planIsFree={entry?.plan_is_free}
@@ -1180,58 +1275,28 @@ function ProductShell() {
   return (
     <ConfirmProvider>
       <BrowserRouter basename="/app">
-        {state.loading ? (
-          <div className="page-center">
-            <div className="panel">
-              <div className="spinner" />
-              <p>Loading dashboard...</p>
-            </div>
-          </div>
-        ) : state.authenticated ? (
-          <ErrorBoundary>
-            <ProductShell />
-          </ErrorBoundary>
-        ) : (
-          <div className="page-center">
-            <div className="panel">
-              <h1>Welcome to Work Zilla Monitor</h1>
-              <p>Please log in to access the dashboard.</p>
-              {loginError ? (
-                <div className="alert alert-danger" role="alert">
-                  {loginError}
-                </div>
-              ) : null}
-              <form onSubmit={handleLoginSubmit} className="d-grid gap-2">
-                <input
-                  type="email"
-                  className="form-control"
-                  placeholder="Email"
-                  value={loginForm.email}
-                  onChange={(event) =>
-                    setLoginForm((prev) => ({ ...prev, email: event.target.value }))
-                  }
-                />
-                <input
-                  type="password"
-                  className="form-control"
-                  placeholder="Password"
-                  value={loginForm.password}
-                  onChange={(event) =>
-                    setLoginForm((prev) => ({ ...prev, password: event.target.value }))
-                  }
-                />
-                <button className="app-btn app-btn-primary" type="submit" disabled={loginSubmitting}>
-                  {loginSubmitting ? "Signing in..." : "Login"}
-                </button>
-              </form>
-              <div className="button-row">
-                <a className="app-btn app-btn-secondary" href="/auth/signup/">
-                  Create Account
-                </a>
+        <BrandingShell getProductRoute={getProductRoute}>
+          {state.loading ? (
+            <div className="page-center">
+              <div className="panel">
+                <div className="spinner" />
+                <p>Loading dashboard...</p>
               </div>
             </div>
-          </div>
-        )}
+          ) : state.authenticated ? (
+            <ErrorBoundary>
+              <ProductShell />
+            </ErrorBoundary>
+          ) : (
+            <UnauthenticatedShell
+              loginError={loginError}
+              loginForm={loginForm}
+              loginSubmitting={loginSubmitting}
+              onLoginSubmit={handleLoginSubmit}
+              onFormChange={setLoginForm}
+            />
+          )}
+        </BrandingShell>
       </BrowserRouter>
     </ConfirmProvider>
   );

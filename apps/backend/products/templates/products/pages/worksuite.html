@@ -1,0 +1,171 @@
+{% extends "public/base.html" %}
+{% load static %}
+{% block meta_title %}Work Zilla Work Suite | Product{% endblock %}
+{% block meta_description %}Work Zilla Work Suite offers live activity, screenshot timelines, and productivity reporting for modern teams.{% endblock %}
+
+{% block content %}
+<section class="section z-chatbot-showcase">
+  <div class="site-container">
+    <div class="z-chatbot-header">
+      <h1 class="section-title section-title1">Work Zilla Work Suite – Employee Monitoring Software with Real-Time Visibility</h1>
+      <p class="section-lead" style="margin-bottom:0px;">
+      Live activity, app usage, and screenshots—securely monitored with <strong>automatic privacy blurring for sensitive employee data</strong>, keeping your organization safe.
+      </p>
+    </div>
+    <div class="z-chatbot-stage">
+      <div class="z-chatbot-aura" aria-hidden="true"></div>
+      <div
+        class="z-chatbot-stage-bg"
+        style="background-image: url('{% static 'public/img/monitor-hero-image.jpg' %}');"
+        aria-hidden="true"
+      ></div>
+
+   
+    </div>
+  </div>
+</section>
+
+<section class="z-hero full-bleed">
+  <div class="site-container">
+    <div class="z-hero-grid">
+      <div>
+        <span class="eyebrow">Product</span>
+        <h1>Work Zilla Work Suite</h1>
+        <p>
+          Live activity, app usage, and screenshot timelines packed into a single dashboard
+          for managers and HR teams.
+        </p>
+        <div class="z-hero-cta">
+          <a class="btn btn-primary" href="/pricing">View plans</a>
+          <a class="btn btn-outline" href="/contact">Talk to sales</a>
+        </div>
+      </div>
+      <div class="z-hero-card">
+        <h4>Key benefits</h4>
+        <ul class="z-hero-list">
+          <li>
+            <span>Live Activity</span>
+            <small>Track active, idle, and offline trends.</small>
+          </li>
+          <li>
+            <span>Screenshot Timeline</span>
+            <small>Privacy-first captures with blur rules.</small>
+          </li>
+          <li>
+            <span>Reports</span>
+            <small>Export summaries for payroll and reviews.</small>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="full-bleed-section privacy-band">
+  <div class="site-container">
+    <div class="privacy-panel light">
+      <div>
+        <h2 class="privacy-title">Built for Privacy-First Monitoring</h2>
+        <h3 class="privacy-subtitle">Work Suite in full privacy mode by default.</h3>
+        <p>
+          Employee activity, screenshots, and web URLs stay locked to org admins only.
+          Even SaaS admins and super admins cannot view raw employee data. This is the
+          Work Zilla difference for privacy-first monitoring.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/contact/">Request a demo</a>
+          <a class="btn btn-outline" href="/pricing/">View plans</a>
+        </div>
+      </div>
+      <ul>
+        <li>Auto-blur hides bank account and email screens instantly.</li>
+        <li>Password and OTP fields are protected by automatic blur rules.</li>
+        <li>Designed for secure HR and compliance use cases.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Features teams rely on</h2>
+    <p class="section-lead">A full monitoring toolkit with clarity and controls built in.</p>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Activity timeline</h3>
+        <p>Understand focus, idle time, and productivity by employee or team.</p>
+      </div>
+      <div class="card">
+        <h3>App and URL usage</h3>
+        <p>Capture tool usage and spot distractions with clear trend charts.</p>
+      </div>
+      <div class="card">
+        <h3>Privacy controls</h3>
+        <p>Blur sensitive screens and apply exclusion patterns automatically.</p>
+      </div>
+      <div class="card">
+        <h3>Exportable reports</h3>
+        <p>Deliver weekly and monthly summaries to managers and HR.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="card">
+      <h2>Screenshot timeline (preview)</h2>
+      <p class="text-secondary">Add screenshots, timelines, or a short product video here.</p>
+      <div class="z-illustration"></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">FAQ</h2>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Do employees know when they are tracked?</h3>
+        <p>Yes. Monitoring is designed to be transparent with policy notices and privacy rules.</p>
+      </div>
+      <div class="card">
+        <h3>Can we disable screenshots for sensitive apps?</h3>
+        <p>Yes. Use exclusion lists, blur rules, and privacy lock controls.</p>
+      </div>
+      <div class="card">
+        <h3>How fast can we onboard?</h3>
+        <p>Most teams complete setup in under 30 minutes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Ready to see Work Suite in action?</h2>
+      <p>Get a tailored walkthrough for your team.</p>
+      <a class="btn btn-primary" href="/contact">Book a demo</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Request a Work Suite demo</h3>
+          <p class="text-secondary">
+            Tell us about your team and we will show the Work Suite dashboard in action.
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

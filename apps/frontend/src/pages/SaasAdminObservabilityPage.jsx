@@ -28,7 +28,7 @@ function formatCount(value) {
 }
 
 export default function SaasAdminObservabilityPage({
-  initialProduct = "monitor",
+  initialProduct = "worksuite",
   initialOrgId = "all",
   initialDays = 7,
   showTitle = true
@@ -47,10 +47,11 @@ export default function SaasAdminObservabilityPage({
     async function loadSummary() {
       setState((prev) => ({ ...prev, loading: true, error: "" }));
       try {
+        const normalizedProduct = filters.product === "worksuite" ? "monitor" : filters.product;
         const data = await fetchObservabilitySummary({
           days: filters.days,
           org_id: filters.orgId === "all" ? null : filters.orgId,
-          product: filters.product === "all" ? null : filters.product
+          product: normalizedProduct === "all" ? null : normalizedProduct
         });
         if (!active) {
           return;
@@ -132,8 +133,8 @@ export default function SaasAdminObservabilityPage({
     <>
       {showTitle ? <h3 className="page-title">Observability</h3> : null}
 
-      <div className="d-flex flex-wrap align-items-end gap-2 mt-3">
-        <label className="table-search">
+      <div className="observability-filters mt-3">
+        <label className="filter-field">
           <span>Organization</span>
           <select
             value={filters.orgId}
@@ -149,7 +150,7 @@ export default function SaasAdminObservabilityPage({
             ))}
           </select>
         </label>
-        <label className="table-search">
+        <label className="filter-field">
           <span>Product</span>
           <select
             value={filters.product}
@@ -165,7 +166,7 @@ export default function SaasAdminObservabilityPage({
             ))}
           </select>
         </label>
-        <label className="table-search">
+        <label className="filter-field">
           <span>Days</span>
           <select
             value={filters.days}
@@ -182,12 +183,12 @@ export default function SaasAdminObservabilityPage({
         </label>
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-primary observability-refresh"
           onClick={() => setRefreshKey((prev) => prev + 1)}
         >
           Refresh
         </button>
-        <div className="form-check ms-2">
+        <label className="form-check observability-autorefresh" htmlFor="observability-auto-refresh">
           <input
             id="observability-auto-refresh"
             className="form-check-input"
@@ -195,22 +196,18 @@ export default function SaasAdminObservabilityPage({
             checked={autoRefresh}
             onChange={(event) => setAutoRefresh(event.target.checked)}
           />
-          <label className="form-check-label" htmlFor="observability-auto-refresh">
-            Auto-refresh (60s)
-          </label>
-        </div>
+          <span className="form-check-label">Auto-refresh (60s)</span>
+        </label>
       </div>
 
-      <div className="row g-3 mt-3">
+      <div className="observability-kpis mt-3">
         {KPI_DEFINITIONS.map((item) => (
-          <div className="col-12 col-md-6 col-xl-3" key={item.key}>
-            <div className="card p-3 h-100 stat-card">
-              <div className="stat-icon stat-icon-primary">
-                <i className={`bi ${item.icon}`} aria-hidden="true" />
-              </div>
-              <h6 className="mb-1">{item.label}</h6>
-              <div className="stat-value">{formatCount(totals[item.key] ?? 0)}</div>
+          <div className="stat-card card p-3 h-100" key={item.key}>
+            <div className="stat-icon stat-icon-primary">
+              <i className={`bi ${item.icon}`} aria-hidden="true" />
             </div>
+            <h6 className="mb-1">{item.label}</h6>
+            <div className="stat-value">{formatCount(totals[item.key] ?? 0)}</div>
           </div>
         ))}
       </div>

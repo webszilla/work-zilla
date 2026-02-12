@@ -1,6 +1,7 @@
 ﻿from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, FileResponse
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 import json
 
 from .services_explorer import (
@@ -115,6 +116,7 @@ def explorer_folder(request, folder_id):
     })
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_upload(request):
@@ -207,6 +209,7 @@ def explorer_download(request, file_id):
     return response
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_folder_create(request):
@@ -248,6 +251,7 @@ def explorer_folder_create(request):
     return JsonResponse({"id": str(folder.id), "name": folder.name, "parent_id": str(parent.id) if parent else None})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_folder_rename(request, folder_id):
@@ -279,6 +283,7 @@ def explorer_folder_rename(request, folder_id):
     return JsonResponse({"id": str(folder.id), "name": folder.name})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_folder_move(request, folder_id):
@@ -315,6 +320,7 @@ def explorer_folder_move(request, folder_id):
     return JsonResponse({"id": str(folder.id), "parent_id": str(parent.id) if parent else None})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["DELETE"])
 def explorer_folder_delete(request, folder_id):
@@ -337,6 +343,7 @@ def explorer_folder_delete(request, folder_id):
     return JsonResponse({"deleted": True})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_file_rename(request, file_id):
@@ -366,6 +373,7 @@ def explorer_file_rename(request, file_id):
     return JsonResponse({"id": str(item.id), "name": item.original_filename})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def explorer_file_move(request, file_id):
@@ -399,6 +407,7 @@ def explorer_file_move(request, file_id):
     return JsonResponse({"id": str(item.id), "folder_id": str(folder.id) if folder else None})
 
 
+@csrf_exempt
 @login_required
 @require_http_methods(["DELETE"])
 def explorer_file_delete(request, file_id):

@@ -422,6 +422,32 @@ export default function SaasAdminOrganizationsPage() {
     }
   }
 
+  async function handleDeletedOrgDelete(org) {
+    if (!org?.id) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "Delete Deleted Account",
+      message: `Delete deleted account entry for ${org.organization_name || "this organization"}?`,
+      confirmText: "Delete",
+      confirmVariant: "danger"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/saas-admin/deleted-accounts/${org.id}`, {
+        method: "DELETE"
+      });
+      await refreshOrganizations();
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to delete deleted account."
+      }));
+    }
+  }
+
   if (state.loading) {
     return (
       <div className="card p-4 text-center">
@@ -918,6 +944,7 @@ export default function SaasAdminOrganizationsPage() {
                     <th>Email ID</th>
                     <th>Deleted At</th>
                     <th>Reason</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -929,11 +956,21 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{formatValue(org.owner_email)}</td>
                         <td>{formatValue(org.deleted_at)}</td>
                         <td>{formatValue(org.reason)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeletedOrgDelete(org)}
+                            disabled={!org.id}
+                          >
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="5">No deleted organizations found.</td>
+                      <td colSpan="6">No deleted organizations found.</td>
                     </tr>
                   )}
                 </tbody>

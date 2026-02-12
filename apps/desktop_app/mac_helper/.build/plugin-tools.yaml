@@ -1,0 +1,66 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "MonitorHelper-arm64-apple-macosx26.0-release.exe": ["<MonitorHelper-arm64-apple-macosx26.0-release.exe>"]
+  "MonitorHelper-arm64-apple-macosx26.0-release.module": ["<MonitorHelper-arm64-apple-macosx26.0-release.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<MonitorHelper-arm64-apple-macosx26.0-release.exe>","<MonitorHelper-arm64-apple-macosx26.0-release.module>"]
+  "test": ["<MonitorHelper-arm64-apple-macosx26.0-release.exe>","<MonitorHelper-arm64-apple-macosx26.0-release.module>"]
+default: "main"
+nodes:
+  "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Sources/MonitorHelper/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Sources/MonitorHelper/main.swift"]
+    outputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/sources"]
+    description: "Write auxiliary file /Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/sources"
+
+  "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swift.o"]
+    outputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.product/Objects.LinkFileList"
+
+  "/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Library/Developer/CommandLineTools/usr/bin/swiftc"]
+    outputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+
+  "<MonitorHelper-arm64-apple-macosx26.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper"]
+    outputs: ["<MonitorHelper-arm64-apple-macosx26.0-release.exe>"]
+
+  "<MonitorHelper-arm64-apple-macosx26.0-release.module>":
+    tool: phony
+    inputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swift.o","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/Modules/MonitorHelper.swiftmodule"]
+    outputs: ["<MonitorHelper-arm64-apple-macosx26.0-release.module>"]
+
+  "C.MonitorHelper-arm64-apple-macosx26.0-release.exe":
+    tool: shell
+    inputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swift.o","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.product/Objects.LinkFileList"]
+    outputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper"]
+    description: "Linking ./.build/arm64-apple-macosx/release/MonitorHelper"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release","-o","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper","-module-name","MonitorHelper","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_MonitorHelper_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.MonitorHelper-arm64-apple-macosx26.0-release.module":
+    tool: shell
+    inputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Sources/MonitorHelper/main.swift","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/sources"]
+    outputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/main.swift.o","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/Modules/MonitorHelper.swiftmodule"]
+    description: "Compiling Swift Module 'MonitorHelper' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","MonitorHelper","-emit-dependencies","-emit-module","-emit-module-path","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/Modules/MonitorHelper.swiftmodule","-output-file-map","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/output-file-map.json","-whole-module-optimization","-num-threads","12","-c","@/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/MonitorHelper.build/sources","-I","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx13.0","-whole-module-optimization","-num-threads","12","-serialize-diagnostics","-O","-j12","-DSWIFT_PACKAGE","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","MonitorHelper_main","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","mac_helper"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Sources/MonitorHelper/","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Package.swift","/Users/guru/Desktop/webszilla/saas/work-zilla/apps/desktop_app/mac_helper/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

@@ -1,5 +1,28 @@
+import { useEffect, useState } from "react";
+
 export default function LaunchScreen({ auth, onSelect, onLogout }) {
   const isAuthed = Boolean(auth?.authenticated);
+  const [agentVersion, setAgentVersion] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function loadVersion() {
+      try {
+        const versionResp = await window.storageApi.getWindowsAgentVersion?.();
+        if (active) {
+          setAgentVersion(versionResp?.version || "");
+        }
+      } catch {
+        if (active) {
+          setAgentVersion("");
+        }
+      }
+    }
+    loadVersion();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function handleClick(product) {
     onSelect(product);
@@ -26,8 +49,8 @@ export default function LaunchScreen({ auth, onSelect, onLogout }) {
             className="launch-tile"
             onClick={() => handleClick("monitor")}
           >
-            <div className="tile-title">Monitor</div>
-            <div className="tile-desc">Employee monitoring and activity tracking.</div>
+            <div className="tile-title">Work Suite</div>
+            <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
           </button>
 
           <button
@@ -43,6 +66,9 @@ export default function LaunchScreen({ auth, onSelect, onLogout }) {
             ) : null}
           </button>
         </div>
+        {agentVersion ? (
+          <div className="launch-version">Windows Agent Version: {agentVersion}</div>
+        ) : null}
       </div>
     </div>
   );

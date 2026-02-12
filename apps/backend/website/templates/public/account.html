@@ -43,7 +43,7 @@
                 {% for sub in subscriptions %}
                   {% with slug=sub.product_slug|default:"monitor" %}
                       <tr>
-                        <td>{{ sub.product_name|default:"Monitor" }}</td>
+                        <td>{{ sub.product_name|default:branding.display_name }}</td>
                         {% if not is_agent %}
                           <td>{{ sub.plan.name }}</td>
                           <td>
@@ -71,7 +71,7 @@
                             <button
                               type="button"
                               class="btn btn-outline btn-sm js-info-btn"
-                              data-product="{{ sub.product_name|default:'Monitor'|escapejs }}"
+                              data-product="{{ sub.product_name|default:branding.display_name|escapejs }}"
                               data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
                               data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
                               data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
@@ -239,7 +239,7 @@
                   {% for sub in expired_subscriptions %}
                     {% with slug=sub.product_slug|default:"monitor" %}
                         <tr>
-                          <td>{{ sub.product_name|default:"Monitor" }}</td>
+                          <td>{{ sub.product_name|default:branding.display_name }}</td>
                           {% if not is_agent %}
                             <td>{{ sub.plan.name }}</td>
                             <td><span class="badge bg-secondary">Expired</span></td>
@@ -255,7 +255,7 @@
                               <button
                                 type="button"
                                 class="btn btn-outline btn-sm js-info-btn"
-                                data-product="{{ sub.product_name|default:'Monitor'|escapejs }}"
+                                data-product="{{ sub.product_name|default:branding.display_name|escapejs }}"
                                 data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
                                 data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
                                 data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"

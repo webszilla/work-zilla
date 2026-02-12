@@ -1,0 +1,18 @@
+<nav class="navbar px-4 py-3">
+  <a class="navbar-brand text-white fw-bold fs-4" href="/">Work Zilla Work Suite</a>
+
+  <div class="d-flex align-items-center gap-3 ms-auto">
+    <a href="/" class="nav-link text-white">Home</a>
+    <a href="/about" class="nav-link text-white">About</a>
+    <a href="/pricing" class="nav-link text-white">Pricing</a>
+    <a href="#" class="nav-link text-white">Blog</a>
+    <a href="/contact" class="nav-link text-white">Contact</a>
+    {% if site_nav.is_authenticated %}
+      <a href="{{ site_nav.dashboard_url }}" class="btn btn-success">{{ site_nav.dashboard_label }}</a>
+    {% else %}
+      <a href="/signup" class="btn btn-primary">Get Started</a>
+      <a href="/auth/login/?next=/app/" class="btn btn-success">Login</a>
+    {% endif %}
+  </div>
+</nav>
+

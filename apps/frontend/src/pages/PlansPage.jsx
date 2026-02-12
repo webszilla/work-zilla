@@ -239,10 +239,11 @@ export default function PlansPage() {
       ? "ai-chatbot"
       : rawPath.includes("/storage")
       ? "storage"
-      : "monitor");
+      : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const productSlug = resolvedSlug;
+  const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
   const [currency, setCurrency] = useState("INR");
   const [billingCycles, setBillingCycles] = useState({});
@@ -264,7 +265,7 @@ export default function PlansPage() {
   async function loadPlans(activeFlag) {
     setNotice("");
     try {
-      const data = await apiFetch(`/api/dashboard/plans?product=${productSlug}`);
+      const data = await apiFetch(`/api/dashboard/plans?product=${apiProductSlug}`);
       if (activeFlag && !activeFlag.current) {
         return;
       }
@@ -394,7 +395,7 @@ export default function PlansPage() {
     try {
     const data = await apiFetch(`/api/dashboard/plans/subscribe/${plan.id}`, {
       method: "POST",
-      body: JSON.stringify({ billing_cycle: cycle, addon_count: addonCount, product: productSlug })
+      body: JSON.stringify({ billing_cycle: cycle, addon_count: addonCount, product: apiProductSlug })
     });
       if (data?.redirect) {
         window.location.href = data.redirect;

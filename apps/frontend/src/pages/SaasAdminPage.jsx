@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
+import { useBranding } from "../branding/BrandingContext.jsx";
 
 const emptyState = {
   loading: true,
@@ -11,6 +12,7 @@ const emptyState = {
 export default function SaasAdminPage() {
   const [state, setState] = useState(emptyState);
   const location = useLocation();
+  const { branding } = useBranding();
 
   useEffect(() => {
     let active = true;
@@ -69,7 +71,7 @@ export default function SaasAdminPage() {
 
   function getProductDescription(product) {
     if (product?.slug === "monitor") {
-      return "Work Zilla Monitoring and Productivity Insights.";
+      return branding?.tagline || branding?.description || "Work Zilla Work Suite productivity insights.";
     }
     return product?.description || "-";
   }
@@ -142,16 +144,14 @@ export default function SaasAdminPage() {
 
       {!showProductsOnly ? (
         <>
-          <div className="row g-3">
+          <div className="saas-admin-kpis">
             {statCards.map((card) => (
-              <div className="col-12 col-md-6 col-xl-3" key={card.label}>
-                <div className="card p-3 h-100 stat-card">
-                  <div className="stat-icon stat-icon-primary">
-                    <i className={`bi ${card.icon}`} aria-hidden="true" />
-                  </div>
-                  <h6 className="mb-1">{card.label}</h6>
-                  <div className="stat-value">{card.value}</div>
+              <div className="card p-3 h-100 stat-card" key={card.label}>
+                <div className="stat-icon stat-icon-primary">
+                  <i className={`bi ${card.icon}`} aria-hidden="true" />
                 </div>
+                <h6 className="mb-1">{card.label}</h6>
+                <div className="stat-value">{card.value}</div>
               </div>
             ))}
           </div>
@@ -160,9 +160,8 @@ export default function SaasAdminPage() {
             <div className="col-12 col-xl-6">
               <div className="card p-4 h-100">
                 <h4>Operations</h4>
-                <div className="row g-3 mt-1">
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                <div className="saas-admin-feature-grid mt-1">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-shield-check" aria-hidden="true" />
                       </div>
@@ -173,11 +172,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/retention-policy" className="btn btn-primary btn-sm">
                         Manage
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-hdd-network" aria-hidden="true" />
                       </div>
@@ -188,11 +185,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/storage" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-cloud-download" aria-hidden="true" />
                       </div>
@@ -203,11 +198,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/backup-activity" className="btn btn-primary btn-sm">
                         View Activity
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-cpu" aria-hidden="true" />
                       </div>
@@ -218,7 +211,6 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/server-monitoring" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -227,9 +219,8 @@ export default function SaasAdminPage() {
             <div className="col-12 col-xl-6">
               <div className="card p-4 h-100">
                 <h4>Org Admin Common Features</h4>
-                <div className="row g-3 mt-1">
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                <div className="saas-admin-feature-grid mt-1">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-cloud-download" aria-hidden="true" />
                       </div>
@@ -240,11 +231,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/backup-activity" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-shield-check" aria-hidden="true" />
                       </div>
@@ -255,11 +244,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/retention-policy" className="btn btn-primary btn-sm">
                         Manage
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-hdd-network" aria-hidden="true" />
                       </div>
@@ -270,11 +257,9 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/storage" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-images" aria-hidden="true" />
                       </div>
@@ -285,11 +270,9 @@ export default function SaasAdminPage() {
                       <Link to="/org-admin/media-library" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
 
-                  <div className="col-12 col-md-6">
-                    <div className="card p-3 h-100 admin-feature-card">
+                  <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-receipt" aria-hidden="true" />
                       </div>
@@ -300,7 +283,6 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/billing" className="btn btn-primary btn-sm">
                         Open
                       </Link>
-                    </div>
                   </div>
                 </div>
               </div>

@@ -17,7 +17,7 @@
         <div class="checkout-summary">
           <div>
             <h2 class="plan-title">{{ selected_plan.name }}</h2>
-            <p class="text-secondary">Product: {{ selected_product_slug|title }}</p>
+            <p class="text-secondary">Product: {{ selected_product_name|default:selected_product_slug|title }}</p>
             <p class="text-secondary">Billing: {{ selected_billing|title }} · Currency: {{ selected_currency|upper }}</p>
           </div>
           <div class="plan-price">
@@ -38,9 +38,7 @@
                 {% endif %}
               {% endif %}
             </span>
-            <span class="price-suffix-inline">
-              {% if selected_billing == "monthly" %}/user per month{% else %}/user per year{% endif %}
-            </span>
+            <span class="price-suffix-inline">{{ price_suffix|default:"/user per month" }}</span>
           </div>
         </div>
 

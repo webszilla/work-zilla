@@ -4,7 +4,7 @@ from django.utils import timezone
 from .models import BackupRecord
 from .retention import retention_candidates, DEFAULT_RETENTION
 from .services import log_backup_event
-from apps.backend.monitor.saas_admin.models import (
+from apps.backend.worksuite.saas_admin.models import (
     BackupRetentionSettings,
     OrganizationBackupRetentionOverride,
     ProductBackupRetentionOverride,

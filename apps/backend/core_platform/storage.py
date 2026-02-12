@@ -43,11 +43,28 @@ class DynamicMediaStorage(Storage):
         super().__init__(*args, **kwargs)
         self._backend = None
 
-    def _get_backend(self):
-        if self._backend is not None:
-            return self._backend
+    def _is_object_mode(self):
         config = _load_storage_settings()
-        if config and config.storage_mode == "object" and config.is_object_configured():
+        return bool(config and config.storage_mode == "object" and config.is_object_configured())
+
+    def _fallback_to_local(self):
+        self._backend = _build_local_storage()
+        return self._backend
+
+    def _get_backend(self):
+        config = _load_storage_settings()
+        wants_object = bool(config and config.storage_mode == "object" and config.is_object_configured())
+        if self._backend is not None:
+            is_local = self._backend.__class__.__name__ == "FileSystemStorage"
+            if wants_object and is_local:
+                storage = _build_object_storage(config)
+                if storage:
+                    self._backend = storage
+                    return self._backend
+            elif not wants_object and not is_local:
+                return self._fallback_to_local()
+            return self._backend
+        if wants_object:
             storage = _build_object_storage(config)
             if storage:
                 self._backend = storage
@@ -56,22 +73,72 @@ class DynamicMediaStorage(Storage):
         return self._backend
 
     def _open(self, name, mode="rb"):
-        return self._get_backend().open(name, mode)
+        backend = self._get_backend()
+        try:
+            return backend.open(name, mode)
+        except Exception:
+            if backend is not self._backend:
+                return backend.open(name, mode)
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    raise
+                return self._fallback_to_local().open(name, mode)
+            raise
 
     def _save(self, name, content):
-        return self._get_backend().save(name, content)
+        backend = self._get_backend()
+        try:
+            return backend.save(name, content)
+        except Exception:
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    raise
+                return self._fallback_to_local().save(name, content)
+            raise
 
     def exists(self, name):
-        return self._get_backend().exists(name)
+        backend = self._get_backend()
+        try:
+            return backend.exists(name)
+        except Exception:
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    return False
+                return self._fallback_to_local().exists(name)
+            return False
 
     def delete(self, name):
-        return self._get_backend().delete(name)
+        backend = self._get_backend()
+        try:
+            return backend.delete(name)
+        except Exception:
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    raise
+                return self._fallback_to_local().delete(name)
+            raise
 
     def size(self, name):
-        return self._get_backend().size(name)
+        backend = self._get_backend()
+        try:
+            return backend.size(name)
+        except Exception:
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    return 0
+                return self._fallback_to_local().size(name)
+            return 0
 
     def url(self, name):
-        return self._get_backend().url(name)
+        backend = self._get_backend()
+        try:
+            return backend.url(name)
+        except Exception:
+            if backend and backend.__class__.__name__ != "FileSystemStorage":
+                if self._is_object_mode():
+                    return ""
+                return self._fallback_to_local().url(name)
+            return ""
 
     def listdir(self, path):
         return self._get_backend().listdir(path)

@@ -23,4 +23,5 @@ urlpatterns = [
     path("org/settings", monitor_core_views.org_settings),
     path("screenshot/upload", monitor_core_views.upload_screenshot),
     path("monitor/stop", monitor_core_views.monitor_stop_event),
+    path("worksuite/stop", monitor_core_views.monitor_stop_event),
 ]

@@ -1,0 +1,62 @@
+name: Build Windows Agent
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "apps/desktop_app/windows_agent/**"
+      - ".github/workflows/windows-agent.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Build
+        run: dotnet build apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release
+
+      - name: Publish single-file
+        run: dotnet publish apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release -r win-x64 -p:PublishSingleFile=true -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          copy apps\desktop_app\windows_agent\bin\Release\net6.0-windows\win-x64\publish\employee_agent.exe artifacts\WorkZillaAgentSetup.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-agent
+          path: artifacts/WorkZillaAgentSetup.exe
+
+      - name: Commit artifact to repo
+        shell: pwsh
+        run: |
+          $targetDir = "apps/backend/static/downloads"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          Copy-Item artifacts/WorkZillaAgentSetup.exe "$targetDir/WorkZillaAgentSetup.exe" -Force
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$targetDir/WorkZillaAgentSetup.exe"
+
+          $status = git status --porcelain
+          if ($status.Length -gt 0) {
+            git commit -m "chore: update Windows agent download"
+            git push
+          } else {
+            Write-Host "No changes to commit."
+          }

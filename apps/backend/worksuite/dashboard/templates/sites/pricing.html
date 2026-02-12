@@ -1,0 +1,190 @@
+{% extends "public/base.html" %}
+{% block page_title %}Work Zilla Work Suite | Pricing Plans{% endblock %}
+{% block meta_description %}Compare Work Zilla Work Suite plans for teams that need activity visibility, screenshots, and productivity analytics.{% endblock %}
+
+{% block content %}
+
+<div class="container text-center mt-5">
+
+  <h1 class="section-title">Choose the Right Plan</h1>
+  <p class="text-secondary">
+      Simple pricing. No hidden fees. Cancel anytime.
+  </p>
+  <div class="mt-3">
+    <div class="currency-toggle" id="pricingCurrencyToggle">
+      <button type="button" data-currency="USD">USD Payment</button>
+      <button type="button" data-currency="INR" class="active">INR Payment</button>
+    </div>
+  </div>
+  <div class="mt-2">
+    <div class="currency-toggle" id="billingCycleToggle">
+      <button type="button" data-cycle="monthly" class="active">Monthly</button>
+      <button type="button" data-cycle="yearly">Yearly</button>
+    </div>
+  </div>
+
+  <div class="row mt-5">
+    {% for p in plans %}
+      <div class="col-lg-3 col-md-4">
+          <div class="card p-4 text-center plan-card">
+              {% if p.name|lower != "free" %}
+                <div class="best-discount"><span>Best<br>Discount</span></div>
+              {% endif %}
+              {% if p.name|lower == "free" %}
+                <h3 class="fw-bold">FREE <span class="trial-sup">(15 Days Trial)</span></h3>
+              {% else %}
+                <h3 class="fw-bold">{{ p.name|upper }}</h3>
+              {% endif %}
+              <h2 class="mt-2 price-monthly"
+                  data-inr="{{ p.monthly_price|default:'0' }}"
+                  data-usd="{{ p.usd_monthly_price|default:'0' }}">
+                  <span class="price-main">INR {{ p.monthly_price|default:'0' }} / month</span>
+                  {% if p.name|lower != "free" %}
+                    <span class="price-suffix-inline" data-month="(PER USER MONTH)" data-year="(PER USER YEAR)">(PER USER MONTH)</span>
+                  {% endif %}
+              </h2>
+              <p class="price-yearly"
+                 data-inr="{{ p.yearly_price|default:'0' }}"
+                 data-usd="{{ p.usd_yearly_price|default:'0' }}">
+                 <span class="price-main">INR {{ p.yearly_price|default:'0' }} / year</span>
+                 {% if p.name|lower != "free" %}
+                   <span class="price-suffix-inline" data-month="(PER USER MONTH)" data-year="(PER USER YEAR)">(PER USER YEAR)</span>
+                 {% endif %}
+              </p>
+              {% if p.name|lower == "free" %}
+                <p class="text-secondary">
+                  Up to {{ p.employee_limit }} employees
+                </p>
+              {% else %}
+                <p class="text-secondary">Unlimited Users</p>
+              {% endif %}
+              <p class="text-secondary">Screenshot Retention: <span class="highlight-text">{{ p.retention_days }} days</span></p>
+              <p class="text-secondary">
+                Addon: {% if p.allow_addons %}Available{% else %}Not Available{% endif %}
+              </p>
+              <p class="text-secondary">
+                App Usage Data: {% if p.allow_app_usage %}Available{% else %}Not Available{% endif %}
+              </p>
+              <p class="text-secondary">
+                Gaming / OTT Usage: {% if p.allow_gaming_ott_usage %}Available{% else %}Not Available{% endif %}
+              </p>
+              <p class="text-secondary">
+                HR View Login: {% if p.allow_hr_view %}Available{% else %}Not Available{% endif %}
+              </p>
+              <p class="text-secondary">Screenshot Starts From <span class="highlight-text">{{ p.screenshot_min_minutes }} min</span></p>
+
+              <hr style="border-color:#1f2937;">
+
+              <p>Live Activity</p>
+              <p>Screenshot Visibility</p>
+              <p>Reports</p>
+
+              <a href="/signup/?plan={{ p.name|lower|urlencode }}"
+                 class="btn btn-primary mt-2">
+                 Choose {{ p.name|title }}
+              </a>
+          </div>
+      </div>
+    {% empty %}
+      <div class="col-12">
+        <p class="text-secondary">No plans available right now.</p>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="container mt-5">
+  <div class="card p-4">
+    <h2>Referral Program</h2>
+    <p class="text-secondary">
+      Earn commission on the first paid invoice (before GST) when your referrals subscribe.
+    </p>
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="form-label">Referral Code</label>
+        <input type="text" class="form-control" id="referralCodeInputPricing" placeholder="Enter referral code">
+      </div>
+      <div class="col-12 col-md-8">
+        <label class="form-label">Referral Link</label>
+        <input type="text" class="form-control" id="referralLinkOutputPricing" readonly>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const toggle = document.getElementById("pricingCurrencyToggle");
+  const cycleToggle = document.getElementById("billingCycleToggle");
+  if (!toggle) return;
+  const buttons = toggle.querySelectorAll("button");
+  const cycleButtons = cycleToggle ? cycleToggle.querySelectorAll("button") : [];
+  const monthly = document.querySelectorAll(".price-monthly");
+  const yearly = document.querySelectorAll(".price-yearly");
+  const suffixInline = document.querySelectorAll(".price-suffix-inline");
+  const discountLabels = document.querySelectorAll(".best-discount");
+  let currentCurrency = "INR";
+  let currentCycle = "monthly";
+
+  function render(){
+    buttons.forEach(b => b.classList.toggle("active", b.dataset.currency === currentCurrency));
+    cycleButtons.forEach(b => b.classList.toggle("active", b.dataset.cycle === currentCycle));
+
+    monthly.forEach(el => {
+      const val = currentCurrency === "USD" ? el.dataset.usd : el.dataset.inr;
+      const label = currentCurrency === "USD" ? "USD" : "INR";
+      const main = el.querySelector(".price-main");
+      if (main) {
+        main.textContent = `${label} ${val} / month`;
+      }
+      el.style.display = currentCycle === "monthly" ? "block" : "none";
+    });
+    yearly.forEach(el => {
+      const val = currentCurrency === "USD" ? el.dataset.usd : el.dataset.inr;
+      const label = currentCurrency === "USD" ? "USD" : "INR";
+      const main = el.querySelector(".price-main");
+      if (main) {
+        main.textContent = `${label} ${val} / year`;
+      }
+      el.style.display = currentCycle === "yearly" ? "block" : "none";
+    });
+    suffixInline.forEach(el => {
+      el.textContent = currentCycle === "yearly" ? el.dataset.year : el.dataset.month;
+    });
+    discountLabels.forEach(el => {
+      el.style.display = currentCycle === "yearly" ? "block" : "none";
+    });
+  }
+
+  buttons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentCurrency = btn.dataset.currency;
+      render();
+    });
+  });
+  cycleButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentCycle = btn.dataset.cycle;
+      render();
+    });
+  });
+  render();
+})();
+</script>
+
+<script>
+(function () {
+  const codeInput = document.getElementById("referralCodeInputPricing");
+  const linkOutput = document.getElementById("referralLinkOutputPricing");
+  if (!codeInput || !linkOutput) return;
+  function updateLink() {
+    const code = (codeInput.value || "").trim().toUpperCase();
+    linkOutput.value = code ? `${window.location.origin}/signup/?ref=${encodeURIComponent(code)}` : "";
+  }
+  codeInput.addEventListener("input", updateLink);
+  updateLink();
+})();
+</script>
+
+{% endblock %}
+

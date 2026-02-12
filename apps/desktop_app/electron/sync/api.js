@@ -29,6 +29,39 @@ export async function getSyncSettings() {
   return response.json();
 }
 
+export async function getMonitorSettings({ companyKey, deviceId, employeeId } = {}) {
+  const params = new URLSearchParams();
+  if (companyKey) {
+    params.set("company_key", companyKey);
+  }
+  if (deviceId) {
+    params.set("device_id", deviceId);
+  }
+  if (employeeId) {
+    params.set("employee", String(employeeId));
+  }
+  const query = params.toString();
+  const url = buildUrl(`/api/org/settings${query ? `?${query}` : ""}`);
+  const response = await getFetch()(url, { method: "GET" });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (!response.ok) {
+    const code = data?.error || data?.detail || "org_settings_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
 export async function listRoot({ userId } = {}) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
   const response = await getFetch()(buildUrl(`/api/storage/explorer/root${query}`), { method: "GET" });
@@ -192,6 +225,39 @@ export async function registerEmployee(payload) {
   return data;
 }
 
+export async function sendMonitorHeartbeat(payload) {
+  const settings = loadSettings();
+  const extraHeaders = {};
+  if (settings.companyKey) {
+    extraHeaders["X-Company-Key"] = settings.companyKey;
+  }
+  if (settings.deviceId) {
+    extraHeaders["X-Device-Id"] = settings.deviceId;
+  }
+  const response = await getFetch()(buildUrl("/api/monitor/heartbeat"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...extraHeaders },
+    body: JSON.stringify(payload || {})
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (!response.ok) {
+    const code = data?.error || data?.detail || "heartbeat_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
 export async function uploadScreenshot({ filePath, employeeId, deviceId, companyKey, pcName }) {
   const form = new FormData();
   if (employeeId) {
@@ -207,10 +273,17 @@ export async function uploadScreenshot({ filePath, employeeId, deviceId, company
     form.append("pc_name", pcName);
   }
   form.append("image", fs.createReadStream(filePath), path.basename(filePath));
+  const extraHeaders = {};
+  if (companyKey) {
+    extraHeaders["X-Company-Key"] = companyKey;
+  }
+  if (deviceId) {
+    extraHeaders["X-Device-Id"] = deviceId;
+  }
   const response = await getFetch()(buildUrl("/api/screenshot/upload"), {
     method: "POST",
     body: form,
-    headers: form.getHeaders()
+    headers: { ...form.getHeaders(), ...extraHeaders }
   });
   const text = await response.text();
   let data = null;
