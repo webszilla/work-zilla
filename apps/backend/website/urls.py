@@ -28,6 +28,8 @@ urlpatterns = [
     path("my-account/billing/renew/confirm/", views.billing_renew_confirm, name="account_billing_renew_confirm"),
     path("my-account/profile/", views.profile_view, name="account_profile"),
     path("downloads/windows-agent/", views.download_windows_agent, name="download_windows_agent"),
+    path("downloads/windows-product-agent/", views.download_windows_product_agent, name="download_windows_product_agent"),
     path("downloads/mac-agent/", views.download_mac_agent, name="download_mac_agent"),
+    path("downloads/mac-product-agent/", views.download_mac_product_agent, name="download_mac_product_agent"),
     path("downloads/bootstrap-products.json", views.bootstrap_products_config, name="bootstrap_products_config"),
 ]

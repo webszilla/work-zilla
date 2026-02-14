@@ -58,6 +58,14 @@ def download_windows_agent(request):
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
+def download_windows_product_agent(request):
+    file_path, filename = _resolve_download_path(
+        "WorkZillaInstallerSetup.exe",
+        "WorkZillaAgentSetup.exe",
+    )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
 def download_mac_agent(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
@@ -86,9 +94,29 @@ def download_mac_agent(request):
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
+def download_mac_product_agent(request):
+    user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
+    prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
+    if prefer_arm:
+        file_path, filename = _resolve_download_path(
+            "WorkZillaInstaller.dmg",
+            "WorkZillaAgent.dmg",
+            "Work Zilla Installer-mac-arm64-0.1.0.dmg",
+            "Work Zilla Installer-mac-x64-0.1.0.dmg",
+        )
+    else:
+        file_path, filename = _resolve_download_path(
+            "WorkZillaInstaller.dmg",
+            "WorkZillaAgent.dmg",
+            "Work Zilla Installer-mac-x64-0.1.0.dmg",
+            "Work Zilla Installer-mac-arm64-0.1.0.dmg",
+        )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
 def bootstrap_products_config(request):
-    windows_url = request.build_absolute_uri("/downloads/windows-agent/")
-    mac_url = request.build_absolute_uri("/downloads/mac-agent/")
+    windows_url = request.build_absolute_uri("/downloads/windows-product-agent/")
+    mac_url = request.build_absolute_uri("/downloads/mac-product-agent/")
     return JsonResponse(
         {
             "monitor": {
