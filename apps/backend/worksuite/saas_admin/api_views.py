@@ -42,6 +42,7 @@ from core.models import (
     SubscriptionHistory,
     ChatMessage,
     AiUsageMonthly,
+    ThemeSettings,
 )
 from core.subscription_utils import is_subscription_active, normalize_subscription_end_date, revert_transfer_subscription
 from core.referral_utils import record_referral_earning, record_dealer_org_referral_earning, record_dealer_referral_flat_earning
@@ -57,6 +58,7 @@ from .models import (
     MediaStoragePullJob,
 )
 from apps.backend.products.models import Product as CatalogProduct
+from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.retention.models import GlobalRetentionPolicy
 from apps.backend.retention.serializers import GlobalRetentionPolicySerializer
 from .observability import build_observability_summary
@@ -99,6 +101,247 @@ def _require_saas_admin(request):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
     return None
+
+
+def _iso_now():
+    return timezone.now().replace(microsecond=0).isoformat()
+
+
+def _float_or_default(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_or_default(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_setup_payload():
+    theme = ThemeSettings.get_active()
+    site_brand = SiteBrandSettings.get_active()
+
+    saas_products = list(
+        Product.objects.all().order_by("sort_order", "name").values(
+            "name",
+            "slug",
+            "description",
+            "icon",
+            "status",
+            "features",
+            "sort_order",
+        )
+    )
+    catalog_products = list(
+        CatalogProduct.objects.all().order_by("sort_order", "name").values(
+            "name",
+            "slug",
+            "short_description",
+            "is_active",
+            "sort_order",
+        )
+    )
+    plans = []
+    for plan in Plan.objects.select_related("product").order_by("name"):
+        plans.append(
+            {
+                "name": plan.name,
+                "product_slug": plan.product.slug if plan.product else None,
+                "price": plan.price,
+                "monthly_price": plan.monthly_price,
+                "yearly_price": plan.yearly_price,
+                "usd_monthly_price": plan.usd_monthly_price,
+                "usd_yearly_price": plan.usd_yearly_price,
+                "addon_monthly_price": plan.addon_monthly_price,
+                "addon_yearly_price": plan.addon_yearly_price,
+                "addon_usd_monthly_price": plan.addon_usd_monthly_price,
+                "addon_usd_yearly_price": plan.addon_usd_yearly_price,
+                "employee_limit": plan.employee_limit,
+                "device_limit": plan.device_limit,
+                "duration_months": plan.duration_months,
+                "retention_days": plan.retention_days,
+                "allow_addons": plan.allow_addons,
+                "screenshot_min_minutes": plan.screenshot_min_minutes,
+                "allow_app_usage": plan.allow_app_usage,
+                "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
+                "allow_hr_view": plan.allow_hr_view,
+                "included_agents": plan.included_agents,
+                "addon_agent_monthly_price": plan.addon_agent_monthly_price,
+                "addon_agent_yearly_price": plan.addon_agent_yearly_price,
+                "ai_library_limit_mb": plan.ai_library_limit_mb,
+                "website_page_limit": plan.website_page_limit,
+                "limits": plan.limits or {},
+                "addons": plan.addons or {},
+                "features": plan.features or {},
+            }
+        )
+
+    return {
+        "meta": {
+            "schema": "workzilla.saas.setup",
+            "version": 1,
+            "exported_at": _iso_now(),
+        },
+        "saas_products": saas_products,
+        "catalog_products": catalog_products,
+        "plans": plans,
+        "theme": {
+            "primary_color": theme.primary_color,
+            "secondary_color": theme.secondary_color,
+        },
+        "site_brand": {
+            "site_name": site_brand.site_name,
+            "primary_color": site_brand.primary_color,
+            "primary_button_color": site_brand.primary_button_color,
+            "primary_button_hover_color": site_brand.primary_button_hover_color,
+            "secondary_color": site_brand.secondary_color,
+            "secondary_button_color": site_brand.secondary_button_color,
+            "secondary_button_hover_color": site_brand.secondary_button_hover_color,
+            "accent_color": site_brand.accent_color,
+            "support_email": site_brand.support_email,
+            "support_phone": site_brand.support_phone,
+            "default_meta_title": site_brand.default_meta_title,
+            "default_meta_description": site_brand.default_meta_description,
+        },
+    }
+
+
+def _apply_setup_payload(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("invalid_payload")
+
+    saas_count = 0
+    catalog_count = 0
+    plan_count = 0
+
+    with transaction.atomic():
+        for item in payload.get("saas_products") or []:
+            if not isinstance(item, dict):
+                continue
+            slug = (item.get("slug") or "").strip().lower()
+            if not slug:
+                continue
+            obj, _ = Product.objects.get_or_create(slug=slug)
+            obj.name = (item.get("name") or obj.name or slug).strip()
+            obj.description = item.get("description") or ""
+            obj.icon = item.get("icon") or ""
+            obj.status = item.get("status") or obj.status or "coming_soon"
+            obj.features = item.get("features") or ""
+            obj.sort_order = _int_or_default(item.get("sort_order"), obj.sort_order or 0)
+            obj.save()
+            saas_count += 1
+
+        catalog_by_slug = {}
+        for item in payload.get("catalog_products") or []:
+            if not isinstance(item, dict):
+                continue
+            slug = (item.get("slug") or "").strip().lower()
+            if not slug:
+                continue
+            obj, _ = CatalogProduct.objects.get_or_create(slug=slug)
+            obj.name = (item.get("name") or obj.name or slug).strip()
+            obj.short_description = item.get("short_description") or ""
+            obj.is_active = bool(item.get("is_active", obj.is_active))
+            obj.sort_order = _int_or_default(item.get("sort_order"), obj.sort_order or 0)
+            obj.save()
+            catalog_by_slug[slug] = obj
+            catalog_count += 1
+
+        for item in payload.get("plans") or []:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            product_slug = (item.get("product_slug") or "").strip().lower()
+            product = catalog_by_slug.get(product_slug)
+            if not product and product_slug:
+                product = CatalogProduct.objects.filter(slug=product_slug).first()
+
+            plan = Plan.objects.filter(name=name, product=product).first()
+            if not plan:
+                plan = Plan(name=name, product=product)
+
+            plan.product = product
+            plan.name = name
+            plan.price = _float_or_default(item.get("price"), plan.price or 0)
+            plan.monthly_price = _float_or_default(item.get("monthly_price"), plan.monthly_price or 0)
+            plan.yearly_price = _float_or_default(item.get("yearly_price"), plan.yearly_price or 0)
+            plan.usd_monthly_price = _float_or_default(item.get("usd_monthly_price"), plan.usd_monthly_price or 0)
+            plan.usd_yearly_price = _float_or_default(item.get("usd_yearly_price"), plan.usd_yearly_price or 0)
+            plan.addon_monthly_price = _float_or_default(item.get("addon_monthly_price"), plan.addon_monthly_price or 0)
+            plan.addon_yearly_price = _float_or_default(item.get("addon_yearly_price"), plan.addon_yearly_price or 0)
+            plan.addon_usd_monthly_price = _float_or_default(item.get("addon_usd_monthly_price"), plan.addon_usd_monthly_price or 0)
+            plan.addon_usd_yearly_price = _float_or_default(item.get("addon_usd_yearly_price"), plan.addon_usd_yearly_price or 0)
+            plan.employee_limit = _int_or_default(item.get("employee_limit"), plan.employee_limit or 0)
+            plan.device_limit = _int_or_default(item.get("device_limit"), plan.device_limit or 1)
+            plan.duration_months = _int_or_default(item.get("duration_months"), plan.duration_months or 1)
+            plan.retention_days = _int_or_default(item.get("retention_days"), plan.retention_days or 30)
+            plan.allow_addons = bool(item.get("allow_addons", plan.allow_addons))
+            plan.screenshot_min_minutes = _int_or_default(item.get("screenshot_min_minutes"), plan.screenshot_min_minutes or 5)
+            plan.allow_app_usage = bool(item.get("allow_app_usage", plan.allow_app_usage))
+            plan.allow_gaming_ott_usage = bool(item.get("allow_gaming_ott_usage", plan.allow_gaming_ott_usage))
+            plan.allow_hr_view = bool(item.get("allow_hr_view", plan.allow_hr_view))
+            plan.included_agents = _int_or_default(item.get("included_agents"), plan.included_agents or 0)
+            plan.addon_agent_monthly_price = _float_or_default(item.get("addon_agent_monthly_price"), plan.addon_agent_monthly_price or 0)
+            plan.addon_agent_yearly_price = _float_or_default(item.get("addon_agent_yearly_price"), plan.addon_agent_yearly_price or 0)
+            ai_library_limit = item.get("ai_library_limit_mb")
+            website_page_limit = item.get("website_page_limit")
+            plan.ai_library_limit_mb = _int_or_default(ai_library_limit, 0) if ai_library_limit not in (None, "") else None
+            plan.website_page_limit = _int_or_default(website_page_limit, 0) if website_page_limit not in (None, "") else None
+            if isinstance(item.get("limits"), dict):
+                plan.limits = item.get("limits") or {}
+            if isinstance(item.get("addons"), dict):
+                plan.addons = item.get("addons") or {}
+            if isinstance(item.get("features"), dict):
+                plan.features = item.get("features") or {}
+            plan.save()
+            plan_count += 1
+
+        theme_data = payload.get("theme") or {}
+        if isinstance(theme_data, dict):
+            theme = ThemeSettings.get_active()
+            if "primary_color" in theme_data:
+                theme.primary_color = (theme_data.get("primary_color") or "").strip() or theme.primary_color
+            if "secondary_color" in theme_data:
+                theme.secondary_color = (theme_data.get("secondary_color") or "").strip() or theme.secondary_color
+            theme.save()
+
+        brand_data = payload.get("site_brand") or {}
+        if isinstance(brand_data, dict):
+            site_brand = SiteBrandSettings.get_active()
+            update_fields = [
+                "site_name",
+                "primary_color",
+                "primary_button_color",
+                "primary_button_hover_color",
+                "secondary_color",
+                "secondary_button_color",
+                "secondary_button_hover_color",
+                "accent_color",
+                "support_email",
+                "support_phone",
+                "default_meta_title",
+                "default_meta_description",
+            ]
+            for field in update_fields:
+                if field in brand_data:
+                    setattr(site_brand, field, (brand_data.get(field) or "").strip())
+            site_brand.save()
+
+    return {
+        "saas_products": saas_count,
+        "catalog_products": catalog_count,
+        "plans": plan_count,
+    }
 
 
 def _money(value):
@@ -919,6 +1162,40 @@ def _apply_transfer(transfer):
     if transfer.request_type in ("new", "renew"):
         record_referral_earning(transfer)
         record_dealer_org_referral_earning(transfer)
+
+
+@login_required
+@require_http_methods(["GET"])
+def setup_export(request):
+    forbidden = _require_saas_admin(request)
+    if forbidden:
+        return forbidden
+    payload = _serialize_setup_payload()
+    stamp = timezone.localtime().strftime("%Y%m%d-%H%M%S")
+    response = JsonResponse(payload)
+    response["Content-Disposition"] = f'attachment; filename="workzilla-saas-setup-{stamp}.json"'
+    return response
+
+
+@login_required
+@require_http_methods(["POST"])
+def setup_import(request):
+    forbidden = _require_saas_admin(request)
+    if forbidden:
+        return forbidden
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    try:
+        counts = _apply_setup_payload(payload)
+    except ValueError:
+        return JsonResponse({"error": "invalid_payload"}, status=400)
+    return JsonResponse({
+        "status": "ok",
+        "imported": counts,
+        "imported_at": _iso_now(),
+    })
 
 
 @login_required

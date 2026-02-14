@@ -11,6 +11,14 @@ const emptyState = {
 
 export default function SaasAdminPage() {
   const [state, setState] = useState(emptyState);
+  const [setupState, setSetupState] = useState({
+    importing: false,
+    downloading: false,
+    error: "",
+    success: "",
+    fileName: "",
+    payload: null
+  });
   const location = useLocation();
   const { branding } = useBranding();
 
@@ -68,6 +76,103 @@ export default function SaasAdminPage() {
     { label: "MRR (INR)", value: stats.mrr ?? 0, icon: "bi-cash" },
     { label: "ARR (INR)", value: stats.arr ?? 0, icon: "bi-graph-up-arrow" }
   ];
+
+  async function handleSetupDownload() {
+    setSetupState((prev) => ({ ...prev, downloading: true, error: "", success: "" }));
+    try {
+      const response = await fetch("/api/saas-admin/settings/setup/export", {
+        credentials: "include"
+      });
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("Content-Disposition") || "";
+      const match = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
+      const fileName = match?.[1] || `workzilla-saas-setup-${Date.now()}.json`;
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      setSetupState((prev) => ({
+        ...prev,
+        downloading: false,
+        success: "Setup JSON downloaded.",
+        error: ""
+      }));
+    } catch (error) {
+      setSetupState((prev) => ({
+        ...prev,
+        downloading: false,
+        success: "",
+        error: error?.message || "Unable to download setup JSON."
+      }));
+    }
+  }
+
+  async function handleSetupFileChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      setSetupState((prev) => ({
+        ...prev,
+        fileName: file.name,
+        payload,
+        error: "",
+        success: "Setup file loaded. Click Import to apply."
+      }));
+    } catch (_error) {
+      setSetupState((prev) => ({
+        ...prev,
+        fileName: "",
+        payload: null,
+        success: "",
+        error: "Invalid JSON file. Please choose a valid setup export."
+      }));
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function handleSetupImport() {
+    if (!setupState.payload) {
+      setSetupState((prev) => ({
+        ...prev,
+        error: "Choose a setup JSON file before import.",
+        success: ""
+      }));
+      return;
+    }
+    setSetupState((prev) => ({ ...prev, importing: true, error: "", success: "" }));
+    try {
+      const result = await apiFetch("/api/saas-admin/settings/setup/import", {
+        method: "POST",
+        body: JSON.stringify(setupState.payload)
+      });
+      const imported = result?.imported || {};
+      setSetupState((prev) => ({
+        ...prev,
+        importing: false,
+        success: `Imported successfully. Products: ${imported.saas_products || 0}, Catalog: ${imported.catalog_products || 0}, Plans: ${imported.plans || 0}.`,
+        error: ""
+      }));
+    } catch (error) {
+      setSetupState((prev) => ({
+        ...prev,
+        importing: false,
+        success: "",
+        error: error?.message || "Setup import failed."
+      }));
+    }
+  }
 
   function getProductDescription(product) {
     if (product?.slug === "monitor") {
@@ -211,6 +316,52 @@ export default function SaasAdminPage() {
                       <Link to="/saas-admin/server-monitoring" className="btn btn-primary btn-sm">
                         Open
                       </Link>
+                  </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-download" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">SaaS Setup</h5>
+                      <p className="text-secondary mb-2">
+                        Export/import Products, Plans, and Website Theme settings.
+                      </p>
+                      <div className="d-flex flex-wrap gap-2 mb-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={handleSetupDownload}
+                          disabled={setupState.downloading}
+                        >
+                          {setupState.downloading ? "Downloading..." : "Download Setup JSON"}
+                        </button>
+                        <label className="btn btn-outline-light btn-sm mb-0">
+                          Choose File
+                          <input
+                            type="file"
+                            accept="application/json,.json"
+                            onChange={handleSetupFileChange}
+                            hidden
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          onClick={handleSetupImport}
+                          disabled={setupState.importing || !setupState.payload}
+                        >
+                          {setupState.importing ? "Importing..." : "Import Setup"}
+                        </button>
+                      </div>
+                      {setupState.fileName ? (
+                        <div className="small text-secondary mb-1">Selected: {setupState.fileName}</div>
+                      ) : null}
+                      {setupState.success ? (
+                        <div className="small text-success">{setupState.success}</div>
+                      ) : null}
+                      {setupState.error ? (
+                        <div className="small text-danger">{setupState.error}</div>
+                      ) : null}
                   </div>
                 </div>
               </div>
