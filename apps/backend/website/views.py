@@ -46,6 +46,7 @@ def _resolve_download_path(*candidates):
 
 def download_windows_agent(request):
     file_path, filename = _resolve_download_path(
+        "Work Zilla Installer-win-x64-0.1.4.exe",
         "Work Zilla Installer-win-x64-0.1.3.exe",
         "Work Zilla Installer-win-x64-0.1.2.exe",
         "Work Zilla Installer-win-x64-0.1.1.exe",

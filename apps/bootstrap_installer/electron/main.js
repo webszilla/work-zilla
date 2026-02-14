@@ -12,7 +12,7 @@ const CONFIG_URLS = [
 ].filter(Boolean);
 
 const SUPPORTED_PRODUCTS = {
-  monitor: "WorkZilla Monitor",
+  monitor: "Work Suite",
   storage: "Online Storage",
 };
 
@@ -128,8 +128,12 @@ function downloadFile({ urlText, destination, progressCb }) {
 
     const req = client.get(urlObj, (res) => {
       if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        let redirectUrl = res.headers.location;
+        if (redirectUrl.startsWith("/")) {
+          redirectUrl = `${urlObj.protocol}//${urlObj.host}${redirectUrl}`;
+        }
         res.resume();
-        downloadFile({ urlText: res.headers.location, destination, progressCb })
+        downloadFile({ urlText: redirectUrl, destination, progressCb })
           .then(resolve)
           .catch(reject);
         return;
@@ -147,6 +151,7 @@ function downloadFile({ urlText, destination, progressCb }) {
         downloaded += chunk.length;
         progressCb({ downloaded, total });
       });
+      res.on("aborted", () => reject(new Error("Download interrupted by server.")));
       res.on("error", reject);
       out.on("error", reject);
       out.on("finish", () => {
@@ -156,10 +161,36 @@ function downloadFile({ urlText, destination, progressCb }) {
     });
 
     req.on("error", reject);
-    req.setTimeout(60000, () => {
+    req.setTimeout(300000, () => {
       req.destroy(new Error("Download timeout."));
     });
   });
+}
+
+async function downloadFileWithRetry({ urlText, destination, progressCb, retries = 3 }) {
+  let attempt = 0;
+  let lastError = null;
+  while (attempt < retries) {
+    attempt += 1;
+    try {
+      if (fs.existsSync(destination)) {
+        fs.unlinkSync(destination);
+      }
+      return await downloadFile({ urlText, destination, progressCb });
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || "").toLowerCase();
+      const retryable = message.includes("timeout")
+        || message.includes("interrupted")
+        || message.includes("econnreset")
+        || message.includes("socket hang up")
+        || message.includes("aborted");
+      if (!retryable || attempt >= retries) {
+        break;
+      }
+    }
+  }
+  throw lastError || new Error("Download failed.");
 }
 
 async function openInstaller(installerPath) {
@@ -213,10 +244,10 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   const downloadUrl = validateProductConfig(config, productKey, platform);
   const downloadsDir = path.join(app.getPath("downloads"), "WorkZillaInstallers");
   fs.mkdirSync(downloadsDir, { recursive: true });
-  const filename = detectInstallerName(productKey, downloadUrl);
+  const filename = `${Date.now()}-${detectInstallerName(productKey, downloadUrl)}`;
   const destination = path.join(downloadsDir, filename);
 
-  await downloadFile({
+  await downloadFileWithRetry({
     urlText: downloadUrl,
     destination,
     progressCb: (progress) => {
