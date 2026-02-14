@@ -1,0 +1,10 @@
+{
+  "monitor": {
+    "windows": "https://getworkzilla.com/downloads/windows-agent/",
+    "mac": "https://getworkzilla.com/downloads/mac-agent/"
+  },
+  "storage": {
+    "windows": "https://getworkzilla.com/downloads/windows-agent/",
+    "mac": "https://getworkzilla.com/downloads/mac-agent/"
+  }
+}

@@ -5,9 +5,11 @@ const https = require("https");
 const http = require("http");
 const { URL } = require("url");
 
-const CONFIG_URL =
-  process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL ||
-  "https://example.com/workzilla/bootstrap-products.json";
+const CONFIG_URLS = [
+  process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL,
+  "https://getworkzilla.com/downloads/bootstrap-products.json",
+  "https://getworkzilla.com/static/downloads/bootstrap-products.json",
+].filter(Boolean);
 
 const SUPPORTED_PRODUCTS = {
   monitor: "WorkZilla Monitor",
@@ -66,6 +68,33 @@ function fetchJson(urlText) {
       req.destroy(new Error("Bootstrap config request timeout."));
     });
   });
+}
+
+function loadBundledConfig() {
+  const fallbackPath = path.join(__dirname, "bootstrap-products.local.json");
+  try {
+    const raw = fs.readFileSync(fallbackPath, "utf8");
+    return JSON.parse(raw);
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function fetchConfigWithFallback() {
+  let lastError = null;
+  for (const url of CONFIG_URLS) {
+    try {
+      const config = await fetchJson(url);
+      return { config, source: url };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const bundled = loadBundledConfig();
+  if (bundled) {
+    return { config: bundled, source: "bundled" };
+  }
+  throw lastError || new Error("Unable to load bootstrap config.");
 }
 
 function sanitizeFilename(name) {
@@ -158,14 +187,14 @@ ipcMain.handle("bootstrap:get-products", async () => {
     throw new Error("Platform not supported.");
   }
 
-  const config = await fetchJson(CONFIG_URL);
+  const { config, source } = await fetchConfigWithFallback();
   const products = Object.entries(SUPPORTED_PRODUCTS).map(([key, label]) => {
     const hasPackage = Boolean(config?.[key]?.[platform]);
     return { key, label, available: hasPackage };
   });
 
   return {
-    configUrl: CONFIG_URL,
+    configUrl: source,
     platform,
     products,
   };
@@ -180,7 +209,7 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     throw new Error("Unknown product selected.");
   }
 
-  const config = await fetchJson(CONFIG_URL);
+  const { config } = await fetchConfigWithFallback();
   const downloadUrl = validateProductConfig(config, productKey, platform);
   const downloadsDir = path.join(app.getPath("downloads"), "WorkZillaInstallers");
   fs.mkdirSync(downloadsDir, { recursive: true });

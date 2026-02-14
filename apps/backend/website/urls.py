@@ -29,4 +29,5 @@ urlpatterns = [
     path("my-account/profile/", views.profile_view, name="account_profile"),
     path("downloads/windows-agent/", views.download_windows_agent, name="download_windows_agent"),
     path("downloads/mac-agent/", views.download_mac_agent, name="download_mac_agent"),
+    path("downloads/bootstrap-products.json", views.bootstrap_products_config, name="bootstrap_products_config"),
 ]
