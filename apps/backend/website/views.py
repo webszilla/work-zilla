@@ -46,6 +46,7 @@ def _resolve_download_path(*candidates):
 
 def download_windows_agent(request):
     file_path, filename = _resolve_download_path(
+        "Work Zilla Installer-win-x64-0.1.6.exe",
         "Work Zilla Installer-win-x64-0.1.5.exe",
         "Work Zilla Installer-win-x64-0.1.4.exe",
         "Work Zilla Installer-win-x64-0.1.3.exe",
@@ -60,6 +61,7 @@ def download_windows_agent(request):
 
 def download_windows_product_agent(request):
     file_path, filename = _resolve_download_path(
+        "Work Zilla Agent Setup 0.2.0.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
@@ -69,12 +71,24 @@ def download_windows_product_agent(request):
 def download_mac_agent(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
+    arm_product_pkg = "Work Zilla Agent-0.2.0-arm64.pkg"
+    arm_product_dmg = "Work Zilla Agent-0.2.0-arm64.dmg"
+    arm_product_zip = "Work Zilla Agent-0.2.0-arm64-mac.zip"
+    x64_product_pkg = "Work Zilla Agent-0.2.0.pkg"
+    x64_product_dmg = "Work Zilla Agent-0.2.0.dmg"
+    x64_product_zip = "Work Zilla Agent-0.2.0-mac.zip"
     arm_file = "Work Zilla Installer-mac-arm64-0.1.0.dmg"
     x64_file = "Work Zilla Installer-mac-x64-0.1.0.dmg"
     arm_zip = "Work Zilla Installer-mac-arm64-0.1.0.zip"
     x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
+            arm_product_pkg,
+            arm_product_dmg,
+            arm_product_zip,
+            x64_product_pkg,
+            x64_product_dmg,
+            x64_product_zip,
             arm_file,
             arm_zip,
             x64_file,
@@ -84,6 +98,12 @@ def download_mac_agent(request):
         )
     else:
         file_path, filename = _resolve_download_path(
+            x64_product_pkg,
+            x64_product_dmg,
+            x64_product_zip,
+            arm_product_pkg,
+            arm_product_dmg,
+            arm_product_zip,
             x64_file,
             x64_zip,
             arm_file,
@@ -99,6 +119,9 @@ def download_mac_product_agent(request):
     prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
     if prefer_arm:
         file_path, filename = _resolve_download_path(
+            "Work Zilla Agent-0.2.0-arm64.pkg",
+            "Work Zilla Agent-0.2.0-arm64.dmg",
+            "Work Zilla Agent-0.2.0-arm64-mac.zip",
             "WorkZillaInstaller.dmg",
             "WorkZillaAgent.dmg",
             "Work Zilla Installer-mac-arm64-0.1.0.dmg",
@@ -106,6 +129,9 @@ def download_mac_product_agent(request):
         )
     else:
         file_path, filename = _resolve_download_path(
+            "Work Zilla Agent-0.2.0.pkg",
+            "Work Zilla Agent-0.2.0.dmg",
+            "Work Zilla Agent-0.2.0-mac.zip",
             "WorkZillaInstaller.dmg",
             "WorkZillaAgent.dmg",
             "Work Zilla Installer-mac-x64-0.1.0.dmg",

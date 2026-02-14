@@ -103,7 +103,7 @@ async function handleInstall(productKey) {
   try {
     const result = await window.bootstrapApi.installProduct(productKey);
     setProgress(1, 1);
-    setStatus(`Installer launched: ${result.filename || result.path}`);
+    setStatus(`Installer opened: ${result.filename || result.path}. Complete setup wizard, then launch app from Start Menu/Applications.`);
     setTimeout(() => {
       setStatus("Ready.");
       setProgress(0, 0);
