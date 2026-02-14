@@ -17,6 +17,8 @@ def _normalize_product_slug(value):
     slug = (value or "").strip().lower()
     if slug == "worksuite":
         return "monitor"
+    if slug == "online-storage":
+        return "storage"
     return slug
 
 def _public_product_slug(value):
@@ -143,7 +145,7 @@ def public_plans(request):
         return JsonResponse({"detail": "product_required"}, status=400)
     normalized_slug = _normalize_product_slug(product_slug)
     product = Product.objects.filter(slug=normalized_slug, is_active=True).first()
-    if not product and product_slug != "online-storage":
+    if not product and normalized_slug not in ("storage",):
         return JsonResponse({"detail": "product_not_found"}, status=404)
     if product_slug in ("storage", "online-storage"):
         storage_product = StorageProduct.objects.filter(name__iexact="Online Storage").first()
@@ -153,6 +155,12 @@ def public_plans(request):
             plans = plans.filter(product=storage_product)
             addons_qs = addons_qs.filter(product=storage_product)
         plans = plans.order_by("name")
+        if not plans.exists():
+            plans = (
+                Plan.objects
+                .filter(product__slug="storage")
+                .order_by("price", "monthly_price", "yearly_price", "name")
+            )
     else:
         plans = Plan.objects.filter(product=product)
         if normalized_slug == "monitor":
@@ -172,26 +180,48 @@ def public_plans(request):
     response_addons = []
     for plan in plans:
         if product_slug in ("storage", "online-storage"):
-            limits = {
-                "storage_gb": plan.storage_limit_gb,
-                "max_users": plan.max_users,
-                "bandwidth_limit_gb_monthly": plan.bandwidth_limit_gb_monthly,
-                "is_bandwidth_limited": plan.is_bandwidth_limited,
-                "device_limit_per_user": plan.device_limit_per_user,
-            }
-            response_plans.append({
-                "id": plan.id,
-                "code": slugify(plan.name),
-                "name": plan.name,
-                "price_inr_month": float(plan.monthly_price_inr or 0),
-                "price_usdt_month": float(plan.monthly_price_usd or 0),
-                "price_inr_year": float(plan.yearly_price_inr or 0),
-                "price_usdt_year": float(plan.yearly_price_usd or 0),
-                "limits": limits,
-                "addons": {},
-                "is_popular": False,
-                "currency": "INR",
-            })
+            if hasattr(plan, "monthly_price_inr"):
+                limits = {
+                    "storage_gb": plan.storage_limit_gb,
+                    "max_users": plan.max_users,
+                    "bandwidth_limit_gb_monthly": plan.bandwidth_limit_gb_monthly,
+                    "is_bandwidth_limited": plan.is_bandwidth_limited,
+                    "device_limit_per_user": plan.device_limit_per_user,
+                }
+                response_plans.append({
+                    "id": plan.id,
+                    "code": slugify(plan.name),
+                    "name": plan.name,
+                    "price_inr_month": float(plan.monthly_price_inr or 0),
+                    "price_usdt_month": float(plan.monthly_price_usd or 0),
+                    "price_inr_year": float(plan.yearly_price_inr or 0),
+                    "price_usdt_year": float(plan.yearly_price_usd or 0),
+                    "limits": limits,
+                    "addons": {},
+                    "is_popular": False,
+                    "currency": "INR",
+                })
+            else:
+                limits = plan.limits or {}
+                response_plans.append({
+                    "id": plan.id,
+                    "code": slugify(plan.name),
+                    "name": plan.name,
+                    "price_inr_month": float(plan.monthly_price or plan.price or 0),
+                    "price_usdt_month": float(plan.usd_monthly_price or 0),
+                    "price_inr_year": float(plan.yearly_price or 0),
+                    "price_usdt_year": float(plan.usd_yearly_price or 0),
+                    "limits": {
+                        "storage_gb": limits.get("storage_gb", 0),
+                        "max_users": limits.get("max_users", plan.employee_limit or 0),
+                        "bandwidth_limit_gb_monthly": limits.get("bandwidth_limit_gb_monthly", 0),
+                        "is_bandwidth_limited": limits.get("is_bandwidth_limited", True),
+                        "device_limit_per_user": limits.get("device_limit_per_user", plan.device_limit or 1),
+                    },
+                    "addons": plan.addons or {},
+                    "is_popular": False,
+                    "currency": "INR",
+                })
             continue
         limits = plan.limits or {}
         if product_slug == "ai-chatbot":
@@ -285,8 +315,10 @@ def public_plans(request):
                     "price_usdt_month": 0,
                     "price_usdt_year": 0,
                 }]
+    response_product_slug = product.slug if product else normalized_slug
+    response_product_name = _public_product_name(product.name if product else "Online Storage", response_product_slug)
     return JsonResponse({
-        "product": {"slug": product.slug if product else product_slug, "name": product.name if product else "Online Storage"},
+        "product": {"slug": response_product_slug, "name": response_product_name},
         "trial_days": 7,
         "free_eligible": free_eligible,
         "plans": response_plans,
