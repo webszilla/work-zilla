@@ -9,7 +9,7 @@ from apps.backend.products.models import Product
 from core.subscription_utils import is_free_plan
 from dashboard.views import get_active_org
 from core.models import Subscription, SubscriptionHistory
-from apps.backend.storage.models import Product as StorageProduct, Plan as StoragePlan, AddOn as StorageAddOn
+from apps.backend.storage.models import Product as StorageProduct, Plan as StoragePlan, AddOn as StorageAddOn, OrgSubscription as StorageOrgSubscription
 from apps.backend.enquiries.views import build_enquiry_context
 
 
@@ -68,14 +68,17 @@ def _org_used_free_trial(org):
     for row in history_rows:
         if row.plan and is_free_plan(row.plan):
             return True
-    storage_subs = (
-        StorageOrgSubscription.objects
-        .filter(organization=org)
-        .select_related("plan")
-    )
-    for sub in storage_subs:
-        if sub.plan is None or _storage_is_free_plan(sub.plan):
-            return True
+    try:
+        storage_subs = (
+            StorageOrgSubscription.objects
+            .filter(organization=org)
+            .select_related("plan")
+        )
+        for sub in storage_subs:
+            if sub.plan is None or _storage_is_free_plan(sub.plan):
+                return True
+    except Exception:
+        return False
     return False
 def home(request):
     context = build_enquiry_context(request)

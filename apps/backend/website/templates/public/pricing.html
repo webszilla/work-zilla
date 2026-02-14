@@ -114,8 +114,10 @@
   </div>
 </section>
 
+{% endblock %}
+
 {% block extra_js %}
-  <script>
+<script>
     const pricingState = { currency: "inr", billing: "monthly", product: "monitor" };
     const activePlans = {{ active_plans_json|default:"{}"|safe }};
     const pricingCache = {};
@@ -734,6 +736,5 @@
     }
 
     loadProducts();
-  </script>
-{% endblock %}
+</script>
 {% endblock %}
