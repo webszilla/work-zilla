@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const http = require("http");
+const os = require("os");
 const { URL } = require("url");
 
 const CONFIG_URLS = [
@@ -219,6 +220,28 @@ function validateProductConfig(config, productKey, platformKey) {
   return urlText;
 }
 
+function detectInstalledProducts() {
+  const platform = getPlatformKey();
+  if (platform === "windows") {
+    const candidates = [
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Work Zilla Agent.exe"),
+      path.join(process.env.ProgramFiles || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
+      path.join(process.env["ProgramFiles(x86)"] || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
+    ];
+    const installed = candidates.some((p) => p && fs.existsSync(p));
+    return { monitor: installed, storage: installed };
+  }
+  if (platform === "mac") {
+    const candidates = [
+      "/Applications/Work Zilla Agent.app",
+      path.join(os.homedir(), "Applications", "Work Zilla Agent.app"),
+    ];
+    const installed = candidates.some((p) => fs.existsSync(p));
+    return { monitor: installed, storage: installed };
+  }
+  return { monitor: false, storage: false };
+}
+
 ipcMain.handle("bootstrap:get-products", async () => {
   const platform = getPlatformKey();
   if (platform === "unsupported") {
@@ -226,9 +249,10 @@ ipcMain.handle("bootstrap:get-products", async () => {
   }
 
   const { config, source } = await fetchConfigWithFallback();
+  const installed = detectInstalledProducts();
   const products = Object.entries(SUPPORTED_PRODUCTS).map(([key, label]) => {
     const hasPackage = Boolean(config?.[key]?.[platform]);
-    return { key, label, available: hasPackage };
+    return { key, label, available: hasPackage, installed: Boolean(installed[key]) };
   });
 
   return {
@@ -237,6 +261,8 @@ ipcMain.handle("bootstrap:get-products", async () => {
     products,
   };
 });
+
+ipcMain.handle("bootstrap:get-installed-products", async () => detectInstalledProducts());
 
 ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   const platform = getPlatformKey();

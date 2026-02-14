@@ -6,6 +6,7 @@ const sizeTextEl = document.getElementById("sizeText");
 
 let installing = false;
 let activeProduct = "";
+let productState = [];
 
 function setStatus(text) {
   statusTextEl.textContent = text;
@@ -46,11 +47,15 @@ function createCard(product, onInstall) {
   const title = document.createElement("h2");
   title.textContent = product.label;
   const subtitle = document.createElement("p");
-  subtitle.textContent = product.available
-    ? "Download latest installer and run setup."
-    : "Not available for this platform in current config.";
+  if (!product.available) {
+    subtitle.textContent = "Not available for this platform in current config.";
+  } else if (product.installed) {
+    subtitle.textContent = "Installed in this computer. If needed, reinstall again.";
+  } else {
+    subtitle.textContent = "Download latest installer and run setup.";
+  }
   const button = document.createElement("button");
-  button.textContent = "Download & Install";
+  button.textContent = product.installed ? "Installed (Reinstall)" : "Download & Install";
   if (!product.available) {
     button.dataset.unavailable = "1";
   }
@@ -61,8 +66,9 @@ function createCard(product, onInstall) {
 }
 
 function renderProducts(products, onInstall) {
+  productState = products || [];
   cardsEl.innerHTML = "";
-  products.forEach((product) => {
+  productState.forEach((product) => {
     cardsEl.appendChild(createCard(product, onInstall));
   });
 }
@@ -84,6 +90,7 @@ async function boot() {
     platformPillEl.textContent = data.platform;
     renderProducts(data.products || [], handleInstall);
     setStatus("Ready.");
+    setInterval(refreshInstalledState, 5000);
   } catch (error) {
     setStatus(error?.message || "Unable to load product catalog.");
   }
@@ -105,6 +112,7 @@ async function handleInstall(productKey) {
     setProgress(1, 1);
     setStatus(`Installer opened: ${result.filename || result.path}. Complete setup wizard, then launch app from Start Menu/Applications.`);
     setTimeout(() => {
+      refreshInstalledState();
       setStatus("Ready.");
       setProgress(0, 0);
     }, 1800);
@@ -115,6 +123,20 @@ async function handleInstall(productKey) {
     installing = false;
     activeProduct = "";
     setButtonsDisabled(false);
+  }
+}
+
+async function refreshInstalledState() {
+  if (!window.bootstrapApi?.getInstalledProducts || productState.length === 0) return;
+  try {
+    const installed = await window.bootstrapApi.getInstalledProducts();
+    const next = productState.map((item) => ({
+      ...item,
+      installed: Boolean(installed?.[item.key]),
+    }));
+    renderProducts(next, handleInstall);
+  } catch {
+    // no-op
   }
 }
 

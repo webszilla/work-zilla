@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("bootstrapApi", {
   getProducts: () => ipcRenderer.invoke("bootstrap:get-products"),
+  getInstalledProducts: () => ipcRenderer.invoke("bootstrap:get-installed-products"),
   installProduct: (productKey) => ipcRenderer.invoke("bootstrap:install-product", productKey),
   onDownloadProgress: (handler) => {
     const listener = (_event, payload) => handler(payload);

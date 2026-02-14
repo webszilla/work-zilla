@@ -5,7 +5,7 @@ import { app } from "electron";
 const SETTINGS_FILE = "settings.json";
 
 const defaultSettings = {
-  serverUrl: process.env.WZ_SERVER_URL || "http://127.0.0.1:8000",
+  serverUrl: process.env.WZ_SERVER_URL || "https://getworkzilla.com",
   theme: "system",
   syncFolders: [],
   two_way: false,
@@ -41,7 +41,15 @@ export function loadSettings() {
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
     const data = JSON.parse(raw);
-    return { ...defaultSettings, ...data };
+    const merged = { ...defaultSettings, ...data };
+    // Production desktop installs should not remain on localhost API.
+    if (app.isPackaged) {
+      const server = String(merged.serverUrl || "").trim().toLowerCase();
+      if (server.includes("127.0.0.1") || server.includes("localhost")) {
+        merged.serverUrl = "https://getworkzilla.com";
+      }
+    }
+    return merged;
   } catch (error) {
     return { ...defaultSettings };
   }
