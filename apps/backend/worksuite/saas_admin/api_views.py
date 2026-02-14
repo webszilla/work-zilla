@@ -154,7 +154,7 @@ def _serialize_setup_payload():
         plans.append(
             {
                 "name": plan.name,
-                "product_slug": plan.product.slug if plan.product else None,
+                "product_slug": plan.product.slug if plan.product else "monitor",
                 "price": plan.price,
                 "monthly_price": plan.monthly_price,
                 "yearly_price": plan.yearly_price,
@@ -183,6 +183,32 @@ def _serialize_setup_payload():
                 "features": plan.features or {},
             }
         )
+    storage_products = list(
+        StorageProduct.objects.all().order_by("id").values(
+            "id",
+            "name",
+            "description",
+            "is_active",
+        )
+    )
+    storage_plans = []
+    for plan in StoragePlan.objects.select_related("product").order_by("name"):
+        storage_plans.append(
+            {
+                "name": plan.name,
+                "product_name": plan.product.name if plan.product else "Online Storage",
+                "monthly_price_inr": float(plan.monthly_price_inr or 0),
+                "yearly_price_inr": float(plan.yearly_price_inr or 0),
+                "monthly_price_usd": float(plan.monthly_price_usd or 0),
+                "yearly_price_usd": float(plan.yearly_price_usd or 0),
+                "max_users": plan.max_users,
+                "device_limit_per_user": plan.device_limit_per_user,
+                "storage_limit_gb": plan.storage_limit_gb,
+                "bandwidth_limit_gb_monthly": plan.bandwidth_limit_gb_monthly,
+                "is_bandwidth_limited": plan.is_bandwidth_limited,
+                "is_active": plan.is_active,
+            }
+        )
 
     return {
         "meta": {
@@ -193,6 +219,8 @@ def _serialize_setup_payload():
         "saas_products": saas_products,
         "catalog_products": catalog_products,
         "plans": plans,
+        "storage_products": storage_products,
+        "storage_plans": storage_plans,
         "theme": {
             "primary_color": theme.primary_color,
             "secondary_color": theme.secondary_color,
@@ -221,6 +249,8 @@ def _apply_setup_payload(payload):
     saas_count = 0
     catalog_count = 0
     plan_count = 0
+    storage_product_count = 0
+    storage_plan_count = 0
 
     with transaction.atomic():
         for item in payload.get("saas_products") or []:
@@ -244,6 +274,10 @@ def _apply_setup_payload(payload):
             if not isinstance(item, dict):
                 continue
             slug = (item.get("slug") or "").strip().lower()
+            if slug == "worksuite":
+                slug = "monitor"
+            if slug == "online-storage":
+                slug = "storage"
             if not slug:
                 continue
             obj, _ = CatalogProduct.objects.get_or_create(slug=slug)
@@ -262,9 +296,15 @@ def _apply_setup_payload(payload):
             if not name:
                 continue
             product_slug = (item.get("product_slug") or "").strip().lower()
+            if product_slug == "worksuite":
+                product_slug = "monitor"
+            if product_slug == "online-storage":
+                product_slug = "storage"
             product = catalog_by_slug.get(product_slug)
             if not product and product_slug:
                 product = CatalogProduct.objects.filter(slug=product_slug).first()
+            if not product and not product_slug:
+                product = CatalogProduct.objects.filter(slug="monitor").first()
 
             plan = Plan.objects.filter(name=name, product=product).first()
             if not plan:
@@ -306,6 +346,42 @@ def _apply_setup_payload(payload):
             plan.save()
             plan_count += 1
 
+        for item in payload.get("storage_products") or []:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            obj, _ = StorageProduct.objects.get_or_create(name=name)
+            obj.description = item.get("description") or obj.description or ""
+            obj.is_active = bool(item.get("is_active", obj.is_active))
+            obj.save()
+            storage_product_count += 1
+
+        for item in payload.get("storage_plans") or []:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            product_name = (item.get("product_name") or "Online Storage").strip() or "Online Storage"
+            storage_product, _ = StorageProduct.objects.get_or_create(name=product_name)
+            storage_plan = StoragePlan.objects.filter(name=name, product=storage_product).first()
+            if not storage_plan:
+                storage_plan = StoragePlan(name=name, product=storage_product)
+            storage_plan.monthly_price_inr = _float_or_default(item.get("monthly_price_inr"), storage_plan.monthly_price_inr or 0)
+            storage_plan.yearly_price_inr = _float_or_default(item.get("yearly_price_inr"), storage_plan.yearly_price_inr or 0)
+            storage_plan.monthly_price_usd = _float_or_default(item.get("monthly_price_usd"), storage_plan.monthly_price_usd or 0)
+            storage_plan.yearly_price_usd = _float_or_default(item.get("yearly_price_usd"), storage_plan.yearly_price_usd or 0)
+            storage_plan.max_users = _int_or_default(item.get("max_users"), storage_plan.max_users or 0)
+            storage_plan.device_limit_per_user = _int_or_default(item.get("device_limit_per_user"), storage_plan.device_limit_per_user or 0)
+            storage_plan.storage_limit_gb = _float_or_default(item.get("storage_limit_gb"), storage_plan.storage_limit_gb or 0)
+            storage_plan.bandwidth_limit_gb_monthly = _float_or_default(item.get("bandwidth_limit_gb_monthly"), storage_plan.bandwidth_limit_gb_monthly or 0)
+            storage_plan.is_bandwidth_limited = bool(item.get("is_bandwidth_limited", storage_plan.is_bandwidth_limited))
+            storage_plan.is_active = bool(item.get("is_active", storage_plan.is_active))
+            storage_plan.save()
+            storage_plan_count += 1
+
         theme_data = payload.get("theme") or {}
         if isinstance(theme_data, dict):
             theme = ThemeSettings.get_active()
@@ -314,6 +390,12 @@ def _apply_setup_payload(payload):
             if "secondary_color" in theme_data:
                 theme.secondary_color = (theme_data.get("secondary_color") or "").strip() or theme.secondary_color
             theme.save()
+            site_brand_from_theme = SiteBrandSettings.get_active()
+            site_brand_from_theme.primary_color = theme.primary_color
+            site_brand_from_theme.secondary_color = theme.secondary_color
+            if not (site_brand_from_theme.primary_button_color or "").strip():
+                site_brand_from_theme.primary_button_color = theme.primary_color
+            site_brand_from_theme.save()
 
         brand_data = payload.get("site_brand") or {}
         if isinstance(brand_data, dict):
@@ -341,6 +423,8 @@ def _apply_setup_payload(payload):
         "saas_products": saas_count,
         "catalog_products": catalog_count,
         "plans": plan_count,
+        "storage_products": storage_product_count,
+        "storage_plans": storage_plan_count,
     }
 
 
