@@ -65,19 +65,19 @@ def download_mac_agent(request):
     x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
-            arm_zip,
             arm_file,
-            x64_zip,
+            arm_zip,
             x64_file,
+            x64_zip,
             "WorkZillaInstaller.dmg",
             "WorkZillaAgent.dmg",
         )
     else:
         file_path, filename = _resolve_download_path(
-            x64_zip,
             x64_file,
-            arm_zip,
+            x64_zip,
             arm_file,
+            arm_zip,
             "WorkZillaInstaller.dmg",
             "WorkZillaAgent.dmg",
         )
