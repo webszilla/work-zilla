@@ -2,6 +2,7 @@ const cardsEl = document.getElementById("cards");
 const statusTextEl = document.getElementById("statusText");
 const progressBarEl = document.getElementById("progressBar");
 const platformPillEl = document.getElementById("platformPill");
+const sizeTextEl = document.getElementById("sizeText");
 
 let installing = false;
 let activeProduct = "";
@@ -10,13 +11,33 @@ function setStatus(text) {
   statusTextEl.textContent = text;
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const idx = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const sized = value / (1024 ** idx);
+  return `${sized.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+}
+
+function setSizeText(downloaded, total) {
+  const downloadedText = formatBytes(downloaded);
+  const totalText = total > 0 ? formatBytes(total) : "Unknown";
+  const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+  sizeTextEl.textContent = total > 0
+    ? `Downloaded: ${downloadedText} / Total: ${totalText} (${pct}%)`
+    : `Downloaded: ${downloadedText} / Total: ${totalText}`;
+}
+
 function setProgress(downloaded, total) {
   if (!total || total <= 0) {
     progressBarEl.style.width = "0%";
+    setSizeText(downloaded || 0, total || 0);
     return;
   }
   const pct = Math.max(0, Math.min(100, Math.round((downloaded / total) * 100)));
   progressBarEl.style.width = `${pct}%`;
+  setSizeText(downloaded, total);
 }
 
 function createCard(product, onInstall) {
@@ -82,7 +103,11 @@ async function handleInstall(productKey) {
   try {
     const result = await window.bootstrapApi.installProduct(productKey);
     setProgress(1, 1);
-    setStatus(`Installer launched from ${result.path}`);
+    setStatus(`Installer launched: ${result.filename || result.path}`);
+    setTimeout(() => {
+      setStatus("Ready.");
+      setProgress(0, 0);
+    }, 1800);
   } catch (error) {
     setStatus(error?.message || "Install failed.");
     setProgress(0, 1);

@@ -102,15 +102,22 @@ function sanitizeFilename(name) {
 }
 
 function detectInstallerName(productKey, downloadUrl) {
+  const platform = getPlatformKey();
+  const defaultSuffix = platform === "windows" ? ".exe" : ".dmg";
   try {
     const parsed = new URL(downloadUrl);
     const base = path.basename(parsed.pathname) || "";
-    if (base) return sanitizeFilename(base);
+    if (base) {
+      const safe = sanitizeFilename(base);
+      if (path.extname(safe)) {
+        return safe;
+      }
+      return `${safe}${defaultSuffix}`;
+    }
   } catch (_err) {
     // no-op
   }
-  const suffix = getPlatformKey() === "windows" ? ".exe" : ".dmg";
-  return `${productKey}-${Date.now()}${suffix}`;
+  return `${productKey}-${Date.now()}${defaultSuffix}`;
 }
 
 function ensureHttpsDownload(urlText) {
@@ -266,7 +273,13 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   });
 
   await openInstaller(destination);
-  return { ok: true, path: destination, productKey, platform };
+  return {
+    ok: true,
+    path: destination,
+    productKey,
+    platform,
+    filename: path.basename(destination),
+  };
 });
 
 app.whenReady().then(createWindow);

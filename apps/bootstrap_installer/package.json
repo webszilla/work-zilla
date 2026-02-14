@@ -1,6 +1,6 @@
 {
   "name": "work-zilla-bootstrap-installer",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",
@@ -21,9 +21,15 @@
       "output": "dist"
     },
     "files": [
-      "electron/**/*",
-      "renderer/**/*",
+      "electron/*.js",
+      "electron/*.json",
+      "renderer/*.html",
+      "renderer/*.css",
+      "renderer/*.js",
       "package.json"
+    ],
+    "electronLanguages": [
+      "en-US"
     ],
     "asar": true,
     "compression": "maximum",
