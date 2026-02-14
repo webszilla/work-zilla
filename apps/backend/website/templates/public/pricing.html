@@ -677,14 +677,26 @@
 
     function loadPlans(slug) {
       fetch(`/api/public/plans?product=${slug}`)
-        .then((response) => response.json())
+        .then((response) => {
+          if (!response.ok) {
+            return response.json().catch(() => ({})).then((data) => {
+              const detail = data.detail || data.error || `Request failed (${response.status})`;
+              throw new Error(detail);
+            });
+          }
+          return response.json();
+        })
         .then((data) => {
           window.__pricingAddons = data.addons || [];
           renderPlans(data);
           syncPricingCopy(slug);
         })
-        .catch(() => {
+        .catch((error) => {
           renderPlans({ plans: [] });
+          const container = document.getElementById("pricing-plans");
+          if (container && error && error.message) {
+            container.innerHTML = `<div class="card"><h3>Unable to load plans</h3><p>${escapeHtml(error.message)}</p></div>`;
+          }
           syncPricingCopy(slug);
         });
     }

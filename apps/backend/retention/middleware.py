@@ -18,6 +18,7 @@ EXEMPT_PATH_PREFIXES = (
     "/static/",
     "/media/",
     "/api/health",
+    "/api/public/",
 )
 
 ARCHIVED_ALLOWED_PREFIXES = (
