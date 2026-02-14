@@ -9,6 +9,26 @@
   StrCpy $0 ""
   StrCpy $1 ""
 
+  ; Force-close any known old bootstrap installer processes first.
+  nsExec::ExecToLog 'taskkill /F /T /IM "Work Zilla Installer.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "work-zilla-bootstrap-installer.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "WorkZillaInstaller.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "Uninstall Work Zilla Installer.exe"'
+  Sleep 1500
+
+  ; Hard cleanup for old install folders (for corrupted uninstall cases).
+  RMDir /r "$LOCALAPPDATA\Programs\Work Zilla Installer"
+  RMDir /r "$PROGRAMFILES\Work Zilla Installer"
+  RMDir /r "$PROGRAMFILES64\Work Zilla Installer"
+
+  ; Remove common/legacy uninstall keys so NSIS doesn't get stuck on stale entries.
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.workzilla.bootstrap"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.workzilla.bootstrap"
+  DeleteRegKey HKLM "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\com.workzilla.bootstrap"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Work Zilla Installer"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Work Zilla Installer"
+  DeleteRegKey HKLM "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Work Zilla Installer"
+
   !insertmacro wz_read_uninstall_value HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
   StrCmp $0 "" 0 wz_found
