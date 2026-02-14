@@ -167,7 +167,8 @@ def public_plans(request):
     else:
         plans = Plan.objects.filter(product=product)
         if normalized_slug == "monitor":
-            plans = Plan.objects.filter(models.Q(product=product) | models.Q(product__isnull=True))
+            explicit_monitor = Plan.objects.filter(product=product)
+            plans = explicit_monitor if explicit_monitor.exists() else Plan.objects.filter(product__isnull=True)
         plans = plans.order_by("price", "monthly_price", "yearly_price", "name")
     org = None
     if request.user.is_authenticated:
