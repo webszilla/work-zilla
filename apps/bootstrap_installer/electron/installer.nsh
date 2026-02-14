@@ -1,19 +1,23 @@
+!macro wz_read_uninstall_value ROOT_KEY SUB_KEY
+  ReadRegStr $0 ${ROOT_KEY} "${SUB_KEY}" "QuietUninstallString"
+  StrCmp $0 "" 0 +2
+  ReadRegStr $0 ${ROOT_KEY} "${SUB_KEY}" "UninstallString"
+  ReadRegStr $1 ${ROOT_KEY} "${SUB_KEY}" "InstallLocation"
+!macroend
+
 !macro customInit
   StrCpy $0 ""
   StrCpy $1 ""
 
-  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "UninstallString"
-  ReadRegStr $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "InstallLocation"
+  !insertmacro wz_read_uninstall_value HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
   StrCmp $0 "" 0 wz_found
 
-  ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "UninstallString"
-  ReadRegStr $1 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "InstallLocation"
+  !insertmacro wz_read_uninstall_value HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
   StrCmp $0 "" 0 wz_found
 
-  ReadRegStr $0 HKLM "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "UninstallString"
-  ReadRegStr $1 HKLM "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "InstallLocation"
+  !insertmacro wz_read_uninstall_value HKLM "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
   StrCmp $0 "" wz_done wz_found
 
@@ -22,7 +26,15 @@ wz_found:
 
 wz_remove_old:
   DetailPrint "Removing existing Work Zilla Installer..."
+  nsExec::ExecToLog 'taskkill /F /T /IM "Work Zilla Installer.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "Uninstall Work Zilla Installer.exe"'
+  Sleep 1200
+
   ExecWait '$0 /S' $2
+  StrCmp $2 "0" wz_cleanup 0
+
+  DetailPrint "Primary uninstall failed with exit code $2. Retrying through cmd..."
+  ExecWait '"$SYSDIR\cmd.exe" /C "$0 /S"' $2
   StrCmp $2 "0" wz_cleanup 0
   MessageBox MB_ICONEXCLAMATION|MB_OK "Automatic uninstall returned code $2. Continuing with cleanup."
 
