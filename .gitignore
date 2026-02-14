@@ -58,3 +58,6 @@ Desktop.ini
 
 # Large release binaries (use Git LFS or Releases)
 apps/backend/static/downloads/WorkZillaAgent.dmg
+apps/backend/static/downloads/WorkZillaInstaller.dmg
+apps/backend/static/downloads/WorkZillaInstallerSetup.exe
+apps/bootstrap_installer/dist/
