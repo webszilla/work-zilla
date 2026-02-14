@@ -1753,6 +1753,9 @@ html[data-theme="light"] .shot-select{
   color:#e5e7eb;
   box-shadow:0 20px 40px rgba(15, 23, 42, 0.35);
 }
+.work-activity-history-modal{
+  width:min(1080px, 96vw);
+}
 .preview-image{
   max-width:90vw;
   max-height:90vh;

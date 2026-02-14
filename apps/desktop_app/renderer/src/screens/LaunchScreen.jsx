@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
-export default function LaunchScreen({ auth, onSelect, onLogout }) {
+export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   const isAuthed = Boolean(auth?.authenticated);
+  const isOnline = connection?.online !== false;
   const [agentVersion, setAgentVersion] = useState("");
 
   useEffect(() => {
@@ -48,20 +49,23 @@ export default function LaunchScreen({ auth, onSelect, onLogout }) {
             type="button"
             className="launch-tile"
             onClick={() => handleClick("monitor")}
+            disabled={!isOnline}
           >
             <div className="tile-title">Work Suite</div>
             <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
+            {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
           </button>
 
           <button
             type="button"
             className="launch-tile"
             onClick={() => handleClick("storage")}
-            disabled={isAuthed && !new Set(auth?.enabled_products || []).has("storage")}
+            disabled={!isOnline || (isAuthed && !new Set(auth?.enabled_products || []).has("storage"))}
           >
             <div className="tile-title">Online Storage</div>
             <div className="tile-desc">Secure storage sync and file backup.</div>
-            {isAuthed && !new Set(auth?.enabled_products || []).has("storage") ? (
+            {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
+            {isOnline && isAuthed && !new Set(auth?.enabled_products || []).has("storage") ? (
               <div className="tile-note">Not enabled for this account.</div>
             ) : null}
           </button>

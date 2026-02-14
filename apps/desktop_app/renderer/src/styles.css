@@ -58,6 +58,21 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+.connection-banner {
+  margin: 12px 20px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+  font-weight: 600;
+}
+
+.connection-banner-subtitle {
+  font-weight: 500;
+  color: #fee2e2;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -118,6 +133,37 @@ body {
   margin-top: auto;
   display: grid;
   gap: 10px;
+}
+
+.sidebar-connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  font-size: 12px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.sidebar-connection-pill.online {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(22, 163, 74, 0.16);
+}
+
+.sidebar-connection-pill.reconnecting {
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(180, 83, 9, 0.18);
+}
+
+.sidebar-connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .sidebar-footer .btn {
@@ -261,10 +307,29 @@ body {
 }
 
 .btn-secondary {
-  background: color-mix(in srgb, var(--secondary) 75%, var(--bg-card));
-  color: var(--text);
-  border: 1px solid color-mix(in srgb, var(--secondary) 70%, transparent);
+  background: transparent;
+  color: #ffffff;
+  border: 1px solid #f59e0b;
   box-shadow: none;
+}
+
+.btn.btn-secondary {
+  background: transparent;
+  color: #ffffff;
+  border: 1px solid #f59e0b;
+}
+
+.btn-secondary:not(:disabled):hover,
+.btn.btn-secondary:not(:disabled):hover {
+  background: rgba(245, 158, 11, 0.14);
+  color: #ffffff;
+  border-color: #fbbf24;
+}
+
+.btn-secondary:focus-visible,
+.btn.btn-secondary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
 }
 
 .btn:not(:disabled):hover {
@@ -553,6 +618,99 @@ input::placeholder {
   background: color-mix(in srgb, var(--bg-card) 85%, transparent);
 }
 
+.table-ui tr.row-selected {
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
+}
+
+.item-link {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.item-link:hover {
+  text-decoration: underline;
+}
+
+.tree-item-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-caret {
+  width: 12px;
+  color: var(--muted);
+  display: inline-block;
+}
+
+.tree-meta-row {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.explorer-list-panel {
+  position: relative;
+}
+
+.explorer-list-panel.drag-active {
+  border-color: color-mix(in srgb, var(--primary) 65%, transparent);
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 2px dashed color-mix(in srgb, var(--primary) 75%, transparent);
+  color: #e2e8f0;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.empty-cloud-state {
+  padding: 24px 10px;
+  border: 1px dashed var(--card-border);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.item-context-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 170px;
+  background: var(--bg-panel);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-strong);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.item-context-menu-action {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.item-context-menu-action:hover {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
 .explorer-shell {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -659,6 +817,8 @@ input::placeholder {
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -670,7 +830,7 @@ input::placeholder {
 }
 
 .explorer-list-panel {
-  margin-top: auto;
+  margin-top: 0;
 }
 
 .file-list-header {

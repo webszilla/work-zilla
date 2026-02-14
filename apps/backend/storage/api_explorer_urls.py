@@ -8,6 +8,7 @@ urlpatterns = [
     path("folder/<uuid:folder_id>", explorer.explorer_folder, name="storage_explorer_folder"),
     path("upload", explorer.explorer_upload, name="storage_explorer_upload"),
     path("files/<uuid:file_id>/download", explorer.explorer_download, name="storage_explorer_download"),
+    path("download-bulk", explorer.explorer_bulk_download, name="storage_explorer_bulk_download"),
     path("folders/create", explorer.explorer_folder_create, name="storage_explorer_folder_create"),
     path("folders/<uuid:folder_id>/rename", explorer.explorer_folder_rename, name="storage_explorer_folder_rename"),
     path("folders/<uuid:folder_id>/move", explorer.explorer_folder_move, name="storage_explorer_folder_move"),

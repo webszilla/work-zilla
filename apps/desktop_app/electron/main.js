@@ -2,14 +2,15 @@ import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, systemPreferences, she
 import path from "path";
 import os from "os";
 import fs from "fs";
+import dns from "dns/promises";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
-import { loadSettings, saveSettings, addFolder, removeFolder } from "./sync/settings.js";
-import { listActivity, listErrors, listQueue } from "./sync/db.js";
-import { getStorageStatus, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, downloadStorage, sendMonitorHeartbeat, getMonitorSettings } from "./sync/api.js";
+import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder } from "./sync/settings.js";
+import { listActivity, listErrors, listQueue, getFolderMap, removeFolderMapsByPrefix, clearQueueByPathPrefix, setFolderMap } from "./sync/db.js";
+import { getStorageStatus, pingApi, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, createFolder as createStorageFolder, renameFolder as renameStorageFolder, deleteFolder as deleteStorageFolder, uploadFile as uploadStorageFile, downloadStorage, downloadBulkSelection, sendMonitorHeartbeat, getMonitorSettings } from "./sync/api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,146 @@ let monitorHeartbeatTimer = null;
 let monitorCaptureTimer = null;
 let monitorCaptureInFlight = false;
 let monitorCaptureIntervalMs = 5 * 60 * 1000;
+let connectivityTimer = null;
+let syncResumeOnReconnect = false;
+let monitorResumeOnReconnect = false;
+let offlineAlertOpen = false;
+let offlineAlertShown = false;
+const CONNECTIVITY_CHECK_INTERVAL_MS = 10000;
+const connectivityState = {
+  internet: false,
+  api: false,
+  online: false,
+  reconnecting: true,
+  checked_at: null
+};
+
+process.on("uncaughtException", (error) => {
+  const code = error?.code || error?.cause?.code || "";
+  if (code === "EPIPE" || code === "ECONNRESET") {
+    return;
+  }
+  console.error("Uncaught exception in main process:", error);
+});
+
+function getConnectionStatusSnapshot() {
+  return {
+    ...connectivityState,
+    message: connectivityState.online
+      ? "Online"
+      : "WorkZilla requires internet connection. Please connect to internet to continue."
+  };
+}
+
+function broadcastConnectionStatus() {
+  const payload = getConnectionStatusSnapshot();
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send("connection:status", payload);
+  });
+}
+
+async function checkInternetConnectivity() {
+  const settings = loadSettings();
+  let host = "example.com";
+  try {
+    const raw = String(settings.serverUrl || "").trim();
+    if (raw) {
+      const url = new URL(raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`);
+      host = url.hostname || host;
+    }
+  } catch {
+    // fallback to default host
+  }
+  if (host === "localhost" || host === "127.0.0.1") {
+    return true;
+  }
+  try {
+    await dns.lookup(host);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function showOfflineAlert() {
+  if (offlineAlertOpen || offlineAlertShown || !mainWindow) {
+    return;
+  }
+  offlineAlertOpen = true;
+  offlineAlertShown = true;
+  try {
+    await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: "Offline",
+      message: "WorkZilla requires internet connection. Please connect to internet to continue."
+    });
+  } catch {
+    // ignore UI alert failures
+  } finally {
+    offlineAlertOpen = false;
+  }
+}
+
+function pauseServicesForReconnect() {
+  const syncStatus = syncService.getStatus();
+  if (syncStatus.status === "Running") {
+    syncResumeOnReconnect = true;
+    syncService.pause();
+  }
+  if (monitorProcess || monitorCaptureTimer || monitorHeartbeatTimer) {
+    monitorResumeOnReconnect = true;
+    stopMonitorProcess();
+    if (monitorHeartbeatTimer) {
+      clearInterval(monitorHeartbeatTimer);
+      monitorHeartbeatTimer = null;
+    }
+  }
+}
+
+async function resumeServicesAfterReconnect() {
+  if (syncResumeOnReconnect) {
+    syncService.resume();
+    syncResumeOnReconnect = false;
+  }
+  if (monitorResumeOnReconnect) {
+    monitorResumeOnReconnect = false;
+    await startMonitorWithAuth();
+  }
+}
+
+async function runConnectivityCheck() {
+  const prevOnline = connectivityState.online;
+  const internet = await checkInternetConnectivity();
+  const api = internet ? await pingApi() : false;
+  connectivityState.internet = internet;
+  connectivityState.api = api;
+  connectivityState.online = Boolean(internet && api);
+  connectivityState.reconnecting = !connectivityState.online;
+  connectivityState.checked_at = new Date().toISOString();
+  if (!connectivityState.online) {
+    if (prevOnline) {
+      pauseServicesForReconnect();
+    }
+    if (!prevOnline || !connectivityState.api) {
+      showOfflineAlert();
+    }
+  } else if (!prevOnline) {
+    offlineAlertShown = false;
+    await resumeServicesAfterReconnect();
+  }
+  broadcastConnectionStatus();
+  return getConnectionStatusSnapshot();
+}
+
+function startConnectivityMonitor() {
+  if (connectivityTimer) {
+    clearInterval(connectivityTimer);
+  }
+  runConnectivityCheck();
+  connectivityTimer = setInterval(() => {
+    runConnectivityCheck();
+  }, CONNECTIVITY_CHECK_INTERVAL_MS);
+}
 
 function uploadScreenshot(filePath) {
   if (typeof syncService.uploadScreenshot === "function") {
@@ -65,7 +206,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      devTools: !app.isPackaged
     }
   });
 
@@ -119,6 +261,7 @@ function refreshTray() {
 app.whenReady().then(() => {
   createWindow();
   createTray();
+  startConnectivityMonitor();
   if (process.platform === "darwin") {
     const settings = loadSettings();
     const screenStatus = systemPreferences.getMediaAccessStatus("screen");
@@ -135,6 +278,10 @@ app.whenReady().then(() => {
   if (settings.monitorRunning) {
     // Resume monitoring after app restart (e.g. PC shutdown/startup)
     setTimeout(() => {
+      if (!connectivityState.online) {
+        monitorResumeOnReconnect = true;
+        return;
+      }
       startMonitorWithAuth();
     }, 1500);
   }
@@ -170,6 +317,7 @@ app.on("browser-window-focus", () => {
 ipcMain.handle("auth:login", async (_event, payload) => {
   const device = ensureDeviceIdentity();
   await login({ ...payload, ...device });
+  await runConnectivityCheck();
   const status = await checkAuth();
   persistAuthProfile(status);
   refreshTray();
@@ -182,6 +330,7 @@ ipcMain.handle("auth:logout", async () => {
 });
 
 ipcMain.handle("auth:status", async () => {
+  await runConnectivityCheck();
   const status = await checkAuth();
   persistAuthProfile(status);
   refreshTray();
@@ -217,17 +366,47 @@ ipcMain.handle("folders:choose", async () => {
   result.filePaths.forEach((folderPath) => {
     addFolder({ path: folderPath, name: path.basename(folderPath) });
   });
-  syncService.start();
+  if (connectivityState.online) {
+    syncService.start();
+  }
   return { message: "Folders added." };
 });
 
-ipcMain.handle("folders:remove", (_event, folderPath) => {
-  removeFolder(folderPath);
+ipcMain.handle("folders:remove", async (_event, folderPath) => {
+  if (!folderPath) {
+    throw new Error("invalid_folder_path");
+  }
+  const mapped = getFolderMap(folderPath);
+  if (mapped?.remote_id) {
+    await deleteStorageFolder(mapped.remote_id);
+  }
+  removeFolderMapsByPrefix(folderPath);
+  clearQueueByPathPrefix(folderPath);
+  removeLocalFolder(folderPath);
   syncService.start();
-  return true;
+  return { ok: true, cloud_deleted: Boolean(mapped?.remote_id) };
+});
+
+ipcMain.handle("folders:map-remote", (_event, payload) => {
+  if (!payload?.localPath || !payload?.remoteId) {
+    throw new Error("invalid_mapping");
+  }
+  setFolderMap(payload.localPath, payload.remoteId);
+  return { ok: true };
+});
+
+ipcMain.handle("folders:get-map", (_event, localPath) => {
+  if (!localPath) {
+    return null;
+  }
+  const mapped = getFolderMap(localPath);
+  return mapped?.remote_id ? { remote_id: mapped.remote_id } : null;
 });
 
 ipcMain.handle("sync:start", () => {
+  if (!connectivityState.online) {
+    return { ...syncService.getStatus(), error: "offline", reconnecting: true };
+  }
   syncService.start();
   return syncService.getStatus();
 });
@@ -294,6 +473,91 @@ ipcMain.handle("storage:explorer:folder", async (_event, payload) => {
   return listFolder(payload.folderId, { userId: payload?.userId });
 });
 
+ipcMain.handle("storage:explorer:create-folder", async (_event, payload) => {
+  const folder = await createStorageFolder(payload?.parentId, payload?.name, { userId: payload?.userId });
+  return folder;
+});
+
+ipcMain.handle("storage:explorer:rename-folder", async (_event, payload) => {
+  if (!payload?.folderId || !payload?.name) {
+    throw new Error("invalid_folder");
+  }
+  return renameStorageFolder(payload.folderId, payload.name, { userId: payload?.userId });
+});
+
+ipcMain.handle("storage:explorer:upload-picker", async (_event, payload) => {
+  if (!payload?.folderId) {
+    throw new Error("invalid_folder");
+  }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "multiSelections"]
+  });
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: true, uploaded: 0, files: [] };
+  }
+  const uploaded = [];
+  const failed = [];
+  for (const filePath of result.filePaths) {
+    try {
+      const data = await uploadStorageFile(payload.folderId, filePath, { userId: payload?.userId });
+      uploaded.push({
+        file_id: data?.file_id,
+        filename: data?.filename || path.basename(filePath)
+      });
+    } catch (error) {
+      failed.push({
+        path: filePath,
+        error: error?.code || error?.message || "upload_failed"
+      });
+    }
+  }
+  return {
+    ok: failed.length === 0,
+    uploaded: uploaded.length,
+    files: uploaded,
+    failed
+  };
+});
+
+ipcMain.handle("storage:explorer:upload-paths", async (_event, payload) => {
+  if (!payload?.folderId) {
+    throw new Error("invalid_folder");
+  }
+  const filePaths = Array.isArray(payload?.filePaths) ? payload.filePaths.filter(Boolean) : [];
+  if (!filePaths.length) {
+    return { ok: true, uploaded: 0, files: [], failed: [] };
+  }
+  const uploaded = [];
+  const failed = [];
+  const total = filePaths.length;
+  let completed = 0;
+  for (const filePath of filePaths) {
+    try {
+      const data = await uploadStorageFile(payload.folderId, filePath, { userId: payload?.userId });
+      uploaded.push({
+        file_id: data?.file_id,
+        filename: data?.filename || path.basename(filePath)
+      });
+    } catch (error) {
+      failed.push({
+        path: filePath,
+        error: error?.code || error?.message || "upload_failed"
+      });
+    } finally {
+      completed += 1;
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send("storage:upload-progress", { completed, total });
+      });
+    }
+  }
+  return {
+    ok: failed.length === 0,
+    uploaded: uploaded.length,
+    files: uploaded,
+    failed
+  };
+});
+
 ipcMain.handle("storage:org:users", async () => {
   return getOrgUsers();
 });
@@ -306,44 +570,78 @@ ipcMain.handle("storage:org:users:create", async (_event, payload) => {
   return createOrgUser(payload);
 });
 
+async function saveDownloadResponse(response, filenameOverride) {
+  const settings = loadSettings();
+  const targetRoot = settings.syncFolders?.[0]?.path || app.getPath("downloads");
+  const contentDisposition = response.headers.get("content-disposition") || "";
+  let filename = filenameOverride || "";
+  if (!filename && contentDisposition) {
+    const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(contentDisposition);
+    if (match && match[1]) {
+      filename = decodeURIComponent(match[1]);
+    }
+  }
+  if (!filename) {
+    filename = "download.zip";
+  }
+  const safeName = filename.replace(/[\\\\/]/g, "-");
+  let targetPath = path.join(targetRoot, safeName);
+  if (fs.existsSync(targetPath)) {
+    const ext = path.extname(safeName);
+    const base = path.basename(safeName, ext);
+    targetPath = path.join(targetRoot, `${base}-${Date.now()}${ext}`);
+  }
+  await new Promise((resolve, reject) => {
+    const stream = fs.createWriteStream(targetPath);
+    response.body.pipe(stream);
+    response.body.on("error", reject);
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+  });
+  return targetPath;
+}
+
 ipcMain.handle("storage:download", async (_event, payload) => {
   try {
     const response = await downloadStorage(payload || {});
-    const settings = loadSettings();
-    const targetRoot = settings.syncFolders?.[0]?.path || app.getPath("downloads");
-    const contentDisposition = response.headers.get("content-disposition") || "";
     let filename = payload?.filename || "";
-    if (!filename && contentDisposition) {
-      const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(contentDisposition);
-      if (match && match[1]) {
-        filename = decodeURIComponent(match[1]);
-      }
+    if (!filename && payload?.fileId) {
+      filename = `${payload.fileId}.bin`;
     }
-    if (!filename) {
-      filename = payload?.fileId ? `${payload.fileId}.bin` : "download.zip";
-    }
-    const safeName = filename.replace(/[\\/]/g, "-");
-    let targetPath = path.join(targetRoot, safeName);
-    if (fs.existsSync(targetPath)) {
-      const ext = path.extname(safeName);
-      const base = path.basename(safeName, ext);
-      targetPath = path.join(targetRoot, `${base}-${Date.now()}${ext}`);
-    }
-    await new Promise((resolve, reject) => {
-      const stream = fs.createWriteStream(targetPath);
-      response.body.pipe(stream);
-      response.body.on("error", reject);
-      stream.on("finish", resolve);
-      stream.on("error", reject);
-    });
+    const targetPath = await saveDownloadResponse(response, filename);
     return { ok: true, path: targetPath };
   } catch (error) {
     return { ok: false, error: error?.message || "download_failed" };
   }
 });
 
+ipcMain.handle("storage:download-bulk", async (_event, payload) => {
+  try {
+    const response = await downloadBulkSelection({
+      fileIds: payload?.fileIds || [],
+      folderIds: payload?.folderIds || [],
+      userId: payload?.userId
+    });
+    const targetPath = await saveDownloadResponse(response, payload?.filename || "selection.zip");
+    return { ok: true, path: targetPath };
+  } catch (error) {
+    return { ok: false, error: error?.message || "bulk_download_failed" };
+  }
+});
+
 ipcMain.handle("monitor:start", async () => {
+  if (!connectivityState.online) {
+    return { ok: false, error: "offline" };
+  }
   return startMonitorWithAuth();
+});
+
+ipcMain.handle("connection:status", () => {
+  return getConnectionStatusSnapshot();
+});
+
+ipcMain.handle("connection:check", async () => {
+  return runConnectivityCheck();
 });
 
 ipcMain.handle("monitor:permissions", async () => {
@@ -577,6 +875,9 @@ async function ensureMonitorConfig(auth) {
 }
 
 async function startMonitorWithAuth() {
+  if (!connectivityState.online) {
+    return { ok: false, error: "offline" };
+  }
   const auth = await checkAuth();
   const settings = loadSettings();
   const hasProfile = Boolean(resolveCompanyKey(settings)) && Boolean(settings.employeeName);

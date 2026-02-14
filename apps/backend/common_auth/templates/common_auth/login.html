@@ -190,7 +190,7 @@
           {% endif %}
         </label>
         <button class="btn" type="submit">Login</button>
-        <button class="btn btn-secondary" type="button" id="download-agent-btn">Download Agent</button>
+        <button class="btn btn-secondary" type="button" id="download-agent-btn">Download Installer</button>
         <p class="footer">
           No account? <a href="{% url 'common_auth:signup' %}">Create one</a>
         </p>
@@ -200,10 +200,10 @@
       <div class="download-modal__backdrop" data-download-close></div>
       <div class="download-modal__panel" role="dialog" aria-modal="true" aria-labelledby="download-agent-title">
         <div class="download-modal__header">
-          <h3 id="download-agent-title">Download Work Zilla Agent</h3>
+          <h3 id="download-agent-title">Download Work Zilla Installer</h3>
           <button class="download-modal__close" type="button" data-download-close>&times;</button>
         </div>
-        <p class="download-modal__subtitle">Choose your operating system to download the agent.</p>
+        <p class="download-modal__subtitle">Choose your operating system to download the installer.</p>
         <div class="download-modal__grid">
           <a class="download-modal__card" href="/downloads/windows-agent/">
             <div class="download-modal__icon" aria-hidden="true">
@@ -215,7 +215,7 @@
               </svg>
             </div>
             <div class="download-modal__label">Windows</div>
-            <div class="download-modal__hint">Download .exe</div>
+            <div class="download-modal__hint">Windows Installer (.exe)</div>
           </a>
           <a class="download-modal__card" href="/downloads/mac-agent/">
             <div class="download-modal__icon" aria-hidden="true">
@@ -225,7 +225,7 @@
               </svg>
             </div>
             <div class="download-modal__label">macOS</div>
-            <div class="download-modal__hint">Download .dmg</div>
+            <div class="download-modal__hint">macOS Installer (.dmg)</div>
           </a>
         </div>
       </div>

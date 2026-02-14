@@ -20,7 +20,7 @@ from .storage_backend import (
     storage_save,
     storage_open,
 )
-from .events import emit_event, soft_delete_folder
+from .events import emit_event, soft_delete_folder, hard_delete_file
 from .permissions import (
     is_org_admin,
     is_saas_admin,
@@ -829,6 +829,7 @@ def delete_file(request, file_id):
     item = get_object_or_404(StorageFile, id=file_id, organization=org, is_deleted=False)
     if not allow_all and item.owner_id != request.user.id:
         return _json_error("forbidden", status=403)
+    hard_delete_file(item.storage_key)
     item.is_deleted = True
     item.save(update_fields=["is_deleted"])
     emit_event("file_deleted", file_id=str(item.id), org_id=org.id, owner_id=item.owner_id)

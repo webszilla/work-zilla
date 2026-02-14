@@ -108,6 +108,18 @@ export function getFolderMap(localPath) {
   return database.prepare("SELECT remote_id FROM folder_map WHERE local_path = ?").get(localPath);
 }
 
+export function removeFolderMapsByPrefix(localPath) {
+  const database = getDb();
+  const nestedPrefix = `${localPath}${path.sep}%`;
+  database.prepare("DELETE FROM folder_map WHERE local_path = ? OR local_path LIKE ?").run(localPath, nestedPrefix);
+}
+
+export function clearQueueByPathPrefix(localPath) {
+  const database = getDb();
+  const nestedPrefix = `${localPath}${path.sep}%`;
+  database.prepare("DELETE FROM queue WHERE path = ? OR path LIKE ?").run(localPath, nestedPrefix);
+}
+
 export function clearQueue() {
   const database = getDb();
   database.prepare("DELETE FROM queue").run();

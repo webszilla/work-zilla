@@ -1,0 +1,10 @@
+{
+  "monitor": {
+    "windows": "https://cdn.example.com/workzilla/monitor/latest/WorkZillaMonitorSetup.exe",
+    "mac": "https://cdn.example.com/workzilla/monitor/latest/WorkZillaMonitor.dmg"
+  },
+  "storage": {
+    "windows": "https://cdn.example.com/workzilla/storage/latest/WorkZillaStorageSetup.exe",
+    "mac": "https://cdn.example.com/workzilla/storage/latest/WorkZillaStorage.dmg"
+  }
+}

@@ -1,4 +1,6 @@
-export default function Sidebar({ items, activeId, onSelect, onLogout, onBack }) {
+export default function Sidebar({ items, activeId, onSelect, onLogout, onBack, connection }) {
+  const isOnline = connection?.online !== false;
+  const label = isOnline ? "Online" : "Reconnecting";
   return (
     <aside className="app-sidebar">
       <div className="brand">
@@ -23,6 +25,10 @@ export default function Sidebar({ items, activeId, onSelect, onLogout, onBack })
           )
         ))}
       </nav>
+      <div className={`sidebar-connection-pill ${isOnline ? "online" : "reconnecting"}`}>
+        <span className="sidebar-connection-dot" />
+        <span>{label}</span>
+      </div>
       <div className="sidebar-footer">
         {onBack ? (
           <button type="button" className="btn btn-primary" onClick={onBack}>

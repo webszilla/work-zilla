@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import LoginScreen from "./screens/LoginScreen.jsx";
 import LaunchScreen from "./screens/LaunchScreen.jsx";
-import MonitorScreen from "./screens/MonitorScreen.jsx";
 import DashboardScreen from "./screens/DashboardScreen.jsx";
 import SyncStatusScreen from "./screens/SyncStatusScreen.jsx";
 import StorageUsageScreen from "./screens/StorageUsageScreen.jsx";
-import ChooseFoldersScreen from "./screens/ChooseFoldersScreen.jsx";
 import SyncActivityScreen from "./screens/SyncActivityScreen.jsx";
 import ErrorsScreen from "./screens/ErrorsScreen.jsx";
 import SettingsScreen from "./screens/SettingsScreen.jsx";
-import StorageFilesScreen from "./screens/StorageFilesScreen.jsx";
+const MonitorScreen = lazy(() => import("./screens/MonitorScreen.jsx"));
+const ChooseFoldersScreen = lazy(() => import("./screens/ChooseFoldersScreen.jsx"));
+const StorageFilesScreen = lazy(() => import("./screens/StorageFilesScreen.jsx"));
 
 const storageScreens = [
   { id: "dashboard", label: "Dashboard" },
@@ -25,6 +25,7 @@ const storageScreens = [
 ];
 
 const defaultAuth = { loading: true, authenticated: false, user: null, enabled_products: [] };
+const defaultConnection = { online: true, reconnecting: false, internet: true, api: true, message: "" };
 
 export default function App() {
   const [auth, setAuth] = useState(defaultAuth);
@@ -33,10 +34,15 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState("files");
   const [theme, setTheme] = useState("system");
   const [platform, setPlatform] = useState("unknown");
+  const [connection, setConnection] = useState(defaultConnection);
 
   const isAdmin = Boolean(
     auth.user?.is_superuser ||
       (auth.role && ["company_admin", "superadmin", "super_admin"].includes(auth.role))
+  );
+  const hasStorageAccess = useMemo(
+    () => new Set(auth?.enabled_products || []).has("storage"),
+    [auth?.enabled_products]
   );
 
   const visibleScreens = useMemo(
@@ -49,6 +55,9 @@ export default function App() {
     async function load() {
       const state = await window.storageApi.getAuthStatus();
       const settings = await window.storageApi.getSettings();
+      const network = window.storageApi.getConnectionStatus
+        ? await window.storageApi.getConnectionStatus()
+        : defaultConnection;
       const os = window.storageApi.getPlatform ? window.storageApi.getPlatform() : "unknown";
       if (!active) {
         return;
@@ -56,10 +65,23 @@ export default function App() {
       setAuth(state);
       setTheme(settings.theme || "system");
       setPlatform(os);
+      setConnection(network || defaultConnection);
     }
     load();
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.storageApi.onConnectionStatusUpdated) {
+      return;
+    }
+    const unsubscribe = window.storageApi.onConnectionStatusUpdated((status) => {
+      setConnection(status || defaultConnection);
+    });
+    return () => {
+      unsubscribe?.();
     };
   }, []);
 
@@ -119,6 +141,17 @@ export default function App() {
     }
   }, [current, activeScreen]);
 
+  useEffect(() => {
+    if (activeModule !== "storage") {
+      return;
+    }
+    if (!auth.authenticated || hasStorageAccess) {
+      return;
+    }
+    setActiveModule("launcher");
+    setPendingModule(null);
+  }, [activeModule, auth.authenticated, hasStorageAccess]);
+
   if (auth.loading) {
     return (
       <>
@@ -142,7 +175,12 @@ export default function App() {
             const next = await window.storageApi.login(payload);
             setAuth(next);
             if (pendingModule) {
-              setActiveModule(pendingModule);
+              const nextHasStorage = new Set(next?.enabled_products || []).has("storage");
+              if (pendingModule === "storage" && !nextHasStorage) {
+                setActiveModule("launcher");
+              } else {
+                setActiveModule(pendingModule);
+              }
               setPendingModule(null);
             } else {
               setActiveModule("launcher");
@@ -159,18 +197,25 @@ export default function App() {
       <>
         <LaunchScreen
           auth={auth}
+          connection={connection}
           onLogout={async () => {
             await window.storageApi.logout();
             setAuth({ ...defaultAuth, loading: false });
           }}
           onSelect={(product) => {
+            if (!connection.online && (product === "storage" || product === "monitor")) {
+              return;
+            }
             if (product === "storage" && !auth.authenticated) {
               setPendingModule(product);
               setActiveModule("login");
               return;
             }
+            if (product === "storage" && auth.authenticated && !hasStorageAccess) {
+              return;
+            }
             setActiveModule(product);
-            if (product === "storage") {
+            if (product === "storage" && hasStorageAccess) {
               window.storageApi.startSync();
             }
           }}
@@ -183,11 +228,13 @@ export default function App() {
   if (activeModule === "monitor") {
     return (
       <>
-        <MonitorScreen
-          onBack={() => {
-            setActiveModule("launcher");
-          }}
-        />
+        <Suspense fallback={<div className="panel">Loading module...</div>}>
+          <MonitorScreen
+            onBack={() => {
+              setActiveModule("launcher");
+            }}
+          />
+        </Suspense>
         <ThemeToggle />
       </>
     );
@@ -195,10 +242,20 @@ export default function App() {
 
   return (
     <>
+      {!connection.online ? (
+        <div className="connection-banner">
+          {connection.reconnecting ? "Reconnecting..." : "Offline"}
+          <span className="connection-banner-subtitle">
+            {" "}
+            WorkZilla requires internet connection. Please connect to internet to continue.
+          </span>
+        </div>
+      ) : null}
       <div className="app-shell">
         <Sidebar
           items={visibleScreens}
           activeId={current.id}
+          connection={connection}
           onSelect={setActiveScreen}
           onBack={() => setActiveModule("launcher")}
           onLogout={async () => {
@@ -211,9 +268,15 @@ export default function App() {
           {current.id === "dashboard" ? <DashboardScreen /> : null}
           {current.id === "sync-status" ? <SyncStatusScreen /> : null}
           {current.id === "storage" ? <StorageUsageScreen /> : null}
-          {current.id === "files" ? <StorageFilesScreen isAdmin={isAdmin} authUser={auth.user} /> : null}
+          {current.id === "files" ? (
+            <Suspense fallback={<div className="panel">Loading files...</div>}>
+              <StorageFilesScreen isAdmin={isAdmin} authUser={auth.user} />
+            </Suspense>
+          ) : null}
           {current.id === "choose-folders" ? (
-            <ChooseFoldersScreen onOpenCloud={() => setActiveScreen("files")} />
+            <Suspense fallback={<div className="panel">Loading sync settings...</div>}>
+              <ChooseFoldersScreen onOpenCloud={() => setActiveScreen("files")} />
+            </Suspense>
           ) : null}
           {current.id === "activity" ? <SyncActivityScreen /> : null}
           {current.id === "errors" ? <ErrorsScreen /> : null}

@@ -5,10 +5,14 @@ contextBridge.exposeInMainWorld("storageApi", {
   logout: () => ipcRenderer.invoke("auth:logout"),
   getAuthStatus: () => ipcRenderer.invoke("auth:status"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  getConnectionStatus: () => ipcRenderer.invoke("connection:status"),
+  checkConnectionNow: () => ipcRenderer.invoke("connection:check"),
   updateSettings: (payload) => ipcRenderer.invoke("settings:update", payload),
   getFolders: () => ipcRenderer.invoke("folders:get"),
   chooseFolders: () => ipcRenderer.invoke("folders:choose"),
   removeFolder: (path) => ipcRenderer.invoke("folders:remove", path),
+  mapFolderToOnline: (payload) => ipcRenderer.invoke("folders:map-remote", payload),
+  getMappedOnlineFolder: (localPath) => ipcRenderer.invoke("folders:get-map", localPath),
   startSync: () => ipcRenderer.invoke("sync:start"),
   getSyncStatus: () => ipcRenderer.invoke("sync:status"),
   pauseSync: () => ipcRenderer.invoke("sync:pause"),
@@ -21,10 +25,15 @@ contextBridge.exposeInMainWorld("storageApi", {
   getDeviceInfo: () => ipcRenderer.invoke("device:info"),
   getStorageRoot: (payload) => ipcRenderer.invoke("storage:explorer:root", payload),
   getStorageFolder: (payload) => ipcRenderer.invoke("storage:explorer:folder", payload),
+  createStorageFolder: (payload) => ipcRenderer.invoke("storage:explorer:create-folder", payload),
+  renameStorageFolder: (payload) => ipcRenderer.invoke("storage:explorer:rename-folder", payload),
+  uploadStorageFiles: (payload) => ipcRenderer.invoke("storage:explorer:upload-picker", payload),
+  uploadStoragePaths: (payload) => ipcRenderer.invoke("storage:explorer:upload-paths", payload),
   getStorageUsers: () => ipcRenderer.invoke("storage:org:users"),
   getStorageDevices: (payload) => ipcRenderer.invoke("storage:org:devices", payload),
   createStorageUser: (payload) => ipcRenderer.invoke("storage:org:users:create", payload),
   downloadFile: (payload) => ipcRenderer.invoke("storage:download", payload),
+  downloadBulk: (payload) => ipcRenderer.invoke("storage:download-bulk", payload),
   getPlatform: () => process.platform,
   getMonitorPermissions: () => ipcRenderer.invoke("monitor:permissions"),
   requestMonitorPermissions: () => ipcRenderer.invoke("monitor:request-permissions"),
@@ -40,5 +49,15 @@ contextBridge.exposeInMainWorld("storageApi", {
     const listener = (_event, perms) => handler(perms);
     ipcRenderer.on("monitor:permissions-updated", listener);
     return () => ipcRenderer.removeListener("monitor:permissions-updated", listener);
+  },
+  onConnectionStatusUpdated: (handler) => {
+    const listener = (_event, status) => handler(status);
+    ipcRenderer.on("connection:status", listener);
+    return () => ipcRenderer.removeListener("connection:status", listener);
+  },
+  onStorageUploadProgress: (handler) => {
+    const listener = (_event, status) => handler(status);
+    ipcRenderer.on("storage:upload-progress", listener);
+    return () => ipcRenderer.removeListener("storage:upload-progress", listener);
   }
 });

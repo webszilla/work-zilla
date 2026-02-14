@@ -6,7 +6,7 @@ from .services import total_allowed_storage_gb, get_org_bandwidth_status, get_or
 from .usage_cache import get_usage_for_org, increment_usage, decrement_usage
 from .permissions import resolve_org_for_user, is_org_admin, is_saas_admin
 from .storage_backend import build_storage_key, storage_save, storage_open
-from .events import emit_event, soft_delete_folder
+from .events import emit_event, soft_delete_folder, hard_delete_file
 
 
 def resolve_context(request):
@@ -148,6 +148,7 @@ def move_file(item, folder):
 def soft_delete_file(item):
     if item.is_deleted:
         return item
+    hard_delete_file(item.storage_key)
     item.is_deleted = True
     item.save(update_fields=["is_deleted"])
     decrement_usage(item.organization, item.size_bytes or 0)

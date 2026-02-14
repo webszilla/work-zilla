@@ -32,23 +32,46 @@ from core.models import (
 )
 
 
-def download_windows_agent(request):
+def _resolve_download_path(*candidates):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     downloads_dir = os.path.join(base_dir, "static", "downloads")
-    filename = "WorkZillaAgentSetup.exe"
-    file_path = os.path.join(downloads_dir, filename)
-    if not os.path.exists(file_path):
-        raise Http404("Installer not found.")
+    for filename in candidates:
+        if not filename:
+            continue
+        file_path = os.path.join(downloads_dir, filename)
+        if os.path.exists(file_path):
+            return file_path, filename
+    raise Http404("Installer not found.")
+
+
+def download_windows_agent(request):
+    file_path, filename = _resolve_download_path(
+        "WorkZillaInstallerSetup.exe",
+        "Work Zilla Installer-win-x64-0.1.0.exe",
+        "WorkZillaAgentSetup.exe",
+    )
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
 def download_mac_agent(request):
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    downloads_dir = os.path.join(base_dir, "static", "downloads")
-    filename = "WorkZillaAgent.dmg"
-    file_path = os.path.join(downloads_dir, filename)
-    if not os.path.exists(file_path):
-        raise Http404("Installer not found.")
+    user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
+    prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
+    arm_file = "Work Zilla Installer-mac-arm64-0.1.0.dmg"
+    x64_file = "Work Zilla Installer-mac-x64-0.1.0.dmg"
+    if prefer_arm:
+        file_path, filename = _resolve_download_path(
+            "WorkZillaInstaller.dmg",
+            arm_file,
+            x64_file,
+            "WorkZillaAgent.dmg",
+        )
+    else:
+        file_path, filename = _resolve_download_path(
+            "WorkZillaInstaller.dmg",
+            x64_file,
+            arm_file,
+            "WorkZillaAgent.dmg",
+        )
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 

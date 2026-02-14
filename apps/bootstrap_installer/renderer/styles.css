@@ -1,0 +1,131 @@
+:root {
+  color-scheme: dark;
+  --bg: #061329;
+  --bg-soft: #0f213f;
+  --text: #e6edf7;
+  --muted: #9fb3d3;
+  --border: #2d4369;
+  --accent: #1fd16b;
+  --accent-2: #f2aa1f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(circle at top left, #12355f, var(--bg));
+  color: var(--text);
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.hero p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.cards {
+  margin-top: 22px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.card {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(23, 47, 82, 0.96), rgba(8, 21, 43, 0.96));
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  min-height: 40px;
+}
+
+.card button {
+  margin-top: 14px;
+  border: 1px solid var(--accent-2);
+  background: transparent;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.card button:hover:enabled {
+  background: rgba(242, 170, 31, 0.14);
+}
+
+.card button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(5, 15, 32, 0.8);
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+#statusText {
+  color: var(--muted);
+}
+
+.pill {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.progress-wrap {
+  margin-top: 10px;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #162840;
+  overflow: hidden;
+}
+
+.progress {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7de2a7);
+  transition: width 120ms linear;
+}
+
+@media (max-width: 740px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}

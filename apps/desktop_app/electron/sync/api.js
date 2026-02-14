@@ -4,6 +4,35 @@ import FormData from "form-data";
 import { getFetch } from "./auth.js";
 import { loadSettings } from "./settings.js";
 
+function getFormHeaders(form, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    form.getLength((error, length) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({
+        ...form.getHeaders(),
+        "Content-Length": String(length),
+        Connection: "close",
+        ...extraHeaders
+      });
+    });
+  });
+}
+
+function mapUploadTransportError(error, fallbackCode = "upload_failed") {
+  const code = error?.code || error?.cause?.code || "";
+  if (code === "EPIPE" || code === "ECONNRESET" || code === "UND_ERR_SOCKET") {
+    const mapped = new Error("upload_connection_closed");
+    mapped.code = "upload_connection_closed";
+    return mapped;
+  }
+  const mapped = new Error(error?.message || fallbackCode);
+  mapped.code = error?.code || fallbackCode;
+  return mapped;
+}
+
 function buildUrl(endpoint) {
   const settings = loadSettings();
   if (!settings.serverUrl) {
@@ -19,6 +48,16 @@ export async function getStorageStatus() {
     throw new Error("storage_unavailable");
   }
   return response.json();
+}
+
+export async function pingApi() {
+  try {
+    const response = await getFetch()(buildUrl("/api/auth/me"), { method: "GET" });
+    // 2xx, 401, 403 all confirm API is reachable.
+    return response.status < 500;
+  } catch {
+    return false;
+  }
 }
 
 export async function getSyncSettings() {
@@ -126,8 +165,9 @@ export async function createOrgUser(payload) {
   return data;
 }
 
-export async function createFolder(parentId, name) {
-  const response = await getFetch()(buildUrl("/api/storage/explorer/folders/create"), {
+export async function createFolder(parentId, name, { userId } = {}) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  const response = await getFetch()(buildUrl(`/api/storage/explorer/folders/create${query}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ parent_id: parentId, name })
@@ -141,15 +181,74 @@ export async function createFolder(parentId, name) {
   return response.json();
 }
 
-export async function uploadFile(folderId, filePath) {
+export async function deleteFolder(folderId, { userId } = {}) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  const response = await getFetch()(buildUrl(`/api/storage/explorer/folders/${folderId}/delete${query}`), {
+    method: "DELETE"
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (!response.ok) {
+    const err = new Error(data?.detail || data?.error || "delete_folder_failed");
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+  return data || { deleted: true };
+}
+
+export async function renameFolder(folderId, name, { userId } = {}) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  const response = await getFetch()(buildUrl(`/api/storage/explorer/folders/${folderId}/rename${query}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (response.status === 409) {
+    throw new Error("duplicate_folder");
+  }
+  if (!response.ok) {
+    const code = data?.error || data?.detail || "rename_folder_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
+export async function uploadFile(folderId, filePath, { userId } = {}) {
   const form = new FormData();
   form.append("folder_id", folderId);
   form.append("file", fs.createReadStream(filePath), path.basename(filePath));
-  const response = await getFetch()(buildUrl("/api/storage/explorer/upload"), {
-    method: "POST",
-    body: form,
-    headers: form.getHeaders()
-  });
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  const headers = await getFormHeaders(form);
+  let response;
+  try {
+    response = await getFetch()(buildUrl(`/api/storage/explorer/upload${query}`), {
+      method: "POST",
+      body: form,
+      headers
+    });
+  } catch (error) {
+    throw mapUploadTransportError(error, "upload_failed");
+  }
   const text = await response.text();
   let data = null;
   if (text) {
@@ -194,6 +293,34 @@ export async function downloadStorage(params = {}) {
       }
     }
     const err = new Error(data?.detail || data?.error || "download_failed");
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+  return response;
+}
+
+export async function downloadBulkSelection({ fileIds = [], folderIds = [], userId } = {}) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  const response = await getFetch()(buildUrl(`/api/storage/explorer/download-bulk${query}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_ids: fileIds,
+      folder_ids: folderIds
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    const err = new Error(data?.error || data?.detail || "bulk_download_failed");
     err.status = response.status;
     err.data = data;
     throw err;
@@ -280,11 +407,17 @@ export async function uploadScreenshot({ filePath, employeeId, deviceId, company
   if (deviceId) {
     extraHeaders["X-Device-Id"] = deviceId;
   }
-  const response = await getFetch()(buildUrl("/api/screenshot/upload"), {
-    method: "POST",
-    body: form,
-    headers: { ...form.getHeaders(), ...extraHeaders }
-  });
+  const headers = await getFormHeaders(form, extraHeaders);
+  let response;
+  try {
+    response = await getFetch()(buildUrl("/api/screenshot/upload"), {
+      method: "POST",
+      body: form,
+      headers
+    });
+  } catch (error) {
+    throw mapUploadTransportError(error, "screenshot_upload_failed");
+  }
   const text = await response.text();
   let data = null;
   if (text) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
+import { formatDeviceDateTime } from "../lib/datetime.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 
@@ -291,7 +292,7 @@ export default function EmployeesPage() {
                           <td>
                             <span className={`badge ${badgeClass}`}>{status}</span>
                           </td>
-                          <td>{employee.last_seen || "-"}</td>
+                          <td>{formatDeviceDateTime(employee.last_seen)}</td>
                           <td>
                             <Link
                               to={`/employees/${employee.id}`}

@@ -3,6 +3,9 @@ from django.http import JsonResponse, FileResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 import json
+import os
+import tempfile
+import zipfile
 
 from .services_explorer import (
     resolve_context,
@@ -23,7 +26,7 @@ from .services_explorer import (
     search_files,
     open_file_stream,
 )
-from .models import StorageFolder
+from .models import StorageFolder, StorageFile
 from .models import StorageGlobalSettings
 from .security import rate_limit, get_storage_security_settings, validate_upload
 from .events import emit_security_event
@@ -41,6 +44,32 @@ def _clean_name(value):
     name = " ".join(str(value or "").strip().split())
     name = name.replace("/", "-").replace("\\", "-")
     return name
+
+
+def _safe_filename(value, fallback="download"):
+    base = _clean_name(value) or fallback
+    return base.replace("..", ".")
+
+
+def _collect_folder_tree(org, owner_id, roots):
+    folder_ids = {folder.id for folder in roots}
+    queue = list(folder_ids)
+    while queue:
+        parent_id = queue.pop(0)
+        children = list(
+            StorageFolder.objects.filter(
+                organization=org,
+                owner_id=owner_id,
+                parent_id=parent_id,
+                is_deleted=False,
+            ).only("id")
+        )
+        for child in children:
+            if child.id in folder_ids:
+                continue
+            folder_ids.add(child.id)
+            queue.append(child.id)
+    return folder_ids
 
 
 @login_required
@@ -206,6 +235,124 @@ def explorer_download(request, file_id):
     emit_security_event("file_download", org_id=org.id, user_id=request.user.id, request=request, file_id=str(item.id))
     response = FileResponse(handle, content_type=item.content_type or "application/octet-stream")
     response["Content-Disposition"] = f"attachment; filename=\"{item.original_filename}\""
+    return response
+
+
+@csrf_exempt
+@login_required
+@require_http_methods(["POST"])
+def explorer_bulk_download(request):
+    ctx = resolve_context(request)
+    if not ctx:
+        return _error("permission_denied", status=403)
+    if ctx["role"] == "saas_admin":
+        emit_security_event("permission_denied", request=request)
+        return _error("permission_denied", status=403)
+    org = ctx["org"]
+    access_state, _ = get_storage_access_state(org)
+    if access_state == "none":
+        return _error("subscription_required", status=403)
+    owner_id = get_owner_from_request(request, org, ctx["role"])
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    file_ids = payload.get("file_ids") or []
+    folder_ids = payload.get("folder_ids") or []
+    if not isinstance(file_ids, list) or not isinstance(folder_ids, list):
+        return _error("invalid_selection", status=400)
+    if not file_ids and not folder_ids:
+        return _error("no_selection", status=400)
+
+    files = []
+    seen_file_ids = set()
+    for file_id in file_ids:
+        try:
+            item = ensure_file_access(org, owner_id, ctx["role"], file_id)
+        except PermissionError:
+            return _error("permission_denied", status=403)
+        if item.id in seen_file_ids:
+            continue
+        seen_file_ids.add(item.id)
+        files.append(item)
+
+    folders = []
+    for folder_id in folder_ids:
+        try:
+            folder = ensure_folder_access(org, owner_id, ctx["role"], folder_id)
+        except PermissionError:
+            return _error("permission_denied", status=403)
+        folders.append(folder)
+
+    if folders:
+        tree_ids = _collect_folder_tree(org, owner_id, folders)
+        folder_files = list(
+            StorageFile.objects.filter(
+                organization=org,
+                owner_id=owner_id,
+                folder_id__in=tree_ids,
+                is_deleted=False,
+            ).order_by("created_at")
+        )
+        for item in folder_files:
+            if item.id in seen_file_ids:
+                continue
+            seen_file_ids.add(item.id)
+            files.append(item)
+
+    if not files:
+        return _error("no_files", status=404)
+
+    total_bytes = sum(int(item.size_bytes or 0) for item in files)
+    ok, usage = apply_bandwidth_usage(org, total_bytes)
+    if not ok:
+        return _error("bandwidth_limit_exceeded", status=409, extra={
+            "used_bytes": usage.get("used_bytes"),
+            "limit_bytes": usage.get("limit_bytes"),
+        })
+
+    folder_rows = list(
+        StorageFolder.objects.filter(
+            organization=org,
+            owner_id=owner_id,
+            id__in={item.folder_id for item in files if item.folder_id},
+        ).only("id", "name", "parent_id")
+    )
+    folder_map = {row.id: row for row in folder_rows}
+
+    def build_path(folder_id):
+        parts = []
+        current = folder_map.get(folder_id)
+        while current:
+            parts.append(_safe_filename(current.name, "folder"))
+            current = folder_map.get(current.parent_id)
+        parts.reverse()
+        return parts
+
+    temp_file = tempfile.TemporaryFile()
+    with zipfile.ZipFile(temp_file, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        for item in files:
+            try:
+                file_handle = open_file_stream(item)
+            except Exception:
+                continue
+            archive_path = os.path.join(
+                "selection",
+                *build_path(item.folder_id),
+                _safe_filename(item.original_filename, "file")
+            )
+            with zipf.open(archive_path, "w") as dest:
+                for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+                    dest.write(chunk)
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+
+    temp_file.seek(0)
+    response = FileResponse(temp_file, content_type="application/zip")
+    response["Content-Disposition"] = "attachment; filename=\"selection.zip\""
     return response
 
 

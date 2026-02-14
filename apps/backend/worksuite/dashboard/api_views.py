@@ -1742,6 +1742,22 @@ def work_activity_log(request):
             return "-"
         return timezone.localtime(value).strftime("%H:%M:%S")
 
+    def classify_event(reason):
+        text = (reason or "").strip().lower()
+        if not text:
+            return ""
+        if any(token in text for token in ["net", "internet", "network", "offline", "disconnect"]):
+            return "Net Disconnect"
+        if any(token in text for token in ["shutdown", "shut down", "power off"]):
+            return "PC Shutdown"
+        if any(token in text for token in ["sleep", "suspend", "standby"]):
+            return "PC Sleep"
+        if any(token in text for token in ["signout", "sign out", "logout", "log out"]):
+            return "Sign Out"
+        if any(token in text for token in ["restart", "reboot"]):
+            return "PC Restart"
+        return "Manual Stop"
+
     def build_sessions(times):
         if not times:
             return []
@@ -1759,18 +1775,33 @@ def work_activity_log(request):
 
     STOP_REASON_WINDOW = timedelta(minutes=10)
 
-    def find_stop_reason(events, end_time):
+    def find_stop_event(events, start_time, end_time):
         if not events or not end_time:
-            return ""
-        best_reason = ""
-        best_delta = None
-        for event in events:
-            event_time = event["time"]
-            delta = abs(event_time - end_time)
-            if delta <= STOP_REASON_WINDOW and (best_delta is None or delta < best_delta):
-                best_delta = delta
-                best_reason = event["reason"]
-        return best_reason
+            return {"reason": "", "event": ""}
+
+        # Prefer events that happened within the active session or shortly after it ended.
+        lower_bound = (start_time or end_time) - timedelta(minutes=2)
+        upper_bound = end_time + STOP_REASON_WINDOW
+        candidates = [
+            event for event in events
+            if lower_bound <= event["time"] <= upper_bound
+        ]
+        if not candidates:
+            # Fallback to nearest event within a wider window to avoid losing user-provided reason text.
+            wide_window = timedelta(minutes=30)
+            candidates = [
+                event for event in events
+                if abs(event["time"] - end_time) <= wide_window
+            ]
+        if not candidates:
+            return {"reason": "", "event": ""}
+
+        best = min(candidates, key=lambda event: abs(event["time"] - end_time))
+        reason = (best.get("reason") or "").strip()
+        return {
+            "reason": reason,
+            "event": classify_event(reason),
+        }
 
     employee_map = {e.id: e.name for e in employees}
     daily_times = defaultdict(list)
@@ -1788,7 +1819,7 @@ def work_activity_log(request):
         key = (event.employee_id, event_time.date())
         stop_events_by_day[key].append({
             "time": event_time,
-            "reason": event.reason or ""
+            "reason": (event.reason or "").strip()
         })
 
     rows = []
@@ -1804,16 +1835,18 @@ def work_activity_log(request):
         for start, end in sessions:
             duration_seconds = max(0, (end - start).total_seconds())
             total_seconds += duration_seconds
-            stop_reason = find_stop_reason(stop_events_for_day, end)
+            stop_info = find_stop_event(stop_events_for_day, start, end)
             history_entries.append({
                 "on": format_time(start),
                 "off": format_time(end),
                 "duration": format_duration(duration_seconds),
-                "stop_reason": stop_reason,
+                "stop_reason": stop_info["reason"],
+                "event": stop_info["event"],
             })
         count = len(sessions)
         label = f"{count} time" if count == 1 else f"{count} times"
         last_stop_reason = history_entries[-1].get("stop_reason") if history_entries else ""
+        last_event = history_entries[-1].get("event") if history_entries else ""
         rows.append({
             "employee": employee_map.get(employee_id, "Unknown"),
             "date": day.isoformat(),
@@ -1823,6 +1856,7 @@ def work_activity_log(request):
             "history": history_entries,
             "duration": format_duration(total_seconds),
             "stop_reason": last_stop_reason,
+            "event": last_event,
             "_date": day,
         })
 

@@ -59,6 +59,7 @@ export default class SyncService {
     this.activeUploads = 0;
     this.autoPaused = false;
     this.lastUploadAt = 0;
+    this.rateLimitedUntil = 0;
   }
 
   getStatus() {
@@ -217,6 +218,11 @@ export default class SyncService {
     if (throttleMs && Date.now() - this.lastUploadAt < throttleMs) {
       return;
     }
+    if (this.rateLimitedUntil && Date.now() < this.rateLimitedUntil) {
+      const remainingSeconds = Math.max(1, Math.ceil((this.rateLimitedUntil - Date.now()) / 1000));
+      this.retryIn = `${remainingSeconds}s`;
+      return;
+    }
     const item = dequeueNext();
     if (!item) {
       return;
@@ -280,6 +286,11 @@ export default class SyncService {
       } else if (error?.code === "conflict") {
         const renamed = await this.handleConflict(item.path);
         addActivity("Conflict resolved", `Renamed to ${renamed}`, "info");
+      } else if (error?.code === "rate_limited") {
+        this.rateLimitedUntil = Date.now() + 60000;
+        this.retryIn = "60s";
+        addActivity("Sync rate limited", "Retrying uploads after cooldown", "error");
+        addError("Upload rate limited", "Too many uploads. Retrying in 60 seconds.");
       } else {
         addError("Upload failed", error?.message || "Unknown error");
       }

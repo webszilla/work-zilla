@@ -31,6 +31,9 @@ def emit_security_event(action, org_id=None, user_id=None, request=None, **extra
 def soft_delete_folder(folder):
     if folder.is_deleted:
         return
+    files = list(StorageFile.objects.filter(folder=folder, is_deleted=False).only("storage_key"))
+    for item in files:
+        hard_delete_file(item.storage_key)
     folder.is_deleted = True
     folder.save(update_fields=["is_deleted"])
     StorageFile.objects.filter(folder=folder, is_deleted=False).update(is_deleted=True)

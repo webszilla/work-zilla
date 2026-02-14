@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import {
+  formatDeviceDate,
+  formatDeviceTimeWithDate,
+} from "../lib/datetime.js";
 import TablePagination from "../components/TablePagination.jsx";
 
 const emptyState = {
@@ -34,7 +38,8 @@ export default function WorkActivityLogPage() {
   const [historyModal, setHistoryModal] = useState({
     open: false,
     rows: [],
-    meta: ""
+    meta: "",
+    baseDate: ""
   });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
@@ -136,6 +141,7 @@ export default function WorkActivityLogPage() {
         row.date,
         row.on_time,
         row.off_time,
+        row.event,
         row.duration,
         row.history_label,
         row.stop_reason
@@ -269,7 +275,8 @@ export default function WorkActivityLogPage() {
     setHistoryModal({
       open: true,
       rows: historyRows,
-      meta: `${row.employee} - ${row.date}`
+      meta: `${row.employee} - ${formatDeviceDate(row.date)}`,
+      baseDate: row.date || ""
     });
   }
 
@@ -412,6 +419,7 @@ export default function WorkActivityLogPage() {
                     <th>PC On Time</th>
                     <th>PC Off / Signout / Sleeping</th>
                     <th>Stop Reason</th>
+                    <th>Event</th>
                     <th>History</th>
                     <th>Duration</th>
                   </tr>
@@ -421,10 +429,11 @@ export default function WorkActivityLogPage() {
                     pagedRows.map((row, index) => (
                       <tr key={`${row.employee}-${row.date}-${index}`}>
                         <td>{row.employee}</td>
-                        <td>{row.date}</td>
-                        <td>{row.on_time}</td>
-                        <td>{row.off_time}</td>
+                        <td>{formatDeviceDate(row.date)}</td>
+                        <td>{formatDeviceTimeWithDate(row.on_time, row.date)}</td>
+                        <td>{formatDeviceTimeWithDate(row.off_time, row.date)}</td>
                         <td>{row.stop_reason || "-"}</td>
+                        <td>{row.event || "-"}</td>
                         <td>
                           <button
                             type="button"
@@ -439,7 +448,7 @@ export default function WorkActivityLogPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="7">No activity data yet.</td>
+                      <td colSpan="8">No activity data yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -463,8 +472,8 @@ export default function WorkActivityLogPage() {
       </div>
 
       {historyModal.open ? (
-        <div className="modal-overlay" onClick={() => setHistoryModal({ open: false, rows: [], meta: "" })}>
-          <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setHistoryModal({ open: false, rows: [], meta: "", baseDate: "" })}>
+          <div className="modal-panel work-activity-history-modal" onClick={(event) => event.stopPropagation()}>
             <h5>On/Off History</h5>
             <div className="text-secondary mb-2">{historyModal.meta}</div>
             <div className="table-responsive">
@@ -475,6 +484,7 @@ export default function WorkActivityLogPage() {
                     <th>On Time</th>
                     <th>PC Off / Signout / Sleeping</th>
                     <th>Stop Reason</th>
+                    <th>Event</th>
                     <th>Duration</th>
                   </tr>
                 </thead>
@@ -483,15 +493,16 @@ export default function WorkActivityLogPage() {
                     historyModal.rows.map((entry, idx) => (
                       <tr key={`${entry.on}-${idx}`}>
                         <td>{idx + 1}</td>
-                        <td>{entry.on}</td>
-                        <td>{entry.off}</td>
+                        <td>{formatDeviceTimeWithDate(entry.on, historyModal.baseDate)}</td>
+                        <td>{formatDeviceTimeWithDate(entry.off, historyModal.baseDate)}</td>
                         <td>{entry.stop_reason || "-"}</td>
+                        <td>{entry.event || "-"}</td>
                         <td>{entry.duration}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="5">No history available.</td>
+                      <td colSpan="6">No history available.</td>
                     </tr>
                   )}
                 </tbody>
@@ -501,7 +512,7 @@ export default function WorkActivityLogPage() {
               <button
                 type="button"
                 className="modal-close"
-                onClick={() => setHistoryModal({ open: false, rows: [], meta: "" })}
+                onClick={() => setHistoryModal({ open: false, rows: [], meta: "", baseDate: "" })}
               >
                 Close
               </button>

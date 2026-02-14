@@ -633,6 +633,45 @@ def _storage_subscription_status(subscription, now=None):
     return "inactive"
 
 
+def _storage_subscription_sort_key(subscription, now=None):
+    status = _storage_subscription_status(subscription, now=now)
+    rank = {
+        "active": 4,
+        "trial": 3,
+        "expired": 2,
+        "inactive": 1,
+    }.get(status, 0)
+    stamp = (
+        getattr(subscription, "updated_at", None)
+        or getattr(subscription, "created_at", None)
+        or getattr(subscription, "start_date", None)
+        or getattr(subscription, "renewal_date", None)
+        or getattr(subscription, "end_date", None)
+    )
+    if isinstance(stamp, date) and not isinstance(stamp, datetime):
+        stamp = datetime.combine(stamp, datetime.min.time())
+    if isinstance(stamp, datetime):
+        if timezone.is_naive(stamp):
+            stamp = timezone.make_aware(stamp, timezone.get_current_timezone())
+        stamp_value = stamp.timestamp()
+    else:
+        stamp_value = 0
+    return rank, stamp_value
+
+
+def _pick_best_storage_subscription(candidates, now=None):
+    best = None
+    best_key = (-1, -1)
+    for candidate in candidates or []:
+        if not candidate:
+            continue
+        key = _storage_subscription_sort_key(candidate, now=now)
+        if key > best_key:
+            best = candidate
+            best_key = key
+    return best
+
+
 def _serialize_owner(user):
     if not user:
         return {
@@ -829,6 +868,29 @@ def _apply_transfer(transfer):
             billing_cycle=transfer.billing_cycle,
         )
 
+        if product_slug == "storage":
+            try:
+                storage_product = StorageProduct.objects.filter(name__iexact="Online Storage").first()
+                if storage_product:
+                    storage_plan = None
+                    if transfer.plan:
+                        storage_plan = (
+                            StoragePlan.objects
+                            .filter(product=storage_product, name__iexact=transfer.plan.name)
+                            .order_by("id")
+                            .first()
+                        )
+                    storage_admin_services.assign_plan_to_org(
+                        org=org,
+                        product=storage_product,
+                        plan=storage_plan,
+                        status="active",
+                        renewal_date=end_date.date() if end_date else None,
+                    )
+            except Exception:
+                # Core subscription stays source-of-truth; storage mirror can be repaired later.
+                pass
+
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
         min_interval = transfer.plan.screenshot_min_minutes or 5
         if settings_obj.screenshot_interval_minutes < min_interval:
@@ -989,28 +1051,31 @@ def product_detail(request, slug):
         plans_qs = StoragePlan.objects.all()
         if storage_product:
             plans_qs = plans_qs.filter(product=storage_product)
-        subs = (
+        subs = list(
             StorageOrgSubscription.objects
             .select_related("plan", "organization", "organization__owner")
             .order_by("organization__name")
         )
-        org_ids = list(subs.values_list("organization_id", flat=True))
-        core_subs = (
+        org_ids = {sub.organization_id for sub in subs}
+        core_subs = list(
             Subscription.objects
-            .filter(organization_id__in=org_ids, plan__product__slug="storage")
+            .filter(plan__product__slug="storage")
             .select_related("plan", "organization", "organization__owner")
             .order_by("organization_id", "-start_date")
         )
-        sub_by_org = {}
+        org_ids.update(sub.organization_id for sub in core_subs)
+        sub_candidates_by_org = {}
         for sub in subs:
-            if sub.organization_id not in sub_by_org:
-                sub_by_org[sub.organization_id] = sub
+            sub_candidates_by_org.setdefault(sub.organization_id, []).append(sub)
         for sub in core_subs:
-            if sub.organization_id not in sub_by_org:
-                sub_by_org[sub.organization_id] = sub
+            sub_candidates_by_org.setdefault(sub.organization_id, []).append(sub)
+        now = timezone.now()
+        sub_by_org = {
+            org_id: _pick_best_storage_subscription(candidates, now=now)
+            for org_id, candidates in sub_candidates_by_org.items()
+        }
         status_counts = {"active": 0, "trial": 0, "inactive": 0, "total": 0, "pending_approvals": 0}
         org_payload = []
-        now = timezone.now()
         for sub in sub_by_org.values():
             org = sub.organization
             status = _storage_subscription_status(sub, now=now)
@@ -1926,27 +1991,29 @@ def product_organizations(request, slug):
         return JsonResponse({"error": "product_not_found"}, status=404)
     if product_slug == "storage":
         orgs = Organization.objects.filter(id__in=list(org_ids)).select_related("owner").order_by("name")
-        subscriptions = (
+        subscriptions = list(
             StorageOrgSubscription.objects
             .filter(organization_id__in=list(org_ids))
             .select_related("plan")
             .order_by("organization_id", "-created_at")
         )
-        sub_by_org = {}
+        sub_candidates_by_org = {}
         for sub in subscriptions:
-            if sub.organization_id not in sub_by_org:
-                sub_by_org[sub.organization_id] = sub
-        core_subs = (
+            sub_candidates_by_org.setdefault(sub.organization_id, []).append(sub)
+        core_subs = list(
             Subscription.objects
             .filter(organization_id__in=list(org_ids), plan__product__slug="storage")
             .select_related("plan")
             .order_by("organization_id", "-start_date")
         )
         for sub in core_subs:
-            if sub.organization_id not in sub_by_org:
-                sub_by_org[sub.organization_id] = sub
+            sub_candidates_by_org.setdefault(sub.organization_id, []).append(sub)
         payload = []
         now = timezone.now()
+        sub_by_org = {
+            org_id: _pick_best_storage_subscription(candidates, now=now)
+            for org_id, candidates in sub_candidates_by_org.items()
+        }
         for org in orgs:
             owner = org.owner
             owner_name = (owner.get_full_name() if owner else "").strip()
