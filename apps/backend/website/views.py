@@ -87,10 +87,10 @@ def download_mac_agent(request):
     x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
-            arm_zip_latest,
             arm_file_latest,
-            x64_zip_latest,
+            arm_zip_latest,
             x64_file_latest,
+            x64_zip_latest,
             arm_file,
             arm_zip,
             x64_file,
@@ -100,10 +100,10 @@ def download_mac_agent(request):
         )
     else:
         file_path, filename = _resolve_download_path(
-            x64_zip_latest,
             x64_file_latest,
-            arm_zip_latest,
+            x64_zip_latest,
             arm_file_latest,
+            arm_zip_latest,
             x64_file,
             x64_zip,
             arm_file,

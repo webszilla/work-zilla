@@ -39,8 +39,12 @@
     "directories": {
       "buildResources": "electron"
     },
+    "electronLanguages": [
+      "en-US"
+    ],
     "files": [
       "electron/**/*",
+      "!electron/monitor/**",
       "renderer/dist/**/*",
       "package.json"
     ],
@@ -48,7 +52,7 @@
     "compression": "maximum",
     "mac": {
       "identity": "-",
-      "target": ["dmg", "zip", "pkg"],
+      "target": ["dmg"],
       "extraResources": [
         {
           "from": "electron/uninstall.sh",
@@ -68,13 +72,6 @@
         {
           "target": "nsis",
           "arch": ["x64"]
-        }
-      ],
-      "extraResources": [
-        {
-          "from": "electron/monitor",
-          "to": "monitor",
-          "filter": ["**/*"]
         }
       ]
     },

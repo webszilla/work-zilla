@@ -37,8 +37,7 @@
     "artifactName": "${productName}-${os}-${arch}-${version}.${ext}",
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ],
       "category": "public.app-category.utilities",
       "identity": "-",
