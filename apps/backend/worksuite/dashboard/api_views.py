@@ -993,8 +993,31 @@ def employees_delete(request, emp_id):
     if not employee:
         return _json_error("employee_not_found", status=404)
 
+    employee_name = employee.name or f"Employee {employee.id}"
+    screenshot_count = Screenshot.objects.filter(employee=employee).count()
+    activity_count = Activity.objects.filter(employee=employee).count()
+    stop_event_count = MonitorStopEvent.objects.filter(employee=employee).count()
+
     employee.delete()
-    return JsonResponse({"deleted": True})
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Delete Employee",
+        (
+            f"{employee_name} deleted. Removed {screenshot_count} screenshots, "
+            f"{activity_count} activity logs, and {stop_event_count} monitor stop records."
+        ),
+    )
+    return JsonResponse(
+        {
+            "deleted": True,
+            "employee_name": employee_name,
+            "removed": {
+                "screenshots": screenshot_count,
+                "activities": activity_count,
+                "monitor_stop_events": stop_event_count,
+            },
+        }
+    )
 
 
 @login_required

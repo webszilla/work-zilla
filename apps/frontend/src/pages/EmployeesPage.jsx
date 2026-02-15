@@ -115,21 +115,22 @@ export default function EmployeesPage() {
     }
   }, [page, totalPages]);
 
-  async function handleDelete(id) {
+  async function handleDelete(employee) {
+    const employeeName = employee?.name || "this employee";
     const confirmed = await confirm({
       title: "Delete Employee",
-      message: "Are you sure you want to delete this employee?",
-      confirmText: "Delete",
+      message: `If you delete ${employeeName}, all related screenshots, Live Activity, and Work Activity Log data will be permanently removed. Do you want to continue?`,
+      confirmText: "Delete Account",
       confirmVariant: "danger"
     });
     if (!confirmed) {
       return;
     }
     try {
-      await apiFetch(`/api/dashboard/employees/${id}/delete`, {
+      const data = await apiFetch(`/api/dashboard/employees/${employee.id}/delete`, {
         method: "DELETE"
       });
-      setNotice("Employee deleted.");
+      setNotice(`${data?.employee_name || employeeName} deleted successfully.`);
       await refreshEmployees();
     } catch (error) {
       if (error?.data?.redirect) {
@@ -309,7 +310,7 @@ export default function EmployeesPage() {
                             <button
                               type="button"
                               className="btn btn-danger btn-sm"
-                              onClick={() => handleDelete(employee.id)}
+                              onClick={() => handleDelete(employee)}
                             >
                               Delete
                             </button>
