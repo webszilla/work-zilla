@@ -297,6 +297,44 @@ function refreshTray() {
   tray.setContextMenu(buildTrayMenu());
 }
 
+async function resolveRemoteFolderIdForLocalPath(localPath) {
+  const localName = path.basename(localPath || "").trim();
+  if (!localName) {
+    return null;
+  }
+  const settings = loadSettings();
+  const rootData = await listRoot({});
+  let parentId = rootData?.folder_id || null;
+  if (!parentId) {
+    return null;
+  }
+  const rootItems = Array.isArray(rootData?.items) ? rootData.items : [];
+  const deviceId = String(settings?.deviceId || "").trim();
+  if (deviceId) {
+    const deviceFolder = rootItems.find((item) => item?.type === "folder" && item?.name === deviceId);
+    if (deviceFolder?.id) {
+      parentId = deviceFolder.id;
+    }
+  }
+  const parentData = await listFolder(parentId, {});
+  const items = Array.isArray(parentData?.items) ? parentData.items : [];
+  const match = items.find((item) => item?.type === "folder" && item?.name === localName);
+  return match?.id || null;
+}
+
+function isRemoteDeleteNotFound(error) {
+  const status = Number(error?.status || 0);
+  const message = String(error?.message || "").toLowerCase();
+  if (status === 404) {
+    return true;
+  }
+  return (
+    message.includes("not_found")
+    || message.includes("invalid_folder")
+    || message.includes("delete_folder_failed")
+  );
+}
+
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
@@ -431,14 +469,28 @@ ipcMain.handle("folders:remove", async (_event, folderPath) => {
     throw new Error("invalid_folder_path");
   }
   const mapped = getFolderMap(folderPath);
-  if (mapped?.remote_id) {
-    await deleteStorageFolder(mapped.remote_id);
+  let remoteId = mapped?.remote_id || null;
+  if (!remoteId) {
+    remoteId = await resolveRemoteFolderIdForLocalPath(folderPath);
+  }
+  if (remoteId) {
+    try {
+      await deleteStorageFolder(remoteId);
+    } catch (error) {
+      // Mapping can become stale after manual cloud operations; retry once via live lookup.
+      const fallbackRemoteId = await resolveRemoteFolderIdForLocalPath(folderPath);
+      if (fallbackRemoteId && fallbackRemoteId !== remoteId) {
+        await deleteStorageFolder(fallbackRemoteId);
+      } else if (!isRemoteDeleteNotFound(error)) {
+        throw error;
+      }
+    }
   }
   removeFolderMapsByPrefix(folderPath);
   clearQueueByPathPrefix(folderPath);
   removeLocalFolder(folderPath);
   syncService.start();
-  return { ok: true, cloud_deleted: Boolean(mapped?.remote_id) };
+  return { ok: true, cloud_deleted: Boolean(remoteId) };
 });
 
 ipcMain.handle("folders:map-remote", (_event, payload) => {
