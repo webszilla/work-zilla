@@ -129,19 +129,18 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-02-15 06:07:39 UTC
-  - Local commit SHA: c41f594
-  - GitHub main SHA: c41f594
+  - Published at (UTC): 2026-02-15 06:40:31 UTC
+  - Local commit SHA: 5ffa8b7
+  - GitHub main SHA: 5ffa8b7
   - Server live SHA (git metadata): 541c972 (code synced by rsync-fallback)
   - Deploy method: rsync-fallback
   - Gunicorn status: yes (listening on :8000)
   - Verified URLs:
-    - /downloads/windows-product-agent/ (200)
-    - /downloads/mac-agent/ (200, zip served)
+    - /app/saas-admin/storage (302 login redirect, app reachable)
     - /downloads/bootstrap-products.json (200)
   - Notes / rollback point:
-    - Purpose: Windows bootstrap download reliability + mac default smaller download
-    - Rollback to previous GitHub main: a1332f6
+    - Purpose: SaaS Media Library online storage view + storage key structure standardization
+    - Rollback to previous GitHub main: 4e95852
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
