@@ -267,6 +267,7 @@ function cleanupLegacyWindowsMonitor() {
     'taskkill /F /T /IM "Work Zilla Monitor.exe"',
     'taskkill /F /T /IM "WorkZillaMonitor.exe"',
     'taskkill /F /T /IM "monitoring_agent.exe"',
+    'taskkill /F /T /IM "employee_agent.exe"',
     'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "Work Zilla Monitor" /f',
     'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "WorkZillaMonitor" /f',
     'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "WorkZilla Monitor" /f',
@@ -1151,6 +1152,19 @@ function scheduleMacCapture(intervalMs) {
   }, intervalMs);
 }
 
+function scheduleWindowsCapture(intervalMs) {
+  if (monitorCaptureTimer) {
+    clearInterval(monitorCaptureTimer);
+    monitorCaptureTimer = null;
+  }
+  if (!intervalMs || intervalMs < 15000) {
+    return;
+  }
+  monitorCaptureTimer = setInterval(() => {
+    captureOnceWindows();
+  }, intervalMs);
+}
+
 async function captureOnceMacElectron() {
   try {
     const display = screen.getPrimaryDisplay();
@@ -1158,6 +1172,31 @@ async function captureOnceMacElectron() {
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
       thumbnailSize: { width: size.width || 1280, height: size.height || 720 }
+    });
+    const source = sources && sources[0];
+    if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
+      return null;
+    }
+    const png = source.thumbnail.toPNG();
+    if (!png || !png.length) {
+      return null;
+    }
+    const fileName = `screenshot-${Date.now()}-${randomUUID()}.png`;
+    const filePath = path.join(os.tmpdir(), fileName);
+    fs.writeFileSync(filePath, png);
+    return filePath;
+  } catch {
+    return null;
+  }
+}
+
+async function captureOnceWindowsElectron() {
+  try {
+    const display = screen.getPrimaryDisplay();
+    const size = display?.size || { width: 0, height: 0 };
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: size.width || 1366, height: size.height || 768 }
     });
     const source = sources && sources[0];
     if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
@@ -1254,10 +1293,25 @@ function captureOnceMac() {
   }
 }
 
+function captureOnceWindows() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  if (monitorCaptureInFlight) {
+    return;
+  }
+  monitorCaptureInFlight = true;
+  captureOnceWindowsElectron().then((filePath) => {
+    if (filePath) {
+      uploadScreenshot(filePath);
+    }
+    monitorCaptureInFlight = false;
+  });
+}
+
 function startMonitorProcess() {
   cleanupLegacyWindowsMonitor();
   if (process.platform === "darwin") {
-    const helperPath = getMacHelperPath();
     captureOnceMac();
     scheduleMacCapture(monitorCaptureIntervalMs);
     return "running";
@@ -1265,24 +1319,11 @@ function startMonitorProcess() {
   if (process.platform !== "win32") {
     return "unsupported";
   }
-  if (monitorProcess) {
+  if (monitorProcess || monitorCaptureTimer) {
     return "running";
   }
-  const exePath = getMonitorExePath();
-  if (!fs.existsSync(exePath)) {
-    return "missing";
-  }
-  const settings = loadSettings();
-  const orgId = resolveCompanyKey(settings);
-  const employeeName = settings.employeeName || "";
-  const args = ["--org", orgId, "--user", employeeName];
-  monitorProcess = spawn(exePath, args, {
-    windowsHide: true,
-    stdio: "ignore"
-  });
-  monitorProcess.on("exit", () => {
-    monitorProcess = null;
-  });
+  captureOnceWindows();
+  scheduleWindowsCapture(monitorCaptureIntervalMs);
   return "running";
 }
 
