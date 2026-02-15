@@ -128,6 +128,21 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
     - /downloads/bootstrap-products.json
   - Notes / rollback point:
 
+- Latest publish record:
+  - Published at (UTC): 2026-02-15 06:07:39 UTC
+  - Local commit SHA: c41f594
+  - GitHub main SHA: c41f594
+  - Server live SHA (git metadata): 541c972 (code synced by rsync-fallback)
+  - Deploy method: rsync-fallback
+  - Gunicorn status: yes (listening on :8000)
+  - Verified URLs:
+    - /downloads/windows-product-agent/ (200)
+    - /downloads/mac-agent/ (200, zip served)
+    - /downloads/bootstrap-products.json (200)
+  - Notes / rollback point:
+    - Purpose: Windows bootstrap download reliability + mac default smaller download
+    - Rollback to previous GitHub main: a1332f6
+
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
