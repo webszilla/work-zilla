@@ -86,6 +86,21 @@ def _safe_filename(value, fallback="download"):
     return name.replace("/", "-").replace("\\", "-")
 
 
+def _resolve_root_folder_name(folder):
+    if not folder:
+        return "sync"
+    current = folder
+    direct_child = None
+    while current:
+        if current.parent_id is None:
+            break
+        direct_child = current
+        current = current.parent
+    if folder.parent_id is None:
+        return "sync"
+    return (direct_child.name if direct_child else folder.name) or "sync"
+
+
 def _folder_path_map(folders):
     mapping = {}
     for folder in folders:
@@ -606,7 +621,12 @@ def upload_file(request):
     if not check_storage_available():
         return _json_error("storage_unavailable", status=503)
     name = _clean_name(upload.name or "file")
-    storage_key = build_storage_key(org.id, owner.id)
+    storage_key = build_storage_key(
+        org,
+        owner,
+        root_folder_name=_resolve_root_folder_name(folder),
+        original_filename=name,
+    )
     try:
         storage_save(storage_key, upload)
     except Exception:

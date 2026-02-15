@@ -106,6 +106,21 @@ def ensure_unique_folder_name(org, owner_id, parent, name):
     return not exists
 
 
+def _resolve_root_folder_name(folder):
+    if not folder:
+        return "sync"
+    current = folder
+    direct_child = None
+    while current:
+        if current.parent_id is None:
+            break
+        direct_child = current
+        current = current.parent
+    if folder.parent_id is None:
+        return "sync"
+    return (direct_child.name if direct_child else folder.name) or "sync"
+
+
 def upload_file(org, owner_id, folder, upload):
     incoming = int(upload.size or 0)
     with transaction.atomic():
@@ -116,7 +131,8 @@ def upload_file(org, owner_id, folder, upload):
                 "used_bytes": usage.used_storage_bytes,
                 "limit_bytes": allowed_bytes,
             }
-        storage_key = build_storage_key(org.id, owner_id)
+        root_folder_name = _resolve_root_folder_name(folder)
+        storage_key = build_storage_key(org, owner_id, root_folder_name=root_folder_name, original_filename=upload.name)
         storage_save(storage_key, upload)
         item = StorageFile.objects.create(
             organization=org,

@@ -52,7 +52,8 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
   const [category, setCategory] = useState(initialCategory);
 
   const isSaas = scope === "saas";
-  const allowPreview = category !== "screenshots";
+  const isOnlineStorageCategory = category === "online_storage";
+  const allowPreview = category !== "screenshots" && !isOnlineStorageCategory;
 
   useEffect(() => {
     let active = true;
@@ -100,8 +101,8 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
       try {
         const params = new URLSearchParams();
         if (folderPrefix) params.set("folder", folderPrefix);
-        if (query) params.set("q", query);
-        if (typeFilter) params.set("type", typeFilter);
+        if (query && !isOnlineStorageCategory) params.set("q", query);
+        if (typeFilter && !isOnlineStorageCategory) params.set("type", typeFilter);
         params.set("limit", "25");
         if (token) params.set("continuation_token", token);
         if (category) params.set("category", category);
@@ -127,7 +128,7 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
     return () => {
       active = false;
     };
-  }, [folderPrefix, query, typeFilter, token, isSaas, orgFilter, category, state.storageMode, state.basePrefix]);
+  }, [folderPrefix, query, typeFilter, token, isSaas, orgFilter, category, state.storageMode, state.basePrefix, isOnlineStorageCategory]);
 
   const filteredFolders = useMemo(() => {
     if (!folderSearch) return state.folders;
@@ -301,7 +302,7 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
             <input
               type="text"
               className="form-control mb-2"
-              placeholder="Search folders"
+              placeholder={isOnlineStorageCategory ? "Search orgs/folders" : "Search folders"}
               value={folderSearch}
               onChange={(e) => setFolderSearch(e.target.value)}
             />
@@ -338,13 +339,13 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
                         >
                           All
                         </button>
-                        {filteredFolders
+                        {(cat.key === "online_storage" ? filteredFolders : filteredFolders
                           .filter((folder) => {
                             const name = String(folder.name || "").toLowerCase();
                             const isOrgId = /^[0-9]+$/.test(name);
                             const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(name);
                             return isOrgId || isUuid;
-                          })
+                          }))
                           .map((folder) => (
                             <button
                               key={folder.prefix}
@@ -372,18 +373,19 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
           <div className="card p-3 h-100">
             <div className="d-flex flex-wrap gap-2 align-items-end mb-2">
               <div className="flex-grow-1" style={{ minWidth: "240px" }}>
-                <label className="form-label">Search files</label>
+                <label className="form-label">{isOnlineStorageCategory ? "Search" : "Search files"}</label>
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="Search by filename or key"
+                  placeholder={isOnlineStorageCategory ? "Search by folder path" : "Search by filename or key"}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
+                  disabled={isOnlineStorageCategory}
                 />
               </div>
               <div style={{ minWidth: "120px" }}>
                 <label className="form-label">Type</label>
-                <select className="form-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                <select className="form-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} disabled={isOnlineStorageCategory}>
                   {TYPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
@@ -398,14 +400,15 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
                     placeholder="Org ID"
                     value={orgFilter}
                     onChange={(e) => setOrgFilter(e.target.value)}
+                    disabled={isOnlineStorageCategory}
                   />
                 </div>
               ) : null}
               <div style={{ minWidth: "180px" }}>
                 <label className="form-label">Actions</label>
                 <div className="d-flex gap-2 flex-wrap">
-                  <button type="button" className="btn btn-outline-light btn-sm" onClick={selectAll}>Select All</button>
-                  <button type="button" className="btn btn-outline-light btn-sm" onClick={clearAll}>Clear</button>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={selectAll} disabled={isOnlineStorageCategory}>Select All</button>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={clearAll} disabled={isOnlineStorageCategory}>Clear</button>
                 </div>
               </div>
             </div>
@@ -415,7 +418,7 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
                 <thead>
                   <tr>
                     <th style={{ width: "40px" }} />
-                    <th>Full Key</th>
+                    <th>{isOnlineStorageCategory ? "Root Folder" : "Full Key"}</th>
                     <th style={{ width: "70px" }}>Size</th>
                     <th style={{ minWidth: "140px", whiteSpace: "nowrap" }}>Content Type</th>
                     <th style={{ minWidth: "180px", whiteSpace: "nowrap" }}>Last Modified</th>
@@ -451,7 +454,7 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
                               Copy URL
                             </button>
                           ) : null}
-                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => confirmDelete([item.key])} disabled={state.storageMode !== "object"}>
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => confirmDelete([item.key])} disabled={state.storageMode !== "object" || isOnlineStorageCategory}>
                             Delete
                           </button>
                         </div>
@@ -482,7 +485,7 @@ export default function MediaLibraryPage({ scope, embedded = false, hideTabs = f
               <button
                 type="button"
                 className="btn btn-danger"
-                disabled={!selected.size || state.storageMode !== "object"}
+                disabled={!selected.size || state.storageMode !== "object" || isOnlineStorageCategory}
                 onClick={() => confirmDelete(Array.from(selected))}
               >
                 Delete Selected
