@@ -17,6 +17,16 @@ function isLocalApiUrl(value) {
   }
 }
 
+function isPlaceholderApiUrl(value) {
+  try {
+    const parsed = new URL(value);
+    const host = String(parsed.hostname || "").toLowerCase();
+    return host === "example.com" || host === "api.example.com" || host.endsWith(".example.com");
+  } catch (_error) {
+    return false;
+  }
+}
+
 function resolveApiBaseUrl() {
   const explicit = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
 
@@ -26,7 +36,7 @@ function resolveApiBaseUrl() {
 
     if (explicit) {
       // Safety guard: never use localhost API base on live/staging domains.
-      if (!(isLocalApiUrl(explicit) && !localHost)) {
+      if (!(isLocalApiUrl(explicit) && !localHost) && !isPlaceholderApiUrl(explicit)) {
         return explicit;
       }
     }
@@ -42,7 +52,7 @@ function resolveApiBaseUrl() {
     return window.location.origin;
   }
 
-  if (explicit) {
+  if (explicit && !isPlaceholderApiUrl(explicit)) {
     return explicit;
   }
 
