@@ -87,10 +87,10 @@ def download_mac_agent(request):
     x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
-            arm_file_latest,
             arm_zip_latest,
-            x64_file_latest,
+            arm_file_latest,
             x64_zip_latest,
+            x64_file_latest,
             arm_file,
             arm_zip,
             x64_file,
@@ -100,10 +100,10 @@ def download_mac_agent(request):
         )
     else:
         file_path, filename = _resolve_download_path(
-            x64_file_latest,
             x64_zip_latest,
-            arm_file_latest,
+            x64_file_latest,
             arm_zip_latest,
+            arm_file_latest,
             x64_file,
             x64_zip,
             arm_file,
@@ -138,7 +138,7 @@ def download_mac_product_agent(request):
 
 
 def bootstrap_products_config(request):
-    windows_url = request.build_absolute_uri("/downloads/windows-product-agent/")
+    windows_url = request.build_absolute_uri("/static/downloads/Work%20Zilla%20Agent%20Setup%200.2.0.exe")
     mac_url = request.build_absolute_uri("/downloads/mac-product-agent/")
     return JsonResponse(
         {

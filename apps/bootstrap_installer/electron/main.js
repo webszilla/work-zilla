@@ -8,8 +8,8 @@ const { URL } = require("url");
 
 const CONFIG_URLS = [
   process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL,
-  "https://getworkzilla.com/downloads/bootstrap-products.json",
   "https://getworkzilla.com/static/downloads/bootstrap-products.json",
+  "https://getworkzilla.com/downloads/bootstrap-products.json",
 ].filter(Boolean);
 
 const SUPPORTED_PRODUCTS = {
@@ -194,7 +194,9 @@ async function downloadFileWithRetry({ urlText, destination, progressCb, retries
         || message.includes("interrupted")
         || message.includes("econnreset")
         || message.includes("socket hang up")
-        || message.includes("aborted");
+        || message.includes("aborted")
+        || message.includes("download failed (5")
+        || message.includes("download failed (429)");
       if (!retryable || attempt >= retries) {
         break;
       }
@@ -215,11 +217,31 @@ function validateProductConfig(config, productKey, platformKey) {
   if (!section) {
     throw new Error(`Missing product config: ${productKey}`);
   }
-  const urlText = section?.[platformKey];
-  if (!urlText) {
+  const raw = section?.[platformKey];
+  if (!raw) {
     throw new Error(`No package for ${platformKey} in ${productKey}`);
   }
-  return urlText;
+  const urls = Array.isArray(raw) ? raw : [raw];
+  const normalized = urls
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (!normalized.length) {
+    throw new Error(`No package URL for ${platformKey} in ${productKey}`);
+  }
+  return normalized;
+}
+
+async function downloadFromUrls({ urls, destination, progressCb }) {
+  let lastError = null;
+  for (const urlText of urls) {
+    try {
+      await downloadFileWithRetry({ urlText, destination, progressCb });
+      return urlText;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Download failed.");
 }
 
 function detectInstalledProducts() {
@@ -326,14 +348,14 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   }
 
   const { config } = await fetchConfigWithFallback();
-  const downloadUrl = validateProductConfig(config, productKey, platform);
+  const downloadUrls = validateProductConfig(config, productKey, platform);
   const downloadsDir = path.join(app.getPath("downloads"), "WorkZillaInstallers");
   fs.mkdirSync(downloadsDir, { recursive: true });
-  const filename = `${Date.now()}-${detectInstallerName(productKey, downloadUrl)}`;
+  const filename = `${Date.now()}-${detectInstallerName(productKey, downloadUrls[0])}`;
   const destination = path.join(downloadsDir, filename);
 
-  await downloadFileWithRetry({
-    urlText: downloadUrl,
+  const usedUrl = await downloadFromUrls({
+    urls: downloadUrls,
     destination,
     progressCb: (progress) => {
       event.sender.send("bootstrap:download-progress", {
@@ -357,6 +379,7 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     path: destination,
     productKey,
     platform,
+    sourceUrl: usedUrl,
     filename: path.basename(destination),
   };
 });
@@ -364,10 +387,24 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    createWindow();
+  });
 
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
+    if (!app.isReady()) {
+      app.whenReady().then(() => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          createWindow();
+        }
+      });
+      return;
+    }
+    let win = BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      createWindow();
+      win = BrowserWindow.getAllWindows()[0];
+    }
     if (!win) {
       return;
     }
@@ -384,5 +421,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
+  if (!app.isReady()) {
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });

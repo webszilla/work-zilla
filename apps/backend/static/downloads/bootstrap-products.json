@@ -1,10 +1,10 @@
 {
   "monitor": {
-    "windows": "https://getworkzilla.com/downloads/windows-product-agent/",
+    "windows": "https://getworkzilla.com/static/downloads/Work%20Zilla%20Agent%20Setup%200.2.0.exe",
     "mac": "https://getworkzilla.com/downloads/mac-product-agent/"
   },
   "storage": {
-    "windows": "https://getworkzilla.com/downloads/windows-product-agent/",
+    "windows": "https://getworkzilla.com/static/downloads/Work%20Zilla%20Agent%20Setup%200.2.0.exe",
     "mac": "https://getworkzilla.com/downloads/mac-product-agent/"
   }
 }

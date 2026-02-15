@@ -114,6 +114,33 @@ IMPORTANT SECURITY NOTE
 - Keep secrets in secure vault/environment variables.
 - OpenAdmin URL noted for ops context: http://89.167.16.104:2087/
 
+ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
+- Maintain below block on each production publish:
+  - Published at (UTC):
+  - Local commit SHA:
+  - GitHub main SHA:
+  - Server live SHA:
+  - Deploy method: git-pull / rsync-fallback
+  - Gunicorn status: running on 0.0.0.0:8000 (yes/no)
+  - Verified URLs:
+    - /downloads/windows-agent/
+    - /downloads/mac-agent/
+    - /downloads/bootstrap-products.json
+  - Notes / rollback point:
+
+FAST SERVER CHECK COMMANDS
+- ssh root@89.167.16.104
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- git rev-parse --short HEAD
+- ss -ltnp | grep :8000
+- pgrep -af "gunicorn apps.backend.core_platform.wsgi:application"
+
+FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
+- rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' /Users/guru/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- pkill -f "gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" || true
+- nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 >/tmp/workzilla-gunicorn.out 2>&1 &
+
 TASK TEMPLATE (USE FOR EACH ISSUE)
 Current issue:
 [PASTE ISSUE HERE]
