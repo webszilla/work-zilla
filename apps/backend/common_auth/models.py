@@ -44,6 +44,10 @@ class User(AbstractUser):
         Organization, on_delete=models.SET_NULL, null=True, blank=True, related_name="users"
     )
     email = models.EmailField(unique=True)
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    email_verification_token = models.CharField(max_length=128, blank=True, default="")
+    email_verification_sent_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs) -> None:
         if self.email and not self.username:

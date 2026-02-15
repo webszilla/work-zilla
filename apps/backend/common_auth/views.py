@@ -1,11 +1,14 @@
 from django.contrib.auth import authenticate, login, logout
 from django.db import transaction
+from django.contrib import messages
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 
 from .forms import SignupForm
 from .models import Organization, User
 from core.models import UserProfile
+from core.email_utils import send_templated_email
+from core.notification_emails import send_email_verification, is_verification_token_valid, mark_email_verified
 
 
 @require_http_methods(["GET", "POST"])
@@ -77,6 +80,16 @@ def signup_view(request):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.phone_number = phone_number
         profile.save(update_fields=["phone_number"])
+    send_templated_email(
+        user.email,
+        "Welcome to Work Zilla",
+        "emails/welcome_signup.txt",
+        {
+            "name": user.first_name or user.username,
+            "login_url": request.build_absolute_uri("/auth/login/"),
+        },
+    )
+    send_email_verification(user, request=request, force=True)
     login(request, user)
     return redirect("/my-account/")
 
@@ -84,3 +97,14 @@ def signup_view(request):
 @require_http_methods(["GET", "POST"])
 def agent_login_view(request):
     return render(request, "sites/agent_login.html")
+
+
+@require_http_methods(["GET"])
+def verify_email_view(request, user_id, token):
+    user = User.objects.filter(id=user_id).first()
+    if not user or not is_verification_token_valid(user, token):
+        messages.error(request, "Invalid or expired verification link. Please request a new one.")
+        return redirect("/my-account/")
+    mark_email_verified(user)
+    messages.success(request, f"Email verified successfully: {user.email}")
+    return redirect("/my-account/")

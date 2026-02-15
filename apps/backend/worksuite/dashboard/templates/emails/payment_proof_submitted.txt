@@ -1,0 +1,13 @@
+Hello {{ name }},
+
+Your payment proof has been submitted successfully.
+
+Plan: {{ plan_name }}
+Billing Cycle: {{ billing_cycle }}
+Amount: {{ currency }} {{ amount }}
+Status: Awaiting admin approval
+
+You will receive another email once approved or rejected.
+
+Thanks,
+Work Zilla Team

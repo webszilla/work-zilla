@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+Your product is now active.
+
+Product: {{ product_name }}
+Plan: {{ plan_name }}
+
+You can now access your dashboard from My Account.
+
+Thanks,
+Work Zilla Team

@@ -7,7 +7,7 @@ import math
 import re
 from types import SimpleNamespace
 
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import update_session_auth_hash, get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
@@ -51,7 +51,11 @@ from core.referral_utils import ensure_referral_code, ensure_dealer_referral_cod
 from core.email_utils import send_templated_email
 from core.subscription_utils import is_subscription_active
 from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
+from core.notification_emails import notify_password_changed, notify_account_limit_reached, send_email_verification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+
+
+User = get_user_model()
 
 
 DEFAULT_ALLOWED_INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30]
@@ -872,6 +876,13 @@ def employees_create(request):
     else:
         employee_limit = employee_limit + addon_count
     if employee_limit and Employee.objects.filter(org=org).count() >= employee_limit:
+        owner = org.owner or request.user
+        notify_account_limit_reached(
+            owner,
+            limit=employee_limit,
+            current_count=Employee.objects.filter(org=org).count(),
+            label="employees",
+        )
         return _json_error("employee_limit_reached", status=403)
 
     try:
@@ -4541,7 +4552,16 @@ def profile_update_email(request):
 
     user = request.user
     profile = dashboard_views.get_profile(user)
+    old_email = (user.email or "").strip().lower()
+    new_email = email.lower()
+    if old_email != new_email:
+        duplicate = User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists()
+        if duplicate:
+            return _json_error("Email already in use.", status=400)
     user.email = email
+    if old_email != new_email:
+        user.email_verified = False
+        user.email_verified_at = None
     user.save()
 
     phone_value = ""
@@ -4559,6 +4579,8 @@ def profile_update_email(request):
             settings_obj.org_timezone = normalize_timezone(org_timezone)
             settings_obj.save(update_fields=["org_timezone"])
         saved_timezone = settings_obj.org_timezone or "UTC"
+    if old_email != new_email:
+        send_email_verification(user, request=request, force=True)
 
     dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}")
 
@@ -4567,6 +4589,7 @@ def profile_update_email(request):
         "email": user.email,
         "phone_number": profile.phone_number or "",
         "org_timezone": saved_timezone,
+        "email_verified": user.email_verified,
     })
 
 
@@ -4601,6 +4624,7 @@ def profile_update_password(request):
     user.save()
     update_session_auth_hash(request, user)
     dashboard_views.log_admin_activity(user, "Update Password", "Password updated")
+    notify_password_changed(user)
 
     return JsonResponse({"updated": True})
 
@@ -4885,7 +4909,16 @@ def dealer_profile(request):
         payload = {}
 
     user.first_name = (payload.get("name") or user.first_name or "").strip()
-    user.email = (payload.get("email") or user.email or "").strip()
+    old_email = (user.email or "").strip().lower()
+    requested_email = (payload.get("email") or user.email or "").strip()
+    new_email = requested_email.lower()
+    if old_email != new_email:
+        duplicate = User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists()
+        if duplicate:
+            return _json_error("Email already in use.", status=400)
+        user.email_verified = False
+        user.email_verified_at = None
+    user.email = requested_email
     phone_country = (payload.get("phone_country") or "").strip() or "+91"
     phone_number = (payload.get("phone_number") or "").strip()
     phone_value = f"{phone_country} {phone_number}".strip() if phone_number else ""
@@ -4904,6 +4937,8 @@ def dealer_profile(request):
     dealer.bank_ifsc = (payload.get("bank_ifsc") or "").strip()
     dealer.upi_id = (payload.get("upi_id") or "").strip()
     dealer.save()
+    if old_email != new_email:
+        send_email_verification(user, request=request, force=True)
 
     return JsonResponse({"updated": True})
 
@@ -4937,6 +4972,7 @@ def dealer_profile_password(request):
     user.set_password(new_password)
     user.save()
     update_session_auth_hash(request, user)
+    notify_password_changed(user)
     return JsonResponse({"updated": True})
 
 

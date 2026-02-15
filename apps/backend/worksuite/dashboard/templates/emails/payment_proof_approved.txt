@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+Your payment proof has been approved.
+
+Plan: {{ plan_name }}
+Billing Cycle: {{ billing_cycle }}
+Amount: {{ currency }} {{ amount }}
+Status: Approved
+
+Thanks,
+Work Zilla Team

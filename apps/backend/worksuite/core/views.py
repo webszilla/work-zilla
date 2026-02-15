@@ -27,6 +27,7 @@ from core.subscription_utils import (
     normalize_subscription_end_date,
 )
 from core.observability import log_event
+from core.notification_emails import notify_account_limit_reached
 from .models import *
 from .serializers import *
 import datetime
@@ -781,6 +782,14 @@ def register_employee(request):
         else:
             allowed = 0
         if allowed and current_count >= allowed:
+            owner = org.owner
+            if owner:
+                notify_account_limit_reached(
+                    owner,
+                    limit=allowed,
+                    current_count=current_count,
+                    label="employees",
+                )
             return Response({"error": "Employee limit reached"}, status=403)
 
         data = request.data.copy()

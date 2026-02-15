@@ -30,6 +30,8 @@ from core.models import (
     SubscriptionHistory,
     InvoiceSellerProfile,
 )
+from apps.backend.common_auth.models import User
+from core.notification_emails import send_email_verification
 
 
 def _resolve_download_path(*candidates):
@@ -1290,8 +1292,47 @@ def account_view(request):
         "is_saas_admin": is_saas_admin,
         "is_agent": is_agent,
         "pending_renewal_rows": pending_renewal_rows,
+        "email_verification_required": bool(request.user.email and not request.user.email_verified),
+        "email_verification_address": request.user.email or "",
     })
     return render(request, "public/account.html", context)
+
+
+@require_POST
+@login_required(login_url="/auth/login/")
+def account_resend_verification(request):
+    if request.user.email_verified:
+        messages.info(request, "Email already verified.")
+        return redirect("/my-account/")
+    sent = send_email_verification(request.user, request=request, force=True)
+    if sent:
+        messages.success(request, f"Verification email sent to {request.user.email}.")
+    else:
+        messages.error(request, "Unable to send verification email. Please update your email and try again.")
+    return redirect("/my-account/")
+
+
+@require_POST
+@login_required(login_url="/auth/login/")
+def account_update_verification_email(request):
+    email = (request.POST.get("verification_email") or "").strip().lower()
+    if not email:
+        messages.error(request, "Email is required.")
+        return redirect("/my-account/")
+    existing = User.objects.filter(email__iexact=email).exclude(id=request.user.id).exists()
+    if existing:
+        messages.error(request, "This email is already in use.")
+        return redirect("/my-account/")
+    request.user.email = email
+    request.user.email_verified = False
+    request.user.email_verified_at = None
+    request.user.save(update_fields=["email", "email_verified", "email_verified_at"])
+    sent = send_email_verification(request.user, request=request, force=True)
+    if sent:
+        messages.success(request, f"Email updated. Verification mail sent to {email}.")
+    else:
+        messages.error(request, "Email updated but verification mail failed to send.")
+    return redirect("/my-account/")
 
 
 @login_required
@@ -1504,8 +1545,19 @@ def profile_view(request):
             request.user.last_name = (request.POST.get("last_name") or "").strip()
             email = (request.POST.get("email") or "").strip()
             if email:
+                old_email = (request.user.email or "").strip().lower()
+                new_email = email.lower()
+                if old_email != new_email:
+                    if User.objects.filter(email__iexact=new_email).exclude(id=request.user.id).exists():
+                        messages.error(request, "Email already in use.")
+                        context.update({"profile": profile})
+                        return render(request, "public/profile.html", context)
+                    request.user.email_verified = False
+                    request.user.email_verified_at = None
                 request.user.email = email
             request.user.save()
+            if email and old_email != new_email:
+                send_email_verification(request.user, request=request, force=True)
 
             if not profile:
                 profile = UserProfile(user=request.user)

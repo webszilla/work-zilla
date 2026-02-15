@@ -57,8 +57,9 @@ class Command(BaseCommand):
                 continue
 
             remaining_days = (sub.end_date - now).total_seconds() / 86400
-            threshold = 15 if (sub.billing_cycle or "monthly") == "yearly" else 7
-            if remaining_days > threshold:
+            days_left = max(int(round(remaining_days)), 0)
+            reminder_days = {7, 3, 2, 1}
+            if days_left not in reminder_days:
                 continue
 
             if sub.last_renewal_reminder_at:
@@ -82,6 +83,7 @@ class Command(BaseCommand):
                         "plan_name": sub.plan.name if sub.plan else "-",
                         "billing_cycle": sub.billing_cycle or "monthly",
                         "end_date": sub.end_date.strftime("%Y-%m-%d"),
+                        "days_left": days_left,
                     },
                 )
                 sub.last_renewal_reminder_at = now

@@ -20,6 +20,8 @@ urlpatterns = [
     path("checkout/confirm/", views.checkout_confirm, name="checkout_confirm"),
     path("my/account/", RedirectView.as_view(url="/my-account/", permanent=False)),
     path("my-account/", views.account_view, name="account"),
+    path("my-account/verification/resend/", views.account_resend_verification, name="account_verification_resend"),
+    path("my-account/verification/update-email/", views.account_update_verification_email, name="account_verification_update_email"),
     path("my-account/billing/", views.billing_view, name="account_billing"),
     path("my-account/bank-transfer/<int:transfer_id>/", views.account_bank_transfer, name="account_bank_transfer"),
     path("my-account/bank-transfer/", views.account_bank_transfer, name="account_bank_transfer_root"),

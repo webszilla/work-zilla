@@ -23,6 +23,36 @@
             <a class="btn btn-outline btn-sm" href="/app/saas-admin/">Open SaaS Admin Dashboard</a>
           {% endif %}
         </div>
+        {% if email_verification_required %}
+          <div class="alert alert-warning mt-3">
+            <div>
+              Email verification pending for
+              <button type="button" class="btn btn-link p-0 align-baseline js-verify-email-toggle">
+                {{ email_verification_address }}
+              </button>.
+              Please verify to receive all product notifications.
+            </div>
+            <form class="mt-2 d-none" id="verify-email-update-form" method="post" action="/my-account/verification/update-email/">
+              {% csrf_token %}
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <input
+                  type="email"
+                  name="verification_email"
+                  class="form-control"
+                  style="max-width: 360px;"
+                  value="{{ email_verification_address }}"
+                  placeholder="Enter correct email"
+                  required
+                />
+                <button type="submit" class="btn btn-outline btn-sm">Update + Send Verification</button>
+              </div>
+            </form>
+            <form class="mt-2" method="post" action="/my-account/verification/resend/">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-outline btn-sm">Resend Verification Email</button>
+            </form>
+          </div>
+        {% endif %}
         {% if subscriptions %}
           <div class="table-responsive mt-3">
             <table class="table table-striped">
@@ -435,6 +465,13 @@
     closeButtons.forEach(function (btn) {
       btn.addEventListener("click", closeModal);
     });
+    var verifyToggle = document.querySelector(".js-verify-email-toggle");
+    var verifyForm = document.getElementById("verify-email-update-form");
+    if (verifyToggle && verifyForm) {
+      verifyToggle.addEventListener("click", function () {
+        verifyForm.classList.toggle("d-none");
+      });
+    }
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") {
         closeModal();

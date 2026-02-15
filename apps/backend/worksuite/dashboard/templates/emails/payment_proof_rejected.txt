@@ -1,0 +1,13 @@
+Hello {{ name }},
+
+Your payment proof has been rejected.
+
+Plan: {{ plan_name }}
+Billing Cycle: {{ billing_cycle }}
+Amount: {{ currency }} {{ amount }}
+Status: Rejected
+
+Please resubmit your payment proof from My Account.
+
+Thanks,
+Work Zilla Team

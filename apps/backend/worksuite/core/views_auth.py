@@ -13,6 +13,7 @@ from core.models import BillingProfile
 from core.device_policy import get_device_limit_for_org
 from core.email_utils import send_templated_email
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
+from core.notification_emails import send_email_verification
 from core.timezone_utils import normalize_timezone, resolve_default_timezone, is_valid_timezone
 from core.subscription_utils import (
     get_effective_end_date,
@@ -95,6 +96,7 @@ def company_signup(request):
                 "login_url": request.build_absolute_uri("/accounts/login/")
             }
         )
+        send_email_verification(user, request=request, force=True)
         messages.success(request, "Account Created Successfully. Please Login.")
         return redirect("/accounts/login/")
 
@@ -157,6 +159,7 @@ def agent_signup(request):
                 "login_url": request.build_absolute_uri("/accounts/login/")
             }
         )
+        send_email_verification(user, request=request, force=True)
         messages.success(request, "Agent account created. Please login.")
         return redirect("/accounts/login/")
 
@@ -482,6 +485,7 @@ def auth_me(request):
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "email_verified": bool(getattr(user, "email_verified", False)),
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "is_superuser": user.is_superuser,

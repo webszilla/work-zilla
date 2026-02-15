@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+Your {{ limit_label }} limit has been reached.
+
+Limit: {{ limit_value }}
+Current Count: {{ current_count }}
+
+Please upgrade plan or add add-ons to continue.
+
+Thanks,
+Work Zilla Team

@@ -912,15 +912,64 @@ def pending_transfer_track_previous_status(sender, instance, **kwargs):
 @receiver(post_save, sender=PendingTransfer)
 def pending_transfer_notify_admin(sender, instance, created, **kwargs):
     previous_status = getattr(instance, "_previous_status", None)
-    should_notify = (
-        instance.status == "pending"
-        and (created or (previous_status and previous_status != "pending"))
-    )
-    if not should_notify:
-        return
     try:
         from .notifications import notify_payment_pending
-        notify_payment_pending(instance)
+        from .notification_emails import (
+            notify_payment_proof_submitted,
+            notify_payment_proof_approved,
+            notify_payment_proof_rejected,
+            notify_product_activated,
+        )
+
+        should_notify_admin = (
+            instance.status == "pending"
+            and (created or (previous_status and previous_status != "pending"))
+        )
+        if should_notify_admin:
+            notify_payment_pending(instance)
+
+        if instance.request_type == "dealer":
+            recipient = instance.user
+            product_name = "Dealer Subscription"
+        else:
+            owner = instance.organization.owner if instance.organization else None
+            recipient = owner or instance.user
+            product_name = (
+                instance.plan.product.name
+                if instance.plan and instance.plan.product
+                else "Work Suite"
+            )
+        plan_name = (
+            instance.plan.name
+            if instance.plan
+            else ("Dealer Subscription" if instance.request_type == "dealer" else "-")
+        )
+
+        if instance.status == "pending" and (created or previous_status != "pending"):
+            notify_payment_proof_submitted(
+                recipient,
+                plan_name=plan_name,
+                billing_cycle=instance.billing_cycle or "monthly",
+                currency=instance.currency or "INR",
+                amount=instance.amount or 0,
+            )
+        elif instance.status == "approved" and previous_status != "approved":
+            notify_payment_proof_approved(
+                recipient,
+                plan_name=plan_name,
+                billing_cycle=instance.billing_cycle or "monthly",
+                currency=instance.currency or "INR",
+                amount=instance.amount or 0,
+            )
+            notify_product_activated(recipient, product_name=product_name, plan_name=plan_name)
+        elif instance.status == "rejected" and previous_status != "rejected":
+            notify_payment_proof_rejected(
+                recipient,
+                plan_name=plan_name,
+                billing_cycle=instance.billing_cycle or "monthly",
+                currency=instance.currency or "INR",
+                amount=instance.amount or 0,
+            )
     except Exception:
         # Avoid breaking the save flow if notification fails.
         return

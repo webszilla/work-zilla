@@ -2796,28 +2796,6 @@ def product_pending_transfer_action(request, slug, transfer_id, action):
             transfer.status = "approved"
             transfer.save()
             _apply_transfer(transfer)
-            recipient = ""
-            recipient_name = ""
-            if transfer.request_type == "dealer":
-                recipient = transfer.user.email if transfer.user else ""
-                recipient_name = transfer.user.first_name if transfer.user else ""
-            else:
-                owner = transfer.organization.owner if transfer.organization else None
-                recipient = owner.email if owner else (transfer.user.email if transfer.user else "")
-                recipient_name = owner.first_name if owner else (transfer.user.first_name if transfer.user else "")
-            send_templated_email(
-                recipient,
-                "Bank Transfer Approved",
-                "emails/bank_transfer_approved.txt",
-                {
-                    "name": recipient_name or "User",
-                    "plan_name": transfer.plan.name if transfer.plan else ("Dealer Subscription" if transfer.request_type == "dealer" else "-"),
-                    "billing_cycle": transfer.billing_cycle or "yearly",
-                    "currency": transfer.currency or "INR",
-                    "amount": transfer.amount or 0,
-                    "reference_no": transfer.reference_no or "-"
-                }
-            )
         return JsonResponse({"status": "approved"})
     if action == "reject":
         if transfer.status == "approved":

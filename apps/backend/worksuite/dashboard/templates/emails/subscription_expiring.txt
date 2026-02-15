@@ -5,6 +5,7 @@ Your subscription is expiring soon.
 Plan: {{ plan_name }}
 Billing cycle: {{ billing_cycle }}
 Expiry date: {{ end_date }}
+Days left: {{ days_left }}
 
 Please renew to avoid interruption.
 
