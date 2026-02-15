@@ -43,6 +43,12 @@ def _resolve_download_path(*candidates):
             return file_path, filename
     raise Http404("Installer not found.")
 
+def _prefer_arm64_mac(request):
+    user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
+    if any(token in user_agent for token in ("intel", "x86_64", "x64")):
+        return False
+    return any(token in user_agent for token in ("arm64", "aarch64", "apple silicon"))
+
 
 def download_windows_agent(request):
     file_path, filename = _resolve_download_path(
@@ -70,14 +76,21 @@ def download_windows_product_agent(request):
 
 
 def download_mac_agent(request):
-    user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
-    prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
+    prefer_arm = _prefer_arm64_mac(request)
+    arm_file_latest = "Work Zilla Installer-mac-arm64-0.1.7.dmg"
+    x64_file_latest = "Work Zilla Installer-mac-x64-0.1.7.dmg"
+    arm_zip_latest = "Work Zilla Installer-mac-arm64-0.1.7.zip"
+    x64_zip_latest = "Work Zilla Installer-mac-x64-0.1.7.zip"
     arm_file = "Work Zilla Installer-mac-arm64-0.1.0.dmg"
     x64_file = "Work Zilla Installer-mac-x64-0.1.0.dmg"
     arm_zip = "Work Zilla Installer-mac-arm64-0.1.0.zip"
     x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
+            arm_file_latest,
+            arm_zip_latest,
+            x64_file_latest,
+            x64_zip_latest,
             arm_file,
             arm_zip,
             x64_file,
@@ -87,6 +100,10 @@ def download_mac_agent(request):
         )
     else:
         file_path, filename = _resolve_download_path(
+            x64_file_latest,
+            x64_zip_latest,
+            arm_file_latest,
+            arm_zip_latest,
             x64_file,
             x64_zip,
             arm_file,
@@ -98,8 +115,7 @@ def download_mac_agent(request):
 
 
 def download_mac_product_agent(request):
-    user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
-    prefer_arm = any(token in user_agent for token in ("arm64", "aarch64", "apple"))
+    prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
         file_path, filename = _resolve_download_path(
             "Work Zilla Agent-0.2.0-arm64.dmg",

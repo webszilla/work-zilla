@@ -33,6 +33,7 @@
     ],
     "asar": true,
     "compression": "maximum",
+    "afterPack": "electron/afterPack.cjs",
     "artifactName": "${productName}-${os}-${arch}-${version}.${ext}",
     "mac": {
       "target": [
@@ -40,7 +41,7 @@
         "zip"
       ],
       "category": "public.app-category.utilities",
-      "identity": null,
+      "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     },

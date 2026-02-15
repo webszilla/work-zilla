@@ -47,6 +47,7 @@
     "asar": true,
     "compression": "maximum",
     "mac": {
+      "identity": "-",
       "target": ["dmg", "zip", "pkg"],
       "extraResources": [
         {

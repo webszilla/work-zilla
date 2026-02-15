@@ -30,6 +30,14 @@ let monitorResumeOnReconnect = false;
 let offlineAlertOpen = false;
 let offlineAlertShown = false;
 const CONNECTIVITY_CHECK_INTERVAL_MS = 10000;
+const isInstallerCommand = process.platform === "win32" && process.argv.some((arg) => {
+  const value = String(arg || "").toLowerCase();
+  return value.includes("squirrel")
+    || value.includes("--uninstall")
+    || value.includes("--install")
+    || value.includes("--updated");
+});
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 const connectivityState = {
   internet: false,
   api: false,
@@ -251,6 +259,37 @@ function createTray() {
   tray.on("double-click", () => mainWindow?.show());
 }
 
+function cleanupLegacyWindowsMonitor() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const commands = [
+    'taskkill /F /T /IM "Work Zilla Monitor.exe"',
+    'taskkill /F /T /IM "WorkZillaMonitor.exe"',
+    'taskkill /F /T /IM "monitoring_agent.exe"',
+    'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "Work Zilla Monitor" /f',
+    'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "WorkZillaMonitor" /f',
+    'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "WorkZilla Monitor" /f',
+    'del /F /Q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Work Zilla Monitor.lnk"',
+    'del /F /Q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\WorkZillaMonitor.lnk"',
+    'rmdir /S /Q "%LOCALAPPDATA%\\Programs\\Work Zilla Monitor"',
+    'rmdir /S /Q "%PROGRAMFILES%\\Work Zilla Monitor"',
+    'rmdir /S /Q "%PROGRAMFILES(X86)%\\Work Zilla Monitor"',
+    'rmdir /S /Q "%APPDATA%\\WorkZillaMonitor"'
+  ];
+  commands.forEach((command) => {
+    try {
+      const child = spawn("cmd.exe", ["/C", command], {
+        windowsHide: true,
+        stdio: "ignore"
+      });
+      child.unref();
+    } catch {
+      // ignore cleanup failures
+    }
+  });
+}
+
 function refreshTray() {
   if (!tray) {
     return;
@@ -258,38 +297,53 @@ function refreshTray() {
   tray.setContextMenu(buildTrayMenu());
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  createTray();
-  startConnectivityMonitor();
-  if (process.platform === "darwin") {
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.whenReady().then(() => {
+    cleanupLegacyWindowsMonitor();
+    createWindow();
+    createTray();
+    startConnectivityMonitor();
+    if (process.platform === "darwin") {
+      const settings = loadSettings();
+      const screenStatus = systemPreferences.getMediaAccessStatus("screen");
+      saveSettings({
+        ...settings,
+        screenPermissionStatus: screenStatus,
+        screenPermissionRelaunchRequired: false
+      });
+    }
+    persistScreenPermissionSnapshot();
+    broadcastMonitorPermissions();
     const settings = loadSettings();
-    const screenStatus = systemPreferences.getMediaAccessStatus("screen");
-    saveSettings({
-      ...settings,
-      screenPermissionStatus: screenStatus,
-      screenPermissionRelaunchRequired: false
-    });
-  }
-  persistScreenPermissionSnapshot();
-  broadcastMonitorPermissions();
-  const settings = loadSettings();
-  configureAutoLaunch(settings.monitorRunning);
-  if (settings.monitorRunning) {
-    // Resume monitoring after app restart (e.g. PC shutdown/startup)
-    setTimeout(() => {
-      if (!connectivityState.online) {
-        monitorResumeOnReconnect = true;
-        return;
+    configureAutoLaunch(settings.monitorRunning);
+    if (settings.monitorRunning) {
+      // Resume monitoring after app restart (e.g. PC shutdown/startup)
+      setTimeout(() => {
+        if (!connectivityState.online) {
+          monitorResumeOnReconnect = true;
+          return;
+        }
+        startMonitorWithAuth();
+      }, 1500);
+    }
+  });
+
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
       }
-      startMonitorWithAuth();
-    }, 1500);
-  }
-});
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 app.on("before-quit", (event) => {
   const settings = loadSettings();
-  if (settings.allowExit === false) {
+  if (!isInstallerCommand && settings.allowExit === false) {
     event.preventDefault();
     isQuitting = false;
     mainWindow?.hide();
@@ -1149,6 +1203,7 @@ function captureOnceMac() {
 }
 
 function startMonitorProcess() {
+  cleanupLegacyWindowsMonitor();
   if (process.platform === "darwin") {
     const helperPath = getMacHelperPath();
     captureOnceMac();

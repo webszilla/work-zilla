@@ -1,0 +1,126 @@
+PROJECT: WorkZilla
+REPO PATH (LOCAL): /Users/guru/Desktop/webszilla/saas/work-zilla
+SERVER: Hetzner (89.167.16.104)
+SERVER PROJECT PATH: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+
+OBJECTIVE
+- Maintain clean, production-safe monorepo workflow.
+- Execute end-to-end whenever requested: code fix + build + deploy + verify.
+- Keep structure strict: no duplicate concepts, no legacy popup behavior, no outside-project staging folders.
+
+COMMUNICATION MODE
+- Single concise update only: one short status per major step.
+- Keep replies practical and short.
+
+HARD RULES
+1) Work only inside project folder.
+   - Do NOT create/use outside folders (example: no Desktop installer staging folders).
+2) Preserve required source folders:
+   - apps/desktop_app
+   - apps/bootstrap_installer
+   - apps/backend
+   - apps/frontend
+3) Remove only unnecessary/generated artifacts when asked:
+   - node_modules, dist, .build caches, temporary archives, duplicate installers.
+4) Installer binaries must stay inside project only:
+   - apps/backend/static/downloads
+5) Keep only latest required installers unless explicitly asked to retain old versions.
+6) Never reintroduce legacy “Work Zilla Monitor” popup/process behavior.
+7) Product install behavior must be product-specific:
+   - Work Suite click => only Work Suite install.
+   - Online Storage click => only Online Storage install.
+   - No auto-install/auto-mark both products.
+8) If deploy needed, do not stop at plan; execute and verify endpoints.
+9) If server git pull fails (keys/permissions), use direct upload fallback and continue.
+10) Always report exact files changed and verification result.
+
+CURRENT CLEAN STRUCTURE EXPECTATION
+- No external installer folders outside repo.
+- Keep local installer outputs under:
+  - apps/backend/static/downloads
+- Ignore heavy generated files/caches in Git (dist/node_modules/mac_helper build caches).
+
+LOCAL DEVELOPMENT WORKFLOW
+A) Backend run (mac/local)
+- cd ~/Desktop/webszilla/saas/work-zilla
+- source env/bin/activate
+- cd apps/backend
+- python3 manage.py runserver
+
+B) Django migrations
+- cd apps/backend
+- python3 manage.py makemigrations
+- python3 manage.py migrate
+
+C) Frontend build helpers
+- ./build_and_copy_frontend.sh
+- build_and_copy_frontend.bat
+
+D) Desktop app build (mac)
+- cd apps/desktop_app
+- npm run build
+- npx electron-builder --mac --arm64
+- For universal builds, include both arch targets when required.
+
+E) Windows monitor binary build (Windows)
+- cd apps/desktop_app/windows_agent
+- dotnet build -c Release
+- .\build_windows_agent.ps1
+
+DEPLOY WORKFLOW (GITHUB + SERVER)
+1) Local push
+- cd ~/Desktop/webszilla/saas/work-zilla
+- git status
+- git add .
+- git commit -m "<message>"
+- git push origin main
+
+2) Server pull
+- ssh root@89.167.16.104
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- git pull origin main
+
+3) Restart backend (important)
+Preferred manual gunicorn flow:
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- source venv/bin/activate
+- pkill -f gunicorn
+- venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000
+
+Ultra-short restart:
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com && source venv/bin/activate && pkill -f gunicorn && venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000
+
+Alternative stack restart (if infra requires):
+- docker restart openpanel
+
+SERVER DEPLOY EXECUTION RULE (WHEN ASKED)
+- ssh root@89.167.16.104
+- project path: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- git pull (or upload fallback)
+- upload required binaries if changed
+- restart gunicorn on :8000
+- verify download/API endpoints
+
+VERIFY CHECKLIST (MANDATORY)
+- Build success logs for modified components.
+- Endpoint/header check for installer URLs.
+- Runtime process sanity (no duplicate installer background processes).
+- Product-specific install behavior validated.
+- Screenshot/monitor flow validated when relevant.
+
+IMPORTANT SECURITY NOTE
+- Do not store plaintext admin/server passwords in repository prompt files.
+- Keep secrets in secure vault/environment variables.
+- OpenAdmin URL noted for ops context: http://89.167.16.104:2087/
+
+TASK TEMPLATE (USE FOR EACH ISSUE)
+Current issue:
+[PASTE ISSUE HERE]
+Expected result:
+[PASTE EXPECTED RESULT HERE]
+
+Execution rule:
+- Do end-to-end directly.
+- Give one concise line per major step.
+- Do not stop at plan.

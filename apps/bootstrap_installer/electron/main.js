@@ -16,6 +16,8 @@ const SUPPORTED_PRODUCTS = {
   monitor: "Work Suite",
   storage: "Online Storage",
 };
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+const PRODUCT_KEYS = Object.keys(SUPPORTED_PRODUCTS);
 
 function getPlatformKey() {
   if (process.platform === "win32") return "windows";
@@ -221,25 +223,75 @@ function validateProductConfig(config, productKey, platformKey) {
 }
 
 function detectInstalledProducts() {
+  const initial = { monitor: false, storage: false };
   const platform = getPlatformKey();
+  let baseInstalled = false;
   if (platform === "windows") {
     const candidates = [
       path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Work Zilla Agent.exe"),
       path.join(process.env.ProgramFiles || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
       path.join(process.env["ProgramFiles(x86)"] || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
     ];
-    const installed = candidates.some((p) => p && fs.existsSync(p));
-    return { monitor: installed, storage: installed };
-  }
-  if (platform === "mac") {
+    baseInstalled = candidates.some((p) => p && fs.existsSync(p));
+  } else if (platform === "mac") {
     const candidates = [
       "/Applications/Work Zilla Agent.app",
       path.join(os.homedir(), "Applications", "Work Zilla Agent.app"),
     ];
-    const installed = candidates.some((p) => fs.existsSync(p));
-    return { monitor: installed, storage: installed };
+    baseInstalled = candidates.some((p) => fs.existsSync(p));
   }
-  return { monitor: false, storage: false };
+  if (!baseInstalled) {
+    return initial;
+  }
+  const state = readInstalledState();
+  const hasAnyProductInstalled = PRODUCT_KEYS.some((key) => state[key] === true);
+  if (!hasAnyProductInstalled) {
+    return initial;
+  }
+  return {
+    monitor: Boolean(state.monitor),
+    storage: Boolean(state.storage),
+  };
+}
+
+function getInstalledStatePath() {
+  return path.join(app.getPath("userData"), "installed-products.json");
+}
+
+function normalizeInstalledState(raw) {
+  return {
+    monitor: Boolean(raw?.monitor),
+    storage: Boolean(raw?.storage),
+  };
+}
+
+function readInstalledState() {
+  const statePath = getInstalledStatePath();
+  try {
+    if (!fs.existsSync(statePath)) {
+      return { monitor: false, storage: false };
+    }
+    const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    return normalizeInstalledState(raw);
+  } catch (_err) {
+    return { monitor: false, storage: false };
+  }
+}
+
+function writeInstalledState(nextState) {
+  const statePath = getInstalledStatePath();
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, `${JSON.stringify(normalizeInstalledState(nextState), null, 2)}\n`, "utf8");
+  } catch (_err) {
+    // no-op
+  }
+}
+
+function markProductInstalled(productKey) {
+  const state = readInstalledState();
+  state[productKey] = true;
+  writeInstalledState(state);
 }
 
 ipcMain.handle("bootstrap:get-products", async () => {
@@ -299,6 +351,7 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   });
 
   await openInstaller(destination);
+  markProductInstalled(productKey);
   return {
     ok: true,
     path: destination,
@@ -308,7 +361,23 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   };
 });
 
-app.whenReady().then(createWindow);
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.whenReady().then(createWindow);
+
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      return;
+    }
+    if (win.isMinimized()) {
+      win.restore();
+    }
+    win.show();
+    win.focus();
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
