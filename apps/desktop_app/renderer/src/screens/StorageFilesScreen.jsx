@@ -429,6 +429,10 @@ export default function StorageFilesScreen() {
         folderId,
         filename: folderName ? `${folderName}.zip` : undefined
       });
+      if (result?.cancelled) {
+        setNotice("Download cancelled.");
+        return;
+      }
       if (result?.path) {
         setNotice(`Downloaded to ${result.path}`);
       } else if (result?.error) {
@@ -448,6 +452,10 @@ export default function StorageFilesScreen() {
         fileId: item.id,
         filename: item.name
       });
+      if (result?.cancelled) {
+        setNotice("Download cancelled.");
+        return;
+      }
       if (result?.path) {
         setNotice(`Downloaded to ${result.path}`);
       } else if (result?.error) {
@@ -820,7 +828,7 @@ export default function StorageFilesScreen() {
                 className="item-context-menu-action"
                 onClick={() => handleContextAction("download-folder", contextMenu.item, contextMenu.depth)}
               >
-                Download as ZIP
+                Download
               </button>
             </>
           ) : (

@@ -106,7 +106,11 @@ export default function ChooseFoldersScreen({ onOpenCloud }) {
     setStatus({ loading: true, message: "", type: "info" });
     try {
       const result = await window.storageApi.chooseFolders();
-      setStatus({ loading: false, message: result?.message || "Folders updated.", type: "success" });
+      if (result?.limitReached) {
+        setStatus({ loading: false, message: "Maximum 5 folders allowed per device.", type: "error" });
+      } else {
+        setStatus({ loading: false, message: result?.message || "Folders updated.", type: "success" });
+      }
       await loadFolders();
     } catch (error) {
       setStatus({

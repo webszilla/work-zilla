@@ -3,6 +3,7 @@ import path from "path";
 import { app } from "electron";
 
 const SETTINGS_FILE = "settings.json";
+export const MAX_SYNC_FOLDERS_PER_DEVICE = 5;
 
 const defaultSettings = {
   serverUrl: process.env.WZ_SERVER_URL || "https://getworkzilla.com",
@@ -12,6 +13,7 @@ const defaultSettings = {
   paused: false,
   throttleMs: 1000,
   deviceId: "",
+  deviceNickname: "",
   employeeId: null,
   orgId: null,
   userId: null,
@@ -64,6 +66,9 @@ export function saveSettings(next) {
 
 export function addFolder(folder) {
   const settings = loadSettings();
+  if ((settings.syncFolders || []).length >= MAX_SYNC_FOLDERS_PER_DEVICE) {
+    return saveSettings(settings);
+  }
   const existing = settings.syncFolders.find((item) => item.path === folder.path);
   if (!existing) {
     settings.syncFolders.push({ ...folder, initialSyncDone: false });

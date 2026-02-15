@@ -8,7 +8,7 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
-import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder } from "./sync/settings.js";
+import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder, MAX_SYNC_FOLDERS_PER_DEVICE } from "./sync/settings.js";
 import { listActivity, listErrors, listQueue, getFolderMap, removeFolderMapsByPrefix, clearQueueByPathPrefix, setFolderMap } from "./sync/db.js";
 import { getStorageStatus, pingApi, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, createFolder as createStorageFolder, renameFolder as renameStorageFolder, deleteFolder as deleteStorageFolder, uploadFile as uploadStorageFile, downloadStorage, downloadBulkSelection, sendMonitorHeartbeat, getMonitorSettings } from "./sync/api.js";
 
@@ -464,13 +464,28 @@ ipcMain.handle("folders:choose", async () => {
   if (result.canceled) {
     return { message: "Selection cancelled." };
   }
-  result.filePaths.forEach((folderPath) => {
+  const settings = loadSettings();
+  const existing = Array.isArray(settings.syncFolders) ? settings.syncFolders : [];
+  const existingPaths = new Set(existing.map((item) => item.path));
+  const selected = (result.filePaths || []).filter(Boolean);
+  const uniqueNew = selected.filter((folderPath) => !existingPaths.has(folderPath));
+  const remaining = Math.max(0, MAX_SYNC_FOLDERS_PER_DEVICE - existing.length);
+  const toAdd = uniqueNew.slice(0, remaining);
+  toAdd.forEach((folderPath) => {
     addFolder({ path: folderPath, name: path.basename(folderPath) });
   });
+  const limitReached = uniqueNew.length > remaining;
   if (connectivityState.online) {
     syncService.start();
   }
-  return { message: "Folders added." };
+  if (limitReached) {
+    return {
+      message: "Maximum 5 folders allowed per device.",
+      added: toAdd.length,
+      limitReached: true
+    };
+  }
+  return { message: "Folders added.", added: toAdd.length, limitReached: false };
 });
 
 ipcMain.handle("folders:remove", async (_event, folderPath) => {
@@ -516,6 +531,18 @@ ipcMain.handle("folders:get-map", (_event, localPath) => {
   }
   const mapped = getFolderMap(localPath);
   return mapped?.remote_id ? { remote_id: mapped.remote_id } : null;
+});
+
+ipcMain.handle("folders:resolve-remote", async (_event, localPath) => {
+  if (!localPath) {
+    return null;
+  }
+  const mapped = getFolderMap(localPath);
+  if (mapped?.remote_id) {
+    return { remote_id: mapped.remote_id };
+  }
+  const remoteId = await resolveRemoteFolderIdForLocalPath(localPath);
+  return remoteId ? { remote_id: remoteId } : null;
 });
 
 ipcMain.handle("sync:start", () => {
@@ -686,8 +713,7 @@ ipcMain.handle("storage:org:users:create", async (_event, payload) => {
 });
 
 async function saveDownloadResponse(response, filenameOverride) {
-  const settings = loadSettings();
-  const targetRoot = settings.syncFolders?.[0]?.path || app.getPath("downloads");
+  const defaultRoot = app.getPath("downloads");
   const contentDisposition = response.headers.get("content-disposition") || "";
   let filename = filenameOverride || "";
   if (!filename && contentDisposition) {
@@ -700,12 +726,16 @@ async function saveDownloadResponse(response, filenameOverride) {
     filename = "download.zip";
   }
   const safeName = filename.replace(/[\\\\/]/g, "-");
-  let targetPath = path.join(targetRoot, safeName);
-  if (fs.existsSync(targetPath)) {
-    const ext = path.extname(safeName);
-    const base = path.basename(safeName, ext);
-    targetPath = path.join(targetRoot, `${base}-${Date.now()}${ext}`);
+  const selection = await dialog.showSaveDialog(mainWindow, {
+    title: "Choose download location",
+    defaultPath: path.join(defaultRoot, safeName)
+  });
+  if (selection.canceled || !selection.filePath) {
+    const err = new Error("download_cancelled");
+    err.code = "download_cancelled";
+    throw err;
   }
+  const targetPath = selection.filePath;
   await new Promise((resolve, reject) => {
     const stream = fs.createWriteStream(targetPath);
     response.body.pipe(stream);
@@ -726,6 +756,9 @@ ipcMain.handle("storage:download", async (_event, payload) => {
     const targetPath = await saveDownloadResponse(response, filename);
     return { ok: true, path: targetPath };
   } catch (error) {
+    if (error?.code === "download_cancelled" || error?.message === "download_cancelled") {
+      return { ok: false, cancelled: true, error: "download_cancelled" };
+    }
     return { ok: false, error: error?.message || "download_failed" };
   }
 });
@@ -740,6 +773,9 @@ ipcMain.handle("storage:download-bulk", async (_event, payload) => {
     const targetPath = await saveDownloadResponse(response, payload?.filename || "selection.zip");
     return { ok: true, path: targetPath };
   } catch (error) {
+    if (error?.code === "download_cancelled" || error?.message === "download_cancelled") {
+      return { ok: false, cancelled: true, error: "download_cancelled" };
+    }
     return { ok: false, error: error?.message || "bulk_download_failed" };
   }
 });

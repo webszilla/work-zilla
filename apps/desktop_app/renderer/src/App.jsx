@@ -11,12 +11,14 @@ import SettingsScreen from "./screens/SettingsScreen.jsx";
 const MonitorScreen = lazy(() => import("./screens/MonitorScreen.jsx"));
 const ChooseFoldersScreen = lazy(() => import("./screens/ChooseFoldersScreen.jsx"));
 const StorageFilesScreen = lazy(() => import("./screens/StorageFilesScreen.jsx"));
+const AddDeviceFoldersScreen = lazy(() => import("./screens/AddDeviceFoldersScreen.jsx"));
 
 const storageScreens = [
   { id: "dashboard", label: "Dashboard" },
   { id: "files", label: "File Storage" },
   { id: "sync-group", label: "Local Auto Sync (Optional)", type: "group" },
   { id: "sync-status", label: "Sync Status" },
+  { id: "add-device-folders", label: "Add Device & Folders" },
   { id: "choose-folders", label: "Choose Local Folders" },
   { id: "activity", label: "Sync Activity" },
   { id: "storage", label: "Storage Usage" },
@@ -276,6 +278,11 @@ export default function App() {
           {current.id === "choose-folders" ? (
             <Suspense fallback={<div className="panel">Loading sync settings...</div>}>
               <ChooseFoldersScreen onOpenCloud={() => setActiveScreen("files")} />
+            </Suspense>
+          ) : null}
+          {current.id === "add-device-folders" ? (
+            <Suspense fallback={<div className="panel">Loading device and folder settings...</div>}>
+              <AddDeviceFoldersScreen onOpenCloud={() => setActiveScreen("files")} />
             </Suspense>
           ) : null}
           {current.id === "activity" ? <SyncActivityScreen /> : null}

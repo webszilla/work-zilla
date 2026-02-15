@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   removeFolder: (path) => ipcRenderer.invoke("folders:remove", path),
   mapFolderToOnline: (payload) => ipcRenderer.invoke("folders:map-remote", payload),
   getMappedOnlineFolder: (localPath) => ipcRenderer.invoke("folders:get-map", localPath),
+  resolveRemoteFolderForLocalPath: (localPath) => ipcRenderer.invoke("folders:resolve-remote", localPath),
   startSync: () => ipcRenderer.invoke("sync:start"),
   getSyncStatus: () => ipcRenderer.invoke("sync:status"),
   pauseSync: () => ipcRenderer.invoke("sync:pause"),
