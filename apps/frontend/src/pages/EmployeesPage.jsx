@@ -119,7 +119,7 @@ export default function EmployeesPage() {
     const employeeName = employee?.name || "this employee";
     const confirmed = await confirm({
       title: "Delete Employee",
-      message: `If you delete ${employeeName}, all related screenshots, Live Activity, and Work Activity Log data will be permanently removed. Do you want to continue?`,
+      message: `If you delete ${employeeName}, all related screenshots, Live Activity, Work Activity Log, App Usage, and Gaming / OTT Usage data will be permanently removed. Do you want to continue?`,
       confirmText: "Delete Account",
       confirmVariant: "danger"
     });

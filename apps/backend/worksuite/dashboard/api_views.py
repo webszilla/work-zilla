@@ -13,7 +13,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Max, Value, Q
 from django.db.models.functions import Coalesce, TruncDate, NullIf
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
@@ -994,17 +994,35 @@ def employees_delete(request, emp_id):
         return _json_error("employee_not_found", status=404)
 
     employee_name = employee.name or f"Employee {employee.id}"
-    screenshot_count = Screenshot.objects.filter(employee=employee).count()
-    activity_count = Activity.objects.filter(employee=employee).count()
-    stop_event_count = MonitorStopEvent.objects.filter(employee=employee).count()
+    keyword_q = dashboard_views.build_gaming_ott_query()
 
-    employee.delete()
+    screenshot_qs = Screenshot.objects.filter(employee=employee)
+    screenshot_count = screenshot_qs.count()
+    activity_qs = Activity.objects.filter(employee=employee)
+    activity_count = activity_qs.count()
+    gaming_ott_activity_count = activity_qs.filter(keyword_q).count()
+    app_usage_activity_count = activity_count - gaming_ott_activity_count
+    stop_event_qs = MonitorStopEvent.objects.filter(employee=employee)
+    stop_event_count = stop_event_qs.count()
+
+    with transaction.atomic():
+        # Explicitly remove screenshot files from local/object storage before row deletion.
+        for shot in screenshot_qs.only("id", "image").iterator():
+            if shot.image:
+                shot.image.delete(save=False)
+        screenshot_qs.delete()
+        activity_qs.delete()
+        stop_event_qs.delete()
+        employee.delete()
+
     dashboard_views.log_admin_activity(
         request.user,
         "Delete Employee",
         (
             f"{employee_name} deleted. Removed {screenshot_count} screenshots, "
-            f"{activity_count} activity logs, and {stop_event_count} monitor stop records."
+            f"{activity_count} total activity logs "
+            f"({app_usage_activity_count} app usage + {gaming_ott_activity_count} gaming/OTT), "
+            f"and {stop_event_count} monitor stop records."
         ),
     )
     return JsonResponse(
@@ -1014,6 +1032,8 @@ def employees_delete(request, emp_id):
             "removed": {
                 "screenshots": screenshot_count,
                 "activities": activity_count,
+                "app_usage": app_usage_activity_count,
+                "gaming_ott_usage": gaming_ott_activity_count,
                 "monitor_stop_events": stop_event_count,
             },
         }
