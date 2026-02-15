@@ -9,7 +9,18 @@ import { fileURLToPath } from "url";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
 import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder, MAX_SYNC_FOLDERS_PER_DEVICE } from "./sync/settings.js";
-import { listActivity, listErrors, listQueue, getFolderMap, removeFolderMapsByPrefix, clearQueueByPathPrefix, setFolderMap } from "./sync/db.js";
+import {
+  listActivity,
+  listErrors,
+  listQueue,
+  getFolderMap,
+  removeFolderMapsByPrefix,
+  clearQueueByPathPrefix,
+  setFolderMap,
+  countPendingQueueByPrefix,
+  addUserActivity,
+  listUserActivity
+} from "./sync/db.js";
 import { getStorageStatus, pingApi, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, createFolder as createStorageFolder, renameFolder as renameStorageFolder, deleteFolder as deleteStorageFolder, uploadFile as uploadStorageFile, downloadStorage, downloadBulkSelection, sendMonitorHeartbeat, getMonitorSettings } from "./sync/api.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,6 +80,16 @@ function broadcastConnectionStatus() {
     win.webContents.send("connection:status", payload);
   });
 }
+
+function broadcastSyncUploadProgress(payload) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send("sync:upload-progress", payload);
+  });
+}
+
+syncService.setUploadProgressListener((payload) => {
+  broadcastSyncUploadProgress(payload);
+});
 
 async function checkInternetConnectivity() {
   const settings = loadSettings();
@@ -323,6 +344,41 @@ async function resolveRemoteFolderIdForLocalPath(localPath) {
   return match?.id || null;
 }
 
+async function countFilesInRemoteFolder(folderId) {
+  if (!folderId) {
+    return 0;
+  }
+  const visited = new Set();
+  async function walk(currentId) {
+    if (!currentId || visited.has(currentId)) {
+      return 0;
+    }
+    visited.add(currentId);
+    const data = await listFolder(currentId, {});
+    const items = Array.isArray(data?.items) ? data.items : [];
+    let total = items.filter((item) => item?.type === "file").length;
+    const folders = items.filter((item) => item?.type === "folder" && item?.id);
+    for (const folder of folders) {
+      total += await walk(folder.id);
+    }
+    return total;
+  }
+  return walk(folderId);
+}
+
+async function resolveRemoteDeviceFolderId(deviceId) {
+  const normalizedDeviceId = String(deviceId || "").trim();
+  if (!normalizedDeviceId) {
+    return null;
+  }
+  const rootData = await listRoot({});
+  const rootItems = Array.isArray(rootData?.items) ? rootData.items : [];
+  const deviceFolder = rootItems.find(
+    (item) => item?.type === "folder" && String(item?.name || "").trim() === normalizedDeviceId
+  );
+  return deviceFolder?.id || null;
+}
+
 function isRemoteDeleteNotFound(error) {
   const status = Number(error?.status || 0);
   const message = String(error?.message || "").toLowerCase();
@@ -454,7 +510,16 @@ ipcMain.handle("settings:update", (_event, payload) => {
 });
 
 ipcMain.handle("folders:get", () => {
-  return { folders: loadSettings().syncFolders || [] };
+  const folders = loadSettings().syncFolders || [];
+  const items = folders.map((item) => {
+    const pendingCount = countPendingQueueByPrefix(item.path);
+    return {
+      ...item,
+      pendingCount,
+      uploadCompleted: pendingCount === 0
+    };
+  });
+  return { folders: items };
 });
 
 ipcMain.handle("folders:choose", async () => {
@@ -474,6 +539,9 @@ ipcMain.handle("folders:choose", async () => {
   toAdd.forEach((folderPath) => {
     addFolder({ path: folderPath, name: path.basename(folderPath) });
   });
+  if (toAdd.length > 0) {
+    addUserActivity("folder_add", "Folder added", `${toAdd.length} folder(s) added for sync.`);
+  }
   const limitReached = uniqueNew.length > remaining;
   if (connectivityState.online) {
     syncService.start();
@@ -497,6 +565,10 @@ ipcMain.handle("folders:remove", async (_event, folderPath) => {
   if (!remoteId) {
     remoteId = await resolveRemoteFolderIdForLocalPath(folderPath);
   }
+  let totalFiles = 0;
+  if (remoteId) {
+    totalFiles = await countFilesInRemoteFolder(remoteId);
+  }
   if (remoteId) {
     try {
       await deleteStorageFolder(remoteId);
@@ -514,7 +586,8 @@ ipcMain.handle("folders:remove", async (_event, folderPath) => {
   clearQueueByPathPrefix(folderPath);
   removeLocalFolder(folderPath);
   syncService.start();
-  return { ok: true, cloud_deleted: Boolean(remoteId) };
+  addUserActivity("folder_delete", "Folder removed", folderPath);
+  return { ok: true, cloud_deleted: Boolean(remoteId), totalFiles, deletedFiles: totalFiles };
 });
 
 ipcMain.handle("folders:map-remote", (_event, payload) => {
@@ -557,6 +630,7 @@ ipcMain.handle("sync:status", () => ({
   ...syncService.getStatus(),
   queue_size: listQueue(200).length
 }));
+ipcMain.handle("sync:upload-progress", () => syncService.getUploadProgress());
 ipcMain.handle("sync:pause", () => {
   syncService.pause();
   return syncService.getStatus();
@@ -599,10 +673,60 @@ ipcMain.handle("storage:usage", async () => {
 });
 
 ipcMain.handle("activity:list", () => ({ items: listActivity(200) }));
+ipcMain.handle("user-activity:list", () => ({ items: listUserActivity(100) }));
 ipcMain.handle("errors:list", () => ({ items: listErrors(200) }));
 ipcMain.handle("queue:list", () => ({ items: listQueue(200) }));
 
 ipcMain.handle("device:info", () => ensureDeviceIdentity());
+ipcMain.handle("device:remove", async (_event, payload) => {
+  const requestedId = String(payload?.deviceId || "").trim();
+  const settings = loadSettings();
+  const localDeviceId = String(settings?.deviceId || "").trim();
+  const targetDeviceId = requestedId || localDeviceId;
+  if (!targetDeviceId) {
+    throw new Error("invalid_device_id");
+  }
+  const remoteFolderId = await resolveRemoteDeviceFolderId(targetDeviceId);
+  let totalFiles = 0;
+  if (remoteFolderId) {
+    totalFiles = await countFilesInRemoteFolder(remoteFolderId);
+    try {
+      await deleteStorageFolder(remoteFolderId);
+    } catch (error) {
+      if (!isRemoteDeleteNotFound(error)) {
+        throw error;
+      }
+    }
+  }
+  const isLocalDevice = targetDeviceId === localDeviceId;
+  let removedLocalFolders = 0;
+  if (isLocalDevice) {
+    const localFolders = Array.isArray(settings.syncFolders) ? settings.syncFolders : [];
+    removedLocalFolders = localFolders.length;
+    localFolders.forEach((folder) => {
+      if (folder?.path) {
+        removeFolderMapsByPrefix(folder.path);
+        clearQueueByPathPrefix(folder.path);
+      }
+    });
+    saveSettings({
+      ...settings,
+      syncFolders: [],
+      deviceId: "",
+      deviceNickname: ""
+    });
+    syncService.pause();
+  }
+  addUserActivity("device_delete", "Device removed", `${targetDeviceId}${isLocalDevice ? " (local)" : ""}`);
+  return {
+    ok: true,
+    deviceId: targetDeviceId,
+    localRemoved: isLocalDevice,
+    removedLocalFolders,
+    totalFiles,
+    deletedFiles: totalFiles
+  };
+});
 
 ipcMain.handle("storage:explorer:root", async (_event, payload) => {
   return listRoot({ userId: payload?.userId });
@@ -933,6 +1057,7 @@ function ensureDeviceIdentity() {
   }
   const deviceId = randomUUID();
   saveSettings({ ...settings, deviceId });
+  addUserActivity("device_add", "Device added", `${os.hostname()} (${deviceId})`);
   return {
     device_id: deviceId,
     device_name: os.hostname(),

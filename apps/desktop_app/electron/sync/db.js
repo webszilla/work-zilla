@@ -39,6 +39,13 @@ export function getDb() {
       local_path TEXT NOT NULL UNIQUE,
       remote_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      details TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -68,6 +75,17 @@ export function dequeueNext() {
 export function listQueue(limit = 100) {
   const database = getDb();
   return database.prepare("SELECT * FROM queue ORDER BY updated_at DESC LIMIT ?").all(limit);
+}
+
+export function countPendingQueueByPrefix(localPath) {
+  const database = getDb();
+  const nestedPrefix = `${localPath}${path.sep}%`;
+  const row = database
+    .prepare(
+      "SELECT COUNT(*) AS pending FROM queue WHERE (path = ? OR path LIKE ?) AND status IN ('queued', 'uploading')"
+    )
+    .get(localPath, nestedPrefix);
+  return Number(row?.pending || 0);
 }
 
 export function addActivity(title, subtitle, status) {
@@ -123,4 +141,33 @@ export function clearQueueByPathPrefix(localPath) {
 export function clearQueue() {
   const database = getDb();
   database.prepare("DELETE FROM queue").run();
+}
+
+function trimUserActivity(maxRows = 100) {
+  const database = getDb();
+  database
+    .prepare(
+      `DELETE FROM user_activity
+       WHERE id NOT IN (
+         SELECT id FROM user_activity
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?
+       )`
+    )
+    .run(maxRows);
+}
+
+export function addUserActivity(eventType, title, details = "") {
+  const database = getDb();
+  database
+    .prepare("INSERT INTO user_activity (event_type, title, details, created_at) VALUES (?, ?, ?, ?)")
+    .run(String(eventType || "info"), String(title || "Activity"), String(details || ""), new Date().toISOString());
+  trimUserActivity(100);
+}
+
+export function listUserActivity(limit = 100) {
+  const database = getDb();
+  return database
+    .prepare("SELECT * FROM user_activity ORDER BY created_at DESC, id DESC LIMIT ?")
+    .all(Math.min(Number(limit || 100), 100));
 }

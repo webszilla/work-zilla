@@ -6,6 +6,7 @@ import DashboardScreen from "./screens/DashboardScreen.jsx";
 import SyncStatusScreen from "./screens/SyncStatusScreen.jsx";
 import StorageUsageScreen from "./screens/StorageUsageScreen.jsx";
 import SyncActivityScreen from "./screens/SyncActivityScreen.jsx";
+import UserActivityScreen from "./screens/UserActivityScreen.jsx";
 import ErrorsScreen from "./screens/ErrorsScreen.jsx";
 import SettingsScreen from "./screens/SettingsScreen.jsx";
 const MonitorScreen = lazy(() => import("./screens/MonitorScreen.jsx"));
@@ -21,6 +22,7 @@ const storageScreens = [
   { id: "add-device-folders", label: "Add Device & Folders" },
   { id: "choose-folders", label: "Choose Local Folders" },
   { id: "activity", label: "Sync Activity" },
+  { id: "user-activity", label: "User Activity" },
   { id: "storage", label: "Storage Usage" },
   { id: "errors", label: "Errors" },
   { id: "settings", label: "Settings" }
@@ -286,6 +288,7 @@ export default function App() {
             </Suspense>
           ) : null}
           {current.id === "activity" ? <SyncActivityScreen /> : null}
+          {current.id === "user-activity" ? <UserActivityScreen /> : null}
           {current.id === "errors" ? <ErrorsScreen /> : null}
           {current.id === "settings" ? (
             <SettingsScreen theme={theme} onThemeChange={applyTheme} />

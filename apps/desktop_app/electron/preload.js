@@ -11,16 +11,19 @@ contextBridge.exposeInMainWorld("storageApi", {
   getFolders: () => ipcRenderer.invoke("folders:get"),
   chooseFolders: () => ipcRenderer.invoke("folders:choose"),
   removeFolder: (path) => ipcRenderer.invoke("folders:remove", path),
+  removeDevice: (payload) => ipcRenderer.invoke("device:remove", payload),
   mapFolderToOnline: (payload) => ipcRenderer.invoke("folders:map-remote", payload),
   getMappedOnlineFolder: (localPath) => ipcRenderer.invoke("folders:get-map", localPath),
   resolveRemoteFolderForLocalPath: (localPath) => ipcRenderer.invoke("folders:resolve-remote", localPath),
   startSync: () => ipcRenderer.invoke("sync:start"),
   getSyncStatus: () => ipcRenderer.invoke("sync:status"),
+  getSyncUploadProgress: () => ipcRenderer.invoke("sync:upload-progress"),
   pauseSync: () => ipcRenderer.invoke("sync:pause"),
   resumeSync: () => ipcRenderer.invoke("sync:resume"),
   getDashboardSummary: () => ipcRenderer.invoke("dashboard:summary"),
   getStorageUsage: () => ipcRenderer.invoke("storage:usage"),
   getActivity: () => ipcRenderer.invoke("activity:list"),
+  getUserActivity: () => ipcRenderer.invoke("user-activity:list"),
   getErrors: () => ipcRenderer.invoke("errors:list"),
   getQueue: () => ipcRenderer.invoke("queue:list"),
   getDeviceInfo: () => ipcRenderer.invoke("device:info"),
@@ -47,5 +50,10 @@ contextBridge.exposeInMainWorld("storageApi", {
     const listener = (_event, status) => handler(status);
     ipcRenderer.on("storage:upload-progress", listener);
     return () => ipcRenderer.removeListener("storage:upload-progress", listener);
+  },
+  onSyncUploadProgress: (handler) => {
+    const listener = (_event, status) => handler(status);
+    ipcRenderer.on("sync:upload-progress", listener);
+    return () => ipcRenderer.removeListener("sync:upload-progress", listener);
   }
 });

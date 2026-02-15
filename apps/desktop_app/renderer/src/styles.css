@@ -332,6 +332,20 @@ body {
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
 }
 
+:root[data-theme="light"] .btn-secondary,
+:root[data-theme="light"] .btn.btn-secondary {
+  color: #0f172a;
+  border-color: #d97706;
+  background: transparent;
+}
+
+:root[data-theme="light"] .btn-secondary:not(:disabled):hover,
+:root[data-theme="light"] .btn.btn-secondary:not(:disabled):hover {
+  color: #0f172a;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: #b45309;
+}
+
 .btn:not(:disabled):hover {
   transform: translateY(-1px);
   filter: brightness(1.05);
@@ -373,6 +387,34 @@ body {
   border-color: rgba(34, 197, 94, 0.4);
 }
 
+.progress-card {
+  margin-bottom: 12px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.progress-track-danger {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.progress-fill-danger {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -390,6 +432,10 @@ body {
   padding: 20px;
   width: min(480px, 92vw);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
+}
+
+.react-theme-modal {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--card-border));
 }
 
 .modal-title {

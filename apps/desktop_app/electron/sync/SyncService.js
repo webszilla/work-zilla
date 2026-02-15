@@ -60,6 +60,8 @@ export default class SyncService {
     this.autoPaused = false;
     this.lastUploadAt = 0;
     this.rateLimitedUntil = 0;
+    this.uploadProgress = { active: false, total: 0, completed: 0 };
+    this.uploadProgressListener = null;
   }
 
   getStatus() {
@@ -70,6 +72,50 @@ export default class SyncService {
       retry_in: this.retryIn || "-",
       active_uploads: this.activeUploads
     };
+  }
+
+  setUploadProgressListener(listener) {
+    this.uploadProgressListener = typeof listener === "function" ? listener : null;
+  }
+
+  getUploadProgress() {
+    return {
+      active: Boolean(this.uploadProgress.active),
+      total: Number(this.uploadProgress.total || 0),
+      completed: Number(this.uploadProgress.completed || 0)
+    };
+  }
+
+  emitUploadProgress() {
+    if (this.uploadProgressListener) {
+      this.uploadProgressListener(this.getUploadProgress());
+    }
+  }
+
+  beginUploadBatch(totalFiles) {
+    const total = Math.max(0, Number(totalFiles || 0));
+    if (!total) {
+      return;
+    }
+    this.uploadProgress.active = true;
+    this.uploadProgress.total += total;
+    this.emitUploadProgress();
+  }
+
+  markUploadProgressStep() {
+    if (!this.uploadProgress.active || this.uploadProgress.total <= 0) {
+      return;
+    }
+    this.uploadProgress.completed = Math.min(
+      this.uploadProgress.total,
+      Number(this.uploadProgress.completed || 0) + 1
+    );
+    if (this.uploadProgress.completed >= this.uploadProgress.total) {
+      this.uploadProgress.active = false;
+      this.uploadProgress.total = 0;
+      this.uploadProgress.completed = 0;
+    }
+    this.emitUploadProgress();
   }
 
   start() {
@@ -135,7 +181,8 @@ export default class SyncService {
 
   async queueInitialSync(folder) {
     try {
-      await this.enqueueExistingFiles(folder.path);
+      const queuedCount = await this.enqueueExistingFiles(folder.path);
+      this.beginUploadBatch(queuedCount);
       const settings = loadSettings();
       const nextFolders = (settings.syncFolders || []).map((item) =>
         item.path === folder.path ? { ...item, initialSyncDone: true } : item
@@ -148,6 +195,7 @@ export default class SyncService {
   }
 
   async enqueueExistingFiles(rootPath) {
+    let queuedCount = 0;
     const walk = async (currentPath) => {
       if (isSystemPath(currentPath) || isHiddenPath(currentPath) || isTempPath(currentPath)) {
         return;
@@ -169,6 +217,7 @@ export default class SyncService {
           try {
             const stats = await fs.promises.stat(fullPath);
             enqueueFile(fullPath, "add", stats.size || 0);
+            queuedCount += 1;
           } catch {
             // ignore unreadable file
           }
@@ -176,6 +225,7 @@ export default class SyncService {
       }
     };
     await walk(rootPath);
+    return queuedCount;
   }
 
   handleChange(event, filePath, stats) {
@@ -296,6 +346,7 @@ export default class SyncService {
       }
     } finally {
       this.activeUploads = Math.max(0, this.activeUploads - 1);
+      this.markUploadProgressStep();
     }
   }
 
