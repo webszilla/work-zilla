@@ -127,7 +127,8 @@ export default function MonitorScreen({ onBack }) {
     await window.storageApi.updateSettings({
       orgId: form.orgId,
       companyKey: form.orgId,
-      employeeName: form.employeeName
+      employeeName: form.employeeName,
+      employeeId: null
     });
     setSaving(false);
     const response = await window.storageApi.startMonitor();

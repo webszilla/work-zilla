@@ -433,7 +433,15 @@ ipcMain.handle("auth:status", async () => {
 ipcMain.handle("settings:get", () => loadSettings());
 
 ipcMain.handle("settings:update", (_event, payload) => {
-  const settings = saveSettings({ ...loadSettings(), ...payload });
+  const previous = loadSettings();
+  const next = { ...previous, ...payload };
+  const prevCompanyKey = String(previous.companyKey || previous.orgId || "").trim();
+  const nextCompanyKey = String(next.companyKey || next.orgId || "").trim();
+  if (prevCompanyKey && nextCompanyKey && prevCompanyKey !== nextCompanyKey) {
+    // Company key changed: force employee re-register for correct org binding.
+    next.employeeId = null;
+  }
+  const settings = saveSettings(next);
   if (payload?.paused !== undefined) {
     if (payload.paused) {
       syncService.pause();

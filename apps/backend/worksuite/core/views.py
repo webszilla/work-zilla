@@ -95,6 +95,28 @@ def _get_org_from_company_key(request, allow_inactive=False):
     header_device_id = request.headers.get("X-Device-Id")
     device_id = header_device_id or request.data.get("device_id") or request.query_params.get("device_id") or request.POST.get("device_id")
     employee_id = request.data.get("employee") or request.query_params.get("employee") or request.POST.get("employee")
+    header_company_key = request.headers.get("X-Company-Key")
+    company_key = header_company_key or request.data.get("company_key") or request.query_params.get("company_key") or request.POST.get("company_key")
+
+    # If company key is explicitly provided, prefer it over stale employee/device bindings.
+    if company_key:
+        org = Organization.objects.filter(company_key=company_key).first()
+        if not org:
+            return None, Response({"error": "Invalid company key"}, status=401)
+        if employee_id:
+            employee = Employee.objects.filter(id=employee_id).select_related("org").first()
+            if not employee or employee.org_id != org.id:
+                return None, Response({"error": "invalid_employee"}, status=401)
+            if device_id and employee.device_id and device_id != employee.device_id:
+                return None, Response({"error": "invalid_device"}, status=401)
+        elif device_id:
+            employee = Employee.objects.filter(device_id=device_id).select_related("org").first()
+            if employee and employee.org_id != org.id:
+                return None, Response({"error": "invalid_device"}, status=401)
+        if not allow_inactive and not has_active_subscription_for_org(org, "monitor"):
+            return None, Response({"error": "subscription_required"}, status=403)
+        return org, None
+
     if employee_id:
         employee = Employee.objects.filter(id=employee_id).select_related("org").first()
         if employee and employee.org:
@@ -109,8 +131,6 @@ def _get_org_from_company_key(request, allow_inactive=False):
             if not allow_inactive and not has_active_subscription_for_org(employee.org, "monitor"):
                 return None, Response({"error": "subscription_required"}, status=403)
             return employee.org, None
-    header_company_key = request.headers.get("X-Company-Key")
-    company_key = header_company_key or request.data.get("company_key") or request.query_params.get("company_key") or request.POST.get("company_key")
     if not company_key:
         return None, Response({"error": "company_key is required"}, status=401)
     org = Organization.objects.filter(company_key=company_key).first()
