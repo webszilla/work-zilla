@@ -32,15 +32,28 @@ function getCookie(name) {
   return "";
 }
 
+function getBrowserTimezone() {
+  if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat !== "function") {
+    return "";
+  }
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch (error) {
+    return "";
+  }
+}
+
 export function getCsrfToken() {
   return getCookie("csrftoken");
 }
 
 export async function apiFetch(url, options = {}) {
   const requestUrl = buildApiUrl(url);
+  const browserTimezone = getBrowserTimezone();
   const fetchOptions = {
     credentials: "include",
     headers: {
+      ...(browserTimezone ? { "X-Browser-Timezone": browserTimezone } : {}),
       ...(options.headers || {})
     },
     ...options

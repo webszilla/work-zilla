@@ -5,7 +5,8 @@ from django.utils import timezone
 from datetime import timedelta
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden, JsonResponse
-from core.models import Organization, Subscription, DeletedAccount, UserProfile
+from core.models import Organization, Subscription, DeletedAccount, UserProfile, OrganizationSettings
+from core.timezone_utils import normalize_timezone
 from core.subscription_utils import get_effective_end_date, is_free_plan, is_subscription_active, maybe_expire_subscription
 
 EXEMPT_URLS = [
@@ -161,4 +162,33 @@ class HrReadOnlyMiddleware:
                     if request.path.startswith("/api/"):
                         return JsonResponse({"error": "read_only"}, status=403)
                     return HttpResponseForbidden("Read-only access.")
+        return self.get_response(request)
+
+
+class OrganizationTimezoneMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        timezone.deactivate()
+
+        if request.user.is_authenticated:
+            profile = UserProfile.objects.filter(user=request.user).select_related("organization").first()
+            org = None
+            if request.user.is_superuser or (profile and profile.role in ("superadmin", "super_admin")):
+                active_org_id = request.session.get("active_org_id")
+                if active_org_id:
+                    org = Organization.objects.filter(id=active_org_id).first()
+            elif profile and profile.role == "dealer":
+                org = None
+            elif profile and profile.organization:
+                org = profile.organization
+            else:
+                org = Organization.objects.filter(owner=request.user).first()
+
+            if org:
+                org_settings = OrganizationSettings.objects.filter(organization=org).only("org_timezone").first()
+                if org_settings and org_settings.org_timezone:
+                    timezone.activate(normalize_timezone(org_settings.org_timezone))
+
         return self.get_response(request)

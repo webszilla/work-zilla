@@ -8,10 +8,12 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from core.models import Organization, Subscription, UserProfile, PendingTransfer, Plan, ThemeSettings, DealerAccount, ReferralSettings, SubscriptionHistory
+from core.models import Organization, Subscription, UserProfile, PendingTransfer, Plan, ThemeSettings, DealerAccount, ReferralSettings, SubscriptionHistory, OrganizationSettings
+from core.models import BillingProfile
 from core.device_policy import get_device_limit_for_org
 from core.email_utils import send_templated_email
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
+from core.timezone_utils import normalize_timezone, resolve_default_timezone, is_valid_timezone
 from core.subscription_utils import (
     get_effective_end_date,
     is_free_plan,
@@ -293,7 +295,37 @@ def auth_me(request):
                 profile.save(update_fields=["organization"])
 
     org_payload = None
+    org_timezone = "UTC"
     if org:
+        org_settings, _ = OrganizationSettings.objects.get_or_create(organization=org)
+        org_timezone = normalize_timezone(org_settings.org_timezone, fallback="UTC")
+        if org_settings.org_timezone != org_timezone:
+            org_settings.org_timezone = org_timezone
+            org_settings.save(update_fields=["org_timezone"])
+
+        if org_timezone == "UTC":
+            billing_country = (
+                BillingProfile.objects
+                .filter(organization=org)
+                .values_list("country", flat=True)
+                .first()
+            )
+            browser_tz = (
+                (request.headers.get("X-Browser-Timezone") or "").strip()
+                if request.headers else ""
+            )
+            if not is_valid_timezone(browser_tz):
+                browser_tz = ""
+            auto_timezone = resolve_default_timezone(
+                country=billing_country,
+                browser_timezone=browser_tz,
+                fallback=org_timezone,
+            )
+            if auto_timezone != org_timezone:
+                org_timezone = auto_timezone
+                org_settings.org_timezone = org_timezone
+                org_settings.save(update_fields=["org_timezone"])
+
         org_payload = {
             "id": org.id,
             "name": org.name,
@@ -471,6 +503,7 @@ def auth_me(request):
             "grace_until": grace_until.isoformat() if grace_until else "",
             "archive_until": archive_until.isoformat() if archive_until else "",
             "archived": archived,
+            "org_timezone": org_timezone,
             "device_limit": get_device_limit_for_org(org),
             "onboarding": {
                 "enabled": onboarding_enabled,

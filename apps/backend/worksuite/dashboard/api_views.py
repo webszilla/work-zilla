@@ -50,6 +50,7 @@ from dashboard import views as dashboard_views
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
 from core.email_utils import send_templated_email
 from core.subscription_utils import is_subscription_active
+from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 
 
@@ -135,6 +136,41 @@ def _format_datetime(value):
     if not value:
         return ""
     return timezone.localtime(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _read_browser_timezone(request):
+    query_tz = (request.GET.get("browser_timezone") or "").strip()
+    if is_valid_timezone(query_tz):
+        return query_tz
+    header_tz = (request.headers.get("X-Browser-Timezone") or "").strip()
+    if is_valid_timezone(header_tz):
+        return header_tz
+    return ""
+
+
+def _resolve_org_timezone(org, request=None):
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    current = normalize_timezone(settings_obj.org_timezone, fallback="UTC")
+    if settings_obj.org_timezone != current:
+        settings_obj.org_timezone = current
+        settings_obj.save(update_fields=["org_timezone"])
+
+    if current != "UTC":
+        return settings_obj, current
+
+    billing_country = (
+        BillingProfile.objects
+        .filter(organization=org)
+        .values_list("country", flat=True)
+        .first()
+    )
+    browser_timezone = _read_browser_timezone(request) if request else ""
+    resolved = resolve_default_timezone(country=billing_country, browser_timezone=browser_timezone, fallback=current)
+    if resolved != current:
+        settings_obj.org_timezone = resolved
+        settings_obj.save(update_fields=["org_timezone"])
+        current = resolved
+    return settings_obj, current
 
 
 def _storage_is_free_plan(plan):
@@ -3228,6 +3264,13 @@ def billing_profile(request):
     else:
         profile = BillingProfile.objects.create(organization=org, **incoming)
 
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    current_timezone = normalize_timezone(settings_obj.org_timezone, fallback="UTC")
+    country_timezone = resolve_default_timezone(country=incoming.get("country"), browser_timezone="", fallback=current_timezone)
+    if current_timezone == "UTC" and country_timezone != current_timezone:
+        settings_obj.org_timezone = country_timezone
+        settings_obj.save(update_fields=["org_timezone"])
+
     return JsonResponse({
         "profile": _billing_profile_payload(profile),
         "complete": True,
@@ -4438,7 +4481,7 @@ def profile_summary(request):
         for row in earnings
     ]
 
-    org_settings, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    _, org_timezone = _resolve_org_timezone(org, request=request)
     return JsonResponse({
         "org": {
             "id": org.id,
@@ -4458,7 +4501,7 @@ def profile_summary(request):
             "role": profile.role,
             "phone_number": profile.phone_number or "",
         },
-        "org_timezone": org_settings.org_timezone or "UTC",
+        "org_timezone": org_timezone,
         "phone_country": phone_country,
         "phone_number": phone_number,
         "recent_actions": [
@@ -4506,14 +4549,16 @@ def profile_update_email(request):
         phone_value = f"{phone_country} {phone_number}".strip()
     profile.phone_number = phone_value
     profile.save()
+    saved_timezone = None
     if not dashboard_views.is_super_admin_user(user):
         org, error = _get_org_or_error(request)
         if error:
             return error
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
         if org_timezone:
-            settings_obj.org_timezone = org_timezone
+            settings_obj.org_timezone = normalize_timezone(org_timezone)
             settings_obj.save(update_fields=["org_timezone"])
+        saved_timezone = settings_obj.org_timezone or "UTC"
 
     dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}")
 
@@ -4521,7 +4566,7 @@ def profile_update_email(request):
         "updated": True,
         "email": user.email,
         "phone_number": profile.phone_number or "",
-        "org_timezone": org_timezone or None,
+        "org_timezone": saved_timezone,
     })
 
 

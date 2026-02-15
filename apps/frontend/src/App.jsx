@@ -65,6 +65,8 @@ import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
+import { formatDeviceDate, setOrgTimezone } from "./lib/datetime.js";
+import { getBrowserTimezone } from "./lib/timezones.js";
 
 const emptyState = {
   loading: true,
@@ -218,7 +220,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     (sub) => sub.product_slug === "ai-chatbot" && (sub.status || "").toLowerCase() === "trialing"
   );
   const trialEndText = aiChatbotTrial?.trial_end
-    ? new Date(aiChatbotTrial.trial_end).toLocaleDateString()
+    ? formatDeviceDate(aiChatbotTrial.trial_end, "")
     : "";
   const allowAppUsage = state.allowAppUsage !== false;
   const allowGamingOttUsage = state.allowGamingOttUsage !== false;
@@ -1014,6 +1016,7 @@ export default function App() {
       window.__WZ_READ_ONLY__ = Boolean(data.read_only);
       window.__WZ_ARCHIVED__ = Boolean(data.archived);
     }
+    setOrgTimezone(data.org_timezone || "UTC");
     setState({
       loading: false,
       authenticated: Boolean(data.authenticated),
@@ -1047,8 +1050,10 @@ export default function App() {
   }, []);
 
   const loadProfile = useCallback(async () => {
+    const browserTimezone = getBrowserTimezone();
     const response = await fetch("/api/auth/me", {
-      credentials: "include"
+      credentials: "include",
+      headers: browserTimezone ? { "X-Browser-Timezone": browserTimezone } : {}
     });
     if (response.status === 401) {
       setState({ ...emptyState, loading: false });

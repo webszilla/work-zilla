@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 import TablePagination from "../components/TablePagination.jsx";
+import { setOrgTimezone as applyOrgTimezone } from "../lib/datetime.js";
+import { TIMEZONE_OPTIONS, getBrowserTimezone } from "../lib/timezones.js";
 
 const emptyState = {
   loading: true,
@@ -10,22 +12,6 @@ const emptyState = {
 };
 
 const phoneCountries = PHONE_COUNTRIES;
-const fallbackTimezones = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Europe/Berlin",
-  "Europe/Paris",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Australia/Sydney"
-];
-
 export default function ProfilePage() {
   const [state, setState] = useState(emptyState);
   const [notice, setNotice] = useState("");
@@ -60,6 +46,10 @@ export default function ProfilePage() {
         if (tableSearchQuery) {
           params.set("q", tableSearchQuery);
         }
+        const browserTimezone = getBrowserTimezone();
+        if (browserTimezone) {
+          params.set("browser_timezone", browserTimezone);
+        }
         const url = params.toString()
           ? `/api/dashboard/profile?${params.toString()}`
           : "/api/dashboard/profile";
@@ -71,7 +61,9 @@ export default function ProfilePage() {
         setEmail(data.user?.email || "");
         setPhoneCountry(data.phone_country || "+91");
         setPhoneNumber(data.phone_number || "");
-        setOrgTimezone(data.org_timezone || "UTC");
+        const timezone = data.org_timezone || "UTC";
+        setOrgTimezone(timezone);
+        applyOrgTimezone(timezone);
       } catch (error) {
         if (error?.data?.redirect) {
           window.location.href = error.data.redirect;
@@ -179,6 +171,7 @@ export default function ProfilePage() {
           org_timezone: orgTimezone
         })
       });
+      applyOrgTimezone(orgTimezone || "UTC");
       setNotice("Email updated successfully.");
     } catch (error) {
       setState((prev) => ({
@@ -250,9 +243,9 @@ export default function ProfilePage() {
   const recentActions = data.recent_actions || [];
   const referral = data.referral || {};
   const referralEarnings = Array.isArray(referral.earnings) ? referral.earnings : [];
-  const tzList = typeof Intl.supportedValuesOf === "function"
-    ? Intl.supportedValuesOf("timeZone")
-    : fallbackTimezones;
+  const tzList = TIMEZONE_OPTIONS.some((item) => item.value === orgTimezone)
+    ? TIMEZONE_OPTIONS
+    : [{ value: orgTimezone || "UTC", label: `${orgTimezone || "UTC"}` }, ...TIMEZONE_OPTIONS];
   const showTimezone = Boolean(data.org?.id);
   const pagination = data.pagination || {};
   const currentPage = pagination.page || adminPage;
@@ -324,17 +317,17 @@ export default function ProfilePage() {
               {showTimezone ? (
                 <div className="mb-2">
                   <label className="form-label">Organization Timezone</label>
-                  <select
-                    className="form-select"
-                    value={orgTimezone}
-                    onChange={(event) => setOrgTimezone(event.target.value)}
-                  >
-                    {tzList.map((tz) => (
-                      <option key={tz} value={tz}>
-                        {tz}
-                      </option>
-                    ))}
-                  </select>
+                <select
+                  className="form-select"
+                  value={orgTimezone}
+                  onChange={(event) => setOrgTimezone(event.target.value)}
+                >
+                  {tzList.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                </select>
                 </div>
               ) : null}
               <button className="btn btn-primary btn-sm">Update Details</button>
