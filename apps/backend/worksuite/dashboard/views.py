@@ -6,7 +6,7 @@ from django.views import View
 import json
 import mimetypes
 import os
-from core.models import Organization, Employee, Activity, Screenshot, UserProfile, Plan, Subscription, SubscriptionHistory, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, AdminActivity, PendingTransfer, InvoiceSellerProfile, log_admin_activity, DealerAccount
+from core.models import Organization, Employee, Activity, Screenshot, UserProfile, Plan, Subscription, SubscriptionHistory, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, AdminActivity, PendingTransfer, InvoiceSellerProfile, MonitorStopEvent, log_admin_activity, DealerAccount
 from core.subscription_utils import (
     get_free_trial_end_date,
     is_free_plan as is_free_plan_util,
@@ -1682,8 +1682,29 @@ def employee_delete(request, emp_id):
     employee = get_object_or_404(Employee, id=emp_id, org=org)
 
     if request.method == "POST":
+        screenshot_qs = Screenshot.objects.filter(employee=employee)
+        activity_qs = Activity.objects.filter(employee=employee)
+        stop_event_qs = MonitorStopEvent.objects.filter(employee=employee)
+
+        screenshot_count = screenshot_qs.count()
+        activity_count = activity_qs.count()
+        stop_event_count = stop_event_qs.count()
+
+        for shot in screenshot_qs.only("id", "image").iterator():
+            if shot.image:
+                shot.image.delete(save=False)
+        screenshot_qs.delete()
+        activity_qs.delete()
+        stop_event_qs.delete()
         employee.delete()
-        messages.success(request, "Employee deleted successfully.")
+
+        messages.success(
+            request,
+            (
+                f"Employee deleted. Removed {screenshot_count} screenshots, "
+                f"{activity_count} activity logs, and {stop_event_count} stop events."
+            ),
+        )
         return redirect("/dashboard/employees/")
 
     return redirect("/dashboard/employees/")

@@ -294,6 +294,7 @@ def public_plans(request):
                 "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
                 "allow_hr_view": plan.allow_hr_view,
             }
+            response_plans[-1]["features"] = dict(plan.features or {})
         if product_slug == "ai-chatbot":
             features = plan.features or {}
             response_plans[-1]["flags"] = {

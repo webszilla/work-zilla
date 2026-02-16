@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
 
@@ -8,13 +8,6 @@ const emptyState = {
   errorStatus: 0,
   data: null
 };
-
-function formatDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function normalizeUrl(value) {
   const text = String(value || "").trim();
@@ -38,16 +31,9 @@ function normalizeUrl(value) {
 }
 
 export default function GamingOttUsagePage() {
-  const today = formatDate(new Date());
   const [filters, setFilters] = useState({
     employeeId: "",
-    preset: "today",
-    dateFrom: "",
-    dateTo: ""
-  });
-  const [draftDates, setDraftDates] = useState({
-    dateFrom: today,
-    dateTo: today
+    preset: "today"
   });
   const [state, setState] = useState(emptyState);
   const [userQuery, setUserQuery] = useState("");
@@ -55,10 +41,6 @@ export default function GamingOttUsagePage() {
   const [tableSearchQuery, setTableSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
-  const fromWrapRef = useRef(null);
-  const toWrapRef = useRef(null);
-  const fromPickerRef = useRef(null);
-  const toPickerRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -69,16 +51,7 @@ export default function GamingOttUsagePage() {
         if (filters.employeeId) {
           params.set("employee_id", filters.employeeId);
         }
-        if (filters.preset) {
-          params.set("preset", filters.preset);
-        } else {
-          if (filters.dateFrom) {
-            params.set("date_from", filters.dateFrom);
-          }
-          if (filters.dateTo) {
-            params.set("date_to", filters.dateTo);
-          }
-        }
+        params.set("preset", filters.preset || "today");
         const url = params.toString()
           ? `/api/dashboard/gaming-ott?${params.toString()}`
           : "/api/dashboard/gaming-ott";
@@ -119,7 +92,6 @@ export default function GamingOttUsagePage() {
 
   const data = state.data || {};
   const employees = data.employees || [];
-  const availableDates = data.available_dates || [];
   const rows = data.rows || [];
   const selectedId = data.selected_employee_id
     ? String(data.selected_employee_id)
@@ -181,105 +153,12 @@ export default function GamingOttUsagePage() {
     setPage(1);
   }, [filters]);
 
-  useEffect(() => {
-    if (!window.flatpickr) {
-      return;
-    }
-    const enabledDates = availableDates.length ? availableDates : [];
-    const baseConfig = {
-      wrap: true,
-      altInput: true,
-      altFormat: "d-m-Y",
-      dateFormat: "Y-m-d",
-      altInputClass: "date-input flatpickr-input",
-      enable: enabledDates,
-      allowInput: false,
-      disableMobile: true
-    };
-
-    if (fromWrapRef.current && !fromPickerRef.current) {
-      fromPickerRef.current = window.flatpickr(fromWrapRef.current, {
-        ...baseConfig,
-        onChange: (_selected, dateStr) => {
-          setDraftDates((prev) => ({ ...prev, dateFrom: dateStr }));
-        }
-      });
-    }
-    if (toWrapRef.current && !toPickerRef.current) {
-      toPickerRef.current = window.flatpickr(toWrapRef.current, {
-        ...baseConfig,
-        onChange: (_selected, dateStr) => {
-          setDraftDates((prev) => ({ ...prev, dateTo: dateStr }));
-        }
-      });
-    }
-
-    if (fromPickerRef.current) {
-      fromPickerRef.current.set("enable", enabledDates);
-      if (draftDates.dateFrom) {
-        fromPickerRef.current.setDate(draftDates.dateFrom, false);
-      } else {
-        fromPickerRef.current.clear();
-      }
-    }
-    if (toPickerRef.current) {
-      toPickerRef.current.set("enable", enabledDates);
-      if (draftDates.dateTo) {
-        toPickerRef.current.setDate(draftDates.dateTo, false);
-      } else {
-        toPickerRef.current.clear();
-      }
-    }
-  }, [availableDates, draftDates.dateFrom, draftDates.dateTo]);
-
-  useEffect(() => {
-    return () => {
-      if (fromPickerRef.current) {
-        fromPickerRef.current.destroy();
-      }
-      if (toPickerRef.current) {
-        toPickerRef.current.destroy();
-      }
-    };
-  }, []);
-
   function handleSelectEmployee(id) {
     setFilters((prev) => ({ ...prev, employeeId: id || "" }));
   }
 
   function handlePreset(preset) {
-    const now = new Date();
-    if (preset === "today") {
-      const date = formatDate(now);
-      setFilters((prev) => ({ ...prev, preset: "today", dateFrom: "", dateTo: "" }));
-      setDraftDates({ dateFrom: date, dateTo: date });
-    } else if (preset === "yesterday") {
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      const date = formatDate(yesterday);
-      setFilters((prev) => ({ ...prev, preset: "yesterday", dateFrom: "", dateTo: "" }));
-      setDraftDates({ dateFrom: date, dateTo: date });
-    } else {
-      setFilters((prev) => ({ ...prev, preset: "all", dateFrom: "", dateTo: "" }));
-      setDraftDates({ dateFrom: "", dateTo: "" });
-    }
-  }
-
-  function handleApply(event) {
-    event.preventDefault();
-    if (!draftDates.dateFrom && !draftDates.dateTo) {
-      const now = new Date();
-      const date = formatDate(now);
-      setFilters((prev) => ({ ...prev, preset: "today", dateFrom: "", dateTo: "" }));
-      setDraftDates({ dateFrom: date, dateTo: date });
-      return;
-    }
-    setFilters((prev) => ({
-      ...prev,
-      preset: "",
-      dateFrom: draftDates.dateFrom,
-      dateTo: draftDates.dateTo
-    }));
+    setFilters((prev) => ({ ...prev, preset }));
   }
 
   if (state.loading) {
@@ -352,7 +231,7 @@ export default function GamingOttUsagePage() {
             <div className="shot-info">
               Showing: {selectedEmployee ? selectedEmployee.name : "All Users"}
             </div>
-            <form className="shot-filter" onSubmit={handleApply}>
+            <div className="shot-filter">
               <div className="preset-buttons">
                 <button
                   type="button"
@@ -368,36 +247,22 @@ export default function GamingOttUsagePage() {
                 >
                   Yesterday
                 </button>
+                <button
+                  type="button"
+                  className={`shot-btn ${filters.preset === "one_week" ? "active" : ""}`}
+                  onClick={() => handlePreset("one_week")}
+                >
+                  One Week
+                </button>
+                <button
+                  type="button"
+                  className={`shot-btn ${filters.preset === "one_month" ? "active" : ""}`}
+                  onClick={() => handlePreset("one_month")}
+                >
+                  One Month
+                </button>
               </div>
-              <label>
-                <span>From</span>
-                <div className="date-picker-wrap" ref={fromWrapRef}>
-                  <input type="text" className="date-input" data-input />
-                  <button type="button" className="calendar-trigger" title="Open calendar" data-toggle>
-                    <i className="bi bi-calendar3" />
-                  </button>
-                </div>
-              </label>
-              <label>
-                <span>To</span>
-                <div className="date-picker-wrap" ref={toWrapRef}>
-                  <input type="text" className="date-input" data-input />
-                  <button type="button" className="calendar-trigger" title="Open calendar" data-toggle>
-                    <i className="bi bi-calendar3" />
-                  </button>
-                </div>
-              </label>
-              <button type="submit" className="shot-btn primary">
-                Apply
-              </button>
-              <button
-                type="button"
-                className={`shot-btn ${filters.preset === "all" ? "active" : ""}`}
-                onClick={() => handlePreset("all")}
-              >
-                Reset
-              </button>
-            </form>
+            </div>
           </div>
 
           <div className="card p-3 usage-card">

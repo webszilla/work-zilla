@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
+import { formatDeviceDateTime } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -16,14 +17,7 @@ const RANGE_OPTIONS = [
 ];
 
 function formatDate(value) {
-  if (!value) {
-    return "-";
-  }
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) {
-    return value;
-  }
-  return dt.toLocaleString();
+  return formatDeviceDateTime(value);
 }
 
 export default function SaasAdminServerMonitoringDetailPage() {

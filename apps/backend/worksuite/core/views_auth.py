@@ -62,6 +62,21 @@ def company_signup(request):
             owner=user,
             company_key=name.replace(" ", "").upper() + "KEY"
         )
+        browser_tz = (
+            (request.headers.get("X-Browser-Timezone") or "").strip()
+            if request.headers else ""
+        )
+        if not is_valid_timezone(browser_tz):
+            browser_tz = ""
+        initial_timezone = resolve_default_timezone(
+            country=(request.POST.get("country") or "").strip(),
+            browser_timezone=browser_tz,
+            fallback="UTC",
+        )
+        OrganizationSettings.objects.create(
+            organization=org,
+            org_timezone=normalize_timezone(initial_timezone, fallback="UTC"),
+        )
         if referral_code:
             referrer_dealer = DealerAccount.objects.filter(referral_code=referral_code).first()
             if referrer_dealer:

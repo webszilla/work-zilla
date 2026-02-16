@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch, getCsrfToken } from "../lib/api.js";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
+import { formatDeviceDateTime } from "../lib/datetime.js";
 
 const emptySettings = {
   loading: true,
@@ -722,7 +723,7 @@ export default function AiChatbotChatSettingsPage() {
                             {item.source_url || item.text_content || "-"}
                           </td>
                           <td>{formatBytes(item.file_size)}</td>
-                          <td>{updatedAt ? new Date(updatedAt).toLocaleString() : "-"}</td>
+                          <td>{formatDeviceDateTime(updatedAt)}</td>
                           <td>
                             <div className="d-flex gap-2 flex-wrap">
                               {item.file_url ? (

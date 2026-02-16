@@ -2,6 +2,7 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch, getCsrfToken } from "../lib/api.js";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
+import { formatDeviceDateTime } from "../lib/datetime.js";
 
 const PAGE_SIZE = 50;
 
@@ -66,14 +67,7 @@ function formatGb(value) {
 }
 
 function formatDate(value) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
+  return formatDeviceDateTime(value);
 }
 
 async function fetchFormData(url, formData) {

@@ -177,6 +177,40 @@ def _resolve_org_timezone(org, request=None):
     return settings_obj, current
 
 
+def _cleanup_old_monitor_data(org, days=30):
+    cutoff = timezone.now() - timedelta(days=max(int(days or 30), 1))
+    Activity.objects.filter(
+        employee__org=org
+    ).filter(
+        models.Q(end_time__lt=cutoff) | models.Q(start_time__lt=cutoff)
+    ).delete()
+    MonitorStopEvent.objects.filter(employee__org=org, stopped_at__lt=cutoff).delete()
+
+
+def _resolve_monitor_preset(date_from_raw, date_to_raw, preset):
+    allowed_presets = {"today", "yesterday", "one_week", "one_month", "all"}
+    if preset not in allowed_presets:
+        preset = None
+
+    if not preset and not date_from_raw and not date_to_raw:
+        preset = "today"
+
+    today = timezone.localdate()
+    if preset == "today":
+        iso_day = today.isoformat()
+        return iso_day, iso_day, preset
+    if preset == "yesterday":
+        iso_day = (today - timedelta(days=1)).isoformat()
+        return iso_day, iso_day, preset
+    if preset == "one_week":
+        return (today - timedelta(days=6)).isoformat(), today.isoformat(), preset
+    if preset == "one_month":
+        return (today - timedelta(days=29)).isoformat(), today.isoformat(), preset
+    if preset == "all":
+        return None, None, preset
+    return date_from_raw, date_to_raw, preset
+
+
 def _storage_is_free_plan(plan):
     if not plan:
         return False
@@ -1713,6 +1747,7 @@ def work_activity_log(request):
     if error:
         return error
 
+    _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     gap_minutes = settings_obj.screenshot_interval_minutes or 5
@@ -1745,28 +1780,11 @@ def work_activity_log(request):
     date_from_raw = request.GET.get("date_from")
     date_to_raw = request.GET.get("date_to")
     preset = request.GET.get("preset")
-    allowed_presets = {"today", "yesterday", "all"}
-    if preset not in allowed_presets:
-        preset = None
-
-    if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
-
-    if preset == "today":
-        today = timezone.localdate()
-        iso_day = today.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "yesterday":
-        day = timezone.localdate() - timedelta(days=1)
-        iso_day = day.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "all":
-        date_from_raw = None
-        date_to_raw = None
-
-    active_preset = preset
+    date_from_raw, date_to_raw, active_preset = _resolve_monitor_preset(
+        date_from_raw,
+        date_to_raw,
+        preset,
+    )
 
     date_from, date_from_value = _parse_date_flexible(date_from_raw)
     date_to, date_to_value = _parse_date_flexible(date_to_raw)
@@ -1985,9 +2003,8 @@ def app_usage(request):
     if not (sub and sub.plan and sub.plan.allow_gaming_ott_usage):
         return _json_error("Gaming / OTT Usage is not enabled for your current plan.", status=403)
 
+    _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()
-    cutoff = now - timedelta(days=30)
-    Activity.objects.filter(employee__org=org, end_time__lt=cutoff).delete()
 
     employees = Employee.objects.filter(org=org).order_by("name")
     selected_employee = None
@@ -2014,28 +2031,11 @@ def app_usage(request):
     date_from_raw = request.GET.get("date_from")
     date_to_raw = request.GET.get("date_to")
     preset = request.GET.get("preset")
-    allowed_presets = {"today", "yesterday", "all"}
-    if preset not in allowed_presets:
-        preset = None
-
-    if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
-
-    if preset == "today":
-        today = timezone.localdate()
-        iso_day = today.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "yesterday":
-        day = timezone.localdate() - timedelta(days=1)
-        iso_day = day.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "all":
-        date_from_raw = None
-        date_to_raw = None
-
-    active_preset = preset
+    date_from_raw, date_to_raw, active_preset = _resolve_monitor_preset(
+        date_from_raw,
+        date_to_raw,
+        preset,
+    )
 
     date_from, date_from_value = _parse_date_flexible(date_from_raw)
     date_to, date_to_value = _parse_date_flexible(date_to_raw)
@@ -2156,6 +2156,7 @@ def app_urls_usage(request):
     if not (sub and sub.plan and sub.plan.allow_app_usage):
         return _json_error("App Usage is not enabled for your current plan.", status=403)
 
+    _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()
     employees = Employee.objects.filter(org=org).order_by("name")
     selected_employee = None
@@ -2187,28 +2188,11 @@ def app_urls_usage(request):
     date_from_raw = request.GET.get("date_from")
     date_to_raw = request.GET.get("date_to")
     preset = request.GET.get("preset")
-    allowed_presets = {"today", "yesterday", "all"}
-    if preset not in allowed_presets:
-        preset = None
-
-    if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
-
-    if preset == "today":
-        today = timezone.localdate()
-        iso_day = today.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "yesterday":
-        day = timezone.localdate() - timedelta(days=1)
-        iso_day = day.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "all":
-        date_from_raw = None
-        date_to_raw = None
-
-    active_preset = preset
+    date_from_raw, date_to_raw, active_preset = _resolve_monitor_preset(
+        date_from_raw,
+        date_to_raw,
+        preset,
+    )
 
     date_from, date_from_value = _parse_date_flexible(date_from_raw)
     date_to, date_to_value = _parse_date_flexible(date_to_raw)
@@ -2323,6 +2307,7 @@ def gaming_ott_usage(request):
     if not (sub and sub.plan and sub.plan.allow_app_usage):
         return _json_error("App Usage is not enabled for your current plan.", status=403)
 
+    _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()
     employees = Employee.objects.filter(org=org).order_by("name")
     selected_employee = None
@@ -2351,28 +2336,11 @@ def gaming_ott_usage(request):
     date_from_raw = request.GET.get("date_from")
     date_to_raw = request.GET.get("date_to")
     preset = request.GET.get("preset")
-    allowed_presets = {"today", "yesterday", "all"}
-    if preset not in allowed_presets:
-        preset = None
-
-    if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
-
-    if preset == "today":
-        today = timezone.localdate()
-        iso_day = today.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "yesterday":
-        day = timezone.localdate() - timedelta(days=1)
-        iso_day = day.isoformat()
-        date_from_raw = iso_day
-        date_to_raw = iso_day
-    elif preset == "all":
-        date_from_raw = None
-        date_to_raw = None
-
-    active_preset = preset
+    date_from_raw, date_to_raw, active_preset = _resolve_monitor_preset(
+        date_from_raw,
+        date_to_raw,
+        preset,
+    )
 
     date_from, date_from_value = _parse_date_flexible(date_from_raw)
     date_to, date_to_value = _parse_date_flexible(date_to_raw)

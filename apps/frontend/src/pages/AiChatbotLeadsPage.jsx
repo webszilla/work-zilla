@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { formatDeviceDateTime } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -17,14 +18,7 @@ const dayOptions = [
 ];
 
 function formatDate(value) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
+  return formatDeviceDateTime(value);
 }
 
 function truncate(text, limit = 80) {
