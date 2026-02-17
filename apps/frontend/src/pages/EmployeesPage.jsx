@@ -263,14 +263,14 @@ export default function EmployeesPage() {
               <table className="table table-dark table-striped table-hover align-middle">
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th className="employee-col-id">ID</th>
                     <th>Name</th>
                     <th>PC Name</th>
                     <th>Company Key</th>
                     <th>Device</th>
-                    <th>Status</th>
+                    <th className="employee-col-status">Status</th>
                     <th>Last Seen</th>
-                    <th>Action</th>
+                    <th className="table-actions employee-col-action">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,35 +285,37 @@ export default function EmployeesPage() {
                       }
                       return (
                         <tr key={employee.id}>
-                          <td>{employee.id}</td>
+                          <td className="employee-col-id">{employee.id}</td>
                           <td>{employee.name}</td>
                           <td>{employee.pc_name || "-"}</td>
                           <td>{companyKey}</td>
                           <td>{employee.device_id}</td>
-                          <td>
+                          <td className="employee-col-status">
                             <span className={`badge ${badgeClass}`}>{status}</span>
                           </td>
                           <td>{formatDeviceDateTime(employee.last_seen)}</td>
-                          <td>
-                            <Link
-                              to={`/employees/${employee.id}`}
-                              className="btn btn-primary btn-sm me-2"
-                            >
-                              View
-                            </Link>
-                            <Link
-                              to={`/employees/${employee.id}/edit`}
-                              className="btn btn-outline-light btn-sm me-2"
-                            >
-                              Edit
-                            </Link>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleDelete(employee)}
-                            >
-                              Delete
-                            </button>
+                          <td className="table-actions employee-col-action">
+                            <div className="d-flex gap-2 employee-actions-row">
+                              <Link
+                                to={`/employees/${employee.id}`}
+                                className="btn btn-primary btn-sm"
+                              >
+                                View
+                              </Link>
+                              <Link
+                                to={`/employees/${employee.id}/edit`}
+                                className="btn btn-outline-light btn-sm"
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDelete(employee)}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
