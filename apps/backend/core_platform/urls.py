@@ -53,6 +53,7 @@ urlpatterns = [
     path("products/", include("apps.backend.products.urls")),
     path("ai-chatbox/<slug:slug>-<str:code>/", monitor_public_views.public_chatbox, name="public_chatbox"),
     path("agent-signup/", monitor_auth_views.agent_signup),
+    path("hr-login/", monitor_auth_views.hr_login),
     path("select-organization/", dashboard_views.select_organization),
     path("api/health", health_check),
     path("api/public/products", monitor_public_views.public_products),
