@@ -4502,7 +4502,11 @@ def profile_summary(request):
         else:
             phone_number = profile.phone_number.strip()
 
-    recent_actions_qs = AdminActivity.objects.filter(user=user)
+    recent_actions_qs = (
+        AdminActivity.objects
+        .filter(user__userprofile__organization=org)
+        .select_related("user")
+    )
     search_query = (request.GET.get("q") or "").strip()
     if search_query:
         recent_actions_qs = recent_actions_qs.filter(
