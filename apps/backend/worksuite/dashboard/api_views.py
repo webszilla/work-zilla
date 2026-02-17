@@ -2550,8 +2550,15 @@ def company_update_name(request):
     if not name:
         return _json_error("Company name is required.")
 
+    old_name = org.name
     org.name = name
     org.save()
+
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Update Company Name",
+        f"Company name changed from '{old_name}' to '{org.name}'",
+    )
 
     return JsonResponse({"updated": True, "name": org.name})
 
@@ -2583,8 +2590,15 @@ def company_update_interval(request):
     if interval_val not in allowed_intervals:
         return _json_error("Invalid interval selected.", status=400)
 
+    previous_interval = settings_obj.screenshot_interval_minutes
     settings_obj.screenshot_interval_minutes = interval_val
     settings_obj.save()
+
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Update Screenshot Interval",
+        f"Interval changed from {previous_interval} to {interval_val} minute(s)",
+    )
 
     return JsonResponse({"screenshot_interval_minutes": interval_val})
 
@@ -2614,6 +2628,15 @@ def company_update_screenshot_privacy(request):
     if len(patterns) > 5000:
         return _json_error("Ignore list is too long.", status=400)
 
+    old_patterns = settings_obj.screenshot_ignore_patterns or ""
+    old_keyword_rules = settings_obj.privacy_keyword_rules or ""
+    old_flags = {
+        "auto_blur_password_fields": settings_obj.auto_blur_password_fields,
+        "auto_blur_otp_fields": settings_obj.auto_blur_otp_fields,
+        "auto_blur_card_fields": settings_obj.auto_blur_card_fields,
+        "auto_blur_email_inbox": settings_obj.auto_blur_email_inbox,
+    }
+
     settings_obj.screenshot_ignore_patterns = patterns
     if keyword_rules is not None:
         keyword_rules = str(keyword_rules).replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -2629,6 +2652,26 @@ def company_update_screenshot_privacy(request):
     if auto_blur_email_inbox is not None:
         settings_obj.auto_blur_email_inbox = bool(auto_blur_email_inbox)
     settings_obj.save()
+
+    changes = []
+    if old_patterns != (settings_obj.screenshot_ignore_patterns or ""):
+        changes.append("ignore patterns")
+    if old_keyword_rules != (settings_obj.privacy_keyword_rules or ""):
+        changes.append("privacy keywords")
+    if old_flags["auto_blur_password_fields"] != settings_obj.auto_blur_password_fields:
+        changes.append("password blur")
+    if old_flags["auto_blur_otp_fields"] != settings_obj.auto_blur_otp_fields:
+        changes.append("OTP blur")
+    if old_flags["auto_blur_card_fields"] != settings_obj.auto_blur_card_fields:
+        changes.append("card blur")
+    if old_flags["auto_blur_email_inbox"] != settings_obj.auto_blur_email_inbox:
+        changes.append("email inbox blur")
+    if changes:
+        dashboard_views.log_admin_activity(
+            request.user,
+            "Update Screenshot Privacy",
+            f"Updated: {', '.join(changes)}",
+        )
 
     return JsonResponse({
         "updated": True,
@@ -2662,11 +2705,18 @@ def company_update_privacy(request):
     if monitoring_mode not in valid_modes:
         return _json_error("Invalid monitoring mode selected.", status=400)
 
+    previous_mode = privacy_settings.monitoring_mode
     privacy_settings.monitoring_mode = monitoring_mode
     if monitoring_mode != "privacy_lock":
         privacy_settings.support_access_enabled_until = None
         privacy_settings.support_access_duration_hours = None
     privacy_settings.save()
+
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Update Privacy Mode",
+        f"Monitoring mode changed from '{previous_mode}' to '{privacy_settings.monitoring_mode}'",
+    )
 
     return JsonResponse({
         "updated": True,
@@ -2704,12 +2754,25 @@ def company_update_support(request):
         privacy_settings.save()
         return _json_error("Support access is available only in Privacy Lock mode.", status=400)
 
+    previous_enabled_until = privacy_settings.support_access_enabled_until
+    previous_hours = privacy_settings.support_access_duration_hours
     privacy_settings.support_access_duration_hours = support_hours
     if support_enabled:
         privacy_settings.support_access_enabled_until = timezone.now() + timedelta(hours=support_hours)
     else:
         privacy_settings.support_access_enabled_until = None
     privacy_settings.save()
+
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Update Support Access",
+        (
+            "Support access updated: "
+            f"enabled={support_enabled}, hours={support_hours}, "
+            f"previous_hours={previous_hours}, "
+            f"previous_until={_format_datetime(previous_enabled_until) if previous_enabled_until else '-'}"
+        ),
+    )
 
     support_active = dashboard_views.has_active_support_access(privacy_settings)
     support_until = privacy_settings.support_access_enabled_until

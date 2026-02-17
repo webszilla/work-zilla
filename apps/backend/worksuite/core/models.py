@@ -1205,20 +1205,27 @@ class AdminNotification(models.Model):
         return f"{self.title} ({self.event_type})"
 
 
+ADMIN_ACTIVITY_MAX_PER_USER = 500
+
+
 def log_admin_activity(user, action, details=""):
+    if not user:
+        return
+
     AdminActivity.objects.create(
         user=user,
         action=action,
-        details=details
+        details=details,
     )
-    old_ids = (
+
+    old_ids = list(
         AdminActivity.objects
         .filter(user=user)
-        .order_by("-created_at")
-        .values_list("id", flat=True)[500:]
+        .order_by("-created_at", "-id")
+        .values_list("id", flat=True)[ADMIN_ACTIVITY_MAX_PER_USER:]
     )
     if old_ids:
-        AdminActivity.objects.filter(id__in=list(old_ids)).delete()
+        AdminActivity.objects.filter(id__in=old_ids).delete()
 
 def _generate_chat_code():
     return secrets.token_hex(8)
