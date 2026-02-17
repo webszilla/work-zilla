@@ -1261,8 +1261,6 @@ def monitor_heartbeat(request):
             return Response({"error": "Invalid employee"}, status=400)
 
         now = timezone.now()
-        employee.last_seen = now
-        employee.save(update_fields=["last_seen"])
         app_name = (request.data.get("app_name") or "").strip()
         window_title = (request.data.get("window_title") or "").strip()
         url = (request.data.get("url") or "").strip()
