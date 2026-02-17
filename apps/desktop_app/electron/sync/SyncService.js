@@ -469,7 +469,7 @@ export default class SyncService {
     return employeeId;
   }
 
-  async uploadScreenshot(filePath) {
+  async uploadScreenshot(filePath, metadata = {}) {
     if (!filePath || !fs.existsSync(filePath)) {
       return;
     }
@@ -482,7 +482,11 @@ export default class SyncService {
         employeeId,
         deviceId: settings.deviceId,
         companyKey,
-        pcName: os.hostname()
+        pcName: os.hostname(),
+        appName: metadata.appName || "",
+        windowTitle: metadata.windowTitle || "",
+        url: metadata.url || "",
+        pcTime: metadata.pcTime || ""
       });
       addActivity("Screenshot uploaded", filePath, "success");
     } catch (error) {

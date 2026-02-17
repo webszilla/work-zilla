@@ -460,13 +460,30 @@ def _is_browser_app(app_name):
         return False
     browsers = {
         "chrome.exe",
+        "chrome",
         "msedge.exe",
+        "msedge",
         "brave.exe",
+        "brave",
         "firefox.exe",
+        "firefox",
         "opera.exe",
+        "opera",
         "iexplore.exe",
+        "iexplore",
+        "google chrome",
+        "microsoft edge",
+        "brave browser",
+        "mozilla firefox",
+        "safari",
     }
     return app_name.strip().lower() in browsers
+
+
+def _is_monitor_placeholder(app_name, window_title):
+    app = (app_name or "").strip().lower()
+    title = (window_title or "").strip().lower()
+    return app in {"", "work zilla agent"} and title in {"", "monitor active"}
 
 
 def _normalize_keywords(value):
@@ -1086,6 +1103,9 @@ def upload_screenshot(request):
                 return Response({"message": "Screenshot ignored for privacy"})
 
         image.name = _build_screenshot_filename(employee, pc_captured_at or timezone.now(), image.name)
+        captured_at_for_activity = pc_captured_at or timezone.now()
+        normalized_app_name = app_name or "Work Zilla Agent"
+        normalized_window_title = window_title or "Monitor Active"
         try:
             Screenshot.objects.create(
                 employee=employee,
@@ -1130,6 +1150,18 @@ def upload_screenshot(request):
                     request=request,
                 )
                 return Response({"error": "screenshot_storage_failed"}, status=500)
+
+        # Persist activity signal from screenshot metadata so dashboard pages can
+        # classify app usage / gaming-ott even when helpers don't post /activity/upload.
+        if not _is_monitor_placeholder(normalized_app_name, normalized_window_title):
+            Activity.objects.create(
+                employee=employee,
+                app_name=normalized_app_name,
+                window_title=normalized_window_title,
+                url=url,
+                start_time=captured_at_for_activity,
+                end_time=captured_at_for_activity,
+            )
 
         sub = Subscription.objects.filter(
             organization=employee.org,
@@ -1229,14 +1261,21 @@ def monitor_heartbeat(request):
             return Response({"error": "Invalid employee"}, status=400)
 
         now = timezone.now()
-        Activity.objects.create(
-            employee=employee,
-            app_name=request.data.get("app_name") or "Work Zilla Agent",
-            window_title=request.data.get("window_title") or "Monitor Active",
-            url=request.data.get("url") or "",
-            start_time=now,
-            end_time=now,
-        )
+        employee.last_seen = now
+        employee.save(update_fields=["last_seen"])
+        app_name = (request.data.get("app_name") or "").strip()
+        window_title = (request.data.get("window_title") or "").strip()
+        url = (request.data.get("url") or "").strip()
+        if app_name or window_title or url:
+            if not _is_monitor_placeholder(app_name, window_title):
+                Activity.objects.create(
+                    employee=employee,
+                    app_name=app_name or "Work Zilla Agent",
+                    window_title=window_title or "Monitor Active",
+                    url=url,
+                    start_time=now,
+                    end_time=now,
+                )
         log_event(
             "agent_heartbeat",
             status="success",

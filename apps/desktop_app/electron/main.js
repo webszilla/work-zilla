@@ -4,7 +4,7 @@ import os from "os";
 import fs from "fs";
 import dns from "dns/promises";
 import { randomUUID } from "crypto";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
@@ -194,9 +194,116 @@ function startConnectivityMonitor() {
   }, CONNECTIVITY_CHECK_INTERVAL_MS);
 }
 
-function uploadScreenshot(filePath) {
+function getWindowsActiveWindowMetadata() {
+  try {
+    const script = `
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class WinApi {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+$h=[WinApi]::GetForegroundWindow()
+if ($h -eq [IntPtr]::Zero) { Write-Output ""; exit 0 }
+$sb=New-Object System.Text.StringBuilder 1024
+[WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
+$pid=0
+[WinApi]::GetWindowThreadProcessId($h,[ref]$pid) | Out-Null
+$app=""
+if ($pid -gt 0) {
+  try { $app=(Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch {}
+}
+Write-Output ($app + "\\t" + $sb.ToString())
+`;
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: true
+    });
+    const output = String(result?.stdout || "").trim();
+    if (!output) {
+      return { appName: "", windowTitle: "", url: "" };
+    }
+    const [appName = "", windowTitle = ""] = output.split("\t");
+    return { appName: appName.trim(), windowTitle: windowTitle.trim(), url: "" };
+  } catch {
+    return { appName: "", windowTitle: "", url: "" };
+  }
+}
+
+function getMacActiveWindowMetadata() {
+  try {
+    const result = spawnSync(
+      "osascript",
+      [
+        "-e",
+        'tell application "System Events"',
+        "-e",
+        'set frontApp to ""',
+        "-e",
+        'set frontTitle to ""',
+        "-e",
+        "try",
+        "-e",
+        "set frontProc to first application process whose frontmost is true",
+        "-e",
+        "set frontApp to name of frontProc",
+        "-e",
+        "try",
+        "-e",
+        'set frontTitle to value of attribute "AXTitle" of window 1 of frontProc',
+        "-e",
+        "end try",
+        "-e",
+        "end try",
+        "-e",
+        'return frontApp & tab & frontTitle',
+        "-e",
+        "end tell"
+      ],
+      { encoding: "utf8" }
+    );
+    const output = String(result?.stdout || "").trim();
+    let appName = "";
+    let windowTitle = "";
+    if (output) {
+      const parts = output.split("\t");
+      appName = String(parts[0] || "").trim();
+      windowTitle = String(parts.slice(1).join("\t") || "").trim();
+    }
+    let url = "";
+    if (appName === "Google Chrome" || appName === "Microsoft Edge" || appName === "Brave Browser") {
+      const browserScript = `tell application "${appName}" to return URL of active tab of front window`;
+      const browserResult = spawnSync("osascript", ["-e", browserScript], { encoding: "utf8" });
+      url = String(browserResult?.stdout || "").trim();
+    } else if (appName === "Safari") {
+      const safariResult = spawnSync("osascript", ["-e", 'tell application "Safari" to return URL of front document'], {
+        encoding: "utf8"
+      });
+      url = String(safariResult?.stdout || "").trim();
+    }
+    return { appName, windowTitle, url };
+  } catch {
+    return { appName: "", windowTitle: "", url: "" };
+  }
+}
+
+function getActiveWindowMetadata() {
+  if (process.platform === "win32") {
+    return getWindowsActiveWindowMetadata();
+  }
+  if (process.platform === "darwin") {
+    return getMacActiveWindowMetadata();
+  }
+  return { appName: "", windowTitle: "", url: "" };
+}
+
+function uploadScreenshot(filePath, metadata = {}) {
   if (typeof syncService.uploadScreenshot === "function") {
-    syncService.uploadScreenshot(filePath);
+    syncService.uploadScreenshot(filePath, metadata);
   }
 }
 
@@ -216,14 +323,14 @@ function attachHelperOutput(child) {
         return;
       }
       if (filePath) {
-        uploadScreenshot(filePath);
+        uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
       }
     });
   });
   child.stdout.on("end", () => {
     const remaining = buffer.trim();
     if (remaining) {
-      uploadScreenshot(remaining);
+      uploadScreenshot(remaining, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
     }
   });
 }
@@ -1189,12 +1296,14 @@ async function startMonitorWithAuth() {
     monitorHeartbeatTimer = setInterval(async () => {
       try {
         const beatSettings = loadSettings();
+        const meta = getActiveWindowMetadata();
         await sendMonitorHeartbeat({
           company_key: resolveCompanyKey(beatSettings),
           device_id: beatSettings.deviceId || "",
           employee_id: beatSettings.employeeId || null,
-          app_name: "Work Zilla Agent",
-          window_title: "Monitor Active"
+          app_name: meta.appName || "",
+          window_title: meta.windowTitle || "",
+          url: meta.url || ""
         });
       } catch {
         // ignore heartbeat errors
@@ -1202,12 +1311,14 @@ async function startMonitorWithAuth() {
     }, 60000);
     try {
       const freshSettings = loadSettings();
+      const meta = getActiveWindowMetadata();
       await sendMonitorHeartbeat({
         company_key: resolveCompanyKey(freshSettings),
         device_id: freshSettings.deviceId || "",
         employee_id: freshSettings.employeeId || null,
-        app_name: "Work Zilla Agent",
-        window_title: "Monitor Active"
+        app_name: meta.appName || "",
+        window_title: meta.windowTitle || "",
+        url: meta.url || ""
       });
     } catch {
       // ignore heartbeat errors
@@ -1396,7 +1507,7 @@ function captureOnceMac() {
     monitorCaptureInFlight = true;
     captureOnceMacElectron().then((filePath) => {
       if (filePath) {
-        uploadScreenshot(filePath);
+        uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
       }
       monitorCaptureInFlight = false;
     });
@@ -1408,7 +1519,7 @@ function captureOnceMac() {
     if (!fs.existsSync(helperPath)) {
       captureOnceMacElectron().then((filePath) => {
         if (filePath) {
-          uploadScreenshot(filePath);
+          uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
         }
         monitorCaptureInFlight = false;
       });
@@ -1434,14 +1545,14 @@ function captureOnceMac() {
             return;
           }
           capturedPath = filePath;
-          uploadScreenshot(filePath);
+          uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
         });
       });
       monitorProcess.stdout.on("end", () => {
         const remaining = buffer.trim();
         if (remaining && !remaining.startsWith("error=")) {
           capturedPath = remaining;
-          uploadScreenshot(remaining);
+          uploadScreenshot(remaining, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
         }
       });
     }
@@ -1451,7 +1562,7 @@ function captureOnceMac() {
       if (!capturedPath) {
         captureOnceMacElectron().then((filePath) => {
           if (filePath) {
-            uploadScreenshot(filePath);
+            uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
           }
         });
       }
@@ -1472,7 +1583,7 @@ function captureOnceWindows() {
   monitorCaptureInFlight = true;
   captureOnceWindowsElectron().then((filePath) => {
     if (filePath) {
-      uploadScreenshot(filePath);
+      uploadScreenshot(filePath, { ...getActiveWindowMetadata(), pcTime: new Date().toISOString() });
     }
     monitorCaptureInFlight = false;
   });

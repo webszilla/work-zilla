@@ -2000,8 +2000,8 @@ def app_usage(request):
         return error
 
     sub = dashboard_views.get_active_subscription(org)
-    if not (sub and sub.plan and sub.plan.allow_gaming_ott_usage):
-        return _json_error("Gaming / OTT Usage is not enabled for your current plan.", status=403)
+    if not (sub and sub.plan and sub.plan.allow_app_usage):
+        return _json_error("App Usage is not enabled for your current plan.", status=403)
 
     _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()
@@ -2071,7 +2071,13 @@ def app_usage(request):
     app_urls = {}
     app_url_time = {}
     default_interval = 10
-    browser_apps = {"chrome.exe", "msedge.exe", "brave.exe"}
+    browser_apps = {
+        "chrome.exe", "chrome",
+        "msedge.exe", "msedge", "microsoft edge",
+        "brave.exe", "brave", "brave browser",
+        "firefox.exe", "firefox", "mozilla firefox",
+        "safari",
+    }
 
     def simplify_title(title):
         if not title:
@@ -2233,7 +2239,13 @@ def app_urls_usage(request):
     url_stats = {}
     total_seconds = 0
     default_interval = 10
-    browser_apps = {"chrome.exe", "msedge.exe", "brave.exe"}
+    browser_apps = {
+        "chrome.exe", "chrome",
+        "msedge.exe", "msedge", "microsoft edge",
+        "brave.exe", "brave", "brave browser",
+        "firefox.exe", "firefox", "mozilla firefox",
+        "safari",
+    }
     for act in activities:
         start = act.start_time or act.end_time
         end = act.end_time or act.start_time
@@ -2304,8 +2316,8 @@ def gaming_ott_usage(request):
         return error
 
     sub = dashboard_views.get_active_subscription(org)
-    if not (sub and sub.plan and sub.plan.allow_app_usage):
-        return _json_error("App Usage is not enabled for your current plan.", status=403)
+    if not (sub and sub.plan and sub.plan.allow_gaming_ott_usage):
+        return _json_error("Gaming / OTT Usage is not enabled for your current plan.", status=403)
 
     _cleanup_old_monitor_data(org, days=30)
     now = timezone.now()

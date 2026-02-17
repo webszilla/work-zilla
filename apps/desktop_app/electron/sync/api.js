@@ -385,7 +385,17 @@ export async function sendMonitorHeartbeat(payload) {
   return data;
 }
 
-export async function uploadScreenshot({ filePath, employeeId, deviceId, companyKey, pcName }) {
+export async function uploadScreenshot({
+  filePath,
+  employeeId,
+  deviceId,
+  companyKey,
+  pcName,
+  appName,
+  windowTitle,
+  url,
+  pcTime
+}) {
   const form = new FormData();
   if (employeeId) {
     form.append("employee", String(employeeId));
@@ -398,6 +408,18 @@ export async function uploadScreenshot({ filePath, employeeId, deviceId, company
   }
   if (pcName) {
     form.append("pc_name", pcName);
+  }
+  if (appName) {
+    form.append("app_name", appName);
+  }
+  if (windowTitle) {
+    form.append("window_title", windowTitle);
+  }
+  if (url) {
+    form.append("url", url);
+  }
+  if (pcTime) {
+    form.append("pc_time", pcTime);
   }
   form.append("image", fs.createReadStream(filePath), path.basename(filePath));
   const extraHeaders = {};
