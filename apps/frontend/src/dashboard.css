@@ -1485,6 +1485,33 @@ html[data-theme="light"] .user-chip{
   border-color:#cbd5f5;
   color:#0f172a;
 }
+html[data-theme="light"] .user-status{
+  color:#334155;
+}
+html[data-theme="light"] .gap-badge{
+  color:#334155;
+  background:#f8fafc;
+}
+html[data-theme="light"] .gap-ok{
+  background:#ecfdf5;
+  border-color:#22c55e;
+  color:#166534;
+}
+html[data-theme="light"] .gap-warning{
+  background:#fffbeb;
+  border-color:#f59e0b;
+  color:#92400e;
+}
+html[data-theme="light"] .gap-danger{
+  background:#fef2f2;
+  border-color:#ef4444;
+  color:#991b1b;
+}
+html[data-theme="light"] .gap-muted{
+  background:#f1f5f9;
+  border-color:#94a3b8;
+  color:#334155;
+}
 html[data-theme="light"] .user-chip.active{
   background:#ffffff;
   border-color:var(--color-primary, #22c55e);
