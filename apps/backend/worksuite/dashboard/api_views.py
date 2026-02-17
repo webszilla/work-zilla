@@ -593,6 +593,37 @@ def _status_from_last_seen(last_seen, now):
     return "Offline"
 
 
+def _build_activity_last_seen_map(org, employee_ids=None):
+    last_seen_qs = (
+        Activity.objects
+        .filter(employee__org=org)
+        .annotate(activity_time=Coalesce("end_time", "start_time"))
+        .values("employee_id")
+        .annotate(last_seen=Max("activity_time"))
+    )
+    if employee_ids:
+        last_seen_qs = last_seen_qs.filter(employee_id__in=employee_ids)
+    return {
+        row["employee_id"]: row["last_seen"]
+        for row in last_seen_qs
+        if row.get("employee_id")
+    }
+
+
+def _resolve_employee_last_seen(employee, activity_last_seen_map):
+    return max(
+        [
+            value
+            for value in (
+                employee.last_seen,
+                activity_last_seen_map.get(employee.id),
+            )
+            if value
+        ],
+        default=None,
+    )
+
+
 def _parse_date_flexible(value):
     if not value:
         return None, ""
@@ -708,9 +739,14 @@ def dashboard_summary(request):
     total_screenshots = screenshots_qs.count()
 
     now = timezone.now()
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees_qs.values_list("id", flat=True)),
+    )
     online_count = 0
     for employee in employees_qs:
-        if employee.last_seen and now - employee.last_seen < timedelta(minutes=2):
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
+        if last_seen and now - last_seen < timedelta(minutes=2):
             online_count += 1
 
     top_apps = (
@@ -848,9 +884,13 @@ def employees_list(request):
         can_add = dashboard_views.is_subscription_active(sub) and employee_count < employee_limit
 
     now = timezone.now()
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
-        last_seen = employee.last_seen
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
         status = _status_from_last_seen(last_seen, now)
         employee_rows.append({
             "id": employee.id,
@@ -967,7 +1007,8 @@ def employees_detail(request, emp_id):
     shots = Screenshot.objects.filter(employee=employee).order_by("-captured_at")[:20]
 
     now = timezone.now()
-    last_seen = employee.last_seen
+    activity_last_seen_map = _build_activity_last_seen_map(org, employee_ids=[employee.id])
+    last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
     status = _status_from_last_seen(last_seen, now)
 
     return JsonResponse({
@@ -1972,9 +2013,14 @@ def work_activity_log(request):
     for row in rows:
         row.pop("_date", None)
 
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
-        status = _status_from_last_seen(employee.last_seen, now)
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
+        status = _status_from_last_seen(last_seen, now)
         employee_rows.append({
             "id": employee.id,
             "name": employee.name,
@@ -2130,9 +2176,14 @@ def app_usage(request):
             "url": app_urls.get(name, "-"),
         })
 
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
-        status = _status_from_last_seen(employee.last_seen, now)
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
+        status = _status_from_last_seen(last_seen, now)
         employee_rows.append({
             "id": employee.id,
             "name": employee.name,
@@ -2286,9 +2337,14 @@ def app_urls_usage(request):
             "percent": percent,
         })
 
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
-        status = _status_from_last_seen(employee.last_seen, now)
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
+        status = _status_from_last_seen(last_seen, now)
         employee_rows.append({
             "id": employee.id,
             "name": employee.name,
@@ -2424,9 +2480,14 @@ def gaming_ott_usage(request):
             "duration": format_duration(duration_seconds),
         })
 
+    activity_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
-        status = _status_from_last_seen(employee.last_seen, now)
+        last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
+        status = _status_from_last_seen(last_seen, now)
         employee_rows.append({
             "id": employee.id,
             "name": employee.name,

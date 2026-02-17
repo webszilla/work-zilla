@@ -49,6 +49,17 @@ function formatUrlCell(url) {
   return { text: clipped, href: normalizeUrl(raw), full: raw };
 }
 
+function getStatusMeta(status) {
+  const normalized = String(status || "Offline").trim().toLowerCase();
+  if (normalized === "online") {
+    return { key: "online", label: "Online" };
+  }
+  if (normalized === "ideal" || normalized === "idle") {
+    return { key: "idle", label: "Idle" };
+  }
+  return { key: "offline", label: "Offline" };
+}
+
 export default function LiveActivityPage() {
   const [employees, setEmployees] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -246,18 +257,23 @@ export default function LiveActivityPage() {
               >
                 All Users
               </button>
-              {filteredEmployees.map((employee) => (
-                <button
-                  key={employee.id}
-                  type="button"
-                  className={`user-chip ${
-                    String(employee.id) === String(selectedId) ? "active" : ""
-                  }`}
-                  onClick={() => setSelectedId(String(employee.id))}
-                >
-                  {employee.name}
-                </button>
-              ))}
+              {filteredEmployees.map((employee) => {
+                const statusMeta = getStatusMeta(employee.status);
+                return (
+                  <button
+                    key={employee.id}
+                    type="button"
+                    className={`user-chip ${
+                      String(employee.id) === String(selectedId) ? "active" : ""
+                    }`}
+                    onClick={() => setSelectedId(String(employee.id))}
+                  >
+                    <span className={`status-dot status-${statusMeta.key}`} />
+                    <span className="user-name">{employee.name}</span>
+                    <span className="user-status">({statusMeta.label})</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

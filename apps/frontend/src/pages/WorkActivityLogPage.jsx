@@ -12,6 +12,17 @@ const emptyState = {
   data: null
 };
 
+function getStatusMeta(status) {
+  const normalized = String(status || "Offline").trim().toLowerCase();
+  if (normalized === "online") {
+    return { key: "online", label: "Online" };
+  }
+  if (normalized === "ideal" || normalized === "idle") {
+    return { key: "idle", label: "Idle" };
+  }
+  return { key: "offline", label: "Offline" };
+}
+
 export default function WorkActivityLogPage() {
   const [filters, setFilters] = useState({
     employeeId: "",
@@ -201,8 +212,7 @@ export default function WorkActivityLogPage() {
                 All Users
               </button>
               {filteredEmployees.map((employee) => {
-                const statusLabel = employee.status || "Offline";
-                const statusKey = statusLabel.toLowerCase();
+                const statusMeta = getStatusMeta(employee.status);
                 return (
                   <button
                     key={employee.id}
@@ -212,9 +222,9 @@ export default function WorkActivityLogPage() {
                     }`}
                     onClick={() => handleSelectEmployee(String(employee.id))}
                   >
-                    <span className={`status-dot status-${statusKey}`} />
+                    <span className={`status-dot status-${statusMeta.key}`} />
                     <span className="user-name">{employee.name}</span>
-                    <span className="user-status">({statusLabel})</span>
+                    <span className="user-status">({statusMeta.label})</span>
                   </button>
                 );
               })}

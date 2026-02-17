@@ -11,6 +11,20 @@ const emptyState = {
   data: null
 };
 
+function normalizeHrLoginUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "/hr-login/";
+  }
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
+  if (text.startsWith("/")) {
+    return text;
+  }
+  return "/hr-login/";
+}
+
 export default function EmployeesPage() {
   const [state, setState] = useState(emptyState);
   const [searchTerm, setSearchTerm] = useState("");
@@ -86,6 +100,7 @@ export default function EmployeesPage() {
   const subscription = state.data?.subscription || null;
   const companyKey = state.data?.org?.company_key || "-";
   const hrAccess = state.data?.hr_access || {};
+  const hrLoginUrl = normalizeHrLoginUrl(hrAccess.login_url);
 
   const filteredEmployees = useMemo(() => {
     if (!searchTerm) {
@@ -411,7 +426,7 @@ export default function EmployeesPage() {
               <h6 className="mb-2">HR User Details</h6>
               <div className="d-flex align-items-center justify-content-between mb-2">
                 <span className="text-secondary">Login URL</span>
-                <a className="btn btn-outline-light btn-sm" href={hrAccess.login_url || "/hr-login/"} target="_blank" rel="noreferrer">
+                <a className="btn btn-outline-light btn-sm" href={hrLoginUrl} target="_blank" rel="noreferrer">
                   Click Here
                 </a>
               </div>
