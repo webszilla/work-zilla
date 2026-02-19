@@ -118,10 +118,10 @@
                         {% endif %}
                         <td>
                           {% if is_agent %}
-                            <a class="btn btn-outline btn-sm" href="/app/{{ slug }}/" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                            <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
                           {% elif sub.status == "active" or sub.status == "trialing" %}
                             <div class="d-flex flex-wrap gap-2">
-                              <a class="btn btn-outline btn-sm" href="/app/{{ slug }}/" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                              <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
                               {% if sub.can_upgrade %}
                                 <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">Plan Upgrade</a>
                               {% endif %}

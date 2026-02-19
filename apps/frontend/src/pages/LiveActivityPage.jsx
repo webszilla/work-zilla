@@ -78,7 +78,15 @@ export default function LiveActivityPage() {
     key: "start",
     direction: "desc",
   });
+  const [statusTick, setStatusTick] = useState(0);
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStatusTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -109,7 +117,7 @@ export default function LiveActivityPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [statusTick]);
 
   useEffect(() => {
     setPage(1);
@@ -378,26 +386,15 @@ export default function LiveActivityPage() {
                         </td>
                         <td className="activity-url-cell">
                           {urlInfo.href ? (
-                            <>
-                              <a
-                                className="activity-url"
-                                href={urlInfo.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={urlInfo.full}
-                              >
-                                {urlInfo.text}
-                              </a>
-                              <span> </span>
-                              <a
-                                className="activity-url"
-                                href={urlInfo.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                Backlink
-                              </a>
-                            </>
+                            <a
+                              className="activity-url"
+                              href={urlInfo.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={urlInfo.full}
+                            >
+                              {urlInfo.text}
+                            </a>
                           ) : (
                             <span className="activity-url" title={urlInfo.full}>
                               {urlInfo.text}

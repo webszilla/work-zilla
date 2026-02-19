@@ -755,9 +755,35 @@ img {
 }
 
 .plan-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
   font-size: 1.4rem;
   font-weight: 700;
   margin: 14px 0 4px;
+}
+
+.erp-base-price {
+  margin-bottom: 0;
+}
+
+.erp-user-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 2px 0 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.erp-user-price [data-user-price] {
+  font-weight: 700;
+}
+
+.erp-plus {
+  color: var(--color-muted);
 }
 
 .plan-features {
@@ -821,6 +847,7 @@ img {
   font-size: 0.9rem;
   letter-spacing: 0.05em;
   color: var(--color-muted);
+  white-space: nowrap;
 }
 
 .currency-toggle {

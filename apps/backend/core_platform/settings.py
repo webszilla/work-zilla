@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     "saas_admin.monitoring.apps.MonitoringConfig",
     "apps.backend.media_library.apps.MediaLibraryConfig",
     "apps.backend.storage.apps.StorageConfig",
+    "apps.backend.business_autopilot.apps.BusinessAutopilotConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",
     "apps.backend.worksuite.apps.MonitorConfig",
@@ -224,6 +225,17 @@ LOGIN_URL = "/auth/login/"
 LOGIN_REDIRECT_URL = "/app/"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@workzilla.local")
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = _bool_env("EMAIL_USE_TLS", "1")
+EMAIL_USE_SSL = _bool_env("EMAIL_USE_SSL", "0")
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "20"))
 OBS_METRICS_ENABLED = os.environ.get("OBS_METRICS_ENABLED", "1") == "1"
 ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM", DEFAULT_FROM_EMAIL)
 _alert_to_raw = os.environ.get("ALERT_EMAIL_TO_DEFAULT", "")

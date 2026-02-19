@@ -137,10 +137,13 @@
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
         const priceTarget = card.querySelector("[data-price]");
         const suffixTarget = card.querySelector("[data-suffix]");
+        const userPriceTarget = card.querySelector("[data-user-price]");
+        const userSuffixTarget = card.querySelector("[data-user-suffix]");
         const planId = card.getAttribute("data-plan-id");
         const plan = pricingCache[planId];
         if (!plan) return;
         const isFree = String(plan.name || "").toLowerCase() === "free";
+        const isBusinessAutopilot = pricingState.product === "business-autopilot-erp";
         const value = pricingState.billing === "yearly"
           ? (pricingState.currency === "usd" ? plan.price_usdt_year : plan.price_inr_year)
           : (pricingState.currency === "usd" ? plan.price_usdt_month : plan.price_inr_month);
@@ -153,8 +156,18 @@
           }
           const cycleText = pricingState.product === "storage"
             ? (pricingState.billing === "monthly" ? "/org per month" : "/org per year")
+            : isBusinessAutopilot
+            ? (pricingState.billing === "monthly" ? "/platform per month" : "/platform per year")
             : (pricingState.billing === "monthly" ? "/user per month" : "/user per year");
           suffixTarget.textContent = `${cycleText}${extra}`;
+        }
+        if (isBusinessAutopilot && userPriceTarget && userSuffixTarget) {
+          const limits = plan.limits || {};
+          const userValue = pricingState.billing === "yearly"
+            ? (pricingState.currency === "usd" ? limits.user_price_usdt_year : limits.user_price_inr_year)
+            : (pricingState.currency === "usd" ? limits.user_price_usdt_month : limits.user_price_inr_month);
+          userPriceTarget.textContent = formatPrice(userValue, pricingState.currency);
+          userSuffixTarget.textContent = pricingState.billing === "monthly" ? "/user per month" : "/user per year";
         }
       });
       updateAddonPrices();
@@ -244,6 +257,42 @@
           `Agents included: ${limits.included_agents ?? "-"}`,
           `Conversations/month: ${limits.conversations_per_month ?? "-"}`,
           "Extra agents billed separately"
+        ];
+      }
+      if (productSlug === "business-autopilot-erp") {
+        const planKey = String(plan.name || "").toLowerCase();
+        if (planKey.includes("starter")) {
+          return [
+            "Basic Accounting",
+            "Invoice & Billing",
+            "Expense Tracking",
+            "GST Ready (India)",
+            "Basic Reports",
+            "1 Organization",
+            "Email Support"
+          ];
+        }
+        if (planKey.includes("growth")) {
+          return [
+            "Everything in Starter",
+            "Inventory Management",
+            "Purchase Orders",
+            "Vendor Management",
+            "Project Accounting",
+            "Multi-branch Support",
+            "Advanced Reports",
+            "API Access"
+          ];
+        }
+        return [
+          "Everything in Growth",
+          "HR + Payroll Integration",
+          "CRM Integration",
+          "Automation Workflows",
+          "Custom Dashboards",
+          "Advanced Role Permissions",
+          "Audit Logs",
+          "Priority Support"
         ];
       }
       return [
@@ -355,6 +404,20 @@
       return "Online storage with org-level access and predictable pricing.";
     }
 
+    function erpPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key === "free") {
+        return "7-day free trial with Pro ERP feature access. Upgrade to any paid plan after trial.";
+      }
+      if (key.includes("starter")) {
+        return "Best for small shops, startups, and service companies.";
+      }
+      if (key.includes("growth")) {
+        return "Best for growing SMBs, manufacturing teams, and agencies.";
+      }
+      return "Best for enterprise and industry-grade operations.";
+    }
+
     function renderPlans(data) {
       const container = document.getElementById("pricing-plans");
       container.innerHTML = "";
@@ -389,6 +452,7 @@
         const isMonitor = normalizedSlug === "monitor";
         const isChatbot = normalizedSlug === "ai-chatbot";
         const isStorage = isStorageProduct;
+        const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
         const isFreePlan = String(plan.name || "").toLowerCase() === "free";
         const storageTrialOnly = isStorage && isFreePlan;
         const features = buildFeatureList(plan, normalizedSlug);
@@ -402,7 +466,11 @@
           : false;
         const trialLocked = isLoggedIn && !freeEligible && (isFreePlan || storageTrialOnly);
         const actionLabel = !isLoggedIn
-          ? (isStorage ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay") : isFreePlan ? "Take a Free Trial" : "Process to Pay")
+          ? (isStorage
+            ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay")
+            : isFreePlan
+              ? "Take a Free Trial"
+              : "Process to Pay")
           : trialLocked
           ? "Trial Unavailable"
           : isCurrentPlan
@@ -427,11 +495,20 @@
               ? escapeHtml(aiChatbotPlanDescription(plan.name))
               : normalizedSlug === "storage"
                 ? escapeHtml(storagePlanDescription(plan.name))
+                : normalizedSlug === "business-autopilot-erp"
+                  ? escapeHtml(erpPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
-          <div class="plan-price">
+          <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
             <span data-price>Custom</span>
             <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
           </div>
+          ${isBusinessAutopilot && !isFreePlan ? `
+            <div class="erp-user-price">
+              <span class="erp-plus">+</span>
+              <span data-user-price>Custom</span>
+              <span class="price-suffix-inline" data-user-suffix>/user per month</span>
+            </div>
+          ` : ""}
           ${isMonitor ? `
             <ul class="plan-features">
               ${monitorFeatures.map((item) => `
@@ -476,7 +553,7 @@
             if (!freeEligible) {
               return;
             }
-            startTrial(plan.id, data.product.slug);
+            startTrial(plan.id, data.product.slug, { fallbackToCheckout: false });
             return;
           }
           submitCheckout(plan.id, data.product.slug);
@@ -588,7 +665,8 @@
       return "";
     }
 
-    function startTrial(planId, productSlug) {
+    function startTrial(planId, productSlug, options = {}) {
+      const fallbackToCheckout = options.fallbackToCheckout === true;
       fetch("/api/subscription/start", {
         method: "POST",
         headers: {
@@ -603,7 +681,11 @@
       })
         .then(async (response) => {
           if (response.status === 409) {
-            submitCheckout(planId, productSlug);
+            if (fallbackToCheckout) {
+              submitCheckout(planId, productSlug);
+            } else {
+              throw new Error("Trial not available for this product.");
+            }
             return null;
           }
           if (!response.ok) {
@@ -616,8 +698,13 @@
             window.location.href = data.redirect;
           }
         })
-        .catch(() => {
-          submitCheckout(planId, productSlug);
+        .catch((error) => {
+          if (fallbackToCheckout) {
+            submitCheckout(planId, productSlug);
+            return;
+          }
+          const message = (error && error.message) ? error.message : "Unable to start trial now.";
+          window.alert(message);
         });
     }
 

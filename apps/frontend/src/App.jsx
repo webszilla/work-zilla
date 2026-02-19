@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -55,6 +55,7 @@ import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
 import StorageUsersPage from "./pages/StorageUsersPage.jsx";
 import StorageDashboardPage from "./pages/StorageDashboardPage.jsx";
+import BusinessAutopilotUsersPage from "./pages/BusinessAutopilotUsersPage.jsx";
 import AiChatbotInboxPage from "./pages/AiChatbotInboxPage.jsx";
 import AiChatbotWidgetsPage from "./pages/AiChatbotWidgetsPage.jsx";
 import AiChatbotLeadsPage from "./pages/AiChatbotLeadsPage.jsx";
@@ -67,6 +68,10 @@ import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
 import { formatDeviceDate, setOrgTimezone } from "./lib/datetime.js";
 import { getBrowserTimezone } from "./lib/timezones.js";
+import { apiFetch } from "./lib/api.js";
+
+const BusinessAutopilotDashboardPage = lazy(() => import("./pages/BusinessAutopilotDashboardPage.jsx"));
+const BusinessAutopilotModulePage = lazy(() => import("./pages/BusinessAutopilotModulePage.jsx"));
 
 const emptyState = {
   loading: true,
@@ -144,6 +149,7 @@ const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "storage" },
   { label: "Files", path: "/files", icon: "bi-cloud", productOnly: "storage" },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "storage", adminOnly: true },
+  { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
   { label: "Inbox", path: "/inbox", icon: "bi-chat-dots", productOnly: "ai-chatbot", allowAgent: true },
   { label: "Widgets", path: "/widgets", icon: "bi-code-slash", productOnly: "ai-chatbot", adminOnly: true },
@@ -159,10 +165,14 @@ const reactPages = [
   { label: "Employees", path: "/employees", icon: "bi-people", productOnly: "worksuite" },
   { label: "Company Settings", path: "/company", icon: "bi-building", adminOnly: true, productOnly: "worksuite" },
   { label: "Privacy Settings", path: "/privacy", icon: "bi-shield-lock", adminOnly: true, productOnly: "worksuite" },
+  { label: "SaaS Admin", path: "/saas-admin", icon: "bi-grid-1x2", saasAdminOnly: true },
+  { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
+  { label: "HR Management", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
+  { label: "Projects", path: "/projects", icon: "bi-kanban", productOnly: "business-autopilot-erp", moduleKey: "projects" },
+  { label: "Accounts", path: "/accounts", icon: "bi-calculator", productOnly: "business-autopilot-erp", moduleKey: "accounts" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
   { label: "Plans", path: "/plans", icon: "bi-clipboard-check", adminOnly: true },
-  { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true },
-  { label: "SaaS Admin", path: "/saas-admin", icon: "bi-grid-1x2", saasAdminOnly: true }
+  { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true }
 ];
 
 const saasAdminPages = [
@@ -196,6 +206,12 @@ function AppShell({ state, productPrefix, productSlug }) {
   const [upgradeAlertMessage, setUpgradeAlertMessage] = useState("");
   const [showFreePlanModal, setShowFreePlanModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [autopilotModules, setAutopilotModules] = useState([]);
+  const [autopilotCatalog, setAutopilotCatalog] = useState([]);
+  const [autopilotCanManageModules, setAutopilotCanManageModules] = useState(false);
+  const [autopilotCanManageUsers, setAutopilotCanManageUsers] = useState(false);
+  const [autopilotSavingSlug, setAutopilotSavingSlug] = useState("");
+  const [autopilotModuleError, setAutopilotModuleError] = useState("");
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") {
       return "dark";
@@ -229,12 +245,15 @@ function AppShell({ state, productPrefix, productSlug }) {
   const onboarding = state.onboarding || { enabled: false, state: "active" };
   const isSaasAdminRoute = location.pathname.startsWith("/saas-admin");
   const isMonitorProduct = productSlug === "worksuite";
+  const isBusinessAutopilot = productSlug === "business-autopilot-erp";
   const productLabel = productSlug === "ai-chatbot"
     ? "AI Chatbot"
     : productSlug === "worksuite"
     ? monitorLabel
     : productSlug === "storage"
     ? "Online Storage"
+    : productSlug === "business-autopilot-erp"
+    ? "Business Autopilot ERP"
     : productSlug === "saas-admin"
     ? "SaaS Admin"
     : "Work Zilla";
@@ -379,6 +398,72 @@ function AppShell({ state, productPrefix, productSlug }) {
   }, [state.freePlanPopup, state.freePlanExpiry]);
 
   useEffect(() => {
+    let active = true;
+    async function loadBusinessModules() {
+      if (!isBusinessAutopilot) {
+        if (active) {
+          setAutopilotModules([]);
+          setAutopilotCatalog([]);
+          setAutopilotCanManageModules(false);
+          setAutopilotCanManageUsers(false);
+          setAutopilotModuleError("");
+        }
+        return;
+      }
+      try {
+        const data = await apiFetch("/api/business-autopilot/modules");
+        if (active) {
+          const enabledModules = Array.isArray(data.enabled_modules)
+            ? data.enabled_modules
+            : (data.modules || []).filter((item) => item.enabled !== false);
+          setAutopilotModules(enabledModules);
+          setAutopilotCatalog(data.catalog || enabledModules);
+          setAutopilotCanManageModules(Boolean(data.can_manage_modules));
+          setAutopilotCanManageUsers(Boolean(data.can_manage_users));
+          setAutopilotModuleError("");
+        }
+      } catch (_error) {
+        if (active) {
+          setAutopilotModules([]);
+          setAutopilotCatalog([]);
+          setAutopilotCanManageModules(false);
+          setAutopilotCanManageUsers(false);
+          setAutopilotModuleError("Unable to load modules.");
+        }
+      }
+    }
+    loadBusinessModules();
+    return () => {
+      active = false;
+    };
+  }, [isBusinessAutopilot]);
+
+  const toggleAutopilotModule = useCallback(async (moduleSlug, enabled) => {
+    if (!isBusinessAutopilot || !moduleSlug) {
+      return;
+    }
+    setAutopilotSavingSlug(moduleSlug);
+    setAutopilotModuleError("");
+    try {
+      const data = await apiFetch("/api/business-autopilot/modules", {
+        method: "POST",
+        body: JSON.stringify({ module_slug: moduleSlug, enabled: Boolean(enabled) })
+      });
+      const enabledModules = Array.isArray(data.enabled_modules)
+        ? data.enabled_modules
+        : (data.modules || []).filter((item) => item.enabled !== false);
+      setAutopilotModules(enabledModules);
+      setAutopilotCatalog(data.catalog || enabledModules);
+      setAutopilotCanManageModules(Boolean(data.can_manage_modules));
+      setAutopilotCanManageUsers(Boolean(data.can_manage_users));
+    } catch (error) {
+      setAutopilotModuleError(error?.message || "Unable to update module.");
+    } finally {
+      setAutopilotSavingSlug("");
+    }
+  }, [isBusinessAutopilot]);
+
+  useEffect(() => {
     const redirectPath = getOnboardingRedirect(location.pathname);
     if (redirectPath && redirectPath !== location.pathname) {
       navigate(redirectPath, { replace: true });
@@ -399,6 +484,9 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     if (item.productOnly && item.productOnly !== productSlug) {
       return false;
+    }
+    if (isBusinessAutopilot && item.moduleKey) {
+      return autopilotModules.some((module) => module.slug === item.moduleKey);
     }
     if (item.saasAdminOnly) {
       return isSaasAdmin;
@@ -427,6 +515,31 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     return true;
   });
+
+  const orderedNavItems = useMemo(() => {
+    if (!isBusinessAutopilot) {
+      return allowedNavItems;
+    }
+    const orderMap = new Map([
+      ["/", 0],
+      ["/crm", 1],
+      ["/hrm", 2],
+      ["/projects", 3],
+      ["/accounts", 4],
+      ["/users", 5],
+      ["/billing", 6],
+      ["/plans", 7],
+      ["/profile", 8]
+    ]);
+    return [...allowedNavItems].sort((a, b) => {
+      const aOrder = orderMap.has(a.path) ? orderMap.get(a.path) : 99;
+      const bOrder = orderMap.has(b.path) ? orderMap.get(b.path) : 99;
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      return a.label.localeCompare(b.label);
+    });
+  }, [allowedNavItems, isBusinessAutopilot]);
 
   const dealerNavItems = dealerPages.filter((item) => {
     const stateValue = state.dealerOnboarding || "active";
@@ -551,7 +664,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                   </NavLink>
                 );
               })
-            : allowedNavItems.map((item) => (
+            : orderedNavItems.map((item) => (
                 <NavLink
                   key={item.path}
                   to={navPath(item.path)}
@@ -662,7 +775,69 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <StorageDashboardPage subscriptions={state.subscriptions} />
                 : productSlug === "ai-chatbot"
                 ? <AiChatbotDashboardPage subscriptions={state.subscriptions} />
+                : productSlug === "business-autopilot-erp"
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
+                    <BusinessAutopilotDashboardPage
+                      modules={autopilotModules}
+                      catalog={autopilotCatalog}
+                      canManageModules={autopilotCanManageModules}
+                      onToggleModule={toggleAutopilotModule}
+                      savingModuleSlug={autopilotSavingSlug}
+                      moduleError={autopilotModuleError}
+                      productBasePath={basePath}
+                    />
+                  </Suspense>
+                )
                 : <DashboardPage productSlug={productSlug} subscriptions={state.subscriptions} />
+            }
+          />
+          <Route
+            path="/crm"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "crm")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="crm" title="CRM" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/hrm"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "hrm")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="hrm" title="HR Management" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="projects" title="Project Management" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/accounts"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts / ERP" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
             }
           />
           <Route
@@ -671,7 +846,13 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/users"
-            element={productSlug === "storage" && isAdmin ? <StorageUsersPage /> : <Navigate to={withBase("/")} replace />}
+            element={
+              productSlug === "storage" && isAdmin
+                ? <StorageUsersPage />
+                : isBusinessAutopilot && autopilotCanManageUsers
+                ? <BusinessAutopilotUsersPage />
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/activity"
@@ -1132,6 +1313,7 @@ export default function App() {
     { prefix: "/worksuite", slug: "worksuite", label: "Work Suite" },
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
+    { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot ERP" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
   ];
@@ -1262,6 +1444,9 @@ export default function App() {
       const status = getSubscriptionStatus(productSlug);
 
       if (status !== "active") {
+        if (productSlug === "business-autopilot-erp") {
+          return <AppShell state={state} productPrefix={prefix} productSlug={productSlug} />;
+        }
         if (productSlug === "storage" && (status === "trial_ended" || status === "expired")) {
           return <AppShell state={state} productPrefix={prefix} productSlug={productSlug} />;
         }

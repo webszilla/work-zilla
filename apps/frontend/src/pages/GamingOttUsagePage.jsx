@@ -39,8 +39,16 @@ export default function GamingOttUsagePage() {
   const [userQuery, setUserQuery] = useState("");
   const [tableSearchTerm, setTableSearchTerm] = useState("");
   const [tableSearchQuery, setTableSearchQuery] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -80,7 +88,7 @@ export default function GamingOttUsagePage() {
     return () => {
       active = false;
     };
-  }, [filters]);
+  }, [filters, refreshTick]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -302,7 +310,7 @@ export default function GamingOttUsagePage() {
                         <td className="text-truncate" style={{ maxWidth: "320px" }} title={row.detail}>
                           {row.detail ? (
                             (() => {
-                              const href = normalizeUrl(row.detail);
+                              const href = normalizeUrl(row.detail_url || row.detail);
                               if (!href) {
                                 return row.detail;
                               }

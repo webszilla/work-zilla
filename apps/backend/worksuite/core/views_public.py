@@ -49,14 +49,19 @@ def _storage_is_free_plan(plan):
     return all(price <= 0 for price in prices)
 
 
-def _org_used_free_trial(org):
+def _org_used_free_trial(org, product_slug):
     if not org:
         return False
+    product_slug = _normalize_product_slug(product_slug)
     subs = (
         Subscription.objects
         .filter(organization=org, plan__isnull=False)
         .select_related("plan")
     )
+    if product_slug == "monitor":
+        subs = subs.filter(models.Q(plan__product__slug="monitor") | models.Q(plan__product__isnull=True))
+    else:
+        subs = subs.filter(plan__product__slug=product_slug)
     for sub in subs:
         if sub.plan and is_free_plan(sub.plan):
             return True
@@ -65,20 +70,25 @@ def _org_used_free_trial(org):
         .filter(organization=org, plan__isnull=False)
         .select_related("plan")
     )
+    if product_slug == "monitor":
+        history_rows = history_rows.filter(models.Q(plan__product__slug="monitor") | models.Q(plan__product__isnull=True))
+    else:
+        history_rows = history_rows.filter(plan__product__slug=product_slug)
     for row in history_rows:
         if row.plan and is_free_plan(row.plan):
             return True
-    try:
-        storage_subs = (
-            StorageOrgSubscription.objects
-            .filter(organization=org)
-            .select_related("plan")
-        )
-        for sub in storage_subs:
-            if sub.plan is None or _storage_is_free_plan(sub.plan):
-                return True
-    except Exception:
-        return False
+    if product_slug == "storage":
+        try:
+            storage_subs = (
+                StorageOrgSubscription.objects
+                .filter(organization=org)
+                .select_related("plan")
+            )
+            for sub in storage_subs:
+                if sub.plan is None or _storage_is_free_plan(sub.plan):
+                    return True
+        except Exception:
+            return False
     return False
 def home(request):
     context = build_enquiry_context(request)
@@ -178,12 +188,12 @@ def public_plans(request):
             org = None
     free_eligible = True
     if org:
-        free_eligible = not _org_used_free_trial(org)
+        free_eligible = not _org_used_free_trial(org, normalized_slug)
 
     response_plans = []
     response_addons = []
     for plan in plans:
-        if product_slug in ("storage", "online-storage"):
+        if normalized_slug == "storage":
             if hasattr(plan, "monthly_price_inr"):
                 limits = {
                     "storage_gb": plan.storage_limit_gb,
@@ -228,7 +238,7 @@ def public_plans(request):
                 })
             continue
         limits = plan.limits or {}
-        if product_slug == "ai-chatbot":
+        if normalized_slug == "ai-chatbot":
             limits = {
                 "widgets": limits.get("widgets"),
                 "included_agents": limits.get("included_agents", plan.included_agents or 0),
@@ -240,11 +250,22 @@ def public_plans(request):
                 "max_messages_per_conversation": limits.get("max_messages_per_conversation"),
                 "max_chars_per_message": limits.get("max_chars_per_message"),
             }
-        elif product_slug == "storage":
+        elif normalized_slug == "storage":
             limits = {
                 "storage_gb": limits.get("storage_gb"),
                 "max_users": limits.get("max_users"),
                 "device_limit_per_user": limits.get("device_limit_per_user"),
+            }
+        elif normalized_slug == "business-autopilot-erp":
+            limits = {
+                "base_price_inr_month": limits.get("base_price_inr_month", plan.monthly_price or 0),
+                "base_price_inr_year": limits.get("base_price_inr_year", plan.yearly_price or 0),
+                "base_price_usdt_month": limits.get("base_price_usdt_month", plan.usd_monthly_price or 0),
+                "base_price_usdt_year": limits.get("base_price_usdt_year", plan.usd_yearly_price or 0),
+                "user_price_inr_month": limits.get("user_price_inr_month", 0),
+                "user_price_inr_year": limits.get("user_price_inr_year", 0),
+                "user_price_usdt_month": limits.get("user_price_usdt_month", 0),
+                "user_price_usdt_year": limits.get("user_price_usdt_year", 0),
             }
         else:
             limits = {
@@ -253,9 +274,9 @@ def public_plans(request):
                 "screenshot_min_minutes": limits.get("screenshot_min_minutes", plan.screenshot_min_minutes),
             }
         addons = dict(plan.addons or {})
-        if product_slug == "storage" and "extra_storage_slot_gb" not in addons:
+        if normalized_slug == "storage" and "extra_storage_slot_gb" not in addons:
             addons["extra_storage_slot_gb"] = 250
-        if product_slug == "storage" and "extra_storage_slot_name" not in addons:
+        if normalized_slug == "storage" and "extra_storage_slot_name" not in addons:
             addons["extra_storage_slot_name"] = "Extra Storage Slot"
         if "extra_agent_inr" not in addons:
             addons["extra_agent_inr"] = plan.addon_agent_monthly_price
@@ -277,7 +298,7 @@ def public_plans(request):
             "addons": addons,
             "is_popular": False,
         })
-        if product_slug == "storage" and not response_addons:
+        if normalized_slug == "storage" and not response_addons:
             response_addons = [{
                 "slug": "extra-storage-slot",
                 "name": "Extra Storage Slot",
@@ -287,15 +308,42 @@ def public_plans(request):
                 "price_usdt_month": plan.addon_usd_monthly_price or 0,
                 "price_usdt_year": plan.addon_usd_yearly_price or 0,
             }]
-        if product_slug == "monitor":
-            response_plans[-1]["flags"] = {
+        if normalized_slug == "monitor":
+            monitor_flag_overrides = {
+                "free": {
+                    "allow_app_usage": True,
+                    "allow_hr_view": True,
+                    "allow_gaming_ott_usage": True,
+                },
+                "basic": {
+                    "allow_app_usage": False,
+                    "allow_hr_view": False,
+                    "allow_gaming_ott_usage": False,
+                },
+                "plus": {
+                    "allow_app_usage": True,
+                    "allow_hr_view": False,
+                    "allow_gaming_ott_usage": False,
+                },
+                "professional": {
+                    "allow_app_usage": True,
+                    "allow_hr_view": True,
+                    "allow_gaming_ott_usage": True,
+                },
+            }
+            response_flags = {
                 "allow_addons": plan.allow_addons,
                 "allow_app_usage": plan.allow_app_usage,
                 "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
                 "allow_hr_view": plan.allow_hr_view,
             }
+            plan_key = (plan.name or "").strip().lower()
+            override = monitor_flag_overrides.get(plan_key)
+            if override:
+                response_flags.update(override)
+            response_plans[-1]["flags"] = response_flags
             response_plans[-1]["features"] = dict(plan.features or {})
-        if product_slug == "ai-chatbot":
+        if normalized_slug == "ai-chatbot":
             features = plan.features or {}
             response_plans[-1]["flags"] = {
                 "allow_addons": plan.allow_addons,
@@ -307,7 +355,7 @@ def public_plans(request):
             response_plans[-1]["features"] = {
                 "ai_enabled": bool(features.get("ai_enabled", False)),
             }
-    if product_slug in ("storage", "online-storage"):
+    if normalized_slug == "storage":
         if not response_addons:
             addon = addons_qs.first() if "addons_qs" in locals() else None
             if addon:

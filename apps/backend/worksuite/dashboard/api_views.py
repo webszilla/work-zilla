@@ -44,6 +44,7 @@ from core.models import (
     Activity,
     BillingProfile,
     InvoiceSellerProfile,
+    Device,
 )
 from saas_admin.models import Product
 from dashboard import views as dashboard_views
@@ -582,19 +583,23 @@ def _get_rollback_entry(org, active_sub, product_slug=None):
         "end_date": best["end_date"],
     }
 
+ONLINE_STATUS_WINDOW = timedelta(minutes=6)
+IDLE_STATUS_WINDOW = timedelta(minutes=30)
+
+
 def _status_from_last_seen(last_seen, now):
     if not last_seen:
         return "Offline"
     delta = now - last_seen
-    if delta <= timedelta(minutes=2):
+    if delta <= ONLINE_STATUS_WINDOW:
         return "Online"
-    if delta <= timedelta(minutes=10):
+    if delta <= IDLE_STATUS_WINDOW:
         return "Ideal"
     return "Offline"
 
 
 def _build_activity_last_seen_map(org, employee_ids=None):
-    last_seen_qs = (
+    activity_last_seen_qs = (
         Activity.objects
         .filter(employee__org=org)
         .annotate(activity_time=Coalesce("end_time", "start_time"))
@@ -602,12 +607,80 @@ def _build_activity_last_seen_map(org, employee_ids=None):
         .annotate(last_seen=Max("activity_time"))
     )
     if employee_ids:
-        last_seen_qs = last_seen_qs.filter(employee_id__in=employee_ids)
-    return {
-        row["employee_id"]: row["last_seen"]
-        for row in last_seen_qs
-        if row.get("employee_id")
-    }
+        activity_last_seen_qs = activity_last_seen_qs.filter(employee_id__in=employee_ids)
+
+    capture_qs = (
+        Screenshot.objects
+        .filter(employee__org=org)
+        .annotate(capture_time=Coalesce("pc_captured_at", "captured_at"))
+        .values("employee_id")
+        .annotate(last_capture=Max("capture_time"))
+    )
+    upload_qs = (
+        Screenshot.objects
+        .filter(employee__org=org)
+        .values("employee_id")
+        .annotate(last_upload=Max("captured_at"))
+    )
+    if employee_ids:
+        capture_qs = capture_qs.filter(employee_id__in=employee_ids)
+        upload_qs = upload_qs.filter(employee_id__in=employee_ids)
+
+    employee_qs = Employee.objects.filter(org=org).only("id", "device_id")
+    if employee_ids:
+        employee_qs = employee_qs.filter(id__in=employee_ids)
+    employee_list = list(employee_qs)
+    normalized_device_to_employee = {}
+    for employee in employee_list:
+        raw_device_id = str(employee.device_id or "").strip().lower()
+        if raw_device_id:
+            normalized_device_to_employee[raw_device_id] = employee.id
+
+    device_last_seen_qs = (
+        Device.objects
+        .filter(org=org, is_active=True, last_seen__isnull=False)
+        .values("device_id")
+        .annotate(last_seen=Max("last_seen"))
+    )
+
+    combined = {}
+    for row in activity_last_seen_qs:
+        employee_id = row.get("employee_id")
+        last_seen = row.get("last_seen")
+        if employee_id and last_seen:
+            combined[employee_id] = last_seen
+
+    for row in capture_qs:
+        employee_id = row.get("employee_id")
+        value = row.get("last_capture")
+        if not employee_id or not value:
+            continue
+        existing = combined.get(employee_id)
+        if not existing or value > existing:
+            combined[employee_id] = value
+
+    for row in upload_qs:
+        employee_id = row.get("employee_id")
+        value = row.get("last_upload")
+        if not employee_id or not value:
+            continue
+        existing = combined.get(employee_id)
+        if not existing or value > existing:
+            combined[employee_id] = value
+
+    for row in device_last_seen_qs:
+        device_id = str(row.get("device_id") or "").strip().lower()
+        value = row.get("last_seen")
+        if not device_id or not value:
+            continue
+        employee_id = normalized_device_to_employee.get(device_id)
+        if not employee_id:
+            continue
+        existing = combined.get(employee_id)
+        if not existing or value > existing:
+            combined[employee_id] = value
+
+    return combined
 
 
 def _resolve_employee_last_seen(employee, activity_last_seen_map):
@@ -637,6 +710,45 @@ def _parse_date_flexible(value):
         except ValueError:
             continue
     return None, ""
+
+
+_URL_PATTERN = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
+_DOMAIN_PATTERN = re.compile(r"\b([a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?\b", re.IGNORECASE)
+
+
+def _extract_urlish(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = _URL_PATTERN.search(raw)
+    if match:
+        return match.group(1).strip()
+    match = _DOMAIN_PATTERN.search(raw)
+    if match:
+        return match.group(0).strip()
+    return ""
+
+
+def _normalize_app_label(value):
+    text = str(value or "").strip()
+    if not text:
+        return "Unknown"
+    normalized = text.replace("\t", " ").replace("|", " ")
+    normalized = normalized.split("\\")[0].strip() if "\\" in normalized else normalized
+    normalized = normalized.split(" - ")[0].strip() if " - " in normalized else normalized
+    normalized = normalized.split("(")[0].strip() if "(" in normalized else normalized
+    lower = normalized.lower()
+    if lower.endswith(".exe"):
+        normalized = normalized[:-4]
+    return normalized or "Unknown"
+
+
+def _activity_primary_url(activity):
+    for candidate in (activity.url, activity.window_title, activity.app_name):
+        found = _extract_urlish(candidate)
+        if found:
+            return found
+    return ""
 
 
 def _get_active_subscription(org):
@@ -739,6 +851,10 @@ def dashboard_summary(request):
     total_screenshots = screenshots_qs.count()
 
     now = timezone.now()
+    status_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     activity_last_seen_map = _build_activity_last_seen_map(
         org,
         employee_ids=list(employees_qs.values_list("id", flat=True)),
@@ -746,7 +862,7 @@ def dashboard_summary(request):
     online_count = 0
     for employee in employees_qs:
         last_seen = _resolve_employee_last_seen(employee, activity_last_seen_map)
-        if last_seen and now - last_seen < timedelta(minutes=2):
+        if _status_from_last_seen(last_seen, now) == "Online":
             online_count += 1
 
     top_apps = (
@@ -1450,12 +1566,6 @@ def screenshots_list(request):
         .values("employee_id")
         .annotate(last_uploaded=Max("captured_at"))
     )
-    last_activities = (
-        Activity.objects
-        .filter(employee__org=org)
-        .values("employee_id")
-        .annotate(last_seen=Max("end_time"))
-    )
     last_captures = (
         Screenshot.objects
         .filter(employee__org=org)
@@ -1468,11 +1578,6 @@ def screenshots_list(request):
         for row in last_uploads
         if row.get("employee_id")
     }
-    last_activity_map = {
-        row["employee_id"]: row["last_seen"]
-        for row in last_activities
-        if row.get("employee_id")
-    }
     last_capture_map = {
         row["employee_id"]: row["last_captured"]
         for row in last_captures
@@ -1480,18 +1585,7 @@ def screenshots_list(request):
     }
     employee_rows = []
     for employee in employees:
-        last_seen = max(
-            [
-                value
-                for value in (
-                    last_capture_map.get(employee.id),
-                    last_upload_map.get(employee.id),
-                    last_activity_map.get(employee.id),
-                )
-                if value
-            ],
-            default=None,
-        )
+        last_seen = _resolve_employee_last_seen(employee, status_last_seen_map)
         status = _status_from_last_seen(last_seen, now)
         last_uploaded_time = last_upload_map.get(employee.id)
         last_captured_time = last_capture_map.get(employee.id)
@@ -1763,9 +1857,9 @@ def activity_live(request):
         "logs": [
             {
                 "employee": log.employee.name,
-                "app": log.app_name,
+                "app": _normalize_app_label(log.app_name),
                 "window": log.window_title,
-                "url": log.url,
+                "url": _activity_primary_url(log),
                 "start": _format_datetime(log.start_time),
             }
             for log in page_obj
@@ -1997,6 +2091,7 @@ def work_activity_log(request):
         last_stop_reason = history_entries[-1].get("stop_reason") if history_entries else ""
         last_event = history_entries[-1].get("event") if history_entries else ""
         rows.append({
+            "_employee_id": employee_id,
             "employee": employee_map.get(employee_id, "Unknown"),
             "date": day.isoformat(),
             "on_time": format_time(first_on),
@@ -2009,9 +2104,30 @@ def work_activity_log(request):
             "_date": day,
         })
 
+    # Keep users visible even when they have no activity rows in the selected range.
+    scoped_employees = [selected_employee] if selected_employee else list(employees)
+    present_employee_ids = {row.get("_employee_id") for row in rows if row.get("_employee_id")}
+    for employee in scoped_employees:
+        if not employee or employee.id in present_employee_ids:
+            continue
+        rows.append({
+            "_employee_id": employee.id,
+            "employee": employee.name,
+            "date": date_to_value or date_from_value or "-",
+            "on_time": "-",
+            "off_time": "-",
+            "history_label": "-",
+            "history": [],
+            "duration": "0s",
+            "stop_reason": "-",
+            "event": "-",
+            "_date": date_to or date_from or now.date(),
+        })
+
     rows.sort(key=lambda item: (item["_date"], item["employee"]), reverse=True)
     for row in rows:
         row.pop("_date", None)
+        row.pop("_employee_id", None)
 
     activity_last_seen_map = _build_activity_last_seen_map(
         org,
@@ -2116,6 +2232,7 @@ def app_usage(request):
     total_seconds = 0
     app_urls = {}
     app_url_time = {}
+    app_keys = {}
     default_interval = 10
     browser_apps = {
         "chrome.exe", "chrome",
@@ -2138,15 +2255,17 @@ def app_usage(request):
         delta = (end - start).total_seconds()
         if delta <= 0:
             delta = default_interval
-        key = act.app_name or "Unknown"
+        key = _normalize_app_label(act.app_name)
         if key.lower() in ("system idle process", "system idle process.exe"):
             continue
         total_seconds += delta
         app_stats[key] = app_stats.get(key, 0) + delta
-        if act.url:
+        app_keys[key] = act.app_name or key
+        resolved_url = _activity_primary_url(act)
+        if resolved_url:
             last_time = app_url_time.get(key)
             if not last_time or end > last_time:
-                app_urls[key] = act.url
+                app_urls[key] = resolved_url
                 app_url_time[key] = end
         elif key.lower() in browser_apps and act.window_title:
             last_time = app_url_time.get(key)
@@ -2165,11 +2284,44 @@ def app_usage(request):
             return f"{minutes}m {secs}s"
         return f"{secs}s"
 
+    # Fallback: if "today" has no rows for a selected employee, include last 24h.
+    if not app_stats and selected_employee and active_preset == "today":
+        fallback_start = now - timedelta(hours=24)
+        fallback_qs = Activity.objects.filter(employee=selected_employee).filter(
+            models.Q(end_time__gte=fallback_start) | models.Q(start_time__gte=fallback_start)
+        )
+        for act in fallback_qs:
+            start = act.start_time or act.end_time
+            end = act.end_time or act.start_time
+            if not start or not end:
+                continue
+            delta = (end - start).total_seconds()
+            if delta <= 0:
+                delta = default_interval
+            key = _normalize_app_label(act.app_name)
+            if key.lower() in ("system idle process", "system idle process.exe"):
+                continue
+            total_seconds += delta
+            app_stats[key] = app_stats.get(key, 0) + delta
+            app_keys[key] = act.app_name or key
+            resolved_url = _activity_primary_url(act)
+            if resolved_url:
+                last_time = app_url_time.get(key)
+                if not last_time or end > last_time:
+                    app_urls[key] = resolved_url
+                    app_url_time[key] = end
+            elif key.lower() in browser_apps and act.window_title:
+                last_time = app_url_time.get(key)
+                if not last_time or end > last_time:
+                    app_urls[key] = simplify_title(act.window_title)
+                    app_url_time[key] = end
+
     app_rows = []
     for name, secs in sorted(app_stats.items(), key=lambda x: x[1], reverse=True):
         percent = round((secs / total_seconds) * 100, 1) if total_seconds else 0
         app_rows.append({
             "name": name,
+            "app_key": app_keys.get(name, name),
             "seconds": secs,
             "duration": format_seconds(secs),
             "percent": percent,
@@ -2225,13 +2377,14 @@ def app_urls_usage(request):
         ).first()
 
     app_name = (request.GET.get("app") or "").strip()
+    app_key = (request.GET.get("app_key") or "").strip()
     query = (request.GET.get("q") or "").strip()
 
     available_activities = Activity.objects.filter(employee__org=org)
     if selected_employee:
         available_activities = available_activities.filter(employee=selected_employee)
-    if app_name:
-        available_activities = available_activities.filter(app_name=app_name)
+    if app_key:
+        available_activities = available_activities.filter(app_name=app_key)
     available_dates = list(
         available_activities
         .annotate(activity_time=Coalesce("end_time", "start_time"))
@@ -2257,8 +2410,8 @@ def app_urls_usage(request):
     activities = Activity.objects.filter(employee__org=org)
     if selected_employee:
         activities = activities.filter(employee=selected_employee)
-    if app_name:
-        activities = activities.filter(app_name=app_name)
+    if app_key:
+        activities = activities.filter(app_name=app_key)
     if date_from or date_to:
         if not date_from:
             date_from = date_to
@@ -2305,8 +2458,13 @@ def app_urls_usage(request):
         delta = (end - start).total_seconds()
         if delta <= 0:
             delta = default_interval
-        key = (act.url or "").strip()
-        if not key and act.app_name and act.app_name.lower() in browser_apps:
+        if app_key and (act.app_name or "") != app_key:
+            continue
+        normalized_label = _normalize_app_label(act.app_name)
+        if app_name and normalized_label.lower() != app_name.lower():
+            continue
+        key = (_activity_primary_url(act) or "").strip()
+        if not key and act.app_name and _normalize_app_label(act.app_name).lower() in browser_apps:
             key = simplify_title(act.window_title)
         key = (key or "").strip()
         if not key:
@@ -2355,6 +2513,7 @@ def app_urls_usage(request):
         "employees": employee_rows,
         "selected_employee_id": selected_employee.id if selected_employee else None,
         "app_name": app_name,
+        "app_key": app_key,
         "url_rows": url_rows,
         "total_time": format_seconds(total_seconds),
         "date_from": date_from_value,
@@ -2469,16 +2628,45 @@ def gaming_ott_usage(request):
         if not start or not end:
             continue
         duration_seconds = max(0, (end - start).total_seconds())
-        detail = (act.url or act.window_title or "-").strip() or "-"
+        detail_url = _activity_primary_url(act)
+        detail = (act.url or act.window_title or act.app_name or "-").strip() or "-"
         rows.append({
             "employee": act.employee.name,
             "date": format_date(end or start),
-            "app": act.app_name or "Unknown",
+            "app": _normalize_app_label(act.app_name),
             "detail": detail,
+            "detail_url": detail_url,
             "start": format_time(start),
             "end": format_time(end),
             "duration": format_duration(duration_seconds),
         })
+
+    if not rows and active_preset == "today":
+        fallback_start = now - timedelta(hours=24)
+        fallback_qs = Activity.objects.filter(employee__org=org).filter(keyword_q)
+        if selected_employee:
+            fallback_qs = fallback_qs.filter(employee=selected_employee)
+        fallback_qs = fallback_qs.filter(
+            models.Q(end_time__gte=fallback_start) | models.Q(start_time__gte=fallback_start)
+        ).select_related("employee").order_by("-end_time", "-start_time")
+        for act in fallback_qs:
+            start = act.start_time or act.end_time
+            end = act.end_time or act.start_time
+            if not start or not end:
+                continue
+            duration_seconds = max(0, (end - start).total_seconds())
+            detail_url = _activity_primary_url(act)
+            detail = (act.url or act.window_title or act.app_name or "-").strip() or "-"
+            rows.append({
+                "employee": act.employee.name,
+                "date": format_date(end or start),
+                "app": _normalize_app_label(act.app_name),
+                "detail": detail,
+                "detail_url": detail_url,
+                "start": format_time(start),
+                "end": format_time(end),
+                "duration": format_duration(duration_seconds),
+            })
 
     activity_last_seen_map = _build_activity_last_seen_map(
         org,
@@ -5120,3 +5308,33 @@ def dealer_referrals(request):
         "org_referrals": [serialize_row(row) for row in org_rows],
         "dealer_referrals": [serialize_row(row) for row in dealer_rows],
     })
+    if not url_stats and selected_employee and active_preset == "today":
+        fallback_start = now - timedelta(hours=24)
+        fallback_qs = Activity.objects.filter(employee=selected_employee).filter(
+            models.Q(end_time__gte=fallback_start) | models.Q(start_time__gte=fallback_start)
+        )
+        if app_key:
+            fallback_qs = fallback_qs.filter(app_name=app_key)
+        for act in fallback_qs:
+            start = act.start_time or act.end_time
+            end = act.end_time or act.start_time
+            if not start or not end:
+                continue
+            delta = (end - start).total_seconds()
+            if delta <= 0:
+                delta = default_interval
+            if app_key and (act.app_name or "") != app_key:
+                continue
+            normalized_label = _normalize_app_label(act.app_name)
+            if app_name and normalized_label.lower() != app_name.lower():
+                continue
+            key = (_activity_primary_url(act) or "").strip()
+            if not key and act.app_name and _normalize_app_label(act.app_name).lower() in browser_apps:
+                key = simplify_title(act.window_title)
+            key = (key or "").strip()
+            if not key:
+                continue
+            if query and query.lower() not in key.lower():
+                continue
+            total_seconds += delta
+            url_stats[key] = url_stats.get(key, 0) + delta

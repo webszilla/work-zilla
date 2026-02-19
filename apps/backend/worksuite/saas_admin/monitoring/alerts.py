@@ -1,10 +1,13 @@
 from datetime import timedelta
+import logging
 
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
 from .models import AlertEvent, MetricSample, MonitoringSettings, ServerNode
+
+logger = logging.getLogger(__name__)
 
 
 def _should_notify(event, now):
@@ -37,13 +40,21 @@ def _send_alert_email(event, server, snapshot, settings_obj):
             "Open SaaS Admin: /app/saas-admin/server-monitoring",
         ]
     )
-    send_mail(
-        subject,
-        body,
-        settings.DEFAULT_FROM_EMAIL,
-        recipients,
-        fail_silently=True,
-    )
+    try:
+        send_mail(
+            subject,
+            body,
+            settings.DEFAULT_FROM_EMAIL,
+            recipients,
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception(
+            "Monitoring alert email failed: event=%s server=%s recipients=%s",
+            event.type,
+            server.name,
+            recipients,
+        )
 
 
 def _ensure_event(server, event_type, breach, details, snapshot, settings_obj, now):

@@ -163,6 +163,15 @@ def _normalize_product_slug(value, default="monitor"):
     return slug or default
 
 
+def _dashboard_path_for_product(value):
+    slug = _normalize_product_slug(value)
+    if slug == "monitor":
+        return "/app/worksuite/"
+    if slug == "business-autopilot-erp":
+        return "/app/business-autopilot/"
+    return f"/app/{slug}/"
+
+
 def _storage_is_free_plan(plan):
     if not plan:
         return False
@@ -179,14 +188,19 @@ def _storage_is_free_plan(plan):
     return all(price <= 0 for price in prices)
 
 
-def _org_has_used_free_trial(org):
+def _org_has_used_free_trial(org, product_slug):
     if not org:
         return False
+    product_slug = _normalize_product_slug(product_slug)
     subs = (
         Subscription.objects
         .filter(organization=org, plan__isnull=False)
         .select_related("plan")
     )
+    if product_slug == "monitor":
+        subs = subs.filter(Q(plan__product__slug="monitor") | Q(plan__product__isnull=True))
+    else:
+        subs = subs.filter(plan__product__slug=product_slug)
     for sub in subs:
         if sub.plan and is_free_plan(sub.plan):
             return True
@@ -195,17 +209,22 @@ def _org_has_used_free_trial(org):
         .filter(organization=org, plan__isnull=False)
         .select_related("plan")
     )
+    if product_slug == "monitor":
+        history_rows = history_rows.filter(Q(plan__product__slug="monitor") | Q(plan__product__isnull=True))
+    else:
+        history_rows = history_rows.filter(plan__product__slug=product_slug)
     for row in history_rows:
         if row.plan and is_free_plan(row.plan):
             return True
-    try:
-        from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
-    except Exception:
-        return False
-    storage_subs = StorageOrgSubscription.objects.filter(organization=org).select_related("plan")
-    for sub in storage_subs:
-        if sub.plan is None or _storage_is_free_plan(sub.plan):
-            return True
+    if product_slug == "storage":
+        try:
+            from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+        except Exception:
+            return False
+        storage_subs = StorageOrgSubscription.objects.filter(organization=org).select_related("plan")
+        for sub in storage_subs:
+            if sub.plan is None or _storage_is_free_plan(sub.plan):
+                return True
     return False
 
 
@@ -671,7 +690,7 @@ def subscription_start(request):
         and not has_history
         and not has_subscription
         and not has_storage_sub
-        and not _org_has_used_free_trial(org)
+        and not _org_has_used_free_trial(org, product_slug)
     )
     if trial_available:
         now = timezone.now()
@@ -1165,12 +1184,14 @@ def account_view(request):
         ))
     for sub in subs:
         if hasattr(sub, "product_slug") and hasattr(sub, "product_name"):
+            sub.dashboard_path = _dashboard_path_for_product(getattr(sub, "product_slug", None))
             continue
         plan = sub.plan
         product = plan.product if plan else None
         slug = product.slug if product and product.slug else "monitor"
         sub.product_slug = slug
         sub.product_name = product.name if product else "Work Suite"
+        sub.dashboard_path = _dashboard_path_for_product(slug)
         sub.plan_rank = _plan_rank(plan)
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
         sub.is_free_plan = is_free_plan(plan)

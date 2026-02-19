@@ -33,8 +33,16 @@ export default function EmployeesPage() {
   const [intervalValue, setIntervalValue] = useState("");
   const [notice, setNotice] = useState("");
   const [page, setPage] = useState(1);
+  const [refreshTick, setRefreshTick] = useState(0);
   const confirm = useConfirm();
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   function buildEmployeesUrl(searchValue) {
     const params = new URLSearchParams();
@@ -85,7 +93,7 @@ export default function EmployeesPage() {
     return () => {
       active = false;
     };
-  }, [query]);
+  }, [query, refreshTick]);
 
   useEffect(() => {
     const handle = setTimeout(() => {

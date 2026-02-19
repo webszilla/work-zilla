@@ -77,6 +77,7 @@ urlpatterns = [
     path("api/storage/", include("apps.backend.storage.api_urls")),
     path("api/storage/files/", include("apps.backend.storage.api_urls")),
     path("api/storage/explorer/", include("apps.backend.storage.api_explorer_urls")),
+    path("api/business-autopilot/", include("apps.backend.business_autopilot.api_urls")),
     path("api/activity/upload", monitor_core_views.upload_activity),
     path("api/org/settings", monitor_core_views.org_settings),
     path("api/screenshot/upload", monitor_core_views.upload_screenshot),

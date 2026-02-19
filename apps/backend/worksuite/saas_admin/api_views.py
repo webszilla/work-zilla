@@ -1043,6 +1043,42 @@ def _normalize_product_slugs(slug):
     return product_slug, catalog_slug
 
 
+def _plans_queryset_for_catalog_slug(catalog_slug):
+    if catalog_slug == "monitor":
+        monitor_plans = Plan.objects.filter(product__slug="monitor")
+        return monitor_plans if monitor_plans.exists() else Plan.objects.filter(product__isnull=True)
+    return Plan.objects.filter(product__slug=catalog_slug)
+
+
+def _dedupe_plans_by_name(plan_rows):
+    seen = set()
+    deduped = []
+    for plan in plan_rows:
+        key = (plan.name or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(plan)
+    return deduped
+
+
+def _conflicting_plan_exists(*, plan_name, product_slug, exclude_id=None):
+    if not plan_name or not product_slug:
+        return False
+    plan_name = str(plan_name).strip()
+    if not plan_name:
+        return False
+    if product_slug == "monitor":
+        qs = Plan.objects.filter(name__iexact=plan_name).filter(
+            models.Q(product__slug="monitor") | models.Q(product__isnull=True)
+        )
+    else:
+        qs = Plan.objects.filter(name__iexact=plan_name, product__slug=product_slug)
+    if exclude_id:
+        qs = qs.exclude(id=exclude_id)
+    return qs.exists()
+
+
 def _get_product_org_ids(slug):
     product_slug, catalog_slug = _normalize_product_slugs(slug)
     product = Product.objects.filter(slug=product_slug).first()
@@ -1595,10 +1631,8 @@ def product_detail(request, slug):
         for row in pending
     ]
 
-    if catalog_slug == "monitor":
-        plan_rows = Plan.objects.filter(models.Q(product__slug="monitor") | models.Q(product__isnull=True))
-    else:
-        plan_rows = Plan.objects.filter(product__slug=catalog_slug)
+    plan_rows = _plans_queryset_for_catalog_slug(catalog_slug)
+    plan_rows = _dedupe_plans_by_name(plan_rows.order_by("price", "id"))
     plans_payload = [
         {
             "id": plan.id,
@@ -1608,7 +1642,7 @@ def product_detail(request, slug):
             "employee_limit": plan.employee_limit,
             "allow_addons": plan.allow_addons,
         }
-        for plan in plan_rows.order_by("price")
+        for plan in plan_rows
     ]
 
     return JsonResponse({
@@ -2280,11 +2314,8 @@ def plans_list(request):
             product_slug = "monitor"
         plans = Plan.objects.all()
         if product_slug:
-            if product_slug == "monitor":
-                plans = plans.filter(models.Q(product__slug="monitor") | models.Q(product__isnull=True))
-            else:
-                plans = plans.filter(product__slug=product_slug)
-        plans = plans.order_by("name")
+            plans = _plans_queryset_for_catalog_slug(product_slug)
+        plans = _dedupe_plans_by_name(plans.order_by("name", "id"))
         return JsonResponse({"plans": [_plan_payload(plan) for plan in plans]})
 
     try:
@@ -2299,6 +2330,8 @@ def plans_list(request):
             return JsonResponse({"error": "name_required"}, status=400)
         if not plan.product:
             return JsonResponse({"product": ["Product is required."]}, status=400)
+        if _conflicting_plan_exists(plan_name=plan.name, product_slug=plan.product.slug):
+            return JsonResponse({"error": "plan_name_exists"}, status=400)
         plan.save()
     except ValueError as error:
         details = error.args[0] if error.args else None
@@ -2334,6 +2367,12 @@ def plan_detail(request, plan_id):
             return JsonResponse({"error": "name_required"}, status=400)
         if not plan.product:
             return JsonResponse({"product": ["Product is required."]}, status=400)
+        if _conflicting_plan_exists(
+            plan_name=plan.name,
+            product_slug=plan.product.slug,
+            exclude_id=plan.id,
+        ):
+            return JsonResponse({"error": "plan_name_exists"}, status=400)
         plan.save()
     except ValueError:
         return JsonResponse({"error": "invalid_value"}, status=400)
@@ -2447,12 +2486,11 @@ def product_organizations(request, slug):
                 status = "inactive"
         serialized["status"] = status
         payload.append(serialized)
-    plans_qs = Plan.objects.all()
-    if catalog_slug == "monitor":
-        plans_qs = plans_qs.filter(models.Q(product__slug="monitor") | models.Q(product__isnull=True))
-    else:
-        plans_qs = plans_qs.filter(product__slug=catalog_slug)
-    plans_payload = [{"id": plan.id, "name": plan.name} for plan in plans_qs.order_by("name")]
+    plans_qs = _plans_queryset_for_catalog_slug(catalog_slug)
+    plans_payload = [
+        {"id": plan.id, "name": plan.name}
+        for plan in _dedupe_plans_by_name(plans_qs.order_by("name", "id"))
+    ]
     dealers = (
         DealerAccount.objects
         .select_related("user", "referred_by__user")

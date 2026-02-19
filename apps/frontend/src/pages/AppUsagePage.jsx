@@ -70,8 +70,16 @@ export default function AppUsagePage() {
   const [userQuery, setUserQuery] = useState("");
   const [tableSearchTerm, setTableSearchTerm] = useState("");
   const [tableSearchQuery, setTableSearchQuery] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -111,7 +119,7 @@ export default function AppUsagePage() {
     return () => {
       active = false;
     };
-  }, [filters]);
+  }, [filters, refreshTick]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -184,9 +192,12 @@ export default function AppUsagePage() {
     setFilters((prev) => ({ ...prev, preset }));
   }
 
-  function buildAppUrlLink(appName) {
+  function buildAppUrlLink(appName, appKey) {
     const params = new URLSearchParams();
     params.set("app", appName);
+    if (appKey) {
+      params.set("app_key", appKey);
+    }
     if (selectedId) {
       params.set("employee_id", selectedId);
     }
@@ -320,8 +331,8 @@ export default function AppUsagePage() {
                   <tr>
                     <th>Application</th>
                     <th>Top URL</th>
-                    <th>Total Time</th>
-                    <th>Share</th>
+                    <th style={{ width: "120px", whiteSpace: "nowrap" }}>Total Time</th>
+                    <th style={{ width: "90px", whiteSpace: "nowrap" }}>Share</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -331,7 +342,7 @@ export default function AppUsagePage() {
                         <td>
                           <a
                             className="text-info text-decoration-none"
-                            href={buildAppUrlLink(row.name)}
+                            href={buildAppUrlLink(row.name, row.app_key)}
                           >
                             {row.name}
                           </a>
@@ -339,8 +350,8 @@ export default function AppUsagePage() {
                         <td className="text-truncate" style={{ maxWidth: "280px" }}>
                           {renderUrlLink(row.url)}
                         </td>
-                        <td>{row.duration}</td>
-                        <td>{row.percent}%</td>
+                        <td style={{ width: "120px", whiteSpace: "nowrap" }}>{row.duration}</td>
+                        <td style={{ width: "90px", whiteSpace: "nowrap" }}>{row.percent}%</td>
                       </tr>
                     ))
                   ) : (

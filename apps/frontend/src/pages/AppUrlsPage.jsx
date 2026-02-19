@@ -47,12 +47,14 @@ export default function AppUrlsPage() {
   const today = formatDate(new Date());
   const queryParams = useQueryParams();
   const initialApp = queryParams.get("app") || "";
+  const initialAppKey = queryParams.get("app_key") || "";
   const initialEmployeeId = queryParams.get("employee_id") || "";
   const initialPreset = queryParams.get("preset") || "today";
   const initialDateFrom = queryParams.get("date_from") || "";
   const initialDateTo = queryParams.get("date_to") || "";
 
   const [appName, setAppName] = useState(initialApp);
+  const [appKey, setAppKey] = useState(initialAppKey);
   const [filters, setFilters] = useState({
     employeeId: initialEmployeeId,
     preset: initialPreset,
@@ -76,6 +78,7 @@ export default function AppUrlsPage() {
 
   useEffect(() => {
     setAppName(initialApp);
+    setAppKey(initialAppKey);
     setFilters((prev) => ({
       ...prev,
       employeeId: initialEmployeeId,
@@ -88,7 +91,7 @@ export default function AppUrlsPage() {
       dateTo: initialDateTo || today
     });
     setPage(1);
-  }, [initialApp, initialEmployeeId, initialPreset, initialDateFrom, initialDateTo, today]);
+  }, [initialApp, initialAppKey, initialEmployeeId, initialPreset, initialDateFrom, initialDateTo, today]);
 
   useEffect(() => {
     let active = true;
@@ -98,6 +101,9 @@ export default function AppUrlsPage() {
         const params = new URLSearchParams();
         if (appName) {
           params.set("app", appName);
+        }
+        if (appKey) {
+          params.set("app_key", appKey);
         }
         if (filters.employeeId) {
           params.set("employee_id", filters.employeeId);
@@ -140,7 +146,7 @@ export default function AppUrlsPage() {
     return () => {
       active = false;
     };
-  }, [appName, filters]);
+  }, [appKey, appName, filters]);
 
   useEffect(() => {
     const handle = setTimeout(() => {

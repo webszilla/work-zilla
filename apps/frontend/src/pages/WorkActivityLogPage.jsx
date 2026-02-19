@@ -38,8 +38,16 @@ export default function WorkActivityLogPage() {
     meta: "",
     baseDate: ""
   });
+  const [refreshTick, setRefreshTick] = useState(0);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshTick((prev) => prev + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -78,7 +86,7 @@ export default function WorkActivityLogPage() {
     return () => {
       active = false;
     };
-  }, [filters]);
+  }, [filters, refreshTick]);
 
   useEffect(() => {
     setPage(1);

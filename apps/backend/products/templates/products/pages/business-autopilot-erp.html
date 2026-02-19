@@ -1,0 +1,40 @@
+{% extends "website/base.html" %}
+
+{% block title %}Business Autopilot ERP{% endblock %}
+
+{% block content %}
+<section class="hero hero-product">
+  <div class="container">
+    <h1>Business Autopilot ERP</h1>
+    <p>Unified CRM, HR Management, Project Management, and Accounts in one SaaS platform.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="/pricing/?product=business-autopilot-erp">View Pricing</a>
+      <a class="btn btn-outline" href="/auth/login/">Login</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2>Core Modules</h2>
+    <div class="grid-4">
+      <article class="card">
+        <h3>CRM</h3>
+        <p>Leads, pipeline, tasks, and customer lifecycle.</p>
+      </article>
+      <article class="card">
+        <h3>HR Management</h3>
+        <p>Employees, attendance, policy, and workforce workflows.</p>
+      </article>
+      <article class="card">
+        <h3>Project Management</h3>
+        <p>Boards, milestones, collaboration, and progress tracking.</p>
+      </article>
+      <article class="card">
+        <h3>Accounts / ERP</h3>
+        <p>Accounting, invoicing, receivables, and financial controls.</p>
+      </article>
+    </div>
+  </div>
+</section>
+{% endblock %}
