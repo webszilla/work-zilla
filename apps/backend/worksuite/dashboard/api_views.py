@@ -28,6 +28,7 @@ from reportlab.pdfgen import canvas
 
 from core.models import (
     AdminActivity,
+    AdminNotification,
     CompanyPrivacySettings,
     Employee,
     OrganizationSettings,
@@ -45,6 +46,7 @@ from core.models import (
     BillingProfile,
     InvoiceSellerProfile,
     Device,
+    UserProfile,
 )
 from saas_admin.models import Product
 from dashboard import views as dashboard_views
@@ -53,6 +55,7 @@ from core.email_utils import send_templated_email
 from core.subscription_utils import is_subscription_active
 from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
 from core.notification_emails import notify_password_changed, notify_account_limit_reached, send_email_verification
+from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 
 
@@ -126,6 +129,15 @@ def _json_error(message, status=400, extra=None):
     return JsonResponse(payload, status=status)
 
 
+def _org_inbox_permission(request):
+    if not request.user or not request.user.is_authenticated:
+        return False, None
+    org, error = _get_org_or_error(request)
+    if error:
+        return False, error
+    return True, org
+
+
 def _get_org_or_error(request):
     org = dashboard_views.get_active_org(request)
     if not org:
@@ -176,6 +188,89 @@ def _resolve_org_timezone(org, request=None):
         settings_obj.save(update_fields=["org_timezone"])
         current = resolved
     return settings_obj, current
+
+
+@login_required
+@require_http_methods(["GET"])
+def org_inbox_list(request):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+
+    try:
+        page = max(int(request.GET.get("page", 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size", 20))
+    except (TypeError, ValueError):
+        page_size = 20
+    page_size = min(max(page_size, 5), 100)
+
+    queryset = (
+        AdminNotification.objects
+        .select_related("organization")
+        .filter(is_deleted=False, audience="org_admin", organization=org)
+        .order_by("-created_at", "-id")
+    )
+    total = queryset.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    results = [serialize_notification(item) for item in queryset[start:end]]
+    total_pages = max(math.ceil(total / page_size), 1)
+    unread_count = queryset.filter(is_read=False).count()
+    return JsonResponse({
+        "results": results,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+        "unread_count": unread_count,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def org_inbox_mark_read(request):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    try:
+        data = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+
+    ids = data.get("ids") or []
+    if not isinstance(ids, list):
+        ids = [data.get("id")] if data.get("id") else []
+    ids = [int(item) for item in ids if str(item).isdigit()]
+    if not ids:
+        return JsonResponse({"error": "no_ids"}, status=400)
+    updated = (
+        AdminNotification.objects
+        .filter(id__in=ids, audience="org_admin", organization=org)
+        .update(is_read=True)
+    )
+    return JsonResponse({"status": "ok", "updated": updated})
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def org_inbox_delete(request, notification_id):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    updated = (
+        AdminNotification.objects
+        .filter(id=notification_id, audience="org_admin", organization=org)
+        .update(is_deleted=True)
+    )
+    if not updated:
+        return JsonResponse({"error": "not_found"}, status=404)
+    return JsonResponse({"status": "ok"})
 
 
 def _cleanup_old_monitor_data(org, days=30):

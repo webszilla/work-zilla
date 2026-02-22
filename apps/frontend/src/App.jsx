@@ -42,8 +42,10 @@ import SaasAdminReferralsPage from "./pages/SaasAdminReferralsPage.jsx";
 import SaasAdminProfilePage from "./pages/SaasAdminProfilePage.jsx";
 import SaasAdminObservabilityPage from "./pages/SaasAdminObservabilityPage.jsx";
 import SaasAdminInboxPage from "./pages/SaasAdminInboxPage.jsx";
+import OrgInboxPage from "./pages/OrgInboxPage.jsx";
 import SaasAdminRetentionPolicyPage from "./pages/SaasAdminRetentionPolicyPage.jsx";
 import SaasAdminStorageSettingsPage from "./pages/SaasAdminStorageSettingsPage.jsx";
+import SaasAdminWhatsAppSettingsPage from "./pages/SaasAdminWhatsAppSettingsPage.jsx";
 import SaasAdminBillingPage from "./pages/SaasAdminBillingPage.jsx";
 import SaasAdminBackupActivityPage from "./pages/SaasAdminBackupActivityPage.jsx";
 import BackupHistoryPage from "./pages/BackupHistoryPage.jsx";
@@ -148,9 +150,12 @@ function applyThemeColors(theme) {
 const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "storage" },
   { label: "Files", path: "/files", icon: "bi-cloud", productOnly: "storage" },
+  { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "storage" },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "storage", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
+  { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
+  { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "business-autopilot-erp" },
   { label: "Inbox", path: "/inbox", icon: "bi-chat-dots", productOnly: "ai-chatbot", allowAgent: true },
   { label: "Widgets", path: "/widgets", icon: "bi-code-slash", productOnly: "ai-chatbot", adminOnly: true },
   { label: "Leads", path: "/leads", icon: "bi-person-lines-fill", productOnly: "ai-chatbot", adminOnly: true },
@@ -522,14 +527,15 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     const orderMap = new Map([
       ["/", 0],
-      ["/crm", 1],
-      ["/hrm", 2],
-      ["/projects", 3],
-      ["/accounts", 4],
-      ["/users", 5],
-      ["/billing", 6],
-      ["/plans", 7],
-      ["/profile", 8]
+      ["/notifications-inbox", 1],
+      ["/crm", 2],
+      ["/hrm", 3],
+      ["/projects", 4],
+      ["/accounts", 5],
+      ["/users", 6],
+      ["/billing", 7],
+      ["/plans", 8],
+      ["/profile", 9]
     ]);
     return [...allowedNavItems].sort((a, b) => {
       const aOrder = orderMap.has(a.path) ? orderMap.get(a.path) : 99;
@@ -919,6 +925,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={isAdmin && !isHrView ? <ProfilePage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/notifications-inbox"
+            element={!isDealer ? <OrgInboxPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/org-admin/media-library"
             element={isAdmin && !isHrView ? <MediaLibraryPage scope="org" /> : <Navigate to={withBase("/")} replace />}
           />
@@ -1021,6 +1031,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/saas-admin/storage"
             element={isSaasAdmin ? <SaasAdminStorageSettingsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/saas-admin/whatsapp-cloud"
+            element={isSaasAdmin ? <SaasAdminWhatsAppSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/saas-admin/media-library"

@@ -1,6 +1,9 @@
 from .models import AdminNotification, Organization
 
 
+ORG_ADMIN_INBOX_MAX_ITEMS = 100
+
+
 def create_admin_notification(
     title,
     message="",
@@ -9,12 +12,52 @@ def create_admin_notification(
 ):
     if isinstance(organization, int):
         organization = Organization.objects.filter(id=organization).first()
+    elif organization is not None and not isinstance(organization, Organization):
+        org_id = getattr(organization, "id", None) or getattr(organization, "pk", None)
+        organization = Organization.objects.filter(id=org_id).first() if org_id else None
     return AdminNotification.objects.create(
         title=title,
         message=message or "",
         event_type=event_type or "system",
+        audience="saas_admin",
+        channel="system",
         organization=organization,
     )
+
+
+def create_org_admin_inbox_notification(
+    title,
+    message="",
+    organization=None,
+    event_type="system",
+    product_slug="",
+    channel="email",
+):
+    if isinstance(organization, int):
+        organization = Organization.objects.filter(id=organization).first()
+    elif organization is not None and not isinstance(organization, Organization):
+        org_id = getattr(organization, "id", None) or getattr(organization, "pk", None)
+        organization = Organization.objects.filter(id=org_id).first() if org_id else None
+    if not organization:
+        return None
+    item = AdminNotification.objects.create(
+        title=title,
+        message=message or "",
+        event_type=event_type or "system",
+        audience="org_admin",
+        channel=channel or "email",
+        product_slug=(product_slug or "").strip(),
+        organization=organization,
+    )
+    old_ids = list(
+        AdminNotification.objects
+        .filter(audience="org_admin", organization=organization)
+        .order_by("-created_at", "-id")
+        .values_list("id", flat=True)[ORG_ADMIN_INBOX_MAX_ITEMS:]
+    )
+    if old_ids:
+        AdminNotification.objects.filter(id__in=old_ids).delete()
+    return item
 
 
 def notify_org_expired(org, message=""):

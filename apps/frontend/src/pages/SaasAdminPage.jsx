@@ -11,6 +11,25 @@ const emptyState = {
 
 export default function SaasAdminPage() {
   const [state, setState] = useState(emptyState);
+  const [whatsAppState, setWhatsAppState] = useState({
+    loading: false,
+    loaded: false,
+    saving: false,
+    error: "",
+    success: "",
+    data: null,
+    form: {
+      is_active: false,
+      phone_number_id: "",
+      access_token: "",
+      admin_phone: "",
+      admin_template_name: "new_user_admin_alert",
+      user_welcome_template_name: "welcome_user_signup",
+      template_language: "en_US",
+      graph_api_version: "v21.0",
+      timeout_seconds: 15
+    }
+  });
   const [setupState, setSetupState] = useState({
     importing: false,
     downloading: false,
@@ -47,6 +66,61 @@ export default function SaasAdminPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (location.pathname !== "/saas-admin") {
+      return;
+    }
+    let active = true;
+    async function loadWhatsAppSettings() {
+      try {
+        const data = await apiFetch("/api/saas-admin/settings/whatsapp-cloud");
+        if (!active) {
+          return;
+        }
+        setWhatsAppState((prev) => ({
+          ...prev,
+          loading: false,
+          loaded: true,
+          data,
+          error: "",
+          success: "",
+          form: {
+            is_active: Boolean(data?.is_active),
+            phone_number_id: data?.phone_number_id || "",
+            access_token: "",
+            admin_phone: data?.admin_phone || "",
+            admin_template_name: data?.admin_template_name || "new_user_admin_alert",
+            user_welcome_template_name: data?.user_welcome_template_name || "welcome_user_signup",
+            template_language: data?.template_language || "en_US",
+            graph_api_version: data?.graph_api_version || "v21.0",
+            timeout_seconds: Number(data?.timeout_seconds || 15)
+          }
+        }));
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setWhatsAppState((prev) => ({
+          ...prev,
+          loading: false,
+          error: error?.message || "Unable to load WhatsApp settings.",
+          success: ""
+        }));
+      }
+    }
+    loadWhatsAppSettings();
+    const onFocus = () => {
+      if (active && window.location.pathname.endsWith("/saas-admin")) {
+        loadWhatsAppSettings();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [location.pathname]);
 
   const data = state.data || {};
   const stats = data.stats || {};
@@ -170,6 +244,71 @@ export default function SaasAdminPage() {
         importing: false,
         success: "",
         error: error?.message || "Setup import failed."
+      }));
+    }
+  }
+
+  function handleWhatsAppFieldChange(key, value) {
+    setWhatsAppState((prev) => ({
+      ...prev,
+      error: "",
+      success: "",
+      form: {
+        ...prev.form,
+        [key]: value
+      }
+    }));
+  }
+
+  async function handleWhatsAppSave() {
+    setWhatsAppState((prev) => ({
+      ...prev,
+      saving: true,
+      error: "",
+      success: ""
+    }));
+    try {
+      const payload = {
+        is_active: Boolean(whatsAppState.form.is_active),
+        phone_number_id: whatsAppState.form.phone_number_id,
+        access_token: whatsAppState.form.access_token,
+        admin_phone: whatsAppState.form.admin_phone,
+        admin_template_name: whatsAppState.form.admin_template_name,
+        user_welcome_template_name: whatsAppState.form.user_welcome_template_name,
+        template_language: whatsAppState.form.template_language,
+        graph_api_version: whatsAppState.form.graph_api_version,
+        timeout_seconds: Number(whatsAppState.form.timeout_seconds || 15)
+      };
+      const data = await apiFetch("/api/saas-admin/settings/whatsapp-cloud", {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+      setWhatsAppState((prev) => ({
+        ...prev,
+        saving: false,
+        loaded: true,
+        data,
+        success: "WhatsApp Cloud API settings saved.",
+        error: "",
+        form: {
+          ...prev.form,
+          access_token: "",
+          is_active: Boolean(data?.is_active),
+          phone_number_id: data?.phone_number_id || "",
+          admin_phone: data?.admin_phone || "",
+          admin_template_name: data?.admin_template_name || prev.form.admin_template_name,
+          user_welcome_template_name: data?.user_welcome_template_name || prev.form.user_welcome_template_name,
+          template_language: data?.template_language || prev.form.template_language,
+          graph_api_version: data?.graph_api_version || prev.form.graph_api_version,
+          timeout_seconds: Number(data?.timeout_seconds || prev.form.timeout_seconds || 15)
+        }
+      }));
+    } catch (error) {
+      setWhatsAppState((prev) => ({
+        ...prev,
+        saving: false,
+        error: error?.message || "Unable to save WhatsApp settings.",
+        success: ""
       }));
     }
   }
@@ -333,10 +472,13 @@ export default function SaasAdminPage() {
                           onClick={handleSetupDownload}
                           disabled={setupState.downloading}
                         >
-                          {setupState.downloading ? "Downloading..." : "Download Setup JSON"}
+                          <>
+                            <i className="bi bi-download me-1" aria-hidden="true" />
+                            {setupState.downloading ? "Downloading..." : "Download"}
+                          </>
                         </button>
-                        <label className="btn btn-outline-light btn-sm mb-0">
-                          Choose File
+                        <label className="btn btn-outline-light btn-sm mb-0" title="Choose Setup File" aria-label="Choose Setup File">
+                          <i className="bi bi-folder2-open" aria-hidden="true" />
                           <input
                             type="file"
                             accept="application/json,.json"
@@ -349,8 +491,14 @@ export default function SaasAdminPage() {
                           className="btn btn-outline-light btn-sm"
                           onClick={handleSetupImport}
                           disabled={setupState.importing || !setupState.payload}
+                          title="Import Setup"
+                          aria-label="Import Setup"
                         >
-                          {setupState.importing ? "Importing..." : "Import Setup"}
+                          {setupState.importing ? (
+                            <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                          ) : (
+                            <i className="bi bi-upload" aria-hidden="true" />
+                          )}
                         </button>
                       </div>
                       {setupState.fileName ? (
@@ -362,6 +510,29 @@ export default function SaasAdminPage() {
                       {setupState.error ? (
                         <div className="small text-danger">{setupState.error}</div>
                       ) : null}
+                  </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-whatsapp" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">WhatsApp Cloud API</h5>
+                      <p className="text-secondary mb-2">
+                        Configure Meta WhatsApp signup alerts and welcome templates.
+                      </p>
+                      <div className="d-flex flex-wrap gap-2 mb-2">
+                        <Link
+                          to="/saas-admin/whatsapp-cloud"
+                          className="btn btn-primary btn-sm"
+                        >
+                          Configure
+                        </Link>
+                        {whatsAppState.data?.is_active ? (
+                          <span className="badge bg-success align-self-center">Active</span>
+                        ) : (
+                          <span className="badge bg-secondary align-self-center">Inactive</span>
+                        )}
+                      </div>
                   </div>
                 </div>
               </div>

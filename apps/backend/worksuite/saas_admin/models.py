@@ -70,6 +70,38 @@ class OpenAISettings(models.Model):
         return f"{self.provider} settings"
 
 
+class WhatsAppCloudSettings(models.Model):
+    provider = models.CharField(max_length=40, default="meta_whatsapp_cloud", unique=True)
+    is_active = models.BooleanField(default=False)
+    phone_number_id = models.CharField(max_length=64, blank=True, default="")
+    access_token = models.TextField(blank=True, default="")
+    admin_phone = models.CharField(max_length=32, blank=True, default="")
+    notify_admin_new_user = models.BooleanField(default=True)
+    notify_user_welcome = models.BooleanField(default=True)
+    notification_toggles = models.JSONField(default=dict, blank=True)
+    admin_template_name = models.CharField(max_length=100, blank=True, default="new_user_admin_alert")
+    user_welcome_template_name = models.CharField(max_length=100, blank=True, default="welcome_user_signup")
+    template_language = models.CharField(max_length=20, blank=True, default="en_US")
+    graph_api_version = models.CharField(max_length=20, blank=True, default="v21.0")
+    timeout_seconds = models.PositiveIntegerField(default=15)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "WhatsApp Cloud Settings"
+        verbose_name_plural = "WhatsApp Cloud Settings"
+
+    def __str__(self):
+        return "WhatsApp Cloud Settings"
+
+    @classmethod
+    def get_solo(cls):
+        obj = cls.objects.filter(provider="meta_whatsapp_cloud").first()
+        if obj:
+            return obj
+        return cls.objects.create(provider="meta_whatsapp_cloud")
+
+
 class GlobalMediaStorageSettings(models.Model):
     STORAGE_CHOICES = (
         ("local", "Local storage"),

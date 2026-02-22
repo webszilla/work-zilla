@@ -1,5 +1,9 @@
 PROJECT: WorkZilla
-REPO PATH (LOCAL): /Users/guru/Desktop/webszilla/saas/work-zilla
+REPO PATH (LOCAL): ~/Desktop/webszilla/saas/work-zilla
+LOCAL USERNAME NOTE (MULTI-DEVICE):
+- Home laptop username: `apple` -> /Users/apple/Desktop/webszilla/saas/work-zilla
+- Office desktop username: `guru` -> /Users/guru/Desktop/webszilla/saas/work-zilla
+- Prefer `~/Desktop/webszilla/saas/work-zilla` in local commands so same workflow works on both devices.
 SERVER: Hetzner (89.167.16.104)
 SERVER PROJECT PATH: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 
@@ -62,6 +66,11 @@ B) Django migrations
 C) Frontend build helpers
 - ./build_and_copy_frontend.sh
 - build_and_copy_frontend.bat
+- Local run (single URL only - preferred):
+  - Run `./build_and_copy_frontend.sh`
+  - Start Django backend
+  - Open http://127.0.0.1:8000 (frontend + backend on same URL; frontend served from `apps/backend/frontend_dist`)
+- Use Vite `5173` only when explicitly needed for frontend-only development/debugging.
 
 D) Desktop app build (mac)
 - cd apps/desktop_app
@@ -158,9 +167,9 @@ FAST SERVER CHECK COMMANDS
 
 FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
 - First run dry-run:
-  - rsync -azn --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' /Users/guru/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
+  - rsync -azn --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
 - Then actual sync:
-  - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' /Users/guru/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
+  - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - pkill -f "gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" || true
 - nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 >/tmp/workzilla-gunicorn.out 2>&1 &
