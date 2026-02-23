@@ -4,6 +4,7 @@ from . import api_views
 
 urlpatterns = [
     path("request", api_views.backup_request, name="backup_request"),
+    path("import", api_views.backup_import, name="backup_import"),
     path("download/<uuid:backup_id>", api_views.backup_download, name="backup_download"),
     path("restore/<uuid:backup_id>", api_views.backup_restore, name="backup_restore"),
     path("list", api_views.backup_list, name="backup_list"),

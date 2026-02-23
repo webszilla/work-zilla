@@ -207,17 +207,30 @@ public class WinApi {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 }
 "@
-$h=[WinApi]::GetForegroundWindow()
-if ($h -eq [IntPtr]::Zero) { Write-Output ""; exit 0 }
-$sb=New-Object System.Text.StringBuilder 1024
-[WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
-$pid=0
-[WinApi]::GetWindowThreadProcessId($h,[ref]$pid) | Out-Null
-$app=""
-if ($pid -gt 0) {
-  try { $app=(Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch {}
+$skip = @("powershell","pwsh","cmd","conhost","windowsterminal")
+for ($i=0; $i -lt 8; $i++) {
+  $h=[WinApi]::GetForegroundWindow()
+  if ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 25; continue }
+  $sb=New-Object System.Text.StringBuilder 4096
+  [WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
+  $title=$sb.ToString()
+  $targetPid=[uint32]0
+  [WinApi]::GetWindowThreadProcessId($h,[ref]$targetPid) | Out-Null
+  $app=""
+  if ($targetPid -gt 0) {
+    try { $app=(Get-Process -Id $targetPid -ErrorAction Stop).ProcessName } catch {}
+  }
+  if ($app -and -not ($skip -contains $app.ToLowerInvariant())) {
+    Write-Output ($app + "\\t" + $title)
+    exit 0
+  }
+  if ((-not $app) -and $title -and $title -notmatch "powershell|command prompt|windows terminal") {
+    Write-Output ($app + "\\t" + $title)
+    exit 0
+  }
+  Start-Sleep -Milliseconds 25
 }
-Write-Output ($app + "\\t" + $sb.ToString())
+Write-Output ""
 `;
     const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
       encoding: "utf8",
@@ -227,8 +240,20 @@ Write-Output ($app + "\\t" + $sb.ToString())
     if (!output) {
       return { appName: "", windowTitle: "", url: "" };
     }
-    const [appName = "", windowTitle = ""] = output.split("\t");
-    return { appName: appName.trim(), windowTitle: windowTitle.trim(), url: "" };
+    let appName = "";
+    let windowTitle = "";
+    if (output.includes("\t")) {
+      const parts = output.split("\t");
+      appName = String(parts[0] || "").trim();
+      windowTitle = String(parts.slice(1).join("\t") || "").trim();
+    } else if (output.includes("\\t")) {
+      const parts = output.split("\\t");
+      appName = String(parts[0] || "").trim();
+      windowTitle = String(parts.slice(1).join("\\t") || "").trim();
+    } else {
+      appName = output.trim();
+    }
+    return { appName, windowTitle, url: "" };
   } catch {
     return { appName: "", windowTitle: "", url: "" };
   }
@@ -1305,6 +1330,7 @@ async function startMonitorWithAuth() {
           window_title: meta.windowTitle || "",
           url: meta.url || ""
         });
+        await syncMonitorCaptureInterval({ reschedule: true });
       } catch {
         // ignore heartbeat errors
       }
@@ -1320,27 +1346,13 @@ async function startMonitorWithAuth() {
         window_title: meta.windowTitle || "",
         url: meta.url || ""
       });
+      await syncMonitorCaptureInterval({ reschedule: true });
     } catch {
       // ignore heartbeat errors
     }
   };
   setupHeartbeat();
-  if (process.platform === "darwin") {
-    try {
-      const intervalSettings = loadSettings();
-      const result = await getMonitorSettings({
-        companyKey: resolveCompanyKey(intervalSettings),
-        deviceId: intervalSettings.deviceId || "",
-        employeeId: intervalSettings.employeeId || null
-      });
-      const intervalSeconds = Number(result?.screenshot_interval_seconds || 0);
-      if (Number.isFinite(intervalSeconds) && intervalSeconds > 0) {
-        monitorCaptureIntervalMs = Math.max(15000, intervalSeconds * 1000);
-      }
-    } catch {
-      // ignore monitor settings errors
-    }
-  }
+  await syncMonitorCaptureInterval();
   const status = startMonitorProcess();
   if (status === "unsupported") {
     return { ok: true, status };
@@ -1416,6 +1428,38 @@ function configureAutoLaunch(enabled) {
     });
   } catch {
     // ignore auto-launch failures
+  }
+}
+
+async function syncMonitorCaptureInterval({ reschedule = false } = {}) {
+  try {
+    const intervalSettings = loadSettings();
+    const result = await getMonitorSettings({
+      companyKey: resolveCompanyKey(intervalSettings),
+      deviceId: intervalSettings.deviceId || "",
+      employeeId: intervalSettings.employeeId || null
+    });
+    const intervalSeconds = Number(result?.screenshot_interval_seconds || 0);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+      return;
+    }
+    const nextIntervalMs = Math.max(15000, intervalSeconds * 1000);
+    if (nextIntervalMs === monitorCaptureIntervalMs) {
+      return;
+    }
+    monitorCaptureIntervalMs = nextIntervalMs;
+    if (!reschedule || !monitorCaptureTimer) {
+      return;
+    }
+    if (process.platform === "darwin") {
+      scheduleMacCapture(monitorCaptureIntervalMs);
+      return;
+    }
+    if (process.platform === "win32") {
+      scheduleWindowsCapture(monitorCaptureIntervalMs);
+    }
+  } catch {
+    // ignore monitor settings errors
   }
 }
 

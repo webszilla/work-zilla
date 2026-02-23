@@ -60,6 +60,8 @@ export async function apiFetch(url, options = {}) {
   };
 
   const method = (fetchOptions.method || "GET").toUpperCase();
+  const isFormDataBody =
+    typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   if (typeof window !== "undefined" && window.__WZ_READ_ONLY__ && method !== "GET" && method !== "HEAD") {
     const err = new Error("read_only");
     err.status = 403;
@@ -71,10 +73,12 @@ export async function apiFetch(url, options = {}) {
       await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
     }
     fetchOptions.headers = {
-      "Content-Type": "application/json",
       "X-CSRFToken": getCsrfToken(),
       ...fetchOptions.headers
     };
+    if (!isFormDataBody && !fetchOptions.headers["Content-Type"]) {
+      fetchOptions.headers["Content-Type"] = "application/json";
+    }
   }
 
   const response = await fetch(requestUrl, fetchOptions);

@@ -11,7 +11,8 @@ def register_backup_exporter(exporter):
       exporter(org_id, product_id, output_dir) -> dict
     Returns dict to add into manifest.
     """
-    _EXPORTERS.append(exporter)
+    if exporter not in _EXPORTERS:
+        _EXPORTERS.append(exporter)
 
 
 def get_exporters():
@@ -23,7 +24,8 @@ def register_backup_restorer(restorer):
     Restorer signature:
       restorer(org_id, product_id, extracted_dir, manifest) -> None
     """
-    _RESTORERS.append(restorer)
+    if restorer not in _RESTORERS:
+        _RESTORERS.append(restorer)
 
 
 def get_restorers():

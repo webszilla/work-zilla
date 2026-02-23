@@ -9,6 +9,7 @@ from .models import Organization, User
 from core.models import UserProfile
 from core.email_utils import send_templated_email
 from core.notification_emails import send_email_verification, is_verification_token_valid, mark_email_verified
+from .signals import user_registration_success
 
 
 @require_http_methods(["GET", "POST"])
@@ -90,6 +91,14 @@ def signup_view(request):
         },
     )
     send_email_verification(user, request=request, force=True)
+    transaction.on_commit(
+        lambda: user_registration_success.send(
+            sender=signup_view,
+            user=user,
+            request=request,
+            phone_number=phone_number,
+        )
+    )
     login(request, user)
     return redirect("/my-account/")
 

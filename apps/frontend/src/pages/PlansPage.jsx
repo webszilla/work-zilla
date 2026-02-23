@@ -239,9 +239,12 @@ export default function PlansPage() {
       ? "ai-chatbot"
       : rawPath.includes("/storage")
       ? "storage"
+      : rawPath.includes("/business-autopilot")
+      ? "business-autopilot-erp"
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
+  const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -317,7 +320,22 @@ export default function PlansPage() {
     };
   }, []);
 
-  const plans = state.data?.plans || [];
+  const plans = useMemo(() => {
+    const rawPlans = state.data?.plans || [];
+    const seen = new Set();
+    const unique = [];
+    for (const plan of rawPlans) {
+      const key = plan?.id != null
+        ? `id:${plan.id}`
+        : `k:${plan?.name || ""}|${plan?.monthly_price || ""}|${plan?.yearly_price || ""}|${plan?.product_slug || ""}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      unique.push(plan);
+    }
+    return unique;
+  }, [state.data?.plans]);
   const freeEligible = state.data?.free_eligible !== false;
   const activeSub = state.data?.active_sub || null;
   const activeTrialPlanId =
@@ -949,6 +967,34 @@ export default function PlansPage() {
                         )}
                       </div>
                     </>
+                  ) : isBusinessAutopilot ? (
+                    <>
+                      <div className="plan-feature-list">
+                        <div className="plan-metric">
+                          Users included: {plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}
+                        </div>
+                        {plan.allow_addons ? (
+                          <>
+                            <div className="plan-metric">
+                              User Add-on Monthly: {formatCurrencyLabel(currency)} {addonMonthly || "-"}
+                            </div>
+                            <div className="plan-metric">
+                              User Add-on Yearly: {formatCurrencyLabel(currency)} {addonYearly || "-"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="plan-metric">Add-ons disabled</div>
+                        )}
+                        <div className="plan-feature-divider" />
+                        <div className="plan-feature">
+                          <i
+                            className={`bi ${plan.allow_addons ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                            aria-hidden="true"
+                          />
+                          <span>User add-ons</span>
+                        </div>
+                      </div>
+                    </>
                   ) : (
                     <>
                       <div className="plan-feature-list">
@@ -1001,7 +1047,7 @@ export default function PlansPage() {
                           {cycle === "yearly" ? "Yearly" : "Monthly"}
                         </div>
                       </div>
-                      {!isAiChatbot && !isStorage ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">
@@ -1056,7 +1102,7 @@ export default function PlansPage() {
                           </>
                         )}
                       </div>
-                      {!isAiChatbot && !isStorage ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">
@@ -1115,19 +1161,21 @@ export default function PlansPage() {
       {addonModal.open && modalPlan ? (
         <div className="modal-overlay" onClick={closeAddonModal}>
           <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
-            <h5>Update User Count</h5>
+            <h5>{isBusinessAutopilot ? "Update User Count" : "Update Employee Count"}</h5>
             <div className="text-secondary mb-2">
               Plan: {modalPlan.name} ({titleCase(modalCycle)})
             </div>
             <div className="mb-2">
-              <strong>Base Employees User Limit:</strong> {modalBaseEmployees}
+              <strong>{isBusinessAutopilot ? "Base User Limit:" : "Base Employee Limit:"}</strong> {modalBaseEmployees}
             </div>
             <div className="mb-2">
-              <strong>Current Existing Users:</strong> {modalExistingBase} + {modalExistingAddons} Addons
+              <strong>{isBusinessAutopilot ? "Current Existing Users:" : "Current Existing Employees:"}</strong> {modalExistingBase} + {modalExistingAddons} Addons
             </div>
             {modalPlan.allow_addons ? (
               <div className="mb-3">
-                <label className="form-label">Additional Users (Add-ons)</label>
+                <label className="form-label">
+                  {isBusinessAutopilot ? "Additional Users (Add-ons)" : "Additional Employees (Add-ons)"}
+                </label>
                 <div className="d-flex align-items-center gap-2">
                   <button
                     type="button"

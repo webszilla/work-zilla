@@ -14,7 +14,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import models
 from django.db.models import Sum
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, ProgrammingError, transaction
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -51,6 +51,7 @@ from .models import (
     MonitorOrgProductEntitlement,
     Product,
     OpenAISettings,
+    WhatsAppCloudSettings,
     GlobalMediaStorageSettings,
     BackupRetentionSettings,
     OrganizationBackupRetentionOverride,
@@ -63,6 +64,12 @@ from apps.backend.retention.models import GlobalRetentionPolicy
 from apps.backend.retention.serializers import GlobalRetentionPolicySerializer
 from .observability import build_observability_summary
 from .serializers import serialize_notification
+from .whatsapp_notification_catalog import (
+    WHATSAPP_NOTIFICATION_CATALOG,
+    normalize_whatsapp_notification_toggles,
+    ADMIN_NEW_USER_NOTIFICATION_KEY,
+    USER_WELCOME_NOTIFICATION_KEY,
+)
 from apps.backend.backups.models import BackupRecord
 from apps.backend.storage.models import (
     StorageFile,
@@ -123,6 +130,18 @@ def _int_or_default(value, default=0):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _int_in_range_or_default(value, default=15, min_value=5, max_value=60):
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return default
+    if parsed < min_value:
+        return min_value
+    if parsed > max_value:
+        return max_value
+    return parsed
 
 
 def _serialize_setup_payload():
@@ -1366,7 +1385,7 @@ def overview(request):
     mrr = monthly_total + (yearly_total / Decimal("12"))
     arr = (monthly_total * Decimal("12")) + yearly_total
 
-    products = list(Product.objects.all())
+    saas_products = list(Product.objects.all().order_by("sort_order", "name"))
     entitlements = (
         MonitorOrgProductEntitlement.objects
         .select_related("product", "organization")
@@ -1378,7 +1397,7 @@ def overview(request):
         entitlements_by_org[ent.organization_id].append(ent)
 
     product_payload = []
-    for product in products:
+    for product in saas_products:
         items = entitlements_by_product.get(product.id, [])
         active_count = sum(1 for ent in items if ent.status == "active")
         product_payload.append({
@@ -1934,18 +1953,33 @@ def inbox_list(request):
         page_size = 20
     page_size = min(max(page_size, 5), 100)
 
-    queryset = (
-        AdminNotification.objects
-        .select_related("organization")
-        .filter(is_deleted=False)
-        .order_by("-created_at")
-    )
-    total = queryset.count()
+    try:
+        queryset = (
+            AdminNotification.objects
+            .select_related("organization")
+            .filter(is_deleted=False, audience="saas_admin")
+            .order_by("-created_at")
+        )
+        total = queryset.count()
+    except (OperationalError, ProgrammingError):
+        queryset = (
+            AdminNotification.objects
+            .select_related("organization")
+            .filter(is_deleted=False)
+            .order_by("-created_at")
+        )
+        total = queryset.count()
     start = (page - 1) * page_size
     end = start + page_size
-    results = [serialize_notification(item) for item in queryset[start:end]]
+    try:
+        results = [serialize_notification(item) for item in queryset[start:end]]
+        unread_count = queryset.filter(is_read=False).count()
+    except (OperationalError, ProgrammingError):
+        # Local DB may be behind migrations (missing newer AdminNotification columns).
+        results = []
+        unread_count = 0
+        total = 0
     total_pages = max(math.ceil(total / page_size), 1)
-    unread_count = queryset.filter(is_read=False).count()
 
     return JsonResponse({
         "results": results,
@@ -1975,11 +2009,14 @@ def inbox_mark_read(request):
     if not ids:
         return JsonResponse({"error": "no_ids"}, status=400)
 
-    updated = (
-        AdminNotification.objects
-        .filter(id__in=ids)
-        .update(is_read=True)
-    )
+    try:
+        updated = (
+            AdminNotification.objects
+            .filter(id__in=ids, audience="saas_admin")
+            .update(is_read=True)
+        )
+    except (OperationalError, ProgrammingError):
+        updated = AdminNotification.objects.filter(id__in=ids).update(is_read=True)
     return JsonResponse({"status": "ok", "updated": updated})
 
 
@@ -1989,11 +2026,14 @@ def inbox_delete(request, notification_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
 
-    updated = (
-        AdminNotification.objects
-        .filter(id=notification_id)
-        .update(is_deleted=True)
-    )
+    try:
+        updated = (
+            AdminNotification.objects
+            .filter(id=notification_id, audience="saas_admin")
+            .update(is_deleted=True)
+        )
+    except (OperationalError, ProgrammingError):
+        updated = AdminNotification.objects.filter(id=notification_id).update(is_deleted=True)
     if not updated:
         return JsonResponse({"error": "not_found"}, status=404)
     return JsonResponse({"status": "deleted"})
@@ -4160,6 +4200,116 @@ def _serialize_media_storage_settings(settings_obj):
         "base_path": settings_obj.base_path or "",
         "updated_at": _format_datetime(settings_obj.updated_at),
     }
+
+
+def _serialize_whatsapp_cloud_settings(settings_obj):
+    notification_toggles = normalize_whatsapp_notification_toggles(
+        getattr(settings_obj, "notification_toggles", {}) or {}
+    )
+    # Keep legacy booleans in sync for current signup WhatsApp flow.
+    notification_toggles["admin"][ADMIN_NEW_USER_NOTIFICATION_KEY] = bool(settings_obj.notify_admin_new_user)
+    notification_toggles["user"][USER_WELCOME_NOTIFICATION_KEY] = bool(settings_obj.notify_user_welcome)
+    return {
+        "provider": "meta_whatsapp_cloud",
+        "is_active": bool(settings_obj.is_active),
+        "phone_number_id": settings_obj.phone_number_id or "",
+        "access_token_masked": _mask_secret(settings_obj.access_token),
+        "has_access_token": bool(settings_obj.access_token),
+        "admin_phone": settings_obj.admin_phone or "",
+        "notify_admin_new_user": bool(settings_obj.notify_admin_new_user),
+        "notify_user_welcome": bool(settings_obj.notify_user_welcome),
+        "notification_catalog": WHATSAPP_NOTIFICATION_CATALOG,
+        "notification_toggles": notification_toggles,
+        "admin_template_name": settings_obj.admin_template_name or "new_user_admin_alert",
+        "user_welcome_template_name": settings_obj.user_welcome_template_name or "welcome_user_signup",
+        "template_language": settings_obj.template_language or "en_US",
+        "graph_api_version": settings_obj.graph_api_version or "v21.0",
+        "timeout_seconds": int(settings_obj.timeout_seconds or 15),
+        "updated_at": _format_datetime(settings_obj.updated_at),
+    }
+
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+def whatsapp_cloud_settings(request):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    try:
+        settings_obj = WhatsAppCloudSettings.get_solo()
+    except (OperationalError, ProgrammingError):
+        # Local/dev DB may not have latest saas_admin migrations applied yet.
+        settings_obj = WhatsAppCloudSettings(provider="meta_whatsapp_cloud")
+        if request.method == "GET":
+            return JsonResponse(_serialize_whatsapp_cloud_settings(settings_obj))
+        return JsonResponse(
+            {
+                "detail": "whatsapp_settings_table_missing",
+                "message": "Apply saas_admin migrations to save WhatsApp Cloud settings.",
+            },
+            status=503,
+        )
+    if request.method == "GET":
+        return JsonResponse(_serialize_whatsapp_cloud_settings(settings_obj))
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    phone_number_id = str(payload.get("phone_number_id", "") or "").strip()
+    access_token = str(payload.get("access_token", "") or "").strip()
+    admin_phone = str(payload.get("admin_phone", "") or "").strip()
+    notify_admin_new_user = bool(payload.get("notify_admin_new_user", True))
+    notify_user_welcome = bool(payload.get("notify_user_welcome", True))
+    raw_notification_toggles = payload.get("notification_toggles")
+    notification_toggles = normalize_whatsapp_notification_toggles(
+        raw_notification_toggles if isinstance(raw_notification_toggles, dict) else getattr(settings_obj, "notification_toggles", {})
+    )
+    # Legacy fields still drive current runtime flow; keep them synced.
+    notify_admin_new_user = bool(
+        notification_toggles.get("admin", {}).get(ADMIN_NEW_USER_NOTIFICATION_KEY, notify_admin_new_user)
+    )
+    notify_user_welcome = bool(
+        notification_toggles.get("user", {}).get(USER_WELCOME_NOTIFICATION_KEY, notify_user_welcome)
+    )
+    admin_template_name = str(payload.get("admin_template_name", "") or "new_user_admin_alert").strip()
+    user_welcome_template_name = str(payload.get("user_welcome_template_name", "") or "welcome_user_signup").strip()
+    template_language = str(payload.get("template_language", "") or "en_US").strip()
+    graph_api_version = str(payload.get("graph_api_version", "") or "v21.0").strip()
+    is_active = bool(payload.get("is_active", False))
+    timeout_seconds = _int_in_range_or_default(
+        payload.get("timeout_seconds", settings_obj.timeout_seconds or 15),
+        default=int(settings_obj.timeout_seconds or 15 or 15),
+        min_value=5,
+        max_value=60,
+    )
+
+    if is_active:
+        if not phone_number_id and not settings_obj.phone_number_id:
+            return JsonResponse({"phone_number_id": ["required"]}, status=400)
+        if not access_token and not settings_obj.access_token:
+            return JsonResponse({"access_token": ["required"]}, status=400)
+        if not admin_phone and not settings_obj.admin_phone:
+            return JsonResponse({"admin_phone": ["required"]}, status=400)
+
+    if phone_number_id:
+        settings_obj.phone_number_id = phone_number_id
+    if access_token:
+        settings_obj.access_token = access_token
+    settings_obj.admin_phone = admin_phone
+    settings_obj.notify_admin_new_user = notify_admin_new_user
+    settings_obj.notify_user_welcome = notify_user_welcome
+    settings_obj.notification_toggles = notification_toggles
+    settings_obj.admin_template_name = admin_template_name or "new_user_admin_alert"
+    settings_obj.user_welcome_template_name = user_welcome_template_name or "welcome_user_signup"
+    settings_obj.template_language = template_language or "en_US"
+    settings_obj.graph_api_version = graph_api_version or "v21.0"
+    settings_obj.timeout_seconds = timeout_seconds
+    settings_obj.is_active = is_active
+    settings_obj.save()
+
+    return JsonResponse(_serialize_whatsapp_cloud_settings(settings_obj))
 
 
 @login_required

@@ -25,6 +25,45 @@
   margin-left:auto;
   margin-right:auto;
 }
+
+.module-heading{
+  padding: 2px 0;
+}
+
+.business-autopilot-header,
+.business-autopilot-header__title,
+.business-autopilot-header__subtitle{
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.crm-stat-card{
+  min-height: auto !important;
+}
+
+.erp-top-tabs{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.erp-top-tab{
+  border:1px solid rgba(148,163,184,0.55);
+  background:transparent;
+  color:inherit;
+  border-radius:10px;
+  padding:6px 12px;
+  font-size:13px;
+  line-height:1.2;
+}
+
+.erp-top-tab.active{
+  border-color:#22c55e;
+  background:rgba(34,197,94,0.22);
+  color:#dcfce7;
+}
 .stat-card h6,
 .stat-card .stat-value{
   text-align:center;
@@ -655,6 +694,19 @@ html[data-theme="light"] .ai-chatbot-usage-bar {
   font-size:12px;
   min-width:140px;
 }
+
+.profile-flat-table{
+  --bs-table-border-color: transparent;
+}
+
+.profile-flat-table > :not(caption) > * > *{
+  border-bottom-width:0 !important;
+  box-shadow:none !important;
+}
+
+.profile-flat-table.table-striped > tbody > tr:nth-of-type(odd) > *{
+  --bs-table-accent-bg: transparent;
+}
 .observability-filters{
   display:flex;
   flex-wrap:wrap;
@@ -1220,12 +1272,12 @@ html[data-theme="light"] .ai-chatbot-usage-bar {
 .shot-btn.primary{
   background:var(--color-primary, #22c55e);
   border-color:var(--color-primary, #22c55e);
-  color:#081a2c;
+  color:#ffffff;
 }
 .shot-btn.active{
   background:var(--color-primary, #22c55e);
   border-color:var(--color-primary, #22c55e);
-  color:#081a2c;
+  color:#ffffff;
 }
 .shot-btn:hover{
   border-color:var(--color-primary, #22c55e);

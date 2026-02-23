@@ -8,8 +8,8 @@ const { URL } = require("url");
 
 const CONFIG_URLS = [
   process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL,
-  "https://getworkzilla.com/static/downloads/bootstrap-products.json",
   "https://getworkzilla.com/downloads/bootstrap-products.json",
+  "https://getworkzilla.com/static/downloads/bootstrap-products.json",
 ].filter(Boolean);
 
 const SUPPORTED_PRODUCTS = {

@@ -47,9 +47,6 @@ DEFAULT_PRIVACY_KEYWORDS = [
     "payment gateway",
     "upi",
     "card payment",
-    "account login",
-    "sign in",
-    "mail inbox",
     "webmail",
     "roundcube",
     "loan account",
@@ -63,9 +60,9 @@ DEFAULT_PRIVACY_KEYWORDS = [
 
 PASSWORD_FIELD_KEYWORDS = [
     "password",
-    "login",
-    "sign in",
-    "signin",
+    "passcode",
+    "security pin",
+    "transaction pin",
 ]
 OTP_FIELD_KEYWORDS = [
     "otp",
@@ -312,7 +309,14 @@ def monitor_stop_event(request):
 def get_screenshot_interval_seconds(org):
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     minutes = settings_obj.screenshot_interval_minutes or 5
-    sub = Subscription.objects.filter(organization=org, status="active").order_by("-start_date").first()
+    product_filter = Q(plan__product__slug="monitor") | Q(plan__product__slug="worksuite") | Q(plan__product__isnull=True)
+    sub = (
+        Subscription.objects
+        .filter(organization=org, status__in=("active", "trialing"))
+        .filter(product_filter)
+        .order_by("-start_date")
+        .first()
+    )
     if sub:
         normalize_subscription_end_date(sub)
         if not is_subscription_active(sub):
@@ -360,6 +364,47 @@ def _compact_alnum(value):
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 
+_URL_PATTERN = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
+_DOMAIN_PATTERN = re.compile(r"\b([a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?\b", re.IGNORECASE)
+
+
+def _extract_urlish(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = _URL_PATTERN.search(raw)
+    if match:
+        return match.group(1).strip()
+    match = _DOMAIN_PATTERN.search(raw)
+    if match:
+        return match.group(0).strip()
+    return ""
+
+
+def _sanitize_capture_metadata(app_name, window_title, url):
+    app = (app_name or "").strip()
+    title = (window_title or "").strip()
+    page = (url or "").strip()
+
+    for sep in ("\\t", "\t"):
+        if sep in app:
+            left, right = app.split(sep, 1)
+            left = left.strip()
+            right = right.strip()
+            if left:
+                app = left
+            if right and (not title or title.lower() == "monitor active"):
+                title = right
+            break
+
+    if not page:
+        page = _extract_urlish(title)
+    if not page:
+        page = _extract_urlish(app)
+
+    return app, title, page
+
+
 def _looks_like_url_pattern(value):
     value = (value or "").strip().lower()
     if not value:
@@ -399,13 +444,12 @@ def _url_keyword_from_pattern(pattern):
     return _compact_alnum(keyword)
 
 
-def _url_keyword_matches(pattern, title, app_name):
+def _url_keyword_matches(pattern, title):
     keyword = _url_keyword_from_pattern(pattern)
     if not keyword:
         return False
     title_key = _compact_alnum(title)
-    app_key = _compact_alnum(app_name)
-    return (title_key and keyword in title_key) or (app_key and keyword in app_key)
+    return title_key and keyword in title_key
 
 
 def _url_pattern_matches(pattern, url_targets):
@@ -483,7 +527,16 @@ def _is_browser_app(app_name):
 def _is_monitor_placeholder(app_name, window_title):
     app = (app_name or "").strip().lower()
     title = (window_title or "").strip().lower()
-    return app in {"", "work zilla agent"} and title in {"", "monitor active"}
+    return app in {
+        "",
+        "work zilla agent",
+        "monitor active",
+        "work zilla monitor",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "conhost",
+    } and title in {"", "monitor active"}
 
 
 def _normalize_keywords(value):
@@ -504,10 +557,13 @@ def _keyword_match(text, keywords):
 
 
 def _should_blur_keywords(url, window_title, keywords):
-    return _keyword_match(url, keywords) or _keyword_match(window_title, keywords)
+    return (
+        _keyword_match(url, keywords)
+        or _keyword_match(window_title, keywords)
+    )
 
 
-def _should_blur_auto(settings_obj, url, window_title):
+def _should_blur_auto(settings_obj, url, window_title, app_name=""):
     if not settings_obj:
         return False
     title = window_title or ""
@@ -527,10 +583,37 @@ def _should_blur_auto(settings_obj, url, window_title):
     return False
 
 
+def _should_blur_fail_safe(settings_obj, url, window_title, app_name, keyword_rules, monitoring_mode="standard"):
+    # When agent cannot provide enough context, prefer privacy-safe behavior.
+    if monitoring_mode != "privacy_lock":
+        return False
+    has_rules = bool((settings_obj and settings_obj.screenshot_ignore_patterns) or keyword_rules)
+    has_auto_blur = bool(
+        settings_obj
+        and (
+            settings_obj.auto_blur_password_fields
+            or settings_obj.auto_blur_otp_fields
+            or settings_obj.auto_blur_card_fields
+            or settings_obj.auto_blur_email_inbox
+        )
+    )
+    if not (has_rules or has_auto_blur):
+        return False
+    app = (app_name or "").strip()
+    title = (window_title or "").strip()
+    page = (url or "").strip()
+    if _is_monitor_placeholder(app, title) and not page:
+        return True
+    if not app and not title and not page:
+        return True
+    return False
+
+
 def _should_blur_screenshot(patterns, url, app_name, window_title):
     if not patterns:
         return False
-    url_targets = [item.lower() for item in _expand_url_targets(url)] if _is_browser_app(app_name) else []
+    # URL pattern rules should be evaluated whenever URL exists, regardless of app_name quality.
+    url_targets = [item.lower() for item in _expand_url_targets(url)] if url else []
     app_target = (app_name or "").strip().lower()
     title_target = (window_title or "").strip().lower()
 
@@ -561,8 +644,6 @@ def _should_blur_screenshot(patterns, url, app_name, window_title):
             targets = [title_target]
         else:
             targets = url_targets[:]
-            if app_target:
-                targets.append(app_target)
             if title_target:
                 targets.append(title_target)
         for target in targets:
@@ -572,7 +653,7 @@ def _should_blur_screenshot(patterns, url, app_name, window_title):
             if _url_pattern_matches(pattern, url_targets):
                 return True
             if not url_targets and _looks_like_url_pattern(pattern):
-                if _url_keyword_matches(pattern, title_target, app_target):
+                if _url_keyword_matches(pattern, title_target):
                     return True
     return False
 
@@ -597,6 +678,51 @@ def _recent_activity_match(employee, patterns, reference_time=None, window_secon
         ):
             return True
     return False
+
+
+def _recent_activity_keyword_match(employee, keywords, reference_time=None, window_seconds=300, max_rows=300):
+    if not employee or not keywords:
+        return False
+    ref_time = reference_time or timezone.now()
+    cutoff = ref_time - datetime.timedelta(seconds=window_seconds)
+    upper = ref_time + datetime.timedelta(seconds=90)
+    activities = (
+        Activity.objects
+        .filter(employee=employee, end_time__gte=cutoff, end_time__lte=upper)
+        .order_by("-end_time", "-start_time")[:max_rows]
+    )
+    for activity in activities:
+        if _should_blur_keywords(
+            activity.url or "",
+            activity.window_title or "",
+            keywords,
+        ):
+            return True
+    return False
+
+
+def _latest_activity_context(employee, reference_time=None, window_seconds=75):
+    if not employee:
+        return "", "", ""
+    ref_time = reference_time or timezone.now()
+    cutoff = ref_time - datetime.timedelta(seconds=window_seconds)
+    upper = ref_time + datetime.timedelta(seconds=10)
+    recent = (
+        Activity.objects
+        .filter(employee=employee, end_time__gte=cutoff, end_time__lte=upper)
+        .exclude(app_name__iexact="work zilla agent")
+        .exclude(app_name__iexact="monitor active")
+        .exclude(window_title__iexact="monitor active")
+        .order_by("-end_time", "-start_time")
+        .first()
+    )
+    if not recent:
+        return "", "", ""
+    return (
+        (recent.app_name or "").strip(),
+        (recent.window_title or "").strip(),
+        (recent.url or "").strip(),
+    )
 
 
 def _blur_upload_image(image_file, radius=12):
@@ -913,6 +1039,33 @@ def upload_activity(request):
         # Force bind employee org and normalize timestamps to server time
         data = request.data.copy()
         data["employee"] = employee.id
+        raw_app_name = (
+            data.get("app_name")
+            or data.get("app")
+            or data.get("application")
+            or ""
+        )
+        raw_window_title = (
+            data.get("window_title")
+            or data.get("window")
+            or data.get("title")
+            or data.get("active_window")
+            or ""
+        )
+        raw_url = (
+            data.get("url")
+            or data.get("website")
+            or data.get("tab_url")
+            or ""
+        )
+        app_name, window_title, url = _sanitize_capture_metadata(
+            raw_app_name,
+            raw_window_title,
+            raw_url,
+        )
+        data["app_name"] = app_name
+        data["window_title"] = window_title
+        data["url"] = url
         now = timezone.now()
         activity_time = now
         if pc_time:
@@ -1019,9 +1172,29 @@ def upload_screenshot(request):
             or request.FILES.get("screenshot")
         )
         pc_time = request.data.get("pc_time")
-        app_name = (request.data.get("app_name") or request.data.get("app") or "").strip()
-        window_title = (request.data.get("window_title") or request.data.get("window") or request.data.get("title") or "").strip()
-        url = (request.data.get("url") or request.data.get("website") or "").strip()
+        raw_app_name = (
+            request.data.get("app_name")
+            or request.data.get("app")
+            or request.data.get("application")
+            or ""
+        )
+        raw_window_title = (
+            request.data.get("window_title")
+            or request.data.get("window")
+            or request.data.get("title")
+            or request.data.get("active_window")
+            or ""
+        )
+        raw_url = (
+            request.data.get("url")
+            or request.data.get("website")
+            or request.data.get("tab_url")
+            or ""
+        )
+        app_name = str(raw_app_name or "").strip()
+        window_title = str(raw_window_title or "").strip()
+        url = str(raw_url or "").strip()
+        app_name, window_title, url = _sanitize_capture_metadata(app_name, window_title, url)
 
         if not employee_id and request_device_id:
             existing_emp = Employee.objects.filter(device_id=request_device_id, org=org).first()
@@ -1071,8 +1244,31 @@ def upload_screenshot(request):
                     pc_captured_at,
                     timezone.get_current_timezone()
                 )
+        captured_at_for_activity = pc_captured_at or timezone.now()
+
+        # If screenshot metadata is placeholder/missing, use only very recent
+        # activity context from same employee to avoid missing sensitive-bank blurs.
+        used_activity_fallback = False
+        if (not url) and _is_monitor_placeholder(app_name, window_title):
+            fallback_app, fallback_title, fallback_url = _latest_activity_context(
+                employee,
+                reference_time=captured_at_for_activity,
+                window_seconds=75,
+            )
+            fallback_app, fallback_title, fallback_url = _sanitize_capture_metadata(
+                fallback_app,
+                fallback_title,
+                fallback_url,
+            )
+            if fallback_url or (fallback_title and fallback_title.lower() != "monitor active"):
+                app_name = fallback_app or app_name
+                window_title = fallback_title or window_title
+                url = fallback_url or url
+                used_activity_fallback = True
 
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=employee.org)
+        privacy_settings = CompanyPrivacySettings.objects.filter(organization=employee.org).only("monitoring_mode").first()
+        monitoring_mode = getattr(privacy_settings, "monitoring_mode", "standard")
         keyword_rules = _normalize_keywords(settings_obj.privacy_keyword_rules)
         keyword_rules = DEFAULT_PRIVACY_KEYWORDS + keyword_rules
 
@@ -1085,7 +1281,16 @@ def upload_screenshot(request):
         if not should_blur and keyword_rules:
             should_blur = _should_blur_keywords(url, window_title, keyword_rules)
         if not should_blur:
-            should_blur = _should_blur_auto(settings_obj, url, window_title)
+            should_blur = _should_blur_auto(settings_obj, url, window_title, app_name=app_name)
+        if not should_blur:
+            should_blur = _should_blur_fail_safe(
+                settings_obj,
+                url,
+                window_title,
+                app_name,
+                keyword_rules,
+                monitoring_mode=monitoring_mode,
+            )
         if should_blur:
             blurred_image = _blur_upload_image(image)
             if blurred_image:
@@ -1103,7 +1308,6 @@ def upload_screenshot(request):
                 return Response({"message": "Screenshot ignored for privacy"})
 
         image.name = _build_screenshot_filename(employee, pc_captured_at or timezone.now(), image.name)
-        captured_at_for_activity = pc_captured_at or timezone.now()
         normalized_app_name = app_name or "Work Zilla Agent"
         normalized_window_title = window_title or "Monitor Active"
         try:
@@ -1153,7 +1357,13 @@ def upload_screenshot(request):
 
         # Persist activity signal from screenshot metadata so dashboard pages can
         # classify app usage / gaming-ott even when helpers don't post /activity/upload.
-        if not _is_monitor_placeholder(normalized_app_name, normalized_window_title):
+        placeholder_meta = _is_monitor_placeholder(normalized_app_name, normalized_window_title)
+        if placeholder_meta and url:
+            normalized_app_name = "Browser"
+            if not window_title:
+                normalized_window_title = url
+        # Avoid recursive blur loops: don't persist synthetic fallback metadata back into activity.
+        if not used_activity_fallback:
             Activity.objects.create(
                 employee=employee,
                 app_name=normalized_app_name,
@@ -1264,8 +1474,14 @@ def monitor_heartbeat(request):
         app_name = (request.data.get("app_name") or "").strip()
         window_title = (request.data.get("window_title") or "").strip()
         url = (request.data.get("url") or "").strip()
+        app_name, window_title, url = _sanitize_capture_metadata(app_name, window_title, url)
         if app_name or window_title or url:
-            if not _is_monitor_placeholder(app_name, window_title):
+            placeholder_meta = _is_monitor_placeholder(app_name, window_title)
+            if placeholder_meta and url:
+                app_name = "Browser"
+                if not window_title:
+                    window_title = url
+            if (not placeholder_meta) or url:
                 Activity.objects.create(
                     employee=employee,
                     app_name=app_name or "Work Zilla Agent",

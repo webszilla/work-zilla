@@ -8,11 +8,11 @@ from django.http import JsonResponse, HttpResponseForbidden, FileResponse, Http4
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from core.models import Organization, Subscription
+from core.models import Organization, Subscription, UserProfile
 from apps.backend.products.models import Product
 from .permissions import is_org_admin, IsSaaSAdmin, IsOrgAdmin, IsFeatureEnabled
 from .services import request_backup, log_backup_event
-from .tasks import restore_backup_task
+from .tasks import restore_backup_task, generate_backup_task
 from .models import BackupRecord, OrgDownloadActivity
 from .serializers import OrgDownloadActivitySerializer, BackupRecordSerializer, BackupRequestResponseSerializer
 from dashboard.views import get_active_org
@@ -24,6 +24,55 @@ from rest_framework.exceptions import ValidationError
 
 
 RATE_LIMIT_SECONDS = getattr(settings, "BACKUP_RATE_LIMIT_SECONDS", 3600)
+
+
+def _normalize_product_slug(slug: str) -> str:
+    value = (slug or "").strip().lower()
+    aliases = {
+        "worksuite": "monitor",
+        "work-suite": "monitor",
+        "business-autopilot": "business-autopilot-erp",
+        "erp": "business-autopilot-erp",
+    }
+    return aliases.get(value, value)
+
+
+def _resolve_request_org(request):
+    org = get_active_org(request)
+    if org:
+        return org
+    profile = UserProfile.objects.filter(user=request.user).select_related("organization").first()
+    if profile and profile.organization_id:
+        return profile.organization
+    return Organization.objects.filter(owner=request.user).first()
+
+
+def _resolve_product(*, product_id=None, product_slug="", organization=None):
+    product = None
+    if product_id:
+        try:
+            pid = int(product_id)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid:
+            product = Product.objects.filter(id=pid, is_active=True).first()
+    if not product:
+        slug = _normalize_product_slug(product_slug)
+        if slug:
+            product = Product.objects.filter(slug=slug, is_active=True).first()
+    if product or not organization:
+        return product
+
+    # Fallback to latest active subscription product for this org.
+    sub = (
+        Subscription.objects.filter(organization=organization, status__in=("active", "trialing"))
+        .select_related("plan__product")
+        .order_by("-start_date")
+        .first()
+    )
+    if sub and sub.plan and sub.plan.product and sub.plan.product.is_active:
+        return sub.plan.product
+    return None
 
 
 def _rate_limit_key(user_id, organization_id, product_id):
@@ -56,42 +105,35 @@ def backup_request(request):
         except json.JSONDecodeError:
             payload = {}
 
-    try:
-        organization_id = int(
-            payload.get("organization_id")
-            or request.POST.get("organization_id")
-            or request.GET.get("organization_id")
-            or 0
-        )
-    except (TypeError, ValueError):
-        return JsonResponse({"detail": "invalid_parameters"}, status=400)
-
+    organization_id = payload.get("organization_id") or request.POST.get("organization_id") or request.GET.get("organization_id")
     product_id = payload.get("product_id") or request.POST.get("product_id") or request.GET.get("product_id")
     product_slug = (payload.get("product_slug") or request.POST.get("product_slug") or request.GET.get("product_slug") or "").strip()
-    if product_id:
+    org = None
+    if organization_id:
         try:
-            product_id = int(product_id)
+            org = Organization.objects.filter(id=int(organization_id)).first()
         except (TypeError, ValueError):
-            product_id = 0
-    if not product_id and product_slug:
-        product = Product.objects.filter(slug=product_slug, is_active=True).first()
-        product_id = product.id if product else 0
+            return JsonResponse({"detail": "invalid_parameters"}, status=400)
+    if not org:
+        org = _resolve_request_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
 
-    if not organization_id or not product_id:
-        return JsonResponse({"detail": "organization_id and product required"}, status=400)
+    product = _resolve_product(
+        product_id=product_id,
+        product_slug=product_slug,
+        organization=org,
+    )
+    if not product:
+        return JsonResponse({"detail": "product_required"}, status=400)
 
-    if not is_org_admin(request.user, organization_id):
+    if not is_org_admin(request.user, org.id):
         return HttpResponseForbidden("Access denied.")
 
-    organization = Organization.objects.filter(id=organization_id).first()
-    product = Product.objects.filter(id=product_id, is_active=True).first()
-    if not organization or not product:
-        return JsonResponse({"detail": "not_found"}, status=404)
-
-    if not _is_subscription_active(organization, product):
+    if not _is_subscription_active(org, product):
         return JsonResponse({"detail": "subscription_required"}, status=403)
 
-    key = _rate_limit_key(request.user.id, organization_id, product_id)
+    key = _rate_limit_key(request.user.id, org.id, product.id)
     if cache.get(key):
         return JsonResponse({"detail": "rate_limited"}, status=429)
     cache.set(key, True, timeout=RATE_LIMIT_SECONDS)
@@ -99,7 +141,7 @@ def backup_request(request):
     request_id = uuid.uuid4()
     trace_id = request.headers.get("X-Request-Id", "") or request.headers.get("X-Trace-Id", "")
     backup = request_backup(
-        organization=organization,
+        organization=org,
         product=product,
         user=request.user,
         request_id=request_id,
@@ -107,6 +149,10 @@ def backup_request(request):
         ip_address=request.META.get("REMOTE_ADDR"),
         user_agent=request.META.get("HTTP_USER_AGENT", ""),
     )
+    if hasattr(generate_backup_task, "delay"):
+        generate_backup_task.delay(str(backup.id))
+    else:
+        generate_backup_task(str(backup.id))
 
     return JsonResponse(
         {
@@ -123,7 +169,7 @@ def backup_list(request):
     if not request.user.is_authenticated:
         return HttpResponseForbidden("Access denied.")
 
-    org = get_active_org(request)
+    org = _resolve_request_org(request)
     if not org:
         return JsonResponse({"detail": "organization_required"}, status=400)
 
@@ -134,7 +180,7 @@ def backup_list(request):
         product_id = int(request.GET.get("product_id") or 0)
     except (TypeError, ValueError):
         product_id = 0
-    product_slug = (request.GET.get("product_slug") or "").strip()
+    product_slug = _normalize_product_slug(request.GET.get("product_slug") or "")
     if not product_id and product_slug:
         product = Product.objects.filter(slug=product_slug, is_active=True).first()
         product_id = product.id if product else 0
@@ -350,7 +396,7 @@ class OrgAdminBackupAccessView(APIView):
 
         qs = BackupRecord.objects.filter(organization=org).select_related("product")
         product_id = request.query_params.get("product_id")
-        product_slug = request.query_params.get("product_slug")
+        product_slug = _normalize_product_slug(request.query_params.get("product_slug") or "")
         if product_id:
             qs = qs.filter(product_id=product_id)
         elif product_slug:
@@ -365,17 +411,17 @@ class OrgAdminBackupAccessView(APIView):
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        org = get_active_org(request)
+        org = _resolve_request_org(request)
         if not org:
             raise ValidationError("organization_required")
 
         product_id = request.data.get("product_id") or request.query_params.get("product_id")
-        product_slug = request.data.get("product_slug") or request.query_params.get("product_slug")
-        product = None
-        if product_id:
-            product = Product.objects.filter(id=product_id, is_active=True).first()
-        elif product_slug:
-            product = Product.objects.filter(slug=product_slug, is_active=True).first()
+        product_slug = request.data.get("product_slug") or request.query_params.get("product_slug") or ""
+        product = _resolve_product(
+            product_id=product_id,
+            product_slug=product_slug,
+            organization=org,
+        )
 
         if not product:
             raise ValidationError("product_required")
@@ -392,12 +438,77 @@ class OrgAdminBackupAccessView(APIView):
             ip_address=request.META.get("REMOTE_ADDR"),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
+        if hasattr(generate_backup_task, "delay"):
+            generate_backup_task.delay(str(backup.id))
+        else:
+            generate_backup_task(str(backup.id))
 
         qs = BackupRecord.objects.filter(organization=org).select_related("product").order_by("-requested_at")
         backups = qs[:5]
         response_obj = BackupRequestResponse(str(backup.id), backups)
         serializer = BackupRequestResponseSerializer(response_obj)
         return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
+
+
+@require_http_methods(["POST"])
+def backup_import(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+
+    org = _resolve_request_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    upload = request.FILES.get("backup_file")
+    if not upload:
+        return JsonResponse({"detail": "backup_file_required"}, status=400)
+
+    product_id = request.POST.get("product_id")
+    product_slug = request.POST.get("product_slug") or ""
+    product = _resolve_product(
+        product_id=product_id,
+        product_slug=product_slug,
+        organization=org,
+    )
+    if not product:
+        return JsonResponse({"detail": "product_required"}, status=400)
+    if not _is_subscription_active(org, product):
+        return JsonResponse({"detail": "subscription_required"}, status=403)
+
+    backup = BackupRecord.objects.create(
+        organization=org,
+        product=product,
+        requested_by=request.user,
+        status="completed",
+        request_id=uuid.uuid4(),
+        expires_at=timezone.now() + timezone.timedelta(hours=getattr(settings, "BACKUP_ZIP_TTL_HOURS", 24)),
+        download_url_expires_at=timezone.now() + timezone.timedelta(hours=getattr(settings, "BACKUP_ZIP_TTL_HOURS", 24)),
+    )
+    upload_path = f"backups/org_{org.id}/product_{product.id}/imports/import_{backup.id}.zip"
+    saved_path = default_storage.save(upload_path, upload)
+    backup.storage_path = saved_path
+    backup.size_bytes = int(getattr(upload, "size", 0) or 0)
+    backup.save(update_fields=["storage_path", "size_bytes"])
+
+    log_backup_event(
+        organization=org,
+        product=product,
+        user=request.user,
+        action="restore_requested",
+        status="ok",
+        backup_id=backup.id,
+        actor_type="user",
+        event_meta={"source": "uploaded_backup"},
+    )
+
+    if hasattr(restore_backup_task, "delay"):
+        async_result = restore_backup_task.delay(str(backup.id), request.user.id)
+        return JsonResponse({"detail": "restore_queued", "task_id": async_result.id}, status=202)
+
+    restore_backup_task(str(backup.id), request.user.id)
+    return JsonResponse({"detail": "restore_completed"}, status=200)
 
 
 class SaasAdminDownloadListView(APIView):

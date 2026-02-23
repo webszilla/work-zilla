@@ -49,6 +49,7 @@ class OrganizationUser(models.Model):
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="org_user")
     employee_role = models.CharField(max_length=120, blank=True, default="")
+    department = models.CharField(max_length=120, blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -66,6 +67,26 @@ class OrganizationEmployeeRole(models.Model):
         "core.Organization",
         on_delete=models.CASCADE,
         related_name="business_autopilot_employee_roles",
+    )
+    name = models.CharField(max_length=120)
+    page_access = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization", "name")
+        ordering = ("name",)
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.name}"
+
+
+class OrganizationDepartment(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_departments",
     )
     name = models.CharField(max_length=120)
     is_active = models.BooleanField(default=True)

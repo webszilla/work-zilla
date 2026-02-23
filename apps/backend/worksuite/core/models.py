@@ -1180,6 +1180,15 @@ class DeletedAccount(models.Model):
 
 
 class AdminNotification(models.Model):
+    AUDIENCE_CHOICES = [
+        ("saas_admin", "SaaS Admin"),
+        ("org_admin", "Org Admin"),
+    ]
+    CHANNEL_CHOICES = [
+        ("system", "System"),
+        ("email", "Email"),
+        ("whatsapp", "WhatsApp"),
+    ]
     EVENT_CHOICES = [
         ("org_expired", "Org Account Expired"),
         ("org_renewed", "Org Account Renewed"),
@@ -1193,6 +1202,9 @@ class AdminNotification(models.Model):
     title = models.CharField(max_length=200)
     message = models.TextField(blank=True)
     event_type = models.CharField(max_length=40, choices=EVENT_CHOICES, default="system")
+    audience = models.CharField(max_length=20, choices=AUDIENCE_CHOICES, default="saas_admin")
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default="system")
+    product_slug = models.CharField(max_length=120, blank=True, default="")
     organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)

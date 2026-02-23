@@ -33,6 +33,8 @@ export default function ProfilePage() {
   const [backupProductSlug, setBackupProductSlug] = useState("");
   const [backupActionLoading, setBackupActionLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState("");
+  const [backupImportFile, setBackupImportFile] = useState(null);
+  const [backupImportLoading, setBackupImportLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -105,7 +107,8 @@ export default function ProfilePage() {
           .map((entry) => ({
             slug: entry.product_slug,
             name: entry.product_name || entry.product_slug
-          }));
+          }))
+          .filter((entry) => entry.slug);
         setBackupProducts(products);
         if (!backupProductSlug && products.length) {
           setBackupProductSlug(products[0].slug);
@@ -206,8 +209,8 @@ export default function ProfilePage() {
   }
 
   async function handleGenerateBackup() {
-    if (!data.org?.id || !backupProductSlug) {
-      setBackupError("Organization or product missing.");
+    if (!backupProductSlug) {
+      setBackupError("Product missing.");
       return;
     }
     setBackupNotice("");
@@ -217,15 +220,48 @@ export default function ProfilePage() {
       await apiFetch("/api/backup/request", {
         method: "POST",
         body: JSON.stringify({
-          organization_id: data.org.id,
           product_slug: backupProductSlug
         })
       });
       setBackupNotice("Backup request queued. It will appear here once ready.");
+      const params = new URLSearchParams();
+      params.set("limit", "10");
+      params.set("product_slug", backupProductSlug);
+      const refreshed = await apiFetch(`/api/backup/list?${params.toString()}`);
+      setBackupItems(Array.isArray(refreshed.items) ? refreshed.items : []);
       setBackupActionLoading(false);
     } catch (error) {
       setBackupError(error?.message || "Unable to request backup.");
       setBackupActionLoading(false);
+    }
+  }
+
+  function handleBackupFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    setBackupImportFile(file);
+  }
+
+  async function handleImportBackup() {
+    if (!backupProductSlug || !backupImportFile || backupImportLoading) {
+      return;
+    }
+    setBackupError("");
+    setBackupNotice("");
+    setBackupImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("product_slug", backupProductSlug);
+      formData.append("backup_file", backupImportFile);
+      await apiFetch("/api/backup/import", {
+        method: "POST",
+        body: formData,
+      });
+      setBackupNotice("Backup import started. Restore will complete shortly.");
+      setBackupImportFile(null);
+      setBackupImportLoading(false);
+    } catch (error) {
+      setBackupError(error?.message || "Unable to import backup.");
+      setBackupImportLoading(false);
     }
   }
 
@@ -418,9 +454,30 @@ export default function ProfilePage() {
             </button>
           </div>
         </div>
+        <div className="row g-3 align-items-end mt-1">
+          <div className="col-12 col-md-6">
+            <label className="form-label">Import Backup (.zip)</label>
+            <input
+              type="file"
+              className="form-control"
+              accept=".zip,application/zip"
+              onChange={handleBackupFileChange}
+            />
+          </div>
+          <div className="col-12 col-md-4">
+            <button
+              type="button"
+              className="btn btn-outline-info"
+              onClick={handleImportBackup}
+              disabled={!backupImportFile || !backupProductSlug || backupImportLoading}
+            >
+              {backupImportLoading ? "Importing..." : "Import Backup"}
+            </button>
+          </div>
+        </div>
 
         <div className="table-responsive mt-3">
-          <table className="table table-dark table-striped table-hover align-middle">
+          <table className="table table-dark table-striped table-hover align-middle profile-flat-table">
             <thead>
               <tr>
                 <th>Product</th>
@@ -500,7 +557,7 @@ export default function ProfilePage() {
       <div className="card p-3 mt-3">
         <h5>Referral Income</h5>
         <div className="table-responsive">
-          <table className="table table-dark table-striped table-hover align-middle mt-2">
+          <table className="table table-dark table-striped table-hover align-middle mt-2 profile-flat-table">
             <thead>
               <tr>
                 <th>Company / Dealer</th>
@@ -555,7 +612,7 @@ export default function ProfilePage() {
           </label>
         </div>
         <div className="table-responsive">
-          <table className="table table-dark table-striped table-hover align-middle mt-2">
+          <table className="table table-dark table-striped table-hover align-middle mt-2 profile-flat-table">
             <thead>
               <tr>
                 <th>Time</th>
@@ -622,7 +679,7 @@ export default function ProfilePage() {
           <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
             <h5>Users Details</h5>
             <div className="table-responsive">
-              <table className="table table-dark table-striped align-middle mb-0">
+              <table className="table table-dark table-striped align-middle mb-0 profile-flat-table">
                 <thead>
                   <tr>
                     <th>#</th>

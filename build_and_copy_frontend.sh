@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FRONTEND_DIR="/Users/guru/Desktop/webszilla/saas/work-zilla/apps/frontend"
-BACKEND_DIR="/Users/guru/Desktop/webszilla/saas/work-zilla/apps/backend"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FRONTEND_DIR="$SCRIPT_DIR/apps/frontend"
+BACKEND_DIR="$SCRIPT_DIR/apps/backend"
+
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
+fi
 
 cd "$FRONTEND_DIR"
 npm install

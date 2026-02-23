@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, redirect
 from types import SimpleNamespace
-from django.http import JsonResponse, HttpResponse, FileResponse, Http404
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404, StreamingHttpResponse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
@@ -13,6 +13,7 @@ from django.db.utils import OperationalError
 import json
 from datetime import timedelta
 import os
+import mimetypes
 from types import SimpleNamespace
 
 from apps.backend.enquiries.views import build_enquiry_context
@@ -45,6 +46,74 @@ def _resolve_download_path(*candidates):
             return file_path, filename
     raise Http404("Installer not found.")
 
+
+def _stream_file_chunks(path, start=0, length=None, chunk_size=1024 * 256):
+    handle = open(path, "rb")
+    try:
+        handle.seek(start)
+        remaining = length
+        while True:
+            if remaining is not None:
+                if remaining <= 0:
+                    break
+                read_size = min(chunk_size, remaining)
+            else:
+                read_size = chunk_size
+            chunk = handle.read(read_size)
+            if not chunk:
+                break
+            if remaining is not None:
+                remaining -= len(chunk)
+            yield chunk
+    finally:
+        handle.close()
+
+
+def _file_download_response(request, file_path, filename):
+    file_size = os.path.getsize(file_path)
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    range_header = (request.META.get("HTTP_RANGE") or "").strip()
+
+    if range_header.startswith("bytes="):
+        ranges = range_header.replace("bytes=", "", 1).split(",", 1)[0].strip()
+        if "-" in ranges:
+            start_str, end_str = ranges.split("-", 1)
+            try:
+                if start_str == "":
+                    suffix = int(end_str)
+                    if suffix <= 0:
+                        raise ValueError
+                    start = max(file_size - suffix, 0)
+                    end = file_size - 1
+                else:
+                    start = int(start_str)
+                    end = int(end_str) if end_str else file_size - 1
+                if start < 0 or end < start or start >= file_size:
+                    raise ValueError
+                end = min(end, file_size - 1)
+                length = end - start + 1
+                response = StreamingHttpResponse(
+                    _stream_file_chunks(file_path, start=start, length=length),
+                    status=206,
+                    content_type=content_type,
+                )
+                response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+                response["Content-Length"] = str(length)
+                response["Accept-Ranges"] = "bytes"
+                response["Content-Disposition"] = f'attachment; filename="{filename}"'
+                return response
+            except ValueError:
+                pass
+
+    response = StreamingHttpResponse(
+        _stream_file_chunks(file_path, start=0, length=None),
+        content_type=content_type,
+    )
+    response["Content-Length"] = str(file_size)
+    response["Accept-Ranges"] = "bytes"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
 def _prefer_arm64_mac(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     if any(token in user_agent for token in ("intel", "x86_64", "x64")):
@@ -54,27 +123,16 @@ def _prefer_arm64_mac(request):
 
 def download_windows_agent(request):
     file_path, filename = _resolve_download_path(
-        "Work Zilla Installer-win-x64-0.1.7.exe",
-        "Work Zilla Installer-win-x64-0.1.6.exe",
-        "Work Zilla Installer-win-x64-0.1.5.exe",
-        "Work Zilla Installer-win-x64-0.1.4.exe",
-        "Work Zilla Installer-win-x64-0.1.3.exe",
-        "Work Zilla Installer-win-x64-0.1.2.exe",
-        "Work Zilla Installer-win-x64-0.1.1.exe",
-        "Work Zilla Installer-win-x64-0.1.0.exe",
-        "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
+        "Work Zilla Agent Setup 0.2.0.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _file_download_response(request, file_path, filename)
 
 
 def download_windows_product_agent(request):
     file_path, filename = _resolve_download_path(
         "Work Zilla Agent Setup 0.2.0.exe",
-        "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _file_download_response(request, file_path, filename)
 
 
 def download_mac_agent(request):
@@ -113,7 +171,7 @@ def download_mac_agent(request):
             "WorkZillaInstaller.dmg",
             "WorkZillaAgent.dmg",
         )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _file_download_response(request, file_path, filename)
 
 
 def download_mac_product_agent(request):
@@ -136,11 +194,11 @@ def download_mac_product_agent(request):
             "Work Zilla Agent-0.2.0-arm64.pkg",
             "Work Zilla Agent-0.2.0-arm64-mac.zip",
         )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _file_download_response(request, file_path, filename)
 
 
 def bootstrap_products_config(request):
-    windows_url = request.build_absolute_uri("/static/downloads/Work%20Zilla%20Agent%20Setup%200.2.0.exe")
+    windows_url = request.build_absolute_uri("/downloads/windows-product-agent/")
     mac_url = request.build_absolute_uri("/downloads/mac-product-agent/")
     return JsonResponse(
         {
@@ -1433,8 +1491,21 @@ def billing_view(request):
             paid_on=sub.start_date,
             status="approved"
         ))
+    def _transfer_sort_dt(transfer):
+        value = (
+            transfer.paid_on
+            or getattr(transfer, "updated_at", None)
+            or getattr(transfer, "created_at", None)
+            or timezone.now()
+        )
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        return timezone.now()
+
     approved_transfers.sort(
-        key=lambda transfer: transfer.paid_on or getattr(transfer, "updated_at", None) or getattr(transfer, "created_at", None) or timezone.now(),
+        key=_transfer_sort_dt,
         reverse=True,
     )
     pending_transfers = (

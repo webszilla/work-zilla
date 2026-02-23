@@ -141,9 +141,12 @@ export default function BillingPage() {
       ? "ai-chatbot"
       : rawPath.includes("/storage")
       ? "storage"
+      : rawPath.includes("/business-autopilot")
+      ? "business-autopilot-erp"
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
+  const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -669,6 +672,43 @@ export default function BillingPage() {
                           <span>{formatUserLimit(getMaxUsers(sub))}</span>
                         </div>
                       </>
+                    ) : isBusinessAutopilot ? (
+                      <>
+                        <div className="billing-current-plan__row">
+                          <span>Users Included</span>
+                          <span>{sub.employee_limit === 0 ? "Unlimited" : sub.employee_limit}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>User Price / Month</span>
+                          <span>
+                            {formatAmount(
+                              showCurrency,
+                              showCurrency === "USD"
+                                ? (sub.limits?.user_price_usdt_month ?? prices.addon_monthly)
+                                : (sub.limits?.user_price_inr_month ?? prices.addon_monthly)
+                            )}
+                          </span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>User Price / Year</span>
+                          <span>
+                            {formatAmount(
+                              showCurrency,
+                              showCurrency === "USD"
+                                ? (sub.limits?.user_price_usdt_year ?? prices.addon_yearly)
+                                : (sub.limits?.user_price_inr_year ?? prices.addon_yearly)
+                            )}
+                          </span>
+                        </div>
+                        <div className="plan-feature-divider" />
+                        <div className="plan-feature">
+                          <i
+                            className={`bi ${sub.allow_addons ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                            aria-hidden="true"
+                          />
+                          <span>User add-ons</span>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div className="billing-current-plan__row">
@@ -730,7 +770,7 @@ export default function BillingPage() {
                       <span>Billing Cycle</span>
                       <span>{titleCase(sub.billing_cycle)}</span>
                     </div>
-                    {!isAiChatbot && !isStorage ? (
+                    {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                       <div className="billing-current-plan__row">
                         <span>Screenshot Storage</span>
                         <span>{formatValue(sub.retention_days)} day(s)</span>
@@ -761,12 +801,14 @@ export default function BillingPage() {
 
             {sub && !isAiChatbot && !isStorage ? (
               <div className="card p-3">
-                <h6>Add Employee Add-ons</h6>
+                <h6>{isBusinessAutopilot ? "Add User Add-ons" : "Add Employee Add-ons"}</h6>
                 {!sub.allow_addons ? (
                   <p className="text-warning mb-0">Add-ons disabled for this plan.</p>
                 ) : (
                   <form onSubmit={handleAddonSubmit}>
-                    <label className="form-label mb-1">Addon Count</label>
+                    <label className="form-label mb-1">
+                      {isBusinessAutopilot ? "User Add-on Count" : "Addon Count"}
+                    </label>
                     <input
                       type="number"
                       min="0"
