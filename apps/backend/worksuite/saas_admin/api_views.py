@@ -1280,7 +1280,13 @@ def _apply_transfer(transfer):
             settings_obj.save()
 
     if transfer.request_type == "addon":
-        sub = Subscription.objects.filter(organization=org, status="active").first()
+        product_slug = getattr(getattr(transfer.plan, "product", None), "slug", "monitor")
+        sub_qs = Subscription.objects.filter(organization=org, status__in=("active", "trialing"))
+        if product_slug == "monitor":
+            sub_qs = sub_qs.filter(models.Q(plan__product__slug="monitor") | models.Q(plan__product__isnull=True))
+        else:
+            sub_qs = sub_qs.filter(plan__product__slug=product_slug)
+        sub = sub_qs.order_by("-start_date", "-id").first()
         if sub:
             addon_delta = max(0, transfer.addon_count or 0)
             sub.addon_count = (sub.addon_count or 0) + addon_delta
@@ -1398,6 +1404,8 @@ def overview(request):
 
     product_payload = []
     for product in saas_products:
+        if str(product.status or "").strip().lower() != "active":
+            continue
         items = entitlements_by_product.get(product.id, [])
         active_count = sum(1 for ent in items if ent.status == "active")
         product_payload.append({

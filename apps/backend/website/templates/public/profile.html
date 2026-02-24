@@ -9,15 +9,10 @@
   <div class="site-container account-layout">
     <div class="account-header">
       <h1 class="section-title">Profile</h1>
-      <p class="section-lead">Manage your account information and preferences.</p>
     </div>
+    {% include "public/partials/account_tabs.html" %}
 
-    <div class="account-grid">
-      <aside class="account-menu">
-        {% include "public/partials/account_sidebar.html" %}
-      </aside>
-
-      <div class="account-content card p-4">
+    <div class="account-content card p-4">
         {% if messages %}
           {% for message in messages|slice:"-1:" %}
             <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %}">
@@ -55,7 +50,6 @@
           </datalist>
           <button class="btn btn-outline mt-3" type="submit">Save Profile</button>
         </form>
-      </div>
     </div>
   </div>
 </section>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ company.company_name|default:public_slug }} - Catalogue</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#071226;color:#e5e7eb;margin:0;padding:24px}
+    .wrap{max-width:960px;margin:0 auto}
+    .head{margin-bottom:16px}
+    .section{margin:18px 0}
+    .panel{background:#0b1a33;border:1px solid #1e2f4d;border-radius:16px;padding:16px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+    .item{background:#0b1a33;border:1px solid #1e2f4d;border-radius:16px;padding:16px}
+    .price{color:{{ theme_color }};font-weight:700}
+    .btn{display:inline-block;margin-top:8px;background:{{ theme_color }};color:#08111f;text-decoration:none;padding:8px 12px;border-radius:10px;font-weight:600}
+    .muted{color:#94a3b8}
+    .contact-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .contact-row{display:flex;flex-direction:column;gap:2px}
+    .list{margin:0;padding-left:18px}
+    .list li + li{margin-top:6px}
+    a.text-link{color:{{ theme_color }};text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>{{ company.company_name|default:public_slug }} Catalogue</h1>
+      <p class="muted">{{ company.description }}</p>
+      {% if digital_card %}<a class="muted" href="/card/{{ digital_card.public_slug }}/">View Digital Card</a>{% endif %}
+    </div>
+
+    {% if catalogue_page.about_content or company.description %}
+    <div class="section panel">
+      <h2>{{ catalogue_page.about_title|default:"About Us" }}</h2>
+      <p class="muted">{{ catalogue_page.about_content|default:company.description|linebreaksbr }}</p>
+    </div>
+    {% endif %}
+
+    {% if services_list %}
+    <div class="section panel">
+      <h2>{{ catalogue_page.services_title|default:"Services" }}</h2>
+      <ul class="list">
+        {% for service in services_list %}
+        <li>{{ service }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if company.phone or company.whatsapp_number or company.email or company.website or company.address or catalogue_page.contact_note %}
+    <div class="section panel">
+      <h2>{{ catalogue_page.contact_title|default:"Contact" }}</h2>
+      {% if catalogue_page.contact_note %}
+        <p class="muted">{{ catalogue_page.contact_note|linebreaksbr }}</p>
+      {% endif %}
+      <div class="contact-grid">
+        {% if company.phone %}
+        <div class="contact-row"><strong>Phone</strong><span class="muted">{{ company.phone }}</span></div>
+        {% endif %}
+        {% if company.whatsapp_number %}
+        <div class="contact-row"><strong>WhatsApp</strong><a class="text-link" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}" target="_blank" rel="noreferrer">{{ company.whatsapp_number }}</a></div>
+        {% endif %}
+        {% if company.email %}
+        <div class="contact-row"><strong>Email</strong><a class="text-link" href="mailto:{{ company.email }}">{{ company.email }}</a></div>
+        {% endif %}
+        {% if company.website %}
+        <div class="contact-row"><strong>Website</strong><a class="text-link" href="{{ company.website }}" target="_blank" rel="noreferrer">{{ company.website }}</a></div>
+        {% endif %}
+        {% if company.address %}
+        <div class="contact-row"><strong>Address</strong><span class="muted">{{ company.address|linebreaksbr }}</span></div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="section">
+      <h2>Products</h2>
+    </div>
+    <div class="grid">
+      {% for item in items %}
+      <div class="item">
+        <h3>{{ item.title }}</h3>
+        {% if item.category %}<div class="muted">{{ item.category }}</div>{% endif %}
+        {% if item.price %}<div class="price">{{ item.price }}</div>{% endif %}
+        <p>{{ item.description }}</p>
+        {% if item.order_button_enabled and company.whatsapp_number %}
+          <a class="btn" target="_blank" rel="noreferrer" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}">Order on WhatsApp</a>
+        {% endif %}
+      </div>
+      {% empty %}
+      <div class="item"><p class="muted">No catalogue products yet.</p></div>
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>

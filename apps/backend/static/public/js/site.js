@@ -13,6 +13,8 @@
   const navLinks = document.querySelectorAll(".site-nav .nav-link");
   if (navLinks.length) {
     const path = window.location.pathname || "/";
+    const productsDropdown = document.querySelector("[data-nav-dropdown]");
+    const productsTrigger = productsDropdown ? productsDropdown.querySelector(".nav-dropdown-trigger") : null;
     navLinks.forEach((link) => {
       let hrefPath = "";
       try {
@@ -33,5 +35,20 @@
         link.classList.add("active");
       }
     });
+    if (productsDropdown && productsTrigger && path.startsWith("/products/")) {
+      productsTrigger.classList.add("active");
+      if (window.innerWidth <= 980) {
+        productsDropdown.classList.add("open");
+        productsTrigger.setAttribute("aria-expanded", "true");
+      }
+    }
+    if (productsDropdown && productsTrigger) {
+      productsTrigger.addEventListener("click", (event) => {
+        if (window.innerWidth > 980) return;
+        event.preventDefault();
+        const isOpen = productsDropdown.classList.toggle("open");
+        productsTrigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      });
+    }
   }
 })();

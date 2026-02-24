@@ -49,9 +49,18 @@
       <nav class="site-nav" aria-label="Primary">
         <a class="nav-link" href="/">Home</a>
         <a class="nav-link" href="/about/">About</a>
-        <a class="nav-link" href="/products/{{ branding.public_slug|default:'worksuite' }}/">{{ branding.display_name|default:"Work Suite" }}</a>
-        <a class="nav-link" href="/products/ai-chatbot/">AI Chatbot</a>
-        <a class="nav-link" href="/products/online-storage/">Online Storage</a>
+        <div class="nav-dropdown" data-nav-dropdown>
+          <a class="nav-link nav-dropdown-trigger" href="/products/{{ branding.public_slug|default:'worksuite' }}/" aria-haspopup="true" aria-expanded="false">
+            Products
+          </a>
+          <div class="nav-dropdown-menu" role="menu" aria-label="Products submenu">
+            <a class="nav-link nav-sub-link" href="/products/{{ branding.public_slug|default:'worksuite' }}/" role="menuitem">{{ branding.display_name|default:"Work Suite" }}</a>
+            <a class="nav-link nav-sub-link" href="/products/ai-chatbot/" role="menuitem">AI Chatbot</a>
+            <a class="nav-link nav-sub-link" href="/products/whatsapp-automation/" role="menuitem">WhatsApp Automation</a>
+            <a class="nav-link nav-sub-link" href="/products/online-storage/" role="menuitem">Online Storage</a>
+            <a class="nav-link nav-sub-link" href="/products/business-autopilot-erp/" role="menuitem">Business Autopilot ERP</a>
+          </div>
+        </div>
         <a class="nav-link" href="/pricing/">Pricing</a>
         <a class="nav-link" href="/contact/">Contact</a>
         {% if not request.user.is_authenticated and not user.is_authenticated and not is_logged_in %}
@@ -63,6 +72,7 @@
         {% if request.user.is_authenticated or user.is_authenticated or is_logged_in %}
           <a class="btn btn-outline" href="/my-account/">My Account</a>
         {% else %}
+          <a class="btn btn-primary header-get-start-btn" href="/auth/signup/">Get Start</a>
           <a class="btn btn-outline" href="/auth/login/">Login</a>
         {% endif %}
       </div>

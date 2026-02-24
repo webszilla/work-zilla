@@ -8,13 +8,8 @@
   <div class="site-container account-layout">
     <div class="account-header">
       <h1 class="section-title">Renew Subscription</h1>
-      <p class="section-lead">Confirm your plan and submit renewal payment for approval.</p>
     </div>
-
-    <div class="account-grid">
-      <aside class="account-menu">
-        {% include "public/partials/account_sidebar.html" %}
-      </aside>
+    {% include "public/partials/account_tabs.html" %}
 
       <div class="account-content card p-4">
         <h2 class="section-title">Selected Plan</h2>
@@ -92,7 +87,6 @@
           {% endif %}
         </form>
       </div>
-    </div>
   </div>
 </section>
 {% endblock %}

@@ -30,6 +30,8 @@ def _public_product_slug(value):
 def _public_product_name(value, slug):
     if slug == "monitor":
         return "Work Suite"
+    if slug == "whatsapp-automation":
+        return "WhatsApp Automation"
     return value
 
 
@@ -210,7 +212,13 @@ def public_plans(request):
                     "price_usdt_month": float(plan.monthly_price_usd or 0),
                     "price_inr_year": float(plan.yearly_price_inr or 0),
                     "price_usdt_year": float(plan.yearly_price_usd or 0),
+                    "allow_addons": False,
+                    "addon_monthly_price": 0,
+                    "addon_yearly_price": 0,
+                    "addon_usd_monthly_price": 0,
+                    "addon_usd_yearly_price": 0,
                     "limits": limits,
+                    "features": {},
                     "addons": {},
                     "is_popular": False,
                     "currency": "INR",
@@ -225,6 +233,11 @@ def public_plans(request):
                     "price_usdt_month": float(plan.usd_monthly_price or 0),
                     "price_inr_year": float(plan.yearly_price or 0),
                     "price_usdt_year": float(plan.usd_yearly_price or 0),
+                    "allow_addons": bool(plan.allow_addons),
+                    "addon_monthly_price": float(plan.addon_monthly_price or 0),
+                    "addon_yearly_price": float(plan.addon_yearly_price or 0),
+                    "addon_usd_monthly_price": float(plan.addon_usd_monthly_price or 0),
+                    "addon_usd_yearly_price": float(plan.addon_usd_yearly_price or 0),
                     "limits": {
                         "storage_gb": limits.get("storage_gb", 0),
                         "max_users": limits.get("max_users", plan.employee_limit or 0),
@@ -232,6 +245,7 @@ def public_plans(request):
                         "is_bandwidth_limited": limits.get("is_bandwidth_limited", True),
                         "device_limit_per_user": limits.get("device_limit_per_user", plan.device_limit or 1),
                     },
+                    "features": dict(plan.features or {}),
                     "addons": plan.addons or {},
                     "is_popular": False,
                     "currency": "INR",
@@ -294,7 +308,13 @@ def public_plans(request):
             "price_usdt_month": plan.usd_monthly_price or 0,
             "price_inr_year": plan.yearly_price or 0,
             "price_usdt_year": plan.usd_yearly_price or 0,
+            "allow_addons": bool(plan.allow_addons),
+            "addon_monthly_price": plan.addon_monthly_price or 0,
+            "addon_yearly_price": plan.addon_yearly_price or 0,
+            "addon_usd_monthly_price": plan.addon_usd_monthly_price or 0,
+            "addon_usd_yearly_price": plan.addon_usd_yearly_price or 0,
             "limits": limits,
+            "features": dict(plan.features or {}),
             "addons": addons,
             "is_popular": False,
         })

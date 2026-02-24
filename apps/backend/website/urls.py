@@ -23,6 +23,7 @@ urlpatterns = [
     path("my-account/verification/resend/", views.account_resend_verification, name="account_verification_resend"),
     path("my-account/verification/update-email/", views.account_update_verification_email, name="account_verification_update_email"),
     path("my-account/billing/", views.billing_view, name="account_billing"),
+    path("my-account/billing/addons/", views.billing_addons_manage, name="account_billing_addons"),
     path("my-account/bank-transfer/<int:transfer_id>/", views.account_bank_transfer, name="account_bank_transfer"),
     path("my-account/bank-transfer/", views.account_bank_transfer, name="account_bank_transfer_root"),
     path("my-account/billing/renew/start/", views.billing_renew_start, name="account_billing_renew_start"),

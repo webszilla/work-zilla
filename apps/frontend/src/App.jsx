@@ -46,6 +46,7 @@ import OrgInboxPage from "./pages/OrgInboxPage.jsx";
 import SaasAdminRetentionPolicyPage from "./pages/SaasAdminRetentionPolicyPage.jsx";
 import SaasAdminStorageSettingsPage from "./pages/SaasAdminStorageSettingsPage.jsx";
 import SaasAdminWhatsAppSettingsPage from "./pages/SaasAdminWhatsAppSettingsPage.jsx";
+import SaasAdminSystemBackupManagerPage from "./pages/SaasAdminSystemBackupManagerPage.jsx";
 import SaasAdminBillingPage from "./pages/SaasAdminBillingPage.jsx";
 import SaasAdminBackupActivityPage from "./pages/SaasAdminBackupActivityPage.jsx";
 import BackupHistoryPage from "./pages/BackupHistoryPage.jsx";
@@ -65,6 +66,10 @@ import AiChatbotAgentsPage from "./pages/AiChatbotAgentsPage.jsx";
 import AiChatbotDashboardPage from "./pages/AiChatbotDashboardPage.jsx";
 import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
+import WhatsappAutomationCompanyProfilePage from "./pages/WhatsappAutomationCompanyProfilePage.jsx";
+import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboardPage.jsx";
+import WebsiteCatalogueDashboardPage from "./pages/WebsiteCatalogueDashboardPage.jsx";
+import DigitalBusinessCardDashboardPage from "./pages/DigitalBusinessCardDashboardPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
@@ -156,6 +161,7 @@ const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
   { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
   { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "business-autopilot-erp" },
+  { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "whatsapp-automation" },
   { label: "Inbox", path: "/inbox", icon: "bi-chat-dots", productOnly: "ai-chatbot", allowAgent: true },
   { label: "Widgets", path: "/widgets", icon: "bi-code-slash", productOnly: "ai-chatbot", adminOnly: true },
   { label: "Leads", path: "/leads", icon: "bi-person-lines-fill", productOnly: "ai-chatbot", adminOnly: true },
@@ -171,6 +177,11 @@ const reactPages = [
   { label: "Company Settings", path: "/company", icon: "bi-building", adminOnly: true, productOnly: "worksuite" },
   { label: "Privacy Settings", path: "/privacy", icon: "bi-shield-lock", adminOnly: true, productOnly: "worksuite" },
   { label: "SaaS Admin", path: "/saas-admin", icon: "bi-grid-1x2", saasAdminOnly: true },
+  { label: "Communication Tools", kind: "section", productOnly: "whatsapp-automation" },
+  { label: "Company Profile", path: "/dashboard/company-profile", icon: "bi-building", productOnly: "whatsapp-automation" },
+  { label: "Whatsapp Automation", path: "/dashboard/whatsapp-automation", icon: "bi-whatsapp", productOnly: "whatsapp-automation" },
+  { label: "Website Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
+  { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
   { label: "HR Management", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
   { label: "Projects", path: "/projects", icon: "bi-kanban", productOnly: "business-autopilot-erp", moduleKey: "projects" },
@@ -251,12 +262,15 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isSaasAdminRoute = location.pathname.startsWith("/saas-admin");
   const isMonitorProduct = productSlug === "worksuite";
   const isBusinessAutopilot = productSlug === "business-autopilot-erp";
+  const isWhatsappAutomationProduct = productSlug === "whatsapp-automation";
   const productLabel = productSlug === "ai-chatbot"
     ? "AI Chatbot"
     : productSlug === "worksuite"
     ? monitorLabel
     : productSlug === "storage"
     ? "Online Storage"
+    : productSlug === "whatsapp-automation"
+    ? "Whatsapp Automation"
     : productSlug === "business-autopilot-erp"
     ? "Business Autopilot ERP"
     : productSlug === "saas-admin"
@@ -522,22 +536,37 @@ function AppShell({ state, productPrefix, productSlug }) {
   });
 
   const orderedNavItems = useMemo(() => {
-    if (!isBusinessAutopilot) {
+    if (!isBusinessAutopilot && !isWhatsappAutomationProduct) {
       return allowedNavItems;
     }
-    const orderMap = new Map([
-      ["/", 0],
-      ["/notifications-inbox", 1],
-      ["/crm", 2],
-      ["/hrm", 3],
-      ["/projects", 4],
-      ["/accounts", 5],
-      ["/users", 6],
-      ["/billing", 7],
-      ["/plans", 8],
-      ["/profile", 9]
-    ]);
+    const orderMap = isWhatsappAutomationProduct
+      ? new Map([
+          ["/dashboard/company-profile", 0],
+          ["/dashboard/whatsapp-automation", 1],
+          ["/dashboard/catalogue", 2],
+          ["/dashboard/digital-card", 3],
+          ["/", 4],
+          ["/notifications-inbox", 5],
+          ["/billing", 6],
+          ["/plans", 7],
+          ["/profile", 8],
+        ])
+      : new Map([
+          ["/", 0],
+          ["/notifications-inbox", 1],
+          ["/crm", 2],
+          ["/hrm", 3],
+          ["/projects", 4],
+          ["/accounts", 5],
+          ["/users", 6],
+          ["/billing", 7],
+          ["/plans", 8],
+          ["/profile", 9]
+        ]);
     return [...allowedNavItems].sort((a, b) => {
+      if (a.kind === "section" && b.kind !== "section") return -1;
+      if (b.kind === "section" && a.kind !== "section") return 1;
+      if (a.kind === "section" && b.kind === "section") return 0;
       const aOrder = orderMap.has(a.path) ? orderMap.get(a.path) : 99;
       const bOrder = orderMap.has(b.path) ? orderMap.get(b.path) : 99;
       if (aOrder !== bOrder) {
@@ -545,7 +574,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       }
       return a.label.localeCompare(b.label);
     });
-  }, [allowedNavItems, isBusinessAutopilot]);
+  }, [allowedNavItems, isBusinessAutopilot, isWhatsappAutomationProduct]);
 
   const dealerNavItems = dealerPages.filter((item) => {
     const stateValue = state.dealerOnboarding || "active";
@@ -671,6 +700,12 @@ function AppShell({ state, productPrefix, productSlug }) {
                 );
               })
             : orderedNavItems.map((item) => (
+                item.kind === "section" ? (
+                  <div key={`section-${item.label}`} className="nav-link disabled" style={{ cursor: "default", opacity: 0.9 }}>
+                    <i className="bi bi-folder2-open nav-icon" aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </div>
+                ) : (
                 <NavLink
                   key={item.path}
                   to={navPath(item.path)}
@@ -706,8 +741,9 @@ function AppShell({ state, productPrefix, productSlug }) {
                   {item.icon ? (
                     <i className={`bi ${item.icon} nav-icon`} aria-hidden="true" />
                   ) : null}
-                  <span>{item.label}</span>
-                </NavLink>
+                    <span>{item.label}</span>
+                  </NavLink>
+                )
               ))}
           <a className="nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} title="Logout">
             <i className="bi bi-box-arrow-right nav-icon" aria-hidden="true" />
@@ -925,6 +961,22 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={isAdmin && !isHrView ? <ProfilePage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/dashboard/company-profile"
+            element={productSlug === "whatsapp-automation" ? <WhatsappAutomationCompanyProfilePage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/dashboard/whatsapp-automation"
+            element={productSlug === "whatsapp-automation" ? <WhatsappAutomationDashboardPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/dashboard/catalogue"
+            element={productSlug === "whatsapp-automation" ? <WebsiteCatalogueDashboardPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/dashboard/digital-card"
+            element={productSlug === "whatsapp-automation" ? <DigitalBusinessCardDashboardPage currentUsername={state.user?.username || ""} /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/notifications-inbox"
             element={!isDealer ? <OrgInboxPage /> : <Navigate to={withBase("/")} replace />}
           />
@@ -1035,6 +1087,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/saas-admin/whatsapp-cloud"
             element={isSaasAdmin ? <SaasAdminWhatsAppSettingsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/saas-admin/system-backup-manager"
+            element={isSaasAdmin ? <SaasAdminSystemBackupManagerPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/saas-admin/media-library"
@@ -1328,6 +1384,7 @@ export default function App() {
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
     { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot ERP" },
+    { prefix: "/whatsapp-automation", slug: "whatsapp-automation", label: "Whatsapp Automation" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
   ];
@@ -1454,6 +1511,9 @@ export default function App() {
     }
     const productSlug = match ? match.slug : "worksuite";
     const prefix = match ? match.prefix : "";
+      if (productSlug === "whatsapp-automation" && (location.pathname === prefix || location.pathname === `${prefix}/`)) {
+        return <Navigate to={`${prefix}/dashboard/whatsapp-automation`} replace />;
+      }
       const entry = getSubscriptionEntry(productSlug);
       const status = getSubscriptionStatus(productSlug);
 

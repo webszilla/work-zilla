@@ -218,6 +218,7 @@ export default function SaasAdminInboxPage() {
                   </div>
                   <div className="inbox-item-meta">
                     <span>{item.organization_name || "Global"}</span>
+                    {item.org_admin_name ? <span>Org Admin: {item.org_admin_name}</span> : null}
                     <span className="inbox-item-type">{item.event_type}</span>
                   </div>
                   <div className="inbox-item-preview">{truncate(item.message)}</div>
@@ -248,6 +249,12 @@ export default function SaasAdminInboxPage() {
                   <div className="text-secondary small">
                     {selectedItem.organization_name || "Global"} · {selectedItem.event_type}
                   </div>
+                  {selectedItem.org_admin_name ? (
+                    <div className="text-secondary small mt-1">
+                      Org Admin: {selectedItem.org_admin_name}
+                      {selectedItem.org_admin_email ? ` (${selectedItem.org_admin_email})` : ""}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="inbox-detail-actions">
                   {!selectedItem.is_read ? (

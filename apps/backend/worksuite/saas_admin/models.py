@@ -102,6 +102,174 @@ class WhatsAppCloudSettings(models.Model):
         return cls.objects.create(provider="meta_whatsapp_cloud")
 
 
+class SystemBackupManagerSettings(models.Model):
+    SCHEDULE_CHOICES = (
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+    )
+
+    provider = models.CharField(max_length=40, default="google_drive", unique=True)
+    is_active = models.BooleanField(default=False)
+    google_client_id = models.CharField(max_length=255, blank=True, default="")
+    google_client_secret = models.TextField(blank=True, default="")
+    google_redirect_uri = models.URLField(blank=True, default="")
+    google_access_token = models.TextField(blank=True, default="")
+    google_refresh_token = models.TextField(blank=True, default="")
+    google_token_expiry = models.DateTimeField(null=True, blank=True)
+    google_drive_folder_id = models.CharField(max_length=255, blank=True, default="")
+    oauth_state = models.CharField(max_length=128, blank=True, default="")
+    oauth_state_created_at = models.DateTimeField(null=True, blank=True)
+    scheduler_enabled = models.BooleanField(default=False)
+    schedule_frequency = models.CharField(max_length=16, choices=SCHEDULE_CHOICES, default="daily")
+    schedule_weekday = models.PositiveSmallIntegerField(default=0)  # 0=Mon
+    schedule_hour_utc = models.PositiveSmallIntegerField(default=2)
+    schedule_minute_utc = models.PositiveSmallIntegerField(default=0)
+    scheduler_last_run_at = models.DateTimeField(null=True, blank=True)
+    keep_last_backups = models.PositiveSmallIntegerField(default=7)
+    last_error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "System Backup Manager Settings"
+        verbose_name_plural = "System Backup Manager Settings"
+
+    def __str__(self):
+        return "System Backup Manager Settings"
+
+    @classmethod
+    def get_solo(cls):
+        obj = cls.objects.filter(provider="google_drive").first()
+        if obj:
+            return obj
+        return cls.objects.create(provider="google_drive")
+
+    @property
+    def google_connected(self):
+        return bool(self.google_refresh_token and self.google_client_id and self.google_client_secret)
+
+
+class SystemBackupLog(models.Model):
+    STATUS_CHOICES = (
+        ("queued", "Queued"),
+        ("running", "Running"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    )
+    TRIGGER_CHOICES = (
+        ("manual", "Manual"),
+        ("scheduler", "Scheduler"),
+    )
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="system_backup_logs",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
+    trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES, default="manual")
+    message = models.TextField(blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    temp_sql_path = models.TextField(blank=True, default="")
+    temp_zip_path = models.TextField(blank=True, default="")
+    sql_size_bytes = models.BigIntegerField(default=0)
+    zip_size_bytes = models.BigIntegerField(default=0)
+    drive_sql_file_id = models.CharField(max_length=255, blank=True, default="")
+    drive_sql_file_name = models.CharField(max_length=255, blank=True, default="")
+    drive_zip_file_id = models.CharField(max_length=255, blank=True, default="")
+    drive_zip_file_name = models.CharField(max_length=255, blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"SystemBackupLog {self.id} ({self.status})"
+
+
+class OrganizationBackupLog(models.Model):
+    STATUS_CHOICES = (
+        ("queued", "Queued"),
+        ("running", "Running"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    )
+    TRIGGER_CHOICES = (
+        ("manual", "Manual"),
+        ("scheduler", "Scheduler"),
+        ("bulk_manual", "Bulk Manual"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="saas_org_backup_logs")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="organization_backup_logs"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
+    trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES, default="manual")
+    backup_scope = models.CharField(max_length=20, default="org_data")
+    temp_file_path = models.TextField(blank=True, default="")
+    temp_file_size_bytes = models.BigIntegerField(default=0)
+    drive_file_id = models.CharField(max_length=255, blank=True, default="")
+    drive_file_name = models.CharField(max_length=255, blank=True, default="")
+    drive_folder_path = models.CharField(max_length=255, blank=True, default="")
+    records_exported = models.IntegerField(default=0)
+    model_count = models.IntegerField(default=0)
+    message = models.TextField(blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["organization", "created_at"]), models.Index(fields=["status", "created_at"])]
+
+    def __str__(self):
+        return f"OrgBackup {self.organization_id} {self.status}"
+
+
+class OrganizationRestoreLog(models.Model):
+    STATUS_CHOICES = (
+        ("queued", "Queued"),
+        ("downloading", "Downloading"),
+        ("validating", "Validating"),
+        ("restoring", "Restoring"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="saas_org_restore_logs")
+    restored_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="organization_restore_logs"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
+    backup_file_id = models.CharField(max_length=255, blank=True, default="")
+    backup_file_name = models.CharField(max_length=255, blank=True, default="")
+    temp_download_path = models.TextField(blank=True, default="")
+    temp_restore_db_path = models.TextField(blank=True, default="")
+    validation_summary = models.JSONField(default=dict, blank=True)
+    restored_records = models.IntegerField(default=0)
+    message = models.TextField(blank=True, default="")
+    errors = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["organization", "created_at"]), models.Index(fields=["status", "created_at"])]
+
+    def __str__(self):
+        return f"OrgRestore {self.organization_id} {self.status}"
+
+
 class GlobalMediaStorageSettings(models.Model):
     STORAGE_CHOICES = (
         ("local", "Local storage"),

@@ -1,0 +1,115 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Manage Add-on Users{% endblock %}
+{% block meta_description %}Manage add-on users for your active subscription.{% endblock %}
+{% block body_class %}account-page{% endblock %}
+
+{% block content %}
+<section class="section">
+  <div class="site-container account-layout">
+    <div class="account-header">
+      <h1 class="section-title">Manage Add-on Users</h1>
+    </div>
+    {% include "public/partials/account_tabs.html" %}
+
+    <div class="account-content card p-4">
+      {% if messages %}
+        {% for message in messages|slice:"-1:" %}
+          <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="plan-summary">
+        <div class="plan-summary__row">
+          <span>Product</span>
+          <strong>{{ addon_subscription.plan.product.name|default:"Work Suite" }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Plan</span>
+          <strong>{{ addon_subscription.plan.name }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Billing Cycle</span>
+          <strong>{{ addon_subscription.billing_cycle|title }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Current Add-on Users</span>
+          <strong>{{ addon_current_count }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Current Plan Expiry</span>
+          <strong>{% if addon_subscription.end_date %}{{ addon_subscription.end_date|date:"d M Y" }}{% else %}-{% endif %}</strong>
+        </div>
+      </div>
+
+      {% if addon_pending_transfer %}
+        <div class="alert alert-warning mt-3">
+          Add-on payment request already pending approval for this product.
+          <a href="/my-account/bank-transfer/{{ addon_pending_transfer.id }}/">Open payment page</a>
+        </div>
+      {% endif %}
+
+      <form method="post" class="mt-3">
+        {% csrf_token %}
+        <input type="hidden" name="product" value="{{ addon_subscription.plan.product.slug|default:'monitor' }}">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Target Add-on Users</label>
+            <input type="number" name="target_addon_count" min="0" value="{{ addon_target_count|default:addon_current_count }}">
+            <small class="text-secondary">You can increase anytime (payment required) or reduce anytime.</small>
+          </div>
+          <div class="form-field">
+            <label>Currency</label>
+            <select name="currency">
+              <option value="INR" {% if addon_currency == "INR" %}selected{% endif %}>INR</option>
+              <option value="USD" {% if addon_currency == "USD" %}selected{% endif %}>USD</option>
+            </select>
+          </div>
+        </div>
+
+        {% if addon_proration_preview %}
+          <div class="card mt-4 p-3" style="background:#f8fafc;">
+            <h3 class="section-title mb-2">Proration Preview</h3>
+            <div class="table-responsive">
+              <table class="table table-striped mb-0">
+                <tbody>
+                  <tr>
+                    <th scope="row">Additional Users</th>
+                    <td>{{ addon_target_count }} (target) - {{ addon_current_count }} (current) = {{ addon_delta_preview }}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Remaining Days</th>
+                    <td>{{ addon_proration_preview.remaining_days }} / {{ addon_proration_preview.cycle_days }} days</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Add-on Unit Price</th>
+                    <td>{{ addon_currency }} {{ addon_proration_preview.unit_price }}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Prorated Total</th>
+                    <td><strong>{{ addon_currency }} {{ addon_proration_preview.amount }}</strong></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Billing Description</th>
+                    <td>{{ addon_proration_preview.description }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% else %}
+          <div class="alert alert-info mt-3">
+            Reduce users and submit to save immediately. Increase users and we will create an add-on payment request with proration.
+          </div>
+        {% endif %}
+
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <button class="btn btn-primary" type="submit">Apply Add-on User Change</button>
+          <a class="btn btn-outline" href="/my-account/billing/">Back to Billing</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

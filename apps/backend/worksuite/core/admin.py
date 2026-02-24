@@ -8,6 +8,7 @@ from django.db import models
 from django.contrib.admin import SimpleListFilter
 from .models import Organization, Employee, Activity, Screenshot, Plan, Device, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, Subscription, SubscriptionHistory, DeletedAccount, AdminNotification, PendingTransfer, UserProfile, BillingProfile, InvoiceSellerProfile, ThemeSettings, ReferralSettings, ReferralEarning, DealerAccount, DealerReferralEarning, EventMetric, AlertRule, ChatWidget, ChatConversation, ChatMessage, ChatLead, ChatEnquiryLead, AiUsageCounter, AiUsageMonthly
 from django.utils import timezone
+from django.db.models import Q
 from decimal import Decimal
 from datetime import timedelta
 
@@ -622,7 +623,13 @@ class PendingTransferAdmin(admin.ModelAdmin):
                 settings_obj.save()
 
         if transfer.request_type == "addon":
-            sub = Subscription.objects.filter(organization=org, status="active").first()
+            product_slug = getattr(getattr(transfer.plan, "product", None), "slug", "monitor")
+            sub_qs = Subscription.objects.filter(organization=org, status__in=("active", "trialing"))
+            if product_slug == "monitor":
+                sub_qs = sub_qs.filter(Q(plan__product__slug="monitor") | Q(plan__product__isnull=True))
+            else:
+                sub_qs = sub_qs.filter(plan__product__slug=product_slug)
+            sub = sub_qs.order_by("-start_date", "-id").first()
             if sub:
                 addon_delta = max(0, transfer.addon_count or 0)
                 sub.addon_count = (sub.addon_count or 0) + addon_delta

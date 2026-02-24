@@ -124,7 +124,9 @@ export default function SaasAdminPage() {
 
   const data = state.data || {};
   const stats = data.stats || {};
-  const products = dedupeProducts(data.products || []);
+  const products = dedupeProducts(data.products || []).filter(
+    (product) => String(product?.status || "").toLowerCase() === "active"
+  );
   const showProductsOnly = location.hash === "#products";
 
   if (state.loading) {
@@ -402,7 +404,7 @@ export default function SaasAdminPage() {
 
           <div className="row g-3 mt-4">
             <div className="col-12 col-xl-6">
-              <div className="card p-4 h-100">
+              <div className="p-4 h-100">
                 <h4>Operations</h4>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">
@@ -441,6 +443,19 @@ export default function SaasAdminPage() {
                       </p>
                       <Link to="/saas-admin/backup-activity" className="btn btn-primary btn-sm">
                         View Activity
+                      </Link>
+                  </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-hdd-stack" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">System Backup Manager</h5>
+                      <p className="text-secondary mb-3">
+                        PostgreSQL + project backup to Google Drive with scheduler.
+                      </p>
+                      <Link to="/saas-admin/system-backup-manager" className="btn btn-primary btn-sm">
+                        Open
                       </Link>
                   </div>
 
@@ -539,7 +554,7 @@ export default function SaasAdminPage() {
             </div>
 
             <div className="col-12 col-xl-6">
-              <div className="card p-4 h-100">
+              <div className="p-4 h-100">
                 <h4>Org Admin Common Features</h4>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">

@@ -76,7 +76,9 @@ def build_observability_summary(days=7, org_id=None, product_slug=None):
         .order_by("name")
         .values("id", "name")
     )
-    products = list(Product.objects.values_list("slug", flat=True))
+    products = list(
+        Product.objects.filter(status="active").values_list("slug", flat=True)
+    )
 
     return {
         "days": days,

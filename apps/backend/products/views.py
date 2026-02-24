@@ -1,5 +1,5 @@
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 
 from .models import Product
 from apps.backend.enquiries.views import build_enquiry_context
@@ -8,6 +8,12 @@ from django.db import connection
 
 
 def product_marketing_view(request, slug):
+    retired_product_redirects = {
+        "digital-card": "whatsapp-automation",
+        "ai-chat-widget": "ai-chatbot",
+    }
+    if slug in retired_product_redirects:
+        return redirect(f"/products/{retired_product_redirects[slug]}/", permanent=True)
     if slug == "online-storage":
         slug = "storage"
     raw_slug = slug

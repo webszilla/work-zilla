@@ -3291,7 +3291,28 @@ def billing_summary(request):
         if product_slug == "monitor":
             free_filter = free_filter | Q(product__isnull=True)
         free_plan = Plan.objects.filter(name__iexact="free").filter(free_filter).first()
-    if free_plan and not history_entries.filter(plan=free_plan).exists():
+    has_non_free_history = False
+    for row in history_entries:
+        if row.plan and not dashboard_views.is_free_plan(row.plan):
+            has_non_free_history = True
+            break
+    has_non_free_approved_transfer = False
+    approved_trial_check = (
+        PendingTransfer.objects
+        .filter(status="approved", organization=org, request_type__in=("new", "renew"))
+        .select_related("plan", "plan__product")
+    )
+    if product_slug:
+        approved_trial_filter = Q(plan__product__slug=product_slug)
+        if product_slug == "monitor":
+            approved_trial_filter = approved_trial_filter | Q(plan__product__isnull=True)
+        approved_trial_check = approved_trial_check.filter(approved_trial_filter)
+    for transfer in approved_trial_check:
+        if transfer.plan and not dashboard_views.is_free_plan(transfer.plan):
+            has_non_free_approved_transfer = True
+            break
+
+    if free_plan and not history_entries.filter(plan=free_plan).exists() and not (has_non_free_history or has_non_free_approved_transfer):
         oldest = SubscriptionHistory.objects.filter(organization=org)
         if product_slug:
             oldest_filter = Q(plan__product__slug=product_slug)
@@ -3341,6 +3362,16 @@ def billing_summary(request):
         pending_transfers = pending_transfers.filter(transfer_filter)
         approved_transfers = approved_transfers.filter(transfer_filter)
         rejected_transfers = rejected_transfers.filter(transfer_filter)
+
+    approved_paid_transfer_exists = False
+    approved_free_transfer_exists = False
+    for t in approved_transfers:
+        if not t.plan or t.request_type not in ("new", "renew"):
+            continue
+        if dashboard_views.is_free_plan(t.plan):
+            approved_free_transfer_exists = True
+        else:
+            approved_paid_transfer_exists = True
 
     if sub:
         base_transfer = approved_transfers.filter(request_type__in=("new", "renew")).first()
@@ -3422,9 +3453,33 @@ def billing_summary(request):
         )
     )
     history_rows = list(history_entries)
+    has_active_paid_plan = bool(sub and sub.plan and not dashboard_views.is_free_plan(sub.plan))
+    current_active_plan_id = sub.plan_id if has_active_paid_plan else None
     history_payload = []
     latest_history = {}
     for index, entry in enumerate(history_rows):
+        # Hide short synthetic free rows when a paid plan is already active for the product.
+        if (
+            has_active_paid_plan
+            and entry.plan
+            and dashboard_views.is_free_plan(entry.plan)
+            and entry.start_date
+            and entry.end_date
+        ):
+            try:
+                free_duration_days = (entry.end_date - entry.start_date).total_seconds() / 86400
+            except Exception:
+                free_duration_days = None
+            if free_duration_days is not None and free_duration_days <= 2:
+                continue
+        if (
+            entry.plan
+            and dashboard_views.is_free_plan(entry.plan)
+            and approved_paid_transfer_exists
+            and not approved_free_transfer_exists
+        ):
+            # Direct paid plan activation: do not show implicit free rows in product billing history.
+            continue
         end_date = entry.end_date
         if (
             sub
@@ -3461,6 +3516,8 @@ def billing_summary(request):
                 expires_soon = True
         pending_renew = entry.plan_id in pending_renew_plans
         renew_available = bool(entry.plan_id) and (is_expired or expires_soon)
+        if current_active_plan_id and entry.plan_id != current_active_plan_id:
+            renew_available = False
         if is_expired:
             status_label = f"Expired on {_format_datetime(end_date)}" if end_date else "Expired"
         elif pending_renew:

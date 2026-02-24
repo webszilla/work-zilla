@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ company.company_name|default:public_slug }} - Digital Card</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#071226;color:#e5e7eb;margin:0;padding:24px}
+    .card{max-width:760px;margin:0 auto;background:#0b1a33;border:1px solid #1e2f4d;border-radius:20px;padding:24px}
+    .btn{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;margin-right:8px;font-weight:600}
+    .primary{background:{{ theme_color }};color:#08111f}
+    .ghost{background:#13233f;color:#e5e7eb;border:1px solid #294265}
+    .muted{color:#94a3b8}
+    ul{padding-left:18px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{ company.company_name|default:public_slug }}</h1>
+    <p class="muted">{{ company.description|default:"Digital Business Card" }}</p>
+    <p>{{ company.address }}</p>
+    <p class="muted">{{ company.email }} {% if company.phone %}| {{ company.phone }}{% endif %}</p>
+    <div>
+      {% if company.phone %}<a class="btn primary" href="tel:{{ company.phone }}">Call</a>{% endif %}
+      {% if company.whatsapp_number %}<a class="btn ghost" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
+      {% if company.website %}<a class="btn ghost" href="{{ company.website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
+      {% if catalogue_page %}<a class="btn ghost" href="/catalogue/{{ catalogue_page.public_slug }}/">Catalogue</a>{% endif %}
+    </div>
+    {% if highlights %}
+      <h3>Product Highlights</h3>
+      <ul>
+        {% for item in highlights %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% if wa_settings and wa_settings.welcome_message %}
+      <h3>WhatsApp Greeting</h3>
+      <pre style="white-space:pre-wrap;background:#081525;padding:12px;border-radius:12px;border:1px solid #1f3355">{{ wa_settings.welcome_message }}</pre>
+    {% endif %}
+  </div>
+</body>
+</html>

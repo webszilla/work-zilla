@@ -1,0 +1,225 @@
+{% extends "public/base.html" %}
+{% block meta_title %}WhatsApp Automation | Work Zilla{% endblock %}
+{% block meta_description %}Manage digital business cards, WhatsApp catalogue pages, and automated conversations in one Work Zilla platform with add-on user billing.{% endblock %}
+{% block og_title %}WhatsApp Automation | Work Zilla{% endblock %}
+{% block og_description %}Digital Card + Catalogue + Automation in ONE Platform for teams and businesses.{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .wa-hero-mock {
+    border-radius: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(2, 6, 23, 0.9));
+    box-shadow: 0 22px 54px rgba(2, 6, 23, 0.36);
+    padding: 16px;
+  }
+  .wa-chat-shell {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    background: rgba(15, 23, 42, 0.75);
+  }
+  .wa-chat-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: rgba(34, 197, 94, 0.12);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  }
+  .wa-chat-bubbles {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+  .wa-bubble {
+    border-radius: 14px;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    max-width: 92%;
+  }
+  .wa-bubble.bot {
+    background: rgba(34, 197, 94, 0.14);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #eafff1;
+  }
+  .wa-bubble.user {
+    justify-self: end;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+  }
+  .wa-addon-panel {
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.98);
+    color: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    box-shadow: 0 22px 46px rgba(15, 23, 42, 0.16);
+  }
+  .wa-addon-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .wa-addon-item {
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    padding: 14px;
+  }
+  .wa-addon-item small {
+    color: #64748b;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .wa-addon-item strong {
+    color: #0f172a;
+    display: block;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="z-hero full-bleed">
+  <div class="site-container">
+    <div class="z-hero-grid">
+      <div>
+        <span class="eyebrow">WhatsApp Automation</span>
+        <h1>Automate Your WhatsApp Business with Smart Digital Tools</h1>
+        <p>
+          Manage digital business cards, product catalogues, and automated conversations — all in one powerful platform.
+        </p>
+        <div class="card p-3 mt-2 mb-3">
+          <strong style="color:#86efac;">🔥 Digital Card + Catalogue + Automation in ONE Platform</strong>
+          <div class="text-secondary">Built for teams that want one clean workflow instead of separate tools.</div>
+        </div>
+        <div class="z-hero-cta">
+          <a class="btn btn-primary" href="/pricing/?product=whatsapp-automation">View Plans</a>
+          <a class="btn btn-outline" href="/contact/">Talk to Sales</a>
+        </div>
+      </div>
+      <div class="wa-hero-mock">
+        <div class="wa-chat-shell">
+          <div class="wa-chat-top">
+            <strong style="color:#ecfdf5;">WhatsApp Automation</strong>
+            <span class="dc-chip" style="margin:0;">Live Flow</span>
+          </div>
+          <div class="wa-chat-bubbles">
+            <div class="wa-bubble user">Hi, send product details.</div>
+            <div class="wa-bubble bot">
+              Hi 👋 Welcome to our business.<br>
+              Reply:<br>
+              1 - View Products<br>
+              2 - Price Details<br>
+              3 - Contact Support
+            </div>
+            <div class="wa-bubble user">1</div>
+            <div class="wa-bubble bot">Sending your catalogue link and featured products now.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Everything in one WhatsApp Automation platform</h2>
+    <p class="section-lead">Digital card, catalogue, and automation features work together under one product.</p>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Digital Business Card</h3>
+        <ul class="z-hero-list">
+          <li><span>Share contact instantly</span><small>Send public card links in one tap.</small></li>
+          <li><span>QR code ready</span><small>Use QR sharing for events and field sales.</small></li>
+          <li><span>Smart profile page</span><small>Company details auto-load into public pages.</small></li>
+          <li><span>Lead capture</span><small>Convert enquiries from shared card links.</small></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>WhatsApp Catalogue</h3>
+        <ul class="z-hero-list">
+          <li><span>Product listing</span><small>Manage products with title, price, and description.</small></li>
+          <li><span>Shareable links</span><small>Public catalogue page built from company profile.</small></li>
+          <li><span>Customer enquiry</span><small>Guide customers to enquiry and purchase actions.</small></li>
+          <li><span>Order management ready</span><small>Future-ready structure for order workflows.</small></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Automation Engine</h3>
+        <ul class="z-hero-list">
+          <li><span>Auto replies</span><small>Keyword and default response rules.</small></li>
+          <li><span>Flow builder ready</span><small>Simple rules today, extendable tomorrow.</small></li>
+          <li><span>Broadcast messaging ready</span><small>Architecture prepared for later integration.</small></li>
+          <li><span>CRM integrations ready</span><small>Structured for future module handoff.</small></li>
+        </ul>
+      </div>
+    </div>
+    <p class="section-lead" style="margin-top:16px;">All features included in one WhatsApp Automation platform.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="wa-addon-panel p-4 p-lg-5">
+      <div class="row g-4 align-items-start">
+        <div class="col-lg-5">
+          <span class="eyebrow" style="color:#16a34a;">Add-on Users</span>
+          <h2 style="color:#0f172a;">Scale Your Team with Add-on Users</h2>
+          <p style="color:#475569; margin-bottom:0;">
+            Add additional team members anytime using our unified add-on user billing system.
+          </p>
+        </div>
+        <div class="col-lg-7">
+          <div class="wa-addon-grid">
+            <div class="wa-addon-item">
+              <small>Monthly add-on example</small>
+              <strong>₹25 / extra user / month</strong>
+              <span style="color:#64748b; font-size:13px;">Frontend display only. Uses existing global add-on user billing system.</span>
+            </div>
+            <div class="wa-addon-item">
+              <small>Yearly add-on example</small>
+              <strong>₹250 / extra user / year</strong>
+              <span style="color:#64748b; font-size:13px;">Billed based on selected billing cycle.</span>
+            </div>
+            <div class="wa-addon-item">
+              <small>Unified platform benefit</small>
+              <strong>One billing model across products</strong>
+              <span style="color:#64748b; font-size:13px;">No separate add-on logic for WhatsApp Automation.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Ready to automate your WhatsApp business flow?</h2>
+      <p>Launch digital cards, catalogue pages, and automation in one platform.</p>
+      <a class="btn btn-primary" href="/pricing/?product=whatsapp-automation">View Plans</a>
+      <a class="btn btn-outline" href="/contact/">Talk to Sales</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Need help choosing a plan?</h3>
+          <p class="text-secondary mb-0">Share your team size and use case. We will recommend the best WhatsApp Automation setup.</p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

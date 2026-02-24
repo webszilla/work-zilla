@@ -16,6 +16,16 @@ def _format_datetime(value):
 
 
 def serialize_notification(item):
+    org_owner = item.organization.owner if item.organization and getattr(item.organization, "owner", None) else None
+    org_admin_name = ""
+    org_admin_email = ""
+    if org_owner:
+        org_admin_name = (
+            f"{getattr(org_owner, 'first_name', '')} {getattr(org_owner, 'last_name', '')}".strip()
+            or getattr(org_owner, "username", "")
+            or ""
+        )
+        org_admin_email = getattr(org_owner, "email", "") or ""
     return {
         "id": item.id,
         "title": item.title,
@@ -26,6 +36,8 @@ def serialize_notification(item):
         "product_slug": getattr(item, "product_slug", "") or "",
         "organization_id": item.organization_id,
         "organization_name": item.organization.name if item.organization else "",
+        "org_admin_name": org_admin_name,
+        "org_admin_email": org_admin_email,
         "created_at": _format_datetime(item.created_at),
         "is_read": bool(item.is_read),
     }

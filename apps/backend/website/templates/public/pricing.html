@@ -32,7 +32,7 @@
   <div class="site-container">
     <div class="pricing-header">
       <div>
-        <h2 class="section-title" id="pricing-header-title" data-default="Plans">Plans</h2>
+        <h2 class="section-title" id="pricing-header-title" data-default="Work Suite Plans">Work Suite Plans</h2>
         <p class="section-lead" id="pricing-header-subtitle" data-default="Choose the plan that fits your team size and monitoring needs.">Choose the plan that fits your team size and monitoring needs.</p>
       </div>
       <div class="pricing-controls">
@@ -116,6 +116,83 @@
 
 {% endblock %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .addon-users-box {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+  }
+  .addon-users-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .addon-users-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    padding: 4px 8px;
+    border-radius: 999px;
+  }
+  .addon-users-tooltip {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid rgba(249, 115, 22, 0.35);
+    color: #ea580c;
+    background: #fff7ed;
+    cursor: help;
+  }
+  .addon-users-grid {
+    display: grid;
+    gap: 6px;
+  }
+  .addon-users-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    color: #475569;
+  }
+  .addon-users-row strong {
+    color: #111827;
+    font-weight: 700;
+  }
+  .addon-users-row.is-active {
+    color: #111827;
+    font-weight: 600;
+  }
+  .addon-users-value {
+    font-size: 14px;
+    color: #111827;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+  .addon-users-note {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 12px;
+  }
+</style>
+{% endblock %}
+
 {% block extra_js %}
 <script>
     const pricingState = { currency: "inr", billing: "monthly", product: "monitor" };
@@ -133,6 +210,15 @@
       return `${prefix} ${number}`;
     }
 
+    function formatAddonSymbolPrice(value, currency) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) {
+        return "Custom";
+      }
+      const symbol = currency === "usd" ? "$" : "₹";
+      return `${symbol}${number}`;
+    }
+
     function updatePrices() {
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
         const priceTarget = card.querySelector("[data-price]");
@@ -144,6 +230,7 @@
         if (!plan) return;
         const isFree = String(plan.name || "").toLowerCase() === "free";
         const isBusinessAutopilot = pricingState.product === "business-autopilot-erp";
+        const isWhatsAppAutomation = pricingState.product === "whatsapp-automation";
         const value = pricingState.billing === "yearly"
           ? (pricingState.currency === "usd" ? plan.price_usdt_year : plan.price_inr_year)
           : (pricingState.currency === "usd" ? plan.price_usdt_month : plan.price_inr_month);
@@ -158,6 +245,8 @@
             ? (pricingState.billing === "monthly" ? "/org per month" : "/org per year")
             : isBusinessAutopilot
             ? (pricingState.billing === "monthly" ? "/platform per month" : "/platform per year")
+            : isWhatsAppAutomation
+            ? (pricingState.billing === "monthly" ? "/month" : "/yearly")
             : (pricingState.billing === "monthly" ? "/user per month" : "/user per year");
           suffixTarget.textContent = `${cycleText}${extra}`;
         }
@@ -169,6 +258,24 @@
           userPriceTarget.textContent = formatPrice(userValue, pricingState.currency);
           userSuffixTarget.textContent = pricingState.billing === "monthly" ? "/user per month" : "/user per year";
         }
+        const addonDisplayTarget = card.querySelector("[data-addon-digital-card-display]");
+        if (addonDisplayTarget) {
+          const inrValue = pricingState.billing === "yearly"
+            ? Number(plan.addon_yearly_price || 0)
+            : Number(plan.addon_monthly_price || 0);
+          const usdValue = pricingState.billing === "yearly"
+            ? Number(plan.addon_usd_yearly_price || 0)
+            : Number(plan.addon_usd_monthly_price || 0);
+          const selectedCurrency = pricingState.currency === "usd" ? "usd" : "inr";
+          const primary = selectedCurrency === "usd"
+            ? formatAddonSymbolPrice(usdValue, "usd")
+            : formatAddonSymbolPrice(inrValue, "inr");
+          const secondary = selectedCurrency === "usd"
+            ? formatAddonSymbolPrice(inrValue, "inr")
+            : formatAddonSymbolPrice(usdValue, "usd");
+          const suffix = pricingState.billing === "yearly" ? "per extra user / year" : "per extra user / month";
+          addonDisplayTarget.textContent = `${primary} / ${secondary} ${suffix}`;
+        }
       });
       updateAddonPrices();
     }
@@ -177,6 +284,22 @@
       const div = document.createElement("div");
       div.textContent = String(value || "");
       return div.innerHTML;
+    }
+
+    function formatPlanTitle(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      const acronyms = new Set(["ERP", "AI", "HR", "CRM", "GST", "USD", "INR"]);
+      return raw
+        .split(/\s+/)
+        .map((part) => {
+          if (!part) return "";
+          const upper = part.toUpperCase();
+          if (acronyms.has(upper)) return upper;
+          const lower = part.toLowerCase();
+          return lower.charAt(0).toUpperCase() + lower.slice(1);
+        })
+        .join(" ");
     }
 
     function formatStorageLabel(gbValue) {
@@ -293,6 +416,41 @@
           "Advanced Role Permissions",
           "Audit Logs",
           "Priority Support"
+        ];
+      }
+      if (productSlug === "whatsapp-automation") {
+        const key = String(plan.name || "").toLowerCase();
+        if (key === "free") {
+          return [
+            "1 Company Digital Card",
+            "Basic WhatsApp Automation",
+            "Limited Catalogue",
+            "Starter team setup"
+          ];
+        }
+        if (key.includes("starter") || key.includes("basic")) {
+          return [
+            "1 Company Digital Card",
+            "WhatsApp Catalogue",
+            "Basic Automation",
+            "1 Team user"
+          ];
+        }
+        if (key.includes("growth") || key.includes("plus")) {
+          return [
+            "1 Company Digital Card",
+            "Advanced Catalogue",
+            "Automation flows",
+            "Analytics",
+            "Add-on users for Digital Card team"
+          ];
+        }
+        return [
+          "1 Company Digital Card",
+          "Full automation",
+          "Branding",
+          "Team management",
+          "Priority support"
         ];
       }
       return [
@@ -418,6 +576,20 @@
       return "Best for enterprise and industry-grade operations.";
     }
 
+    function whatsappAutomationPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key === "free") {
+        return "Try WhatsApp Automation core features with one company digital card and starter automation setup.";
+      }
+      if (key.includes("starter") || key.includes("basic")) {
+        return "Digital Card + Catalogue + Automation in ONE Platform for teams getting started.";
+      }
+      if (key.includes("growth") || key.includes("plus")) {
+        return "Scale digital cards, catalogue pages, and automation flows with flexible add-on users.";
+      }
+      return "Full WhatsApp automation platform with branding, team management, and lower add-on user pricing.";
+    }
+
     function renderPlans(data) {
       const container = document.getElementById("pricing-plans");
       container.innerHTML = "";
@@ -453,6 +625,11 @@
         const isChatbot = normalizedSlug === "ai-chatbot";
         const isStorage = isStorageProduct;
         const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
+        const isWhatsAppAutomation = normalizedSlug === "whatsapp-automation";
+        const waFeatures = plan.features || {};
+        const hasDigitalCardFeature = Boolean(
+          waFeatures.digital_card || waFeatures.digital_card_enabled || (plan.limits || {}).digital_card_enabled
+        );
         const isFreePlan = String(plan.name || "").toLowerCase() === "free";
         const storageTrialOnly = isStorage && isFreePlan;
         const features = buildFeatureList(plan, normalizedSlug);
@@ -488,15 +665,17 @@
           ? `${isMonitor ? 15 : data.trial_days} days free trial`
           : null;
         card.innerHTML = `
-          <h2 class="plan-title">${escapeHtml(plan.name)}</h2>
+          <h2 class="plan-title">${escapeHtml(formatPlanTitle(plan.name))}</h2>
           <p>${isMonitor
             ? escapeHtml(monitorPlanDescription(plan.name))
             : normalizedSlug === "ai-chatbot"
               ? escapeHtml(aiChatbotPlanDescription(plan.name))
-              : normalizedSlug === "storage"
+                : normalizedSlug === "storage"
                 ? escapeHtml(storagePlanDescription(plan.name))
                 : normalizedSlug === "business-autopilot-erp"
                   ? escapeHtml(erpPlanDescription(plan.name))
+                  : normalizedSlug === "whatsapp-automation"
+                    ? escapeHtml(whatsappAutomationPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
           <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
             <span data-price>Custom</span>
@@ -507,6 +686,24 @@
               <span class="erp-plus">+</span>
               <span data-user-price>Custom</span>
               <span class="price-suffix-inline" data-user-suffix>/user per month</span>
+            </div>
+          ` : ""}
+          ${isWhatsAppAutomation && hasDigitalCardFeature && plan.allow_addons ? `
+            <div class="addon-users-box" data-addon-users-box>
+              <div class="addon-users-head">
+                <span class="addon-users-badge">Digital Card Add-on Users</span>
+                <span
+                  class="addon-users-tooltip"
+                  title="Add-on users apply only to Digital Card feature and are billed based on your selected currency and billing cycle."
+                  aria-label="Add-on users apply only to Digital Card feature and are billed based on your selected currency and billing cycle."
+                >i</span>
+              </div>
+              <div class="addon-users-grid">
+                <div class="addon-users-row">
+                  <span class="addon-users-value" data-addon-digital-card-display>Custom</span>
+                </div>
+              </div>
+              <div class="addon-users-note">Upgrade your plan to unlock discounted add-on user pricing.</div>
             </div>
           ` : ""}
           ${isMonitor ? `
@@ -600,6 +797,7 @@
 
     function syncPricingCopy(productSlug) {
       const isStorage = productSlug === "storage";
+      const isWhatsAppAutomation = productSlug === "whatsapp-automation";
       const heroTitle = document.getElementById("pricing-hero-title");
       const heroSubtitle = document.getElementById("pricing-hero-subtitle");
       const headerTitle = document.getElementById("pricing-header-title");
@@ -610,13 +808,53 @@
       if (isStorage) {
         setTextContentById("pricing-hero-title", "Simple, Transparent Pricing", heroTitle?.dataset.default);
         setTextContentById("pricing-hero-subtitle", "No per-user storage confusion. Pay only for what your organization needs.", heroSubtitle?.dataset.default);
-        setTextContentById("pricing-header-title", "Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Online Storage Plans", headerTitle?.dataset.default);
         setTextContentById("pricing-header-subtitle", "Choose the plan that fits your organization’s storage needs.", headerSubtitle?.dataset.default);
         setButtonById("pricing-hero-primary", "Start Free Trial", "/auth/signup/");
         setButtonById("pricing-hero-secondary", "View Pricing", "/pricing/?product=storage");
         if (addonSection) addonSection.style.display = "";
         if (trialNote) trialNote.style.display = "";
         if (footerCta) footerCta.style.display = "";
+      } else if (productSlug === "ai-chatbot") {
+        setTextContentById("pricing-hero-title", "AI Chatbot Pricing for Support Teams", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "Launch AI-powered website chat with scalable conversation and agent limits.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "AI Chatbot Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose a plan based on widgets, agents, and monthly conversation volume.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "Talk to Sales", "/contact/");
+        setButtonById("pricing-hero-secondary", "Start Free Trial", "/auth/signup/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      } else if (productSlug === "business-autopilot-erp") {
+        setTextContentById("pricing-hero-title", "Business Autopilot ERP Pricing", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "Platform pricing with optional per-user expansion for finance, operations, and team workflows.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Business Autopilot ERP Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose a base ERP platform plan and scale users as your organization grows.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "Talk to Sales", "/contact/");
+        setButtonById("pricing-hero-secondary", "View ERP", "/products/business-autopilot-erp/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      } else if (productSlug === "monitor") {
+        setTextContentById("pricing-hero-title", "Flexible plans for growing teams.", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "Start free, upgrade anytime, and scale with your workforce.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Work Suite Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose the plan that fits your team size and monitoring needs.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "Talk to Sales", "/contact/");
+        setButtonById("pricing-hero-secondary", "Start Free Trial", "/auth/signup/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      } else if (isWhatsAppAutomation) {
+        setTextContentById("pricing-hero-title", "WhatsApp Automation Pricing for Growing Teams", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "Digital Card + Catalogue + Automation in ONE Platform, with add-on users on the same global billing system.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "WhatsApp Automation Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Dynamic pricing from admin plans with Digital Card add-on user pricing.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "View Plans", "/pricing/?product=whatsapp-automation");
+        setButtonById("pricing-hero-secondary", "Talk to Sales", "/contact/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
       } else {
         if (heroTitle) heroTitle.textContent = heroTitle.dataset.default || heroTitle.textContent;
         if (heroSubtitle) heroSubtitle.textContent = heroSubtitle.dataset.default || heroSubtitle.textContent;
@@ -822,7 +1060,19 @@
       fetch("/api/public/products")
         .then((response) => response.json())
         .then((data) => {
-          const products = (data.products || []).filter((item) => item.slug !== "ai-chat-widget");
+          const desiredOrder = ["worksuite", "ai-chatbot", "whatsapp-automation", "online-storage", "business-autopilot-erp"];
+          const products = (data.products || [])
+            .filter((item) => item.slug !== "ai-chat-widget" && item.slug !== "digital-card")
+            .sort((a, b) => {
+              const ai = desiredOrder.indexOf(a.slug);
+              const bi = desiredOrder.indexOf(b.slug);
+              if (ai !== -1 || bi !== -1) {
+                if (ai === -1) return 1;
+                if (bi === -1) return -1;
+                if (ai !== bi) return ai - bi;
+              }
+              return String(a.name || "").localeCompare(String(b.name || ""));
+            });
           window.__pricingProducts = products;
           const monitor = products.find((item) => item.slug === "monitor");
           const preferred = getInitialProductSlug(products);

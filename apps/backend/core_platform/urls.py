@@ -78,12 +78,14 @@ urlpatterns = [
     path("api/storage/files/", include("apps.backend.storage.api_urls")),
     path("api/storage/explorer/", include("apps.backend.storage.api_explorer_urls")),
     path("api/business-autopilot/", include("apps.backend.business_autopilot.api_urls")),
+    path("api/whatsapp-automation/", include("apps.backend.modules.whatsapp_automation.api_urls")),
     path("api/activity/upload", monitor_core_views.upload_activity),
     path("api/org/settings", monitor_core_views.org_settings),
     path("api/screenshot/upload", monitor_core_views.upload_screenshot),
     path("api/monitor/heartbeat", monitor_core_views.monitor_heartbeat),
     path("api/monitor/stop", monitor_core_views.monitor_stop_event),
     path("api/worksuite/stop", monitor_core_views.monitor_stop_event),
+    path("", include("apps.backend.modules.whatsapp_automation.urls")),
     re_path(r"^app/(?P<path>.*)$", spa_serve, name="spa"),
 ]
 

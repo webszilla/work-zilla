@@ -4,6 +4,13 @@ from .models import AdminNotification, Organization
 ORG_ADMIN_INBOX_MAX_ITEMS = 100
 
 
+def _user_display(user):
+    if not user:
+        return ""
+    full_name = f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+    return full_name or getattr(user, "username", "") or getattr(user, "email", "") or ""
+
+
 def create_admin_notification(
     title,
     message="",
@@ -91,6 +98,8 @@ def notify_payment_pending(transfer, message=""):
     org = transfer.organization if transfer else None
     plan = transfer.plan if transfer else None
     product = plan.product if plan else None
+    submitter = transfer.user if transfer else None
+    org_admin = org.owner if org else None
     org_name = org.name if org else (transfer.user.username if transfer and transfer.user else "Unknown org")
     plan_name = plan.name if plan else "Plan"
     product_name = product.name if product else "Work Suite"
@@ -98,6 +107,12 @@ def notify_payment_pending(transfer, message=""):
     amount = transfer.amount if transfer and transfer.amount is not None else 0
     reference = transfer.reference_no if transfer else ""
     details = f"{org_name} submitted a bank transfer for {product_name} ({plan_name}). Amount {currency} {amount}."
+    submitter_name = _user_display(submitter)
+    org_admin_name = _user_display(org_admin)
+    if submitter_name:
+        details = f"{details} Submitted by: {submitter_name}."
+    if org_admin_name:
+        details = f"{details} Org Admin: {org_admin_name}."
     if reference:
         details = f"{details} Reference: {reference}."
     return create_admin_notification(

@@ -11,7 +11,8 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
 from django.db.utils import OperationalError
 import json
-from datetime import timedelta
+from datetime import timedelta, date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 import os
 from types import SimpleNamespace
 
@@ -230,7 +231,20 @@ def _org_has_used_free_trial(org, product_slug):
 
 def _base_context(request):
     context = build_enquiry_context(request)
-    context["products"] = Product.objects.filter(is_active=True).order_by("sort_order", "name")
+    live_public_product_slugs = [
+        "monitor",
+        "ai-chatbot",
+        "whatsapp-automation",
+        "storage",  # Online Storage
+        "online-storage",  # compatibility alias if slug is renamed later
+        "business-autopilot-erp",
+    ]
+    product_order = {slug: idx for idx, slug in enumerate(live_public_product_slugs)}
+    products = list(
+        Product.objects.filter(is_active=True, slug__in=live_public_product_slugs)
+    )
+    products.sort(key=lambda p: (product_order.get(p.slug, 999), (p.name or "").lower()))
+    context["products"] = products
     context["is_logged_in"] = request.user.is_authenticated
     if request.user.is_authenticated:
         profile = UserProfile.objects.filter(user=request.user).first()
@@ -458,11 +472,17 @@ def checkout_select(request):
     product_slug = _normalize_product_slug(request.POST.get("product_slug"))
     currency = (request.POST.get("currency") or "inr").lower()
     billing = (request.POST.get("billing") or "monthly").lower()
+    try:
+        addon_count = int(request.POST.get("addon_count") or 0)
+    except (TypeError, ValueError):
+        addon_count = 0
+    addon_count = max(0, addon_count)
 
     request.session["selected_product_slug"] = product_slug
     request.session["selected_plan_id"] = plan_id
     request.session["selected_currency"] = currency
     request.session["selected_billing"] = billing
+    request.session["selected_addon_count"] = addon_count
 
     if not request.user.is_authenticated:
         return redirect("/auth/signup/?next=/checkout/")
@@ -476,6 +496,11 @@ def checkout_view(request):
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
     billing = request.session.get("selected_billing") or "monthly"
+    try:
+        addon_count = int(request.session.get("selected_addon_count") or 0)
+    except (TypeError, ValueError):
+        addon_count = 0
+    addon_count = max(0, addon_count)
     plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
     selected_product_name = product_slug.title() if product_slug else ""
     price_suffix = "/user per month" if billing == "monthly" else "/user per year"
@@ -495,6 +520,11 @@ def checkout_view(request):
                 price_suffix = "/org per month" if billing == "monthly" else "/org per year"
         except Exception:
             pass
+    if not getattr(plan, "allow_addons", False):
+        addon_count = 0
+    addon_unit_price = float(_addon_price(plan, currency, billing) or 0) if getattr(plan, "allow_addons", False) else 0.0
+    base_amount = float(_plan_price(plan, currency, billing) or 0) if plan else 0.0
+    total_amount = base_amount + (addon_unit_price * addon_count)
     org = _resolve_org_for_user(request.user)
     profile = BillingProfile.objects.filter(organization=org).first()
     user_profile = UserProfile.objects.filter(user=request.user).first()
@@ -521,6 +551,10 @@ def checkout_view(request):
         "selected_currency": currency,
         "selected_billing": billing,
         "selected_plan": plan,
+        "selected_addon_count": addon_count,
+        "selected_addon_price": addon_unit_price,
+        "selected_base_amount": base_amount,
+        "selected_total_amount": total_amount,
         "price_suffix": price_suffix,
         "billing_profile": profile,
         "billing_profile_complete": _billing_profile_complete(profile),
@@ -570,6 +604,65 @@ def _addon_price(plan, currency, billing):
     if currency == "usd":
         return plan.addon_usd_monthly_price if billing == "monthly" else plan.addon_usd_yearly_price
     return plan.addon_monthly_price if billing == "monthly" else plan.addon_yearly_price
+
+
+def _active_subscription_for_product(org, product_slug):
+    if not org:
+        return None
+    product_slug = _normalize_product_slug(product_slug)
+    qs = Subscription.objects.filter(organization=org, status__in=("active", "trialing")).select_related("plan", "plan__product")
+    if product_slug == "monitor":
+        qs = qs.filter(Q(plan__product__slug="monitor") | Q(plan__product__isnull=True))
+    else:
+        qs = qs.filter(plan__product__slug=product_slug)
+    return qs.order_by("-start_date", "-id").first()
+
+
+def _addon_proration_preview(subscription, currency="inr", now=None, addon_delta=1):
+    now = now or timezone.now()
+    addon_delta = max(0, int(addon_delta or 0))
+    if not subscription or not subscription.plan or addon_delta <= 0:
+        return {
+            "remaining_days": 0,
+            "cycle_days": 30,
+            "unit_price": Decimal("0.00"),
+            "prorated_unit_price": Decimal("0.00"),
+            "amount": Decimal("0.00"),
+            "start_at": now,
+            "end_at": now,
+            "description": "",
+        }
+    plan = subscription.plan
+    billing_cycle = (subscription.billing_cycle or "monthly").lower()
+    cycle_days = 365 if billing_cycle == "yearly" else 30
+    raw_unit_price = _addon_price(plan, currency, billing_cycle) or 0
+    unit_price = Decimal(str(raw_unit_price))
+    start_at = now
+    end_at = subscription.end_date if subscription.end_date and subscription.end_date > now else (now + timedelta(days=cycle_days))
+    remaining_seconds = max(0, (end_at - start_at).total_seconds())
+    cycle_seconds = max(1, cycle_days * 24 * 60 * 60)
+    ratio = Decimal(str(remaining_seconds / cycle_seconds))
+    prorated_unit = (unit_price * ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total_amount = (prorated_unit * Decimal(addon_delta)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    remaining_days = max(0, int((end_at.date() - start_at.date()).days))
+    currency_label = (currency or "INR").upper()
+    description = (
+        f"Add-on users proration ({addon_delta} user{'s' if addon_delta != 1 else ''}) "
+        f"for {remaining_days} day{'s' if remaining_days != 1 else ''} "
+        f"from {start_at.strftime('%d %b %Y')} to {end_at.strftime('%d %b %Y')} "
+        f"(billing cycle: {billing_cycle.title()}, {remaining_days}/{cycle_days} days remaining). "
+        f"Unit {currency_label} {unit_price} prorated to {currency_label} {prorated_unit}."
+    )
+    return {
+        "remaining_days": remaining_days,
+        "cycle_days": cycle_days,
+        "unit_price": unit_price,
+        "prorated_unit_price": prorated_unit,
+        "amount": total_amount,
+        "start_at": start_at,
+        "end_at": end_at,
+        "description": description,
+    }
 
 
 def _plan_rank(plan):
@@ -747,6 +840,11 @@ def checkout_confirm(request):
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
     billing = request.session.get("selected_billing") or "monthly"
+    try:
+        addon_count = int(request.POST.get("addon_count") or request.session.get("selected_addon_count") or 0)
+    except (TypeError, ValueError):
+        addon_count = 0
+    addon_count = max(0, addon_count)
     plan = Plan.objects.filter(id=plan_id).first()
     storage_plan = None
     if product_slug in ("storage", "online-storage"):
@@ -764,6 +862,8 @@ def checkout_confirm(request):
     if not plan:
         messages.error(request, "Select a plan before checkout.")
         return redirect("/pricing/")
+    if not getattr(plan, "allow_addons", False):
+        addon_count = 0
 
     org = _resolve_org_for_user(request.user)
     profile = BillingProfile.objects.filter(organization=org).first()
@@ -810,6 +910,7 @@ def checkout_confirm(request):
                 amount = storage_plan.monthly_price_inr if billing == "monthly" else storage_plan.yearly_price_inr
         else:
             amount = _plan_price(plan, currency, billing) or 0
+            amount = float(amount or 0) + (float(_addon_price(plan, currency, billing) or 0) * addon_count)
         PendingTransfer.objects.create(
             organization=org,
             user=request.user,
@@ -817,6 +918,7 @@ def checkout_confirm(request):
             request_type="new",
             billing_cycle=billing,
             retention_days=plan.retention_days or 30,
+            addon_count=addon_count if plan.allow_addons else 0,
             currency=currency.upper(),
             amount=float(amount or 0),
             status="pending",
@@ -831,6 +933,7 @@ def checkout_confirm(request):
         "selected_plan_id",
         "selected_currency",
         "selected_billing",
+        "selected_addon_count",
     ):
         request.session.pop(key, None)
 
@@ -1048,6 +1151,112 @@ def billing_renew_confirm(request):
 
     messages.success(request, "Renewal submitted. We will activate your plan soon.")
     return redirect("/my-account/")
+
+
+@login_required(login_url="/auth/login/")
+def billing_addons_manage(request):
+    context = _base_context(request)
+    context["is_logged_in"] = True
+    context["account_section"] = "billing"
+    org = _resolve_org_for_user(request.user)
+    product_slug = _normalize_product_slug(request.GET.get("product") or request.POST.get("product"))
+    if not product_slug:
+        messages.error(request, "Product is required.")
+        return redirect("/my-account/")
+
+    sub = _active_subscription_for_product(org, product_slug)
+    if not sub or not sub.plan:
+        messages.error(request, "No active subscription found for this product.")
+        return redirect("/my-account/")
+    if not sub.plan.allow_addons:
+        messages.info(request, "Add-on users are not available for this plan.")
+        return redirect("/my-account/")
+
+    current_addons = int(sub.addon_count or 0)
+    currency = ((request.GET.get("currency") or request.POST.get("currency") or "INR").strip().upper())
+    if currency not in ("INR", "USD"):
+        currency = "INR"
+    pending_addon = (
+        PendingTransfer.objects
+        .filter(
+            organization=org,
+            plan=sub.plan,
+            request_type="addon",
+            status__in=("pending", "draft"),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    target_addons = current_addons
+    if request.method == "POST":
+        try:
+            target_addons = int(request.POST.get("target_addon_count") or current_addons)
+        except (TypeError, ValueError):
+            target_addons = current_addons
+        target_addons = max(0, target_addons)
+        if target_addons == current_addons:
+            messages.info(request, "No add-on user change detected.")
+            return redirect(f"/my-account/billing/addons/?product={product_slug}")
+
+        if target_addons < current_addons:
+            sub.addon_count = target_addons
+            sub.save(update_fields=["addon_count"])
+            reduced = current_addons - target_addons
+            messages.success(
+                request,
+                f"Reduced {reduced} add-on user{'s' if reduced != 1 else ''}. New add-on count: {target_addons}.",
+            )
+            return redirect("/my-account/billing/")
+
+        if pending_addon:
+            messages.info(request, "An add-on payment request is already pending approval.")
+            return redirect(f"/my-account/bank-transfer/{pending_addon.id}/")
+
+        addon_delta = target_addons - current_addons
+        preview = _addon_proration_preview(sub, currency=currency.lower(), addon_delta=addon_delta)
+        if preview["amount"] <= 0:
+            messages.error(request, "Unable to calculate add-on proration amount.")
+            return redirect(f"/my-account/billing/addons/?product={product_slug}")
+        transfer = PendingTransfer.objects.create(
+            organization=org,
+            user=request.user,
+            plan=sub.plan,
+            request_type="addon",
+            billing_cycle=sub.billing_cycle or "monthly",
+            retention_days=sub.retention_days or (sub.plan.retention_days if sub.plan else 30),
+            addon_count=addon_delta,
+            currency=currency,
+            amount=float(preview["amount"]),
+            status="draft",
+            notes=(
+                f"{preview['description']} Current add-ons: {current_addons}. "
+                f"Requested total add-ons after approval: {target_addons}."
+            ),
+        )
+        messages.info(request, "Add-on payment request created. Complete bank transfer submission to continue.")
+        return redirect(f"/my-account/bank-transfer/{transfer.id}/")
+    else:
+        try:
+            target_addons = int(request.GET.get("target") or current_addons)
+        except (TypeError, ValueError):
+            target_addons = current_addons
+        target_addons = max(0, target_addons)
+
+    addon_delta_preview = max(0, target_addons - current_addons)
+    preview = _addon_proration_preview(sub, currency=currency.lower(), addon_delta=addon_delta_preview) if addon_delta_preview else None
+
+    context.update({
+        "organization": org,
+        "addon_subscription": sub,
+        "addon_current_count": current_addons,
+        "addon_target_count": target_addons,
+        "addon_delta_preview": addon_delta_preview,
+        "addon_currency": currency,
+        "addon_pending_transfer": pending_addon,
+        "addon_proration_preview": preview,
+    })
+    return render(request, "public/billing_addons.html", context)
 
 
 @login_required
@@ -1433,10 +1642,21 @@ def billing_view(request):
             paid_on=sub.start_date,
             status="approved"
         ))
-    approved_transfers.sort(
-        key=lambda transfer: transfer.paid_on or getattr(transfer, "updated_at", None) or getattr(transfer, "created_at", None) or timezone.now(),
-        reverse=True,
-    )
+    def _billing_sort_dt(transfer):
+        value = (
+            transfer.paid_on
+            or getattr(transfer, "updated_at", None)
+            or getattr(transfer, "created_at", None)
+            or timezone.now()
+        )
+        if isinstance(value, datetime):
+            return value if timezone.is_aware(value) else timezone.make_aware(value, timezone.get_current_timezone())
+        if isinstance(value, date):
+            dt = datetime.combine(value, datetime.min.time())
+            return timezone.make_aware(dt, timezone.get_current_timezone())
+        return timezone.now()
+
+    approved_transfers.sort(key=_billing_sort_dt, reverse=True)
     pending_transfers = (
         PendingTransfer.objects
         .filter(organization=org, status__in=["pending", "draft"])
@@ -1546,6 +1766,7 @@ def account_bank_transfer(request, transfer_id=None):
         "transfer": transfer,
         "bank_account_details": bank_account_details,
         "seller_upi_id": seller_upi_id,
+        "transfer_description": (transfer.notes or "").strip() if transfer and transfer.request_type == "addon" else "",
     })
     return render(request, "payments/bank_transfer.html", context)
 

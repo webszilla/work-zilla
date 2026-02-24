@@ -39,6 +39,13 @@
               {% endif %}
             </span>
             <span class="price-suffix-inline">{{ price_suffix|default:"/user per month" }}</span>
+            {% if selected_plan.allow_addons %}
+              <div class="text-secondary mt-1" style="font-size:14px;">
+                Base: {{ selected_currency|upper }} {{ selected_base_amount }}<br>
+                Add-ons: {{ selected_addon_count|default:0 }} x {{ selected_currency|upper }} {{ selected_addon_price }}<br>
+                <strong>Total: {{ selected_currency|upper }} {{ selected_total_amount }}</strong>
+              </div>
+            {% endif %}
           </div>
         </div>
 
@@ -53,6 +60,26 @@
 
           <form method="post" action="/checkout/confirm/" class="mt-4" enctype="multipart/form-data">
             {% csrf_token %}
+            {% if selected_plan.allow_addons %}
+              <div class="card mb-3 p-3" style="background:#f8fafc;">
+                <h3 class="section-title mb-2">Add-on Users</h3>
+                <p class="text-secondary mb-2">Available for this plan. Amount will be added to this payment request.</p>
+                <div class="row g-3">
+                  <div class="col-12 col-lg-4">
+                    <div class="form-group mb-0">
+                      <label>Add-on Users</label>
+                      <input class="form-control" type="number" name="addon_count" min="0" value="{{ selected_addon_count|default:0 }}">
+                    </div>
+                  </div>
+                  <div class="col-12 col-lg-8">
+                    <div class="form-group mb-0">
+                      <label>Add-on User Price</label>
+                      <input class="form-control" type="text" value="{{ selected_currency|upper }} {{ selected_addon_price }} per user / {{ selected_billing }}" readonly>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
             <div class="row g-3 mb-3">
               <div class="col-12 col-lg-4">
                 <div class="form-group mb-0">

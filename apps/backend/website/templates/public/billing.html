@@ -9,15 +9,10 @@
   <div class="site-container account-layout">
     <div class="account-header">
       <h1 class="section-title">Billing</h1>
-      <p class="section-lead">Track payment status and plan renewals in one place.</p>
     </div>
+    {% include "public/partials/account_tabs.html" %}
 
-    <div class="account-grid">
-      <aside class="account-menu">
-        {% include "public/partials/account_sidebar.html" %}
-      </aside>
-
-      <div class="account-content card p-4">
+    <div class="account-content card p-4">
         {% if messages %}
           {% for message in messages|slice:"-1:" %}
             <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %}">
@@ -28,7 +23,6 @@
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
           <div>
             <h2 class="section-title">Billing Details</h2>
-            <p class="text-secondary">Download invoices and track payment status for your subscriptions.</p>
           </div>
           <form method="get" class="d-flex align-items-center gap-2">
             <label class="text-secondary">Product</label>
@@ -50,6 +44,7 @@
                 <th>Product</th>
                 <th>Plan</th>
                 <th>Billing Cycle</th>
+                <th>Type</th>
                 <th>Amount</th>
                 <th>Paid On</th>
                 <th>Status</th>
@@ -62,6 +57,7 @@
                   <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
+                  <td>{{ transfer.request_type|default:"Base"|title }}</td>
                   <td>{{ transfer.currency }} {{ transfer.amount }}</td>
                   <td>{% if transfer.paid_on %}{{ transfer.paid_on|date:"d M Y" }}{% else %}-{% endif %}</td>
                   <td><span class="badge bg-success">{{ transfer.status|title|default:"Approved" }}</span></td>
@@ -77,7 +73,7 @@
                 </tr>
               {% empty %}
                 <tr>
-                  <td colspan="7">No billing records available.</td>
+                  <td colspan="8">No billing records available.</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -92,8 +88,10 @@
                 <th>Product</th>
                 <th>Plan</th>
                 <th>Billing Cycle</th>
+                <th>Type</th>
                 <th>Amount</th>
                 <th>Requested</th>
+                <th>Description</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -103,13 +101,15 @@
                   <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
+                  <td>{{ transfer.request_type|title }}</td>
                   <td>{{ transfer.currency }} {{ transfer.amount }}</td>
                   <td>{{ transfer.created_at|date:"d M Y" }}</td>
+                  <td>{{ transfer.notes|default:"-"|truncatechars:120 }}</td>
                   <td><span class="badge bg-warning text-dark">{{ transfer.status|title }}</span></td>
                 </tr>
               {% empty %}
                 <tr>
-                  <td colspan="6">No pending transfers.</td>
+                  <td colspan="8">No pending transfers.</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -150,7 +150,6 @@
 
         <h3 class="section-title mt-4">Company Billing Details</h3>
         {% include "public/partials/billing_profile_form.html" %}
-      </div>
     </div>
   </div>
 </section>

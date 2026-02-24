@@ -1,4 +1,5 @@
 import os
+import threading
 from collections import Counter
 
 from celery import shared_task
@@ -7,7 +8,10 @@ from django.core.files import File
 from django.core.files.storage import FileSystemStorage
 from django.utils import timezone
 
+from core.models import Organization
 from .models import GlobalMediaStorageSettings, MediaStoragePullJob
+from .org_backup_manager import run_org_backup_pipeline, run_org_restore_pipeline, queue_org_backup
+from .system_backup_manager import run_system_backup_pipeline, trigger_due_scheduled_backup
 
 
 def _iter_local_media_files(local_root):
@@ -131,3 +135,56 @@ def pull_local_media_job(job_id):
     job.file_type_counts = dict(ext_counts)
     job.current_path = ""
     job.save(update_fields=["status", "finished_at", "copied_files", "skipped_files", "existing_files", "file_type_counts", "current_path"])
+
+
+@shared_task(name="saas_admin.system_backup_run")
+def run_system_backup_job(log_id):
+    return run_system_backup_pipeline(log_id)
+
+
+@shared_task(name="saas_admin.system_backup_scheduler_tick")
+def run_system_backup_scheduler_tick():
+    result = trigger_due_scheduled_backup()
+    if not result.get("queued"):
+        return result
+
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    log_id = result.get("log_id")
+    if not log_id:
+        return {"queued": False, "reason": "missing_log_id"}
+    if broker_url.startswith("memory://"):
+        threading.Thread(target=run_system_backup_job, args=(log_id,), daemon=True).start()
+    else:
+        run_system_backup_job.delay(log_id)
+    return {"queued": True, "log_id": log_id}
+
+
+@shared_task(name="saas_admin.org_backup_run")
+def run_org_backup_job(log_id):
+    return run_org_backup_pipeline(log_id)
+
+
+@shared_task(name="saas_admin.org_restore_run")
+def run_org_restore_job(log_id):
+    return run_org_restore_pipeline(log_id)
+
+
+@shared_task(name="saas_admin.org_backup_all")
+def run_org_backup_all_job(requested_by_user_id=None):
+    queued = 0
+    skipped = 0
+    errors = []
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    for org in Organization.objects.order_by("id"):
+        try:
+            log = queue_org_backup(org, requested_by=None, trigger="bulk_manual")
+            queued += 1
+            if broker_url.startswith("memory://"):
+                threading.Thread(target=run_org_backup_job, args=(log.id,), daemon=True).start()
+            else:
+                run_org_backup_job.delay(log.id)
+        except Exception as exc:
+            skipped += 1
+            if len(errors) < 20:
+                errors.append(f"{org.id}: {exc}")
+    return {"queued": queued, "skipped": skipped, "errors": errors}

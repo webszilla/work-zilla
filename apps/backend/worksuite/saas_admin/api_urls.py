@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api_views
+from . import api_views, backup_manager_api_views
 
 urlpatterns = [
     path("overview", api_views.overview, name="saas_admin_overview"),
@@ -17,6 +17,19 @@ urlpatterns = [
     path("settings/media-storage/pull-local/status/<uuid:job_id>", api_views.media_storage_pull_status, name="saas_admin_media_storage_pull_status"),
     path("settings/storage-sync", api_views.storage_sync_settings, name="saas_admin_storage_sync_settings"),
     path("settings/backup-retention", api_views.backup_retention_settings, name="saas_admin_backup_retention_settings"),
+    path("settings/system-backup-manager", backup_manager_api_views.system_backup_manager_settings, name="saas_admin_system_backup_manager_settings"),
+    path("system-backup-manager/dashboard", backup_manager_api_views.system_backup_manager_dashboard, name="saas_admin_system_backup_manager_dashboard"),
+    path("system-backup-manager/run", backup_manager_api_views.system_backup_manager_run, name="saas_admin_system_backup_manager_run"),
+    path("system-backup-manager/logs", backup_manager_api_views.system_backup_manager_logs, name="saas_admin_system_backup_manager_logs"),
+    path("system-backup-manager/org-backups/run", backup_manager_api_views.organization_backup_run, name="saas_admin_org_backup_run"),
+    path("system-backup-manager/org-backups/run-all", backup_manager_api_views.organization_backup_run_all, name="saas_admin_org_backup_run_all"),
+    path("system-backup-manager/org-backups/logs", backup_manager_api_views.organization_backup_logs, name="saas_admin_org_backup_logs"),
+    path("system-backup-manager/restore/available", backup_manager_api_views.organization_restore_available_backups, name="saas_admin_org_restore_available"),
+    path("system-backup-manager/restore/run", backup_manager_api_views.organization_restore_run, name="saas_admin_org_restore_run"),
+    path("system-backup-manager/restore/logs", backup_manager_api_views.organization_restore_logs, name="saas_admin_org_restore_logs"),
+    path("system-backup-manager/google-drive/auth-start", backup_manager_api_views.system_backup_google_auth_start, name="saas_admin_system_backup_google_auth_start"),
+    path("system-backup-manager/google-drive/callback", backup_manager_api_views.system_backup_google_auth_callback, name="saas_admin_system_backup_google_auth_callback"),
+    path("system-backup-manager/google-drive/disconnect", backup_manager_api_views.system_backup_google_disconnect, name="saas_admin_system_backup_google_disconnect"),
     path("settings/setup/export", api_views.setup_export, name="saas_admin_setup_export"),
     path("settings/setup/import", api_views.setup_import, name="saas_admin_setup_import"),
     path("settings/backup-retention/org/<int:org_id>", api_views.org_backup_retention_override, name="saas_admin_backup_retention_org"),

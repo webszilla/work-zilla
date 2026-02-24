@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "apps.backend.media_library.apps.MediaLibraryConfig",
     "apps.backend.storage.apps.StorageConfig",
     "apps.backend.business_autopilot.apps.BusinessAutopilotConfig",
+    "apps.backend.modules.whatsapp_automation.apps.WhatsappAutomationConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",
     "apps.backend.worksuite.apps.MonitorConfig",
@@ -208,6 +209,12 @@ try:
 except Exception:
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "cache+memory://"
+CELERY_BEAT_SCHEDULE = {
+    "saas-admin-system-backup-scheduler-tick": {
+        "task": "saas_admin.system_backup_scheduler_tick",
+        "schedule": 900.0,  # every 15 minutes
+    }
+}
 BACKUP_INCLUDE_PREFIXES = os.environ.get(
     "BACKUP_INCLUDE_PREFIXES",
     "critical/org_{org_id}/product_{product_id}/,critical/org_{org_id}/assets/",

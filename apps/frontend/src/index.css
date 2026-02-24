@@ -293,6 +293,17 @@ a{
 html[data-theme="light"] .theme-btn-dark{
   color:#ffffff;
 }
+html[data-theme="light"] .theme-btn-dark:hover{
+  color:#ffffff;
+  background:#0b1222;
+  border-color:#0f172a;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
+}
+html[data-theme="light"] .theme-btn-dark.active:hover{
+  color:#ffffff;
+  background:#0b1222;
+  border-color: var(--color-accent, #0ea5e9);
+}
 html[data-theme="light"] .form-control,
 html[data-theme="light"] .form-select{
   background:#ffffff;

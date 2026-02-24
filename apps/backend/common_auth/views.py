@@ -100,7 +100,7 @@ def signup_view(request):
         )
     )
     login(request, user)
-    return redirect("/my-account/")
+    return redirect("/pricing/")
 
 
 @require_http_methods(["GET", "POST"])
