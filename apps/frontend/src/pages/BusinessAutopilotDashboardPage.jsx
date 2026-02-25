@@ -23,7 +23,7 @@ export default function BusinessAutopilotDashboardPage({
   };
 
   return (
-    <div className="card p-3">
+    <div>
       <h4 className="mb-2">Business Autopilot ERP</h4>
       <p className="text-secondary mb-3">
         Modular suite for CRM, HR Management, Projects, and Accounts.
@@ -54,21 +54,25 @@ export default function BusinessAutopilotDashboardPage({
         <div className="card p-3 mt-3">
           <h6 className="mb-2">Module Access Settings</h6>
           <div className="text-secondary small mb-3">Enable or disable eligible ERP modules for your organization.</div>
-          <div className="d-flex flex-column gap-2">
+          <div className="row g-2">
             {allModules.map((module) => (
-              <div className="d-flex align-items-center justify-content-between border rounded px-2 py-2" key={`toggle-${module.slug}`}>
-                <div>
-                  <div className="fw-semibold">{module.name}</div>
-                  <div className="text-secondary small">{module.enabled ? "Enabled" : "Disabled"}</div>
+              <div className="col-12 col-md-6 col-xl-3" key={`toggle-${module.slug}`}>
+                <div className="d-flex align-items-center justify-content-between border rounded px-2 py-2 h-100 gap-2">
+                  <div className="min-w-0">
+                    <div className="fw-semibold">{module.name}</div>
+                    <div className="text-secondary small">{module.enabled ? "Enabled" : "Disabled"}</div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${module.enabled ? "btn-outline-danger" : "btn-outline-success"}`}
+                      disabled={savingModuleSlug === module.slug}
+                      onClick={() => onToggleModule && onToggleModule(module.slug, !module.enabled)}
+                    >
+                      {savingModuleSlug === module.slug ? "Saving..." : module.enabled ? "Disable" : "Enable"}
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${module.enabled ? "btn-outline-danger" : "btn-outline-success"}`}
-                  disabled={savingModuleSlug === module.slug}
-                  onClick={() => onToggleModule && onToggleModule(module.slug, !module.enabled)}
-                >
-                  {savingModuleSlug === module.slug ? "Saving..." : module.enabled ? "Disable" : "Enable"}
-                </button>
               </div>
             ))}
           </div>

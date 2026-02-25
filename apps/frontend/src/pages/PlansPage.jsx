@@ -199,6 +199,58 @@ function getAddonPrice(plan, cycle, currency) {
   return cycle === "yearly" ? plan.addon_yearly_price : plan.addon_monthly_price;
 }
 
+function getErpPerUserPrice(plan, cycle, currency) {
+  const limits = plan?.limits || {};
+  if (currency === "USD") {
+    return cycle === "yearly"
+      ? (limits.user_price_usdt_year ?? limits.user_price_usd_year ?? null)
+      : (limits.user_price_usdt_month ?? limits.user_price_usd_month ?? null);
+  }
+  return cycle === "yearly"
+    ? (limits.user_price_inr_year ?? null)
+    : (limits.user_price_inr_month ?? null);
+}
+
+function getErpPlanFeatures(plan) {
+  const name = String(plan?.name || "").toLowerCase();
+  if (name.includes("starter")) {
+    return [
+      "Basic Accounting",
+      "Invoice & Billing",
+      "Expense Tracking",
+      "GST Ready (India)",
+      "Basic Reports",
+      "1 Organization",
+    ];
+  }
+  if (name.includes("growth")) {
+    return [
+      "Everything in Starter",
+      "Inventory Management",
+      "Purchase Orders",
+      "Vendor Management",
+      "Project Accounting",
+      "CRM + HR Modules",
+    ];
+  }
+  if (name.includes("pro")) {
+    return [
+      "Everything in Growth",
+      "Advanced Role Permissions",
+      "Automation Workflows",
+      "Custom Dashboards",
+      "Audit Logs",
+      "Priority Support",
+    ];
+  }
+  return [
+    "CRM Module",
+    "HR Management",
+    "Projects",
+    "Accounts / ERP",
+  ];
+}
+
 function getProrationNote(plan, cycle, activeSub) {
   if (!activeSub || !activeSub.end_ts || !activeSub.start_ts) {
     return "";
@@ -242,6 +294,7 @@ export default function PlansPage() {
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
+  const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -949,6 +1002,41 @@ export default function PlansPage() {
                         )}
                       </div>
                     </>
+                  ) : isBusinessAutopilot ? (
+                    <>
+                      <div className="plan-feature-list">
+                        <div className="plan-metric">
+                          Base platform ({currency}): {formatCurrencyLabel(currency)}{" "}
+                          {getPlanPrice(plan, cycle, currency) || "-"} / {cycle === "yearly" ? "year" : "month"}
+                        </div>
+                        <div className="plan-metric">
+                          Per user ({currency}): {formatCurrencyLabel(currency)}{" "}
+                          {getErpPerUserPrice(plan, cycle, currency) || "-"} / {cycle === "yearly" ? "year" : "month"}
+                        </div>
+                        <div className="plan-metric">
+                          Employees allowed: {plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}
+                        </div>
+                        {plan.allow_addons ? (
+                          <>
+                            <div className="plan-metric">
+                              Add-on Monthly: {formatCurrencyLabel(currency)} {addonMonthly || "-"}
+                            </div>
+                            <div className="plan-metric">
+                              Add-on Yearly: {formatCurrencyLabel(currency)} {addonYearly || "-"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="plan-metric">Add-ons disabled</div>
+                        )}
+                        <div className="plan-feature-divider" />
+                        {getErpPlanFeatures(plan).map((feature) => (
+                          <div className="plan-feature" key={`${plan.id}-${feature}`}>
+                            <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   ) : (
                     <>
                       <div className="plan-feature-list">
@@ -1001,7 +1089,7 @@ export default function PlansPage() {
                           {cycle === "yearly" ? "Yearly" : "Monthly"}
                         </div>
                       </div>
-                      {!isAiChatbot && !isStorage ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">
@@ -1056,7 +1144,7 @@ export default function PlansPage() {
                           </>
                         )}
                       </div>
-                      {!isAiChatbot && !isStorage ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">

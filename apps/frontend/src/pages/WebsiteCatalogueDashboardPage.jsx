@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
 
 const emptyForm = {
@@ -11,6 +11,7 @@ const emptyForm = {
   is_active: true,
   sort_order: 0,
 };
+const PAGE_SIZE = 10;
 
 export default function WebsiteCatalogueDashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,8 @@ export default function WebsiteCatalogueDashboardPage() {
     is_active: true,
   });
   const [form, setForm] = useState(emptyForm);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   async function loadItems() {
     setLoading(true);
@@ -78,6 +81,10 @@ export default function WebsiteCatalogueDashboardPage() {
     loadItems();
   }, []);
 
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
+
   async function saveItem() {
     setSaving(true);
     setError("");
@@ -86,7 +93,7 @@ export default function WebsiteCatalogueDashboardPage() {
       setForm(emptyForm);
       await loadItems();
     } catch (err) {
-      setError(err?.message || "Unable to save catalogue product.");
+      setError(err?.data?.message || err?.message || "Unable to save catalogue product.");
     } finally {
       setSaving(false);
     }
@@ -100,6 +107,20 @@ export default function WebsiteCatalogueDashboardPage() {
       setError(err?.message || "Unable to delete catalogue product.");
     }
   }
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((row) =>
+      [row.title, row.category, row.price, row.description]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [items, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedItems = filteredItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (loading) return <div className="card p-4 text-center"><div className="spinner" /><p className="mb-0">Loading catalogue...</p></div>;
 
@@ -195,17 +216,32 @@ export default function WebsiteCatalogueDashboardPage() {
               <input className="form-check-input" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setForm((p) => ({ ...p, is_active: e.target.checked }))} id="waCatActive" />
               <label className="form-check-label" htmlFor="waCatActive">Active</label>
             </div>
+            <div className="small text-secondary ms-auto">
+              Max entries: <strong>50</strong> | Current: <strong>{items.length}</strong>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="p-4">
-        <h4 className="mb-3">Catalogue Products</h4>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+          <h4 className="mb-0">Catalogue Products</h4>
+          <label className="table-search mb-0" htmlFor="wa-catalogue-search">
+            <i className="bi bi-search" aria-hidden="true" />
+            <input
+              id="wa-catalogue-search"
+              type="search"
+              placeholder="Search products"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+        </div>
         <div className="table-responsive">
           <table className="table table-dark table-hover align-middle">
             <thead><tr><th>Title</th><th>Category</th><th>Price</th><th>Status</th><th className="text-end">Action</th></tr></thead>
             <tbody>
-              {items.length ? items.map((row) => (
+              {pagedItems.length ? pagedItems.map((row) => (
                 <tr key={row.id}>
                   <td>{row.title}</td>
                   <td>{row.category || "-"}</td>
@@ -220,9 +256,19 @@ export default function WebsiteCatalogueDashboardPage() {
                     <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteItem(row.id)}>Delete</button>
                   </td>
                 </tr>
-              )) : <tr><td colSpan="5" className="text-secondary">No catalogue products yet.</td></tr>}
+              )) : <tr><td colSpan="5" className="text-secondary">No catalogue products found.</td></tr>}
             </tbody>
           </table>
+        </div>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+          <small className="text-secondary">
+            Showing {pagedItems.length ? ((currentPage - 1) * PAGE_SIZE) + 1 : 0} to {((currentPage - 1) * PAGE_SIZE) + pagedItems.length} of {filteredItems.length}
+          </small>
+          <div className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-light btn-sm" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</button>
+            <span className="btn btn-outline-light btn-sm disabled">Page {currentPage} / {totalPages}</span>
+            <button type="button" className="btn btn-outline-light btn-sm" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</button>
+          </div>
         </div>
       </div>
     </div>

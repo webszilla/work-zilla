@@ -12,4 +12,7 @@ urlpatterns = [
     path("catalogue/page", api_views.catalogue_page_settings_api, name="wa_catalogue_page_settings_api"),
     path("catalogue/products", api_views.catalogue_products_api, name="wa_catalogue_products_api"),
     path("catalogue/products/<int:product_id>", api_views.catalogue_product_detail_api, name="wa_catalogue_product_detail_api"),
+    path("digital-cards", api_views.digital_card_entries_api, name="wa_digital_cards_api"),
+    path("digital-cards/slug-check", api_views.digital_card_slug_check_api, name="wa_digital_card_slug_check_api"),
+    path("digital-cards/<int:card_id>", api_views.digital_card_entry_detail_api, name="wa_digital_card_detail_api"),
 ]

@@ -15,11 +15,11 @@
         <div class="visual-title">Support</div>
         <div class="stat-row">
           <span>Email</span>
-          <strong>workzonemonitor@webszilla.com</strong>
+          <strong>{{ contact_info.support_email }}</strong>
         </div>
         <div class="stat-row">
           <span>Phone</span>
-          <strong>+91 90928 33701</strong>
+          <strong>{{ contact_info.support_phone }}</strong>
         </div>
       </div>
     </div>
@@ -32,10 +32,18 @@
       <div class="col-lg-5">
         <div class="card p-4 h-100">
           <h3>Office</h3>
-          <p class="text-secondary mb-1">Webszilla</p>
-          <p class="text-secondary mb-1">182/C, 4th Main Road, Sadasivam Nagar, Madipakkam, Chennai - 600091</p>
-          <p class="text-secondary mb-1">Phone: <a href="tel:9092833701" class="text-decoration-none">9092833701</a></p>
-          <p class="text-secondary mb-0">Email: <a href="mailto:workzonemonitor@webszilla.com" class="text-decoration-none">workzonemonitor@webszilla.com</a></p>
+          <p class="text-secondary mb-1">{{ contact_info.company_name }}</p>
+          {% for line in contact_info.address_lines %}
+            <p class="text-secondary mb-1">{{ line }}</p>
+          {% endfor %}
+          <p class="text-secondary mb-1">
+            Phone:
+            <a href="tel:{{ contact_info.support_phone_href }}" class="text-decoration-none">{{ contact_info.support_phone }}</a>
+          </p>
+          <p class="text-secondary mb-0">
+            Email:
+            <a href="mailto:{{ contact_info.support_email }}" class="text-decoration-none">{{ contact_info.support_email }}</a>
+          </p>
         </div>
       </div>
       <div class="col-lg-7">

@@ -59,7 +59,6 @@
                     <th>Status</th>
                     <th>Billing</th>
                     <th>Expire Date</th>
-                  <th>Info</th>
                   {% endif %}
                   <th>Action</th>
                 </tr>
@@ -92,36 +91,38 @@
                               -
                             {% endif %}
                           </td>
-                          <td>
-                            <button
-                              type="button"
-                              class="btn btn-outline btn-sm js-info-btn"
-                              data-product="{{ sub.product_name|default:branding.display_name|escapejs }}"
-                              data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
-                              data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
-                              data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
-                              data-expire="{% if sub.info_expire_date %}{{ sub.info_expire_date|date:'d M Y' }}{% else %}-{% endif %}"
-                              data-plan-paid="{% if sub.info_plan_paid_on %}{{ sub.info_plan_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
-                              data-plan-amount="{% if sub.info_plan_amount %}{{ sub.info_plan_currency }} {{ sub.info_plan_amount }}{% else %}-{% endif %}"
-                              data-addon-count="{% if sub.info_addon_count %}{{ sub.info_addon_count }}{% else %}0{% endif %}"
-                              data-addon-amount="{% if sub.info_addon_amount %}{{ sub.info_addon_currency }} {{ sub.info_addon_amount }}{% else %}-{% endif %}"
-                              data-addon-paid="{% if sub.info_addon_paid_on %}{{ sub.info_addon_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
-                            >
-                              View
-                            </button>
-                          </td>
                         {% endif %}
                         <td>
                           {% if is_agent %}
                             <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
                           {% elif sub.status == "active" or sub.status == "trialing" %}
                             <div class="d-flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                class="btn btn-outline btn-sm js-info-btn"
+                                title="View details"
+                                aria-label="View details"
+                                data-product="{{ sub.product_name|default:branding.display_name|escapejs }}"
+                                data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
+                                data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
+                                data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
+                                data-start="{% if sub.info_start_date %}{{ sub.info_start_date|date:'d M Y' }}{% else %}-{% endif %}"
+                                data-expire="{% if sub.info_expire_date %}{{ sub.info_expire_date|date:'d M Y' }}{% else %}-{% endif %}"
+                                data-plan-paid="{% if sub.info_plan_paid_on %}{{ sub.info_plan_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                                data-plan-amount="{% if sub.info_plan_amount %}{{ sub.info_plan_currency }} {{ sub.info_plan_amount }}{% else %}-{% endif %}"
+                                data-addon-count="{% if sub.info_addon_count %}{{ sub.info_addon_count }}{% else %}0{% endif %}"
+                                data-addon-amount="{% if sub.info_addon_amount %}{{ sub.info_addon_currency }} {{ sub.info_addon_amount }}{% else %}-{% endif %}"
+                                data-addon-paid="{% if sub.info_addon_paid_on %}{{ sub.info_addon_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
+                              >
+                                <i class="bi bi-eye" aria-hidden="true"></i>
+                                <span class="visually-hidden">View</span>
+                              </button>
                               <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
                               {% if sub.plan and sub.plan.allow_addons %}
                                 <a class="btn btn-outline btn-sm" href="/my-account/billing/addons/?product={{ slug }}">Manage Add-ons</a>
                               {% endif %}
                               {% if sub.can_upgrade %}
-                                <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">Plan Upgrade</a>
+                                <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">Upgrade</a>
                               {% endif %}
                             </div>
                           {% elif sub.status == "pending" %}
@@ -258,7 +259,6 @@
                       <th>Status</th>
                       <th>Billing</th>
                       <th>Expire Date</th>
-                      <th>Info</th>
                     {% endif %}
                     <th>Action</th>
                   </tr>
@@ -279,14 +279,19 @@
                                 -
                               {% endif %}
                             </td>
-                            <td>
+                          {% endif %}
+                          <td>
+                            <div class="d-flex flex-wrap gap-2">
                               <button
                                 type="button"
                                 class="btn btn-outline btn-sm js-info-btn"
+                                title="View details"
+                                aria-label="View details"
                                 data-product="{{ sub.product_name|default:branding.display_name|escapejs }}"
                                 data-plan="{{ sub.info_plan_name|default:'-'|escapejs }}"
                                 data-status="{{ sub.info_status|default:'-'|title|escapejs }}"
                                 data-billing="{{ sub.info_billing_cycle|default:'-'|title|escapejs }}"
+                                data-start="{% if sub.info_start_date %}{{ sub.info_start_date|date:'d M Y' }}{% else %}-{% endif %}"
                                 data-expire="{% if sub.info_expire_date %}{{ sub.info_expire_date|date:'d M Y' }}{% else %}-{% endif %}"
                                 data-plan-paid="{% if sub.info_plan_paid_on %}{{ sub.info_plan_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
                                 data-plan-amount="{% if sub.info_plan_amount %}{{ sub.info_plan_currency }} {{ sub.info_plan_amount }}{% else %}-{% endif %}"
@@ -294,16 +299,15 @@
                                 data-addon-amount="{% if sub.info_addon_amount %}{{ sub.info_addon_currency }} {{ sub.info_addon_amount }}{% else %}-{% endif %}"
                                 data-addon-paid="{% if sub.info_addon_paid_on %}{{ sub.info_addon_paid_on|date:'d M Y' }}{% else %}-{% endif %}"
                               >
-                                View
+                                <i class="bi bi-eye" aria-hidden="true"></i>
+                                <span class="visually-hidden">View</span>
                               </button>
-                            </td>
-                          {% endif %}
-                          <td>
                             {% if sub.is_free_plan %}
                               <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">View Plans</a>
                             {% else %}
                               <a class="btn btn-outline btn-sm" href="/my-account/billing/renew/start/?product={{ slug }}">Renew Plan</a>
                             {% endif %}
+                            </div>
                           </td>
                         </tr>
                     {% endwith %}
@@ -342,6 +346,10 @@
           <tr>
             <th scope="row">Billing Cycle</th>
             <td id="info-billing">-</td>
+          </tr>
+          <tr>
+            <th scope="row">Start Date</th>
+            <td id="info-start">-</td>
           </tr>
           <tr>
             <th scope="row">Expire Date</th>
@@ -430,6 +438,7 @@
       setText("info-plan", dataset.plan);
       setText("info-status", dataset.status);
       setText("info-billing", dataset.billing);
+      setText("info-start", dataset.start);
       setText("info-expire", dataset.expire);
       setText("info-plan-paid", dataset.planPaid);
       setText("info-plan-amount", dataset.planAmount);
@@ -450,6 +459,7 @@
           plan: btn.getAttribute("data-plan"),
           status: btn.getAttribute("data-status"),
           billing: btn.getAttribute("data-billing"),
+          start: btn.getAttribute("data-start"),
           expire: btn.getAttribute("data-expire"),
           planPaid: btn.getAttribute("data-plan-paid"),
           planAmount: btn.getAttribute("data-plan-amount"),

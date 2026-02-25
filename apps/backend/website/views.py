@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 from apps.backend.enquiries.views import build_enquiry_context
 from apps.backend.brand.models import ProductRouteMapping
+from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.products.models import Product
 from core.observability import log_event
 from core.subscription_utils import is_free_plan, is_subscription_active
@@ -451,7 +452,58 @@ def pricing_view(request):
 
 
 def contact_view(request):
-    return render(request, "public/contact.html", _base_context(request))
+    context = _base_context(request)
+    site_brand = SiteBrandSettings.get_active()
+    seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
+
+    company_name = (
+        (seller.name if seller and seller.name else "")
+        or (site_brand.site_name if site_brand and site_brand.site_name else "")
+        or "Work Zilla"
+    )
+    support_email = (
+        (site_brand.support_email if site_brand and site_brand.support_email else "")
+        or (seller.support_email if seller and seller.support_email else "")
+        or "workzonemonitor@webszilla.com"
+    )
+    support_phone = (
+        (site_brand.support_phone if site_brand and site_brand.support_phone else "")
+        or "+91 90928 33701"
+    )
+
+    address_lines = []
+    if seller:
+        for value in [seller.address_line1, seller.address_line2]:
+            text = (value or "").strip()
+            if text:
+                address_lines.append(text)
+        location_parts = [
+            (seller.city or "").strip(),
+            (seller.state or "").strip(),
+            (seller.postal_code or "").strip(),
+        ]
+        location_line = ", ".join([part for part in location_parts if part])
+        if location_line:
+            address_lines.append(location_line)
+        country = (seller.country or "").strip()
+        if country and country.lower() != "india":
+            address_lines.append(country)
+
+    if not address_lines:
+        address_lines = ["182/C, 4th Main Road, Sadasivam Nagar, Madipakkam, Chennai - 600091"]
+
+    phone_href = "".join(ch for ch in str(support_phone) if ch.isdigit() or ch == "+")
+
+    context.update({
+        "contact_info": {
+            "company_name": company_name,
+            "support_email": support_email,
+            "support_phone": support_phone,
+            "support_phone_href": phone_href,
+            "address_lines": address_lines,
+        }
+    })
+    return render(request, "public/contact.html", context)
 
 
 def about_view(request):
@@ -1470,6 +1522,7 @@ def account_view(request):
         sub.info_plan_name = sub.plan.name if sub.plan else "-"
         sub.info_billing_cycle = sub.billing_cycle
         sub.info_status = sub.status
+        sub.info_start_date = getattr(sub, "start_date", None)
         sub.info_expire_date = sub.end_date
         sub.info_plan_paid_on = (base_transfer.paid_on or base_transfer.updated_at) if base_transfer else None
         sub.info_plan_amount = base_transfer.amount if base_transfer else None
@@ -1602,6 +1655,45 @@ def billing_view(request):
         if product_slug == "monitor":
             product_filter |= Q(plan__product__isnull=True)
 
+    def _plan_product_slug(plan_obj):
+        if not plan_obj:
+            return ""
+        product_obj = getattr(plan_obj, "product", None)
+        if product_obj and getattr(product_obj, "slug", ""):
+            return product_obj.slug
+        return "monitor"
+
+    def _base_user_limit_for_plan(plan_obj):
+        if not plan_obj:
+            return None
+        product_obj = getattr(plan_obj, "product", None)
+        product_slug_local = (getattr(product_obj, "slug", "") or "monitor").strip().lower()
+        limits = getattr(plan_obj, "limits", {}) or {}
+        if product_slug_local in ("storage", "online-storage"):
+            value = limits.get("max_users", limits.get("user_limit", 0))
+            return None if not value else int(value)
+        if product_slug_local == "ai-chatbot":
+            value = limits.get("included_agents", getattr(plan_obj, "included_agents", 0))
+            return None if not value else int(value)
+        employee_limit = getattr(plan_obj, "employee_limit", 0) or 0
+        if employee_limit == 0:
+            return None
+        return int(employee_limit)
+
+    def _user_count_label(plan_obj, addon_count_value=0):
+        if not plan_obj:
+            return "-"
+        base_limit = _base_user_limit_for_plan(plan_obj)
+        addon_count_value = int(addon_count_value or 0)
+        if base_limit is None:
+            if addon_count_value > 0:
+                return f"Unlimited (+{addon_count_value} add-on)"
+            return "Unlimited"
+        total = max(base_limit, 0) + max(addon_count_value, 0)
+        if addon_count_value > 0:
+            return f"{total} ({base_limit} + {addon_count_value} add-on)"
+        return str(base_limit)
+
     approved_transfers_qs = (
         PendingTransfer.objects
         .filter(organization=org, status="approved")
@@ -1623,6 +1715,11 @@ def billing_view(request):
         .select_related("plan", "plan__product")
         .order_by("-start_date")
     )
+    active_sub_map = {}
+    for sub in active_subs:
+        slug_key = _plan_product_slug(sub.plan)
+        if slug_key and slug_key not in active_sub_map:
+            active_sub_map[slug_key] = sub
     for sub in active_subs:
         if sub.plan_id in approved_plan_ids:
             continue
@@ -1640,7 +1737,9 @@ def billing_view(request):
             amount=amount or 0,
             currency="INR",
             paid_on=sub.start_date,
-            status="approved"
+            status="approved",
+            request_type="base",
+            addon_count=sub.addon_count or 0,
         ))
     def _billing_sort_dt(transfer):
         value = (
@@ -1657,6 +1756,19 @@ def billing_view(request):
         return timezone.now()
 
     approved_transfers.sort(key=_billing_sort_dt, reverse=True)
+
+    for transfer in approved_transfers:
+        slug_key = _plan_product_slug(getattr(transfer, "plan", None))
+        active_sub_for_product = active_sub_map.get(slug_key)
+        transfer.user_count_display = _user_count_label(
+            getattr(transfer, "plan", None),
+            getattr(active_sub_for_product, "addon_count", None),
+        )
+        transfer.show_addon_button = bool(
+            getattr(getattr(transfer, "plan", None), "allow_addons", False) and slug_key
+        )
+        transfer.addon_manage_url = f"/my-account/billing/addons/?product={slug_key}" if slug_key else ""
+
     pending_transfers = (
         PendingTransfer.objects
         .filter(organization=org, status__in=["pending", "draft"])

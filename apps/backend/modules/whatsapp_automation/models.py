@@ -55,6 +55,61 @@ class DigitalCard(models.Model):
         return f"DigitalCard {self.public_slug}"
 
 
+class DigitalCardEntry(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_digital_card_entries")
+    company_profile = models.ForeignKey(
+        CompanyProfile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="digital_card_entries",
+    )
+    public_slug = models.SlugField(max_length=220, unique=True)
+    card_title = models.CharField(max_length=200, blank=True, default="")
+    person_name = models.CharField(max_length=200, blank=True, default="")
+    role_title = models.CharField(max_length=200, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    whatsapp_number = models.CharField(max_length=40, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    website = models.URLField(blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    social_links = models.JSONField(default=dict, blank=True)
+    theme_color = models.CharField(max_length=20, blank=True, default="#22c55e")
+    template_style = models.CharField(max_length=20, blank=True, default="design1")
+    custom_domain = models.CharField(max_length=255, blank=True, default="")
+    custom_domain_active = models.BooleanField(default=False)
+    logo_image_data = models.TextField(blank=True, default="")
+    hero_banner_image_data = models.TextField(blank=True, default="")
+    logo_size = models.PositiveSmallIntegerField(default=96)
+    icon_size_pt = models.PositiveSmallIntegerField(default=14)
+    font_size_pt = models.PositiveSmallIntegerField(default=16)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wa_digital_card_entries_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wa_digital_card_entries_updated",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.public_slug}"
+
+
 class CataloguePage(models.Model):
     company_profile = models.OneToOneField(CompanyProfile, on_delete=models.CASCADE, related_name="catalogue_page")
     public_slug = models.SlugField(max_length=220, unique=True)

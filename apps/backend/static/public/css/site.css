@@ -340,12 +340,12 @@ img {
 
 .account-layout {
   display: grid;
-  gap: 24px;
+  gap: 16px;
 }
 
 .account-header {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .account-tabs {

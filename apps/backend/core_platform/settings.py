@@ -87,6 +87,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "apps.backend.core_platform.middleware.LegacyMonitorRedirectMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "apps.backend.modules.whatsapp_automation.middleware.CustomDigitalCardDomainMiddleware",
     "apps.backend.core_platform.middleware.ProductRouteRedirectMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

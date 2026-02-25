@@ -177,7 +177,7 @@ const reactPages = [
   { label: "Company Settings", path: "/company", icon: "bi-building", adminOnly: true, productOnly: "worksuite" },
   { label: "Privacy Settings", path: "/privacy", icon: "bi-shield-lock", adminOnly: true, productOnly: "worksuite" },
   { label: "SaaS Admin", path: "/saas-admin", icon: "bi-grid-1x2", saasAdminOnly: true },
-  { label: "Communication Tools", kind: "section", productOnly: "whatsapp-automation" },
+  { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "whatsapp-automation" },
   { label: "Company Profile", path: "/dashboard/company-profile", icon: "bi-building", productOnly: "whatsapp-automation" },
   { label: "Whatsapp Automation", path: "/dashboard/whatsapp-automation", icon: "bi-whatsapp", productOnly: "whatsapp-automation" },
   { label: "Website Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
@@ -501,6 +501,9 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (productSlug === "storage" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
       return false;
     }
+    if (productSlug === "whatsapp-automation" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
+      return false;
+    }
     if (item.productOnly && item.productOnly !== productSlug) {
       return false;
     }
@@ -539,17 +542,26 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (!isBusinessAutopilot && !isWhatsappAutomationProduct) {
       return allowedNavItems;
     }
+    const uniqueNavItems = (() => {
+      const seen = new Set();
+      return allowedNavItems.filter((item) => {
+        const key = `${item.kind || "link"}|${item.path || ""}|${item.label || ""}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    })();
     const orderMap = isWhatsappAutomationProduct
       ? new Map([
-          ["/dashboard/company-profile", 0],
-          ["/dashboard/whatsapp-automation", 1],
-          ["/dashboard/catalogue", 2],
-          ["/dashboard/digital-card", 3],
-          ["/", 4],
-          ["/notifications-inbox", 5],
-          ["/billing", 6],
-          ["/plans", 7],
-          ["/profile", 8],
+          ["/", 0],
+          ["/notifications-inbox", 1],
+          ["/dashboard/company-profile", 3],
+          ["/dashboard/whatsapp-automation", 4],
+          ["/dashboard/catalogue", 5],
+          ["/dashboard/digital-card", 6],
+          ["/billing", 7],
+          ["/plans", 8],
+          ["/profile", 9],
         ])
       : new Map([
           ["/", 0],
@@ -563,9 +575,15 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/plans", 8],
           ["/profile", 9]
         ]);
-    return [...allowedNavItems].sort((a, b) => {
-      if (a.kind === "section" && b.kind !== "section") return -1;
-      if (b.kind === "section" && a.kind !== "section") return 1;
+    return [...uniqueNavItems].sort((a, b) => {
+      if (isWhatsappAutomationProduct) {
+        const topPaths = new Set(["/", "/notifications-inbox"]);
+        if (a.kind === "section" && b.kind !== "section") return topPaths.has(b.path) ? 1 : -1;
+        if (b.kind === "section" && a.kind !== "section") return topPaths.has(a.path) ? -1 : 1;
+      } else {
+        if (a.kind === "section" && b.kind !== "section") return -1;
+        if (b.kind === "section" && a.kind !== "section") return 1;
+      }
       if (a.kind === "section" && b.kind === "section") return 0;
       const aOrder = orderMap.has(a.path) ? orderMap.get(a.path) : 99;
       const bOrder = orderMap.has(b.path) ? orderMap.get(b.path) : 99;
@@ -701,8 +719,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               })
             : orderedNavItems.map((item) => (
                 item.kind === "section" ? (
-                  <div key={`section-${item.label}`} className="nav-link disabled" style={{ cursor: "default", opacity: 0.9 }}>
-                    <i className="bi bi-folder2-open nav-icon" aria-hidden="true" />
+                  <div key={`section-${item.label}`} className="nav-section-label">
                     <span>{item.label}</span>
                   </div>
                 ) : (

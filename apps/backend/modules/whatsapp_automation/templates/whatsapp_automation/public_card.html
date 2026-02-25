@@ -6,26 +6,85 @@
   <title>{{ company.company_name|default:public_slug }} - Digital Card</title>
   <style>
     body{font-family:system-ui,sans-serif;background:#071226;color:#e5e7eb;margin:0;padding:24px}
-    .card{max-width:760px;margin:0 auto;background:#0b1a33;border:1px solid #1e2f4d;border-radius:20px;padding:24px}
+    .card{max-width:760px;margin:0 auto;background:#0b1a33;border:1px solid #1e2f4d;border-radius:20px;padding:24px;overflow:hidden}
+    .card.design2{background:#0f172a;border:2px solid {{ theme_color }};box-shadow:0 0 0 2px rgba(255,255,255,.04) inset}
+    .card.design3{background:linear-gradient(180deg,#08111f 0%,#111827 100%);border:1px solid #334155}
+    .hero{height:140px;border-radius:14px 14px 0 0;margin:-24px -24px 0 -24px;background:linear-gradient(135deg,{{ theme_color }} 0%,#0b1a33 100%);background-size:cover;background-position:center}
+    .card.design2 .hero{height:120px;border-radius:10px;margin:-24px -24px 12px -24px}
+    .card.design3 .hero{height:160px}
+    .logo-wrap{margin-top:-44px;display:flex;justify-content:center}
+    .logo{width:96px;height:96px;border-radius:50%;border:3px solid {{ theme_color }};background:#081525;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .logo img{width:100%;height:100%;object-fit:cover}
     .btn{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;margin-right:8px;font-weight:600}
     .primary{background:{{ theme_color }};color:#08111f}
     .ghost{background:#13233f;color:#e5e7eb;border:1px solid #294265}
     .muted{color:#94a3b8}
+    .socials{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+    .social-link{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:#13233f;border:1px solid #294265;color:#e5e7eb;text-decoration:none}
+    .social-link img{display:block;border-radius:6px}
+    .social-emoji{font-size:18px;line-height:1}
     ul{padding-left:18px}
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>{{ company.company_name|default:public_slug }}</h1>
-    <p class="muted">{{ company.description|default:"Digital Business Card" }}</p>
-    <p>{{ company.address }}</p>
-    <p class="muted">{{ company.email }} {% if company.phone %}| {{ company.phone }}{% endif %}</p>
+  <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %}">
+    <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}></div>
+    <div class="logo-wrap">
+      <div class="logo" style="width:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};height:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};">
+        {% if card_entry and card_entry.logo_image_data %}
+          <img src="{{ card_entry.logo_image_data }}" alt="Logo">
+        {% elif company.logo %}
+          <img src="{{ company.logo.url }}" alt="Logo">
+        {% else %}
+          <span style="font-size:30px;font-weight:700;color:{{ theme_color }}">{{ company.company_name|default:public_slug|slice:":1"|upper }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <h1 style="margin-top:14px;text-align:center">{% if card_entry and card_entry.person_name %}{{ card_entry.person_name }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</h1>
+    {% if card_entry and card_entry.role_title %}<p style="text-align:center;margin-top:-6px">{{ card_entry.role_title }}</p>{% endif %}
+    <p class="muted" style="text-align:center;font-weight:600">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</p>
+    {% if card_entry and card_entry.template_style %}
+      <p class="muted" style="text-align:center;margin-top:-4px">Template: {{ card_entry.template_style|title }}</p>
+    {% endif %}
+    <p class="muted">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
+    <p>{{ card_entry.address|default:company.address }}</p>
+    <p class="muted">{{ card_entry.email|default:company.email }} {% if card_entry.phone|default:company.phone %}| {{ card_entry.phone|default:company.phone }}{% endif %}</p>
     <div>
-      {% if company.phone %}<a class="btn primary" href="tel:{{ company.phone }}">Call</a>{% endif %}
-      {% if company.whatsapp_number %}<a class="btn ghost" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
-      {% if company.website %}<a class="btn ghost" href="{{ company.website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
+      {% with phone=card_entry.phone|default:company.phone %}
+      {% if phone %}<a class="btn primary" href="tel:{{ phone }}">Call</a>{% endif %}
+      {% endwith %}
+      {% with wa_no=card_entry.whatsapp_number|default:company.whatsapp_number %}
+      {% if wa_no %}<a class="btn ghost" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
+      {% endwith %}
+      {% with website=card_entry.website|default:company.website %}
+      {% if website %}<a class="btn ghost" href="{{ website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
+      {% endwith %}
       {% if catalogue_page %}<a class="btn ghost" href="/catalogue/{{ catalogue_page.public_slug }}/">Catalogue</a>{% endif %}
     </div>
+    {% if social_links_items %}
+      <div class="socials">
+        {% for link in social_links_items %}
+          <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer">
+            {% if link.type == "custom" and link.custom_icon_data %}
+              <img src="{{ link.custom_icon_data }}" alt="{{ link.label }}" width="{{ link.icon_size }}" height="{{ link.icon_size }}">
+            {% else %}
+              <span class="social-emoji">
+                {% if link.icon == "instagram" %}📷
+                {% elif link.icon == "facebook" %}📘
+                {% elif link.icon == "youtube" %}▶️
+                {% elif link.icon == "linkedin" %}💼
+                {% elif link.icon == "twitter" or link.icon == "x" %}𝕏
+                {% elif link.icon == "whatsapp" %}💬
+                {% elif link.icon == "telegram" %}✈️
+                {% else %}🔗
+                {% endif %}
+              </span>
+            {% endif %}
+            <span>{{ link.label }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
     {% if highlights %}
       <h3>Product Highlights</h3>
       <ul>

@@ -87,7 +87,7 @@ export default function WhatsappAutomationDashboardPage() {
 
   return (
     <div className="d-flex flex-column gap-3">
-      <div className="card p-4">
+      <div className="p-2">
         <div className="d-flex align-items-center justify-content-between mb-2">
           <h3 className="mb-0">Whatsapp Automation</h3>
           <button type="button" className="btn btn-primary btn-sm" onClick={saveSettings} disabled={savingSettings}>
@@ -96,17 +96,27 @@ export default function WhatsappAutomationDashboardPage() {
         </div>
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {success ? <div className="alert alert-success">{success}</div> : null}
-        <div className="row g-3">
-          <div className="col-12 col-md-4">
+        <div className="row g-2">
+          <div className="col-12">
             <label className="form-label">Auto Reply</label>
             <div className="form-check form-switch mt-2">
               <input type="checkbox" className="form-check-input" checked={Boolean(settings.auto_reply_enabled)} onChange={(e) => setSettings((p) => ({ ...p, auto_reply_enabled: e.target.checked }))} />
               <label className="form-check-label">{settings.auto_reply_enabled ? "Enabled" : "Disabled"}</label>
             </div>
           </div>
-          <div className="col-12">
+          <div className="col-12 col-xl-6">
             <label className="form-label">Welcome Message</label>
             <textarea className="form-control" rows="5" value={settings.welcome_message || ""} onChange={(e) => setSettings((p) => ({ ...p, welcome_message: e.target.value }))} />
+          </div>
+          <div className="col-12 col-xl-6">
+            <label className="form-label">Automation Preview (Internal Only)</label>
+            <div className="d-flex gap-2 flex-wrap">
+              <input className="form-control" value={previewInput} onChange={(e) => setPreviewInput(e.target.value)} placeholder="Type customer message" />
+              <button type="button" className="btn btn-primary" onClick={runPreview}>Preview Reply</button>
+            </div>
+            {previewReply ? (
+              <pre className="mt-2 mb-0 p-2 rounded border" style={{ whiteSpace: "pre-wrap" }}>{previewReply}</pre>
+            ) : null}
           </div>
         </div>
       </div>
@@ -138,21 +148,23 @@ export default function WhatsappAutomationDashboardPage() {
           <table className="table table-dark table-hover align-middle">
             <thead>
               <tr>
-                <th>Keyword</th>
-                <th>Reply</th>
-                <th>Default</th>
-                <th className="text-end">Action</th>
+                <th style={{ width: "20%" }}>Keyword</th>
+                <th style={{ width: "56%" }}>Reply</th>
+                <th style={{ width: "10%" }}>Default</th>
+                <th style={{ width: "14%" }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {sortedRules.length ? sortedRules.map((row) => (
                 <tr key={row.id}>
                   <td>{row.keyword || "-"}</td>
-                  <td className="text-secondary">{row.reply_message}</td>
+                  <td className="text-secondary" style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{row.reply_message}</td>
                   <td>{row.is_default ? <span className="badge bg-success">Yes</span> : <span className="badge bg-secondary">No</span>}</td>
-                  <td className="text-end d-flex justify-content-end gap-2">
+                  <td>
+                    <div className="d-flex gap-1 justify-content-start flex-nowrap">
                     <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setRuleForm({ id: row.id, keyword: row.keyword || "", reply_message: row.reply_message || "", is_default: Boolean(row.is_default) })}>Edit</button>
                     <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteRule(row.id)}>Delete</button>
+                    </div>
                   </td>
                 </tr>
               )) : (
@@ -163,17 +175,6 @@ export default function WhatsappAutomationDashboardPage() {
         </div>
       </div>
 
-      <div className="card p-4">
-        <h4 className="mb-3">Automation Preview (Internal Only)</h4>
-        <div className="d-flex gap-2 flex-wrap">
-          <input className="form-control" value={previewInput} onChange={(e) => setPreviewInput(e.target.value)} placeholder="Type customer message" />
-          <button type="button" className="btn btn-primary" onClick={runPreview}>Preview Reply</button>
-        </div>
-        {previewReply ? (
-          <pre className="mt-3 mb-0" style={{ whiteSpace: "pre-wrap" }}>{previewReply}</pre>
-        ) : null}
-      </div>
     </div>
   );
 }
-

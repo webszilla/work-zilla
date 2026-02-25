@@ -58,4 +58,31 @@ export const waApi = {
   deleteCatalogueProduct(id) {
     return apiFetch(`/api/whatsapp-automation/catalogue/products/${id}`, { method: "DELETE" });
   },
+  getDigitalCards(params = {}) {
+    const search = new URLSearchParams();
+    if (params.q) search.set("q", params.q);
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("page_size", String(params.pageSize));
+    const qs = search.toString();
+    return apiFetch(`/api/whatsapp-automation/digital-cards${qs ? `?${qs}` : ""}`);
+  },
+  saveDigitalCard(payload) {
+    return apiFetch("/api/whatsapp-automation/digital-cards", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  checkDigitalCardSlug(slug, id) {
+    const search = new URLSearchParams();
+    if (slug) search.set("slug", String(slug));
+    if (id) search.set("id", String(id));
+    const qs = search.toString();
+    return apiFetch(`/api/whatsapp-automation/digital-cards/slug-check${qs ? `?${qs}` : ""}`);
+  },
+  getDigitalCard(id) {
+    return apiFetch(`/api/whatsapp-automation/digital-cards/${id}`);
+  },
+  deleteDigitalCard(id) {
+    return apiFetch(`/api/whatsapp-automation/digital-cards/${id}`, { method: "DELETE" });
+  },
 };
