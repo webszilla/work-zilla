@@ -48,6 +48,7 @@ class OrganizationUser(models.Model):
         related_name="business_autopilot_memberships",
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="org_user")
+    department = models.CharField(max_length=120, blank=True, default="")
     employee_role = models.CharField(max_length=120, blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -78,3 +79,46 @@ class OrganizationEmployeeRole(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} - {self.name}"
+
+
+class OrganizationDepartment(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_departments",
+    )
+    name = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization", "name")
+        ordering = ("name",)
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.name}"
+
+
+class AccountsWorkspace(models.Model):
+    organization = models.OneToOneField(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_accounts_workspace",
+    )
+    data = models.JSONField(default=dict, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_accounts_workspace_updates",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"AccountsWorkspace(org={self.organization_id})"

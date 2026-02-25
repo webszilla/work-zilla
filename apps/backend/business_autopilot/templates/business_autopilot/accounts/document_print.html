@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ doc_type_label }} {{ document.docNo|default:'-' }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+    .toolbar { margin-bottom: 16px; display: flex; gap: 8px; }
+    .btn { border: 1px solid #cbd5e1; background: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+    .doc { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+    .header { padding: 20px; color: #fff; background: {{ billing_template.themeColor|default:'#22c55e' }}; }
+    .header h1 { margin: 0 0 4px; font-size: 24px; }
+    .muted { color: #64748b; }
+    .section { padding: 16px 20px; border-top: 1px solid #e5e7eb; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+    .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+    .value { font-weight: 600; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+    th { background: #f8fafc; font-size: 12px; text-transform: uppercase; color: #475569; }
+    .text-right { text-align: right; }
+    .totals { width: 340px; margin-left: auto; }
+    .totals td { border: none; padding: 6px 0; }
+    .totals .grand td { border-top: 1px solid #cbd5e1; padding-top: 10px; font-weight: 700; }
+    @media print {
+      .toolbar { display: none; }
+      body { margin: 0; }
+      .doc { border: none; border-radius: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn" type="button" onclick="window.print()">Print / Save PDF</button>
+    <button class="btn" type="button" onclick="window.close()">Close</button>
+  </div>
+  <div class="doc">
+    <div class="header">
+      <h1>{{ doc_type_label }}</h1>
+      <div>{{ document.docNo|default:'-' }}</div>
+      <div style="margin-top:6px; font-size:13px; opacity:.9;">{{ org.name }}</div>
+    </div>
+    <div class="section">
+      <div class="grid">
+        <div>
+          <div class="label">Customer</div>
+          <div class="value">{{ document.customerName|default:'-' }}</div>
+          <div class="muted" style="margin-top:4px;">GSTIN: {{ document.customerGstin|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">Salesperson</div>
+          <div class="value">{{ document.salesperson|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">Issue Date</div>
+          <div class="value">{{ document.issueDate|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">Due Date</div>
+          <div class="value">{{ document.dueDate|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">Status</div>
+          <div class="value">{{ document.status|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">GST Template</div>
+          <div class="value">{{ gst_template.name|default:'-' }}</div>
+          <div class="muted" style="margin-top:4px;">GST Total: {{ gst_total_percent }}%</div>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <div class="label">Billing Address</div>
+        <div class="value" style="font-weight:500; white-space:pre-wrap;">{{ document.billingAddress|default:'-' }}</div>
+      </div>
+    </div>
+
+    <div class="section" style="padding-top:0;">
+      <table>
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Rate</th>
+            <th class="text-right">Tax %</th>
+            <th class="text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in items %}
+          <tr>
+            <td>{{ row.description }}</td>
+            <td class="text-right">{{ row.qty }}</td>
+            <td class="text-right">{{ row.rate }}</td>
+            <td class="text-right">{{ row.tax_percent }}</td>
+            <td class="text-right">{{ row.amount }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="muted">No items</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <table class="totals">
+        <tr><td>Sub Total</td><td class="text-right">{{ totals.subtotal }}</td></tr>
+        <tr><td>GST / Tax</td><td class="text-right">{{ totals.tax_total }}</td></tr>
+        <tr class="grand"><td>Total</td><td class="text-right">{{ totals.grand_total }}</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="grid">
+        <div>
+          <div class="label">Notes</div>
+          <div style="white-space:pre-wrap;">{{ document.notes|default:'-' }}</div>
+        </div>
+        <div>
+          <div class="label">Terms & Conditions</div>
+          <div style="white-space:pre-wrap;">{{ document.termsText|default:'-' }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

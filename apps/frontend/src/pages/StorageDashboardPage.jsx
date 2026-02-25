@@ -196,6 +196,7 @@ export default function StorageDashboardPage({ subscriptions = [] }) {
         products={products}
         subscriptions={subscriptions}
         isReadOnly={false}
+        currentProductKey="storage"
       />
     </div>
   );

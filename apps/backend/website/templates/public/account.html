@@ -128,11 +128,7 @@
                           {% elif sub.status == "pending" %}
                             <span class="text-secondary">Awaiting Admin Approval</span>
                           {% else %}
-                            {% if sub.is_free_plan %}
-                              <a class="btn btn-outline btn-sm" href="/pricing/?product={{ slug }}">View Plans</a>
-                            {% else %}
-                              <a class="btn btn-outline btn-sm" href="/my-account/billing/renew/start/?product={{ slug }}">Renew Plan</a>
-                            {% endif %}
+                            <a class="btn btn-outline btn-sm" href="/my-account/billing/renew/start/?product={{ slug }}">Renew Plan</a>
                           {% endif %}
                         </td>
                       </tr>

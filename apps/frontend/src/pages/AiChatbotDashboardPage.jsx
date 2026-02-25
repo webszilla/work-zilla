@@ -205,6 +205,7 @@ export default function AiChatbotDashboardPage({ subscriptions = [] }) {
         products={products}
         subscriptions={subscriptions}
         isReadOnly={false}
+        currentProductKey="ai-chatbot"
       />
     </>
   );

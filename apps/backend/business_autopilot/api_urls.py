@@ -8,4 +8,11 @@ urlpatterns = [
     path("users", api_views.org_users, name="business_autopilot_users"),
     path("users/<int:membership_id>", api_views.org_user_detail, name="business_autopilot_user_detail"),
     path("employee-roles", api_views.org_employee_roles, name="business_autopilot_employee_roles"),
+    path("departments", api_views.org_departments, name="business_autopilot_departments"),
+    path("accounts/workspace", api_views.accounts_workspace, name="business_autopilot_accounts_workspace"),
+    path(
+        "accounts/documents/<slug:doc_type>/<str:doc_id>/print",
+        api_views.accounts_document_print,
+        name="business_autopilot_accounts_document_print",
+    ),
 ]

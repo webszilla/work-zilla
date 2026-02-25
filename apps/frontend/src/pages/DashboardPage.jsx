@@ -429,6 +429,7 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
         products={data.products || []}
         subscriptions={subscriptions}
         isReadOnly={isReadOnly}
+        currentProductKey="monitor"
       />
 
       {showAlert && usageAlerts.length ? (

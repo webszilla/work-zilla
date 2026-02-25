@@ -141,6 +141,10 @@ export default function BillingPage() {
       ? "ai-chatbot"
       : rawPath.includes("/storage")
       ? "storage"
+      : rawPath.includes("/business-autopilot")
+      ? "business-autopilot-erp"
+      : rawPath.includes("/whatsapp-automation")
+      ? "whatsapp-automation"
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";

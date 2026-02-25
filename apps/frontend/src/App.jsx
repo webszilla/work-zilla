@@ -183,9 +183,11 @@ const reactPages = [
   { label: "Website Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
-  { label: "HR Management", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
-  { label: "Projects", path: "/projects", icon: "bi-kanban", productOnly: "business-autopilot-erp", moduleKey: "projects" },
+  { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
+  { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
   { label: "Accounts", path: "/accounts", icon: "bi-calculator", productOnly: "business-autopilot-erp", moduleKey: "accounts" },
+  { label: "Ticketing", path: "/ticketing", icon: "bi-life-preserver", productOnly: "business-autopilot-erp", moduleKey: "ticketing" },
+  { label: "Stocks", path: "/stocks", icon: "bi-box-seam", productOnly: "business-autopilot-erp", moduleKey: "stocks" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
   { label: "Plans", path: "/plans", icon: "bi-clipboard-check", adminOnly: true },
   { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true }
@@ -570,10 +572,12 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/hrm", 3],
           ["/projects", 4],
           ["/accounts", 5],
-          ["/users", 6],
-          ["/billing", 7],
-          ["/plans", 8],
-          ["/profile", 9]
+          ["/ticketing", 6],
+          ["/stocks", 7],
+          ["/users", 8],
+          ["/billing", 9],
+          ["/plans", 10],
+          ["/profile", 11]
         ]);
     return [...uniqueNavItems].sort((a, b) => {
       if (isWhatsappAutomationProduct) {
@@ -845,6 +849,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                       savingModuleSlug={autopilotSavingSlug}
                       moduleError={autopilotModuleError}
                       productBasePath={basePath}
+                      subscriptions={state.subscriptions}
                     />
                   </Suspense>
                 )
@@ -869,7 +874,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               isBusinessAutopilot && autopilotModules.some((module) => module.slug === "hrm")
                 ? (
                   <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="hrm" title="HR Management" />
+                    <BusinessAutopilotModulePage moduleKey="hrm" title="HR" />
                   </Suspense>
                 )
                 : <Navigate to={withBase("/")} replace />
@@ -893,7 +898,31 @@ function AppShell({ state, productPrefix, productSlug }) {
               isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts")
                 ? (
                   <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts / ERP" />
+                    <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/ticketing"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "ticketing")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="ticketing" title="Ticketing System" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/stocks"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "stocks")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="stocks" title="Stocks Management" />
                   </Suspense>
                 )
                 : <Navigate to={withBase("/")} replace />
@@ -983,7 +1012,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/dashboard/whatsapp-automation"
-            element={productSlug === "whatsapp-automation" ? <WhatsappAutomationDashboardPage /> : <Navigate to={withBase("/")} replace />}
+            element={productSlug === "whatsapp-automation" ? <WhatsappAutomationDashboardPage subscriptions={state.subscriptions} /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/dashboard/catalogue"

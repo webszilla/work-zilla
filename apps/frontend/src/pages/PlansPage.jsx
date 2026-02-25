@@ -283,6 +283,28 @@ function getProrationNote(plan, cycle, activeSub) {
   return "Plan change at no additional charge.";
 }
 
+function dedupePlans(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  return rows.filter((plan) => {
+    const key = [
+      String(plan?.name || "").trim().toLowerCase(),
+      String(plan?.monthly_price ?? ""),
+      String(plan?.yearly_price ?? ""),
+      String(plan?.usd_monthly_price ?? ""),
+      String(plan?.usd_yearly_price ?? ""),
+      String(plan?.employee_limit ?? ""),
+      String(plan?.retention_days ?? ""),
+      String(plan?.allow_addons ?? ""),
+    ].join("|");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function PlansPage() {
   const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
   const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
@@ -370,7 +392,7 @@ export default function PlansPage() {
     };
   }, []);
 
-  const plans = state.data?.plans || [];
+  const plans = useMemo(() => dedupePlans(state.data?.plans || []), [state.data?.plans]);
   const freeEligible = state.data?.free_eligible !== false;
   const activeSub = state.data?.active_sub || null;
   const activeTrialPlanId =
@@ -381,7 +403,7 @@ export default function PlansPage() {
     if (!activeSub || !state.data?.plans) {
       return null;
     }
-    return state.data.plans.find((plan) => Number(plan.id) === Number(activeSub.plan_id)) || null;
+    return dedupePlans(state.data.plans).find((plan) => Number(plan.id) === Number(activeSub.plan_id)) || null;
   }, [activeSub, state.data?.plans]);
   const rollback = state.data?.rollback || null;
   const taxRate = Number(state.data?.tax_rate || 0);

@@ -37,6 +37,7 @@ class EnquiryForm(forms.ModelForm):
             .exclude(slug="ai-chat-widget")
             .order_by("sort_order", "name")
         )
+        self.fields["product"].label_from_instance = lambda obj: "Work Suite" if getattr(obj, "slug", "") == "monitor" else obj.name
         self.fields["product"].required = False
         self.fields["details"].required = False
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
+import { apiFetch } from "../lib/api.js";
+import ProductAccessSection from "../components/ProductAccessSection.jsx";
 
-export default function WhatsappAutomationDashboardPage() {
+export default function WhatsappAutomationDashboardPage({ subscriptions = [] }) {
   const [loading, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
@@ -12,6 +14,7 @@ export default function WhatsappAutomationDashboardPage() {
   const [ruleForm, setRuleForm] = useState({ id: null, keyword: "", reply_message: "", is_default: false });
   const [previewInput, setPreviewInput] = useState("Hi");
   const [previewReply, setPreviewReply] = useState("");
+  const [products, setProducts] = useState([]);
 
   async function loadAll() {
     setLoading(true);
@@ -29,6 +32,27 @@ export default function WhatsappAutomationDashboardPage() {
 
   useEffect(() => {
     loadAll();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadProducts() {
+      try {
+        const data = await apiFetch("/api/dashboard/summary");
+        if (!active) {
+          return;
+        }
+        setProducts(Array.isArray(data?.products) ? data.products : []);
+      } catch {
+        if (active) {
+          setProducts([]);
+        }
+      }
+    }
+    loadProducts();
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function saveSettings() {
@@ -174,6 +198,12 @@ export default function WhatsappAutomationDashboardPage() {
           </table>
         </div>
       </div>
+
+      <ProductAccessSection
+        products={products}
+        subscriptions={subscriptions}
+        currentProductKey="whatsapp-automation"
+      />
 
     </div>
   );

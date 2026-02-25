@@ -1,39 +1,284 @@
-{% extends "website/base.html" %}
-
-{% block title %}Business Autopilot ERP{% endblock %}
+{% extends "public/base.html" %}
+{% load static %}
+{% block meta_title %}Business Autopilot ERP | Work Zilla{% endblock %}
+{% block meta_description %}Business Autopilot ERP combines CRM, HR, Projects, Accounts, Ticketing, and Stocks Management in one modular SaaS platform for growing businesses.{% endblock %}
 
 {% block content %}
-<section class="hero hero-product">
-  <div class="container">
-    <h1>Business Autopilot ERP</h1>
-    <p>Unified CRM, HR Management, Project Management, and Accounts in one SaaS platform.</p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="/pricing/?product=business-autopilot-erp">View Pricing</a>
-      <a class="btn btn-outline" href="/auth/login/">Login</a>
+<section class="section z-chatbot-showcase">
+  <div class="site-container">
+    <div class="z-chatbot-header">
+      <h1 class="section-title section-title1">Business Autopilot ERP for CRM, HR, Projects, Accounts, Ticketing and Stocks</h1>
+      <p class="section-lead" style="margin-bottom:0;">
+        Run core operations from a single dashboard with modular access control for each team and department.
+      </p>
+    </div>
+    <div class="z-chatbot-stage">
+      <div class="z-chatbot-aura" aria-hidden="true"></div>
+      <div class="card p-4" style="position:relative; z-index:2; width:min(980px,100%); margin:0 auto;">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <div class="card p-3 h-100">
+              <div class="text-secondary small">Modules Enabled</div>
+              <h3 class="mb-0 mt-1">6</h3>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="card p-3 h-100">
+              <div class="text-secondary small">Admin Controls</div>
+              <h3 class="mb-0 mt-1">Role + Access</h3>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="card p-3 h-100">
+              <div class="text-secondary small">Deployment Model</div>
+              <h3 class="mb-0 mt-1">Single SaaS Workspace</h3>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="z-hero full-bleed">
+  <div class="site-container">
+    <div class="z-hero-grid">
+      <div>
+        <span class="eyebrow">ERP Product</span>
+        <h1>Business Autopilot ERP</h1>
+        <p>
+          A modular ERP workspace for small and growing businesses to manage customer operations,
+          people operations, delivery execution, accounting workflows, support ticketing, and inventory control.
+        </p>
+        <div class="z-hero-cta">
+          <a class="btn btn-primary" href="/pricing/?product=business-autopilot-erp">View plans</a>
+          <a class="btn btn-outline" href="/contact/">Talk to sales</a>
+        </div>
+      </div>
+      <div class="z-hero-card">
+        <h4>What teams get</h4>
+        <ul class="z-hero-list">
+          <li>
+            <span>Modular Access</span>
+            <small>Enable only the ERP modules your organization needs.</small>
+          </li>
+          <li>
+            <span>Role-Based Usage</span>
+            <small>Separate admin access from user-level operations.</small>
+          </li>
+          <li>
+            <span>One Platform</span>
+            <small>CRM, HR, Projects, Accounts, Ticketing and Stocks in one place.</small>
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
 
 <section class="section">
-  <div class="container">
-    <h2>Core Modules</h2>
-    <div class="grid-4">
-      <article class="card">
+  <div class="site-container">
+    <h2 class="section-title">Core Modules Included</h2>
+    <p class="section-lead">Turn on the modules you need now and expand later without changing platforms.</p>
+    <div class="feature-grid">
+      <div class="card">
         <h3>CRM</h3>
-        <p>Leads, pipeline, tasks, and customer lifecycle.</p>
-      </article>
-      <article class="card">
-        <h3>HR Management</h3>
-        <p>Employees, attendance, policy, and workforce workflows.</p>
-      </article>
-      <article class="card">
+        <p>Manage leads, sales pipeline, follow-ups, and customer lifecycle activities.</p>
+        <ul class="text-secondary mb-0">
+          <li>Lead pipeline board</li>
+          <li>Deal stage tracking</li>
+          <li>Follow-up reminders</li>
+          <li>Contact history visibility</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>HR</h3>
+        <p>Handle employee records, attendance, leave workflows, and payroll-ready operations.</p>
+        <ul class="text-secondary mb-0">
+          <li>Employee records</li>
+          <li>Attendance tracking</li>
+          <li>Leave requests</li>
+          <li>Payroll setup workflows</li>
+        </ul>
+      </div>
+      <div class="card">
         <h3>Project Management</h3>
-        <p>Boards, milestones, collaboration, and progress tracking.</p>
-      </article>
-      <article class="card">
+        <p>Track projects, tasks, milestones, teams, and delivery timelines from one dashboard.</p>
+        <ul class="text-secondary mb-0">
+          <li>Project list and owners</li>
+          <li>Task assignment</li>
+          <li>Milestone planning</li>
+          <li>Team responsibility mapping</li>
+        </ul>
+      </div>
+      <div class="card">
         <h3>Accounts / ERP</h3>
-        <p>Accounting, invoicing, receivables, and financial controls.</p>
-      </article>
+        <p>Billing, receivables, expense tracking, GST reporting, and vendor accounting workflows.</p>
+        <ul class="text-secondary mb-0">
+          <li>Invoice and billing overview</li>
+          <li>Expense tracking</li>
+          <li>GST-ready reporting</li>
+          <li>Vendor entries</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Ticketing System</h3>
+        <p>Organize customer/internal support issues with statuses, priorities, and resolution tracking.</p>
+        <ul class="text-secondary mb-0">
+          <li>Ticket queue management</li>
+          <li>Priority and SLA tracking</li>
+          <li>Agent assignment</li>
+          <li>Issue comments & history</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Stocks Management</h3>
+        <p>Manage inventory items, stock movement, low-stock alerts, and warehouse-based quantities.</p>
+        <ul class="text-secondary mb-0">
+          <li>Inventory item master</li>
+          <li>Stock in / stock out records</li>
+          <li>Low-stock alerts</li>
+          <li>Warehouse tracking</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="full-bleed-section privacy-band">
+  <div class="site-container">
+    <div class="privacy-panel light">
+      <div>
+        <h2 class="privacy-title">Designed for Teams That Need Operational Control</h2>
+        <h3 class="privacy-subtitle">Manage departments with module-level access settings.</h3>
+        <p>
+          Business Autopilot ERP supports modular enable/disable controls so organizations can launch
+          CRM + HR first, then add Projects, Accounts, Ticketing, and Stocks as teams scale.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/pricing/?product=business-autopilot-erp">View plans</a>
+          <a class="btn btn-outline" href="/auth/login/">Login</a>
+        </div>
+      </div>
+      <ul>
+        <li>Module access settings for organization-level control.</li>
+        <li>Separate admin pages, users, billing, and profile workflows.</li>
+        <li>Scalable single workspace UX across all enabled modules.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Feature Details by Business Function</h2>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Sales & Customer Ops</h3>
+        <p>Track lead generation, follow-ups, customer engagement, and sales movement through CRM workflows.</p>
+      </div>
+      <div class="card">
+        <h3>People Operations</h3>
+        <p>Maintain employee records, attendance entries, leave approvals, and payroll planning in HR workflows.</p>
+      </div>
+      <div class="card">
+        <h3>Delivery Execution</h3>
+        <p>Plan projects, assign tasks, manage milestones, and organize team responsibilities in one module.</p>
+      </div>
+      <div class="card">
+        <h3>Finance Control</h3>
+        <p>Monitor receivables, billing cycles, expenses, GST status, and vendor entries inside Accounts / ERP.</p>
+      </div>
+      <div class="card">
+        <h3>Support Desk Operations</h3>
+        <p>Handle customer complaints and internal IT/service requests using the Ticketing System module.</p>
+      </div>
+      <div class="card">
+        <h3>Inventory & Supply Tracking</h3>
+        <p>Track stock availability, warehouse balances, stock movement, and reorder needs with the Stocks module.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="card">
+      <h2>Who is Business Autopilot ERP for?</h2>
+      <p class="text-secondary mb-3">
+        Built for startups, agencies, service businesses, distributors, and growing SMB teams that need one operational dashboard.
+      </p>
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <div class="card p-3 h-100">
+            <h4 class="mb-2">Service Businesses</h4>
+            <p class="mb-0 text-secondary">CRM + HR + Ticketing for customer management and team execution.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div class="card p-3 h-100">
+            <h4 class="mb-2">Project Teams</h4>
+            <p class="mb-0 text-secondary">Projects + HR + Accounts for delivery, staffing, and billing visibility.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div class="card p-3 h-100">
+            <h4 class="mb-2">Retail / Distribution</h4>
+            <p class="mb-0 text-secondary">Stocks + Accounts + Ticketing for inventory and operational controls.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">FAQ</h2>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Can we enable only selected modules?</h3>
+        <p>Yes. Organizations can enable or disable eligible modules like CRM, HR, Projects, Accounts, Ticketing, and Stocks.</p>
+      </div>
+      <div class="card">
+        <h3>Do we need separate logins for each module?</h3>
+        <p>No. Business Autopilot ERP is built as a single product workspace with module-based navigation.</p>
+      </div>
+      <div class="card">
+        <h3>Can we start with CRM and add more later?</h3>
+        <p>Yes. Start with your current operational need and expand modules as your team grows.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="cta-panel">
+      <h2>Ready to run operations in one ERP workspace?</h2>
+      <p>Explore Business Autopilot ERP plans or request a product walkthrough.</p>
+      <div class="d-flex flex-wrap gap-2 justify-content-center">
+        <a class="btn btn-primary" href="/pricing/?product=business-autopilot-erp">View pricing</a>
+        <a class="btn btn-outline" href="/contact/">Request demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="row g-4 align-items-stretch">
+      <div class="col-lg-5">
+        <div class="card p-4 h-100">
+          <h3>Request a Business Autopilot ERP demo</h3>
+          <p class="text-secondary mb-0">
+            Tell us your business type and we will show the right module combination for your workflow.
+          </p>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        {% include "public/partials/enquiry_form.html" %}
+      </div>
     </div>
   </div>
 </section>

@@ -948,7 +948,7 @@ def dashboard_summary(request):
     now = timezone.now()
     status_last_seen_map = _build_activity_last_seen_map(
         org,
-        employee_ids=list(employees.values_list("id", flat=True)),
+        employee_ids=list(employees_qs.values_list("id", flat=True)),
     )
     activity_last_seen_map = _build_activity_last_seen_map(
         org,
@@ -1678,6 +1678,10 @@ def screenshots_list(request):
         for row in last_captures
         if row.get("employee_id")
     }
+    status_last_seen_map = _build_activity_last_seen_map(
+        org,
+        employee_ids=list(employees.values_list("id", flat=True)),
+    )
     employee_rows = []
     for employee in employees:
         last_seen = _resolve_employee_last_seen(employee, status_last_seen_map)
