@@ -63,8 +63,37 @@ def theme_context(request):
 
 
 def site_nav_context(request):
+    try:
+        from saas_admin.models import Product as SaaSAdminProduct
+        saas_products = list(
+            SaaSAdminProduct.objects
+            .filter(status="active")
+            .order_by("sort_order", "name")
+            .values("slug", "name")
+        )
+    except Exception:
+        saas_products = []
+
+    product_links = []
+    for row in saas_products:
+        slug = (row.get("slug") or "").strip().lower()
+        if not slug:
+            continue
+        if slug == "work-suite":
+            slug = "worksuite"
+        elif slug == "online-storage":
+            slug = "storage"
+        if slug in {"ai-chat-widget", "digital-card"}:
+            continue
+        public_slug = "worksuite" if slug == "monitor" else slug
+        product_links.append({
+            "slug": public_slug,
+            "name": row.get("name") or public_slug.replace("-", " ").title(),
+            "href": f"/products/{public_slug}/",
+        })
+
     if not request.user.is_authenticated:
-        return {"site_nav": {"is_authenticated": False}}
+        return {"site_nav": {"is_authenticated": False, "product_links": product_links}}
     profile = UserProfile.objects.filter(user=request.user).first()
     dashboard_label = "Dashboard"
     dashboard_url = "/app/"
@@ -86,5 +115,6 @@ def site_nav_context(request):
             "is_authenticated": True,
             "dashboard_label": dashboard_label,
             "dashboard_url": dashboard_url,
+            "product_links": product_links,
         }
     }

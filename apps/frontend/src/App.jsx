@@ -90,6 +90,7 @@ const emptyState = {
   allowGamingOttUsage: true,
   themePrimary: "",
   themeSecondary: "",
+  sidebarMenuStyle: "default",
   freePlanPopup: false,
   freePlanExpiry: "",
   dealer: null,
@@ -187,7 +188,7 @@ const reactPages = [
   { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
   { label: "Accounts", path: "/accounts", icon: "bi-calculator", productOnly: "business-autopilot-erp", moduleKey: "accounts" },
   { label: "Ticketing", path: "/ticketing", icon: "bi-life-preserver", productOnly: "business-autopilot-erp", moduleKey: "ticketing" },
-  { label: "Stocks", path: "/stocks", icon: "bi-box-seam", productOnly: "business-autopilot-erp", moduleKey: "stocks" },
+  { label: "Inventory", path: "/stocks", icon: "bi-box-seam", productOnly: "business-autopilot-erp", moduleKey: "stocks" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
   { label: "Plans", path: "/plans", icon: "bi-clipboard-check", adminOnly: true },
   { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true }
@@ -260,6 +261,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const allowGamingOttUsage = state.allowGamingOttUsage !== false;
   const themePrimary = state.themePrimary;
   const themeSecondary = state.themeSecondary;
+  const sidebarMenuStyle = state.sidebarMenuStyle === "compact" ? "compact" : "default";
   const onboarding = state.onboarding || { enabled: false, state: "active" };
   const isSaasAdminRoute = location.pathname.startsWith("/saas-admin");
   const isMonitorProduct = productSlug === "worksuite";
@@ -630,7 +632,11 @@ function AppShell({ state, productPrefix, productSlug }) {
     : "/billing";
 
   return (
-    <div className={`app-shell ${isSaasAdminRoute ? "saas-admin" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`app-shell ${isSaasAdminRoute ? "saas-admin" : ""} ${
+        sidebarCollapsed ? "sidebar-collapsed" : ""
+      } ${sidebarMenuStyle === "compact" ? "sidebar-style-compact" : "sidebar-style-default"}`}
+    >
       <aside className="sidebar">
         <div className="brand">
           <span>Work Zilla</span>
@@ -711,7 +717,12 @@ function AppShell({ state, productPrefix, productSlug }) {
                     key={item.key}
                     to={navPath(href)}
                     title={item.label}
-                    onClick={handleSidebarNavClick}
+                    onClick={() => {
+                      handleSidebarNavClick();
+                      if (item.moduleKey === "ticketing") {
+                        window.dispatchEvent(new Event("wz:ticketing-menu-click"));
+                      }
+                    }}
                     className={() => `nav-link ${isActive ? "active" : ""}`}
                   >
                     {item.icon ? (
@@ -733,6 +744,9 @@ function AppShell({ state, productPrefix, productSlug }) {
                   end={item.path === "/"}
                   onClick={(event) => {
                     handleSidebarNavClick();
+                    if (item.moduleKey === "ticketing") {
+                      window.dispatchEvent(new Event("wz:ticketing-menu-click"));
+                    }
                     if (item.requiresAppUsage && !allowAppUsage) {
                       event.preventDefault();
                       setUpgradeAlertMessage("Upgrade to next plan to access App Usage.");
@@ -1326,6 +1340,7 @@ export default function App() {
       allowGamingOttUsage: data.allow_gaming_ott_usage !== false,
       themePrimary: data.theme_primary || "",
       themeSecondary: data.theme_secondary || "",
+      sidebarMenuStyle: data.sidebar_menu_style === "compact" ? "compact" : "default",
       freePlanPopup: Boolean(data.free_plan_popup),
       freePlanExpiry: data.free_plan_expiry || "",
       onboarding: data.onboarding || { enabled: false, state: "active" },
@@ -1364,6 +1379,17 @@ export default function App() {
     applyProfileState(data);
     await loadSubscriptions();
   }, [applyProfileState, loadSubscriptions]);
+
+  useEffect(() => {
+    const handleSidebarStyleChange = (event) => {
+      const nextStyle = event?.detail?.style === "compact" ? "compact" : "default";
+      setState((prev) => ({ ...prev, sidebarMenuStyle: nextStyle }));
+    };
+    window.addEventListener("wz:sidebar-menu-style-change", handleSidebarStyleChange);
+    return () => {
+      window.removeEventListener("wz:sidebar-menu-style-change", handleSidebarStyleChange);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;

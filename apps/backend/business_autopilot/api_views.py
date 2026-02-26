@@ -5,9 +5,10 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from django.shortcuts import render
+from django.utils import timezone
 
 from apps.backend.common_auth.models import User
-from core.models import Organization, UserProfile
+from core.models import Organization, UserProfile, Subscription
 
 from .models import (
     Module,
@@ -34,11 +35,12 @@ DEFAULT_ERP_MODULES = [
     {"name": "Project Management", "slug": "projects", "sort_order": 3},
     {"name": "Accounts / ERP", "slug": "accounts", "sort_order": 4},
     {"name": "Ticketing System", "slug": "ticketing", "sort_order": 5},
-    {"name": "Stocks Management", "slug": "stocks", "sort_order": 6},
+    {"name": "Inventory", "slug": "stocks", "sort_order": 6},
 ]
 
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
+ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 
 
 def _resolve_org(user: User):
@@ -101,6 +103,55 @@ def _ensure_org_modules(org):
     return active_modules
 
 
+def _default_plan_module_slugs(plan_name):
+    key = str(plan_name or "").strip().lower()
+    if "free" in key:
+        return ["crm", "hrm", "projects", "accounts"]
+    if "starter" in key:
+        return ["crm", "hrm", "projects", "accounts"]
+    if "growth" in key:
+        return ["crm", "hrm", "projects", "accounts", "ticketing", "stocks"]
+    if "pro" in key:
+        return ["crm", "hrm", "projects", "accounts", "ticketing", "stocks"]
+    return list(ERP_MODULE_SLUG_SET)
+
+
+def _get_active_erp_subscription(org):
+    if not org:
+        return None
+    now = timezone.now()
+    rows = (
+        Subscription.objects
+        .filter(organization=org, plan__product__slug="business-autopilot-erp")
+        .select_related("plan", "plan__product")
+        .order_by("-start_date", "-id")
+    )
+    for row in rows:
+        status = str(row.status or "").lower()
+        if status not in {"active", "trialing"}:
+            continue
+        if row.end_date and row.end_date < now:
+            continue
+        return row
+    return None
+
+
+def _get_plan_erp_module_slugs(plan):
+    if not plan:
+        return set(ERP_MODULE_SLUG_SET)
+    features = plan.features or {}
+    configured = features.get("erp_enabled_modules")
+    if isinstance(configured, list):
+        normalized = {
+            str(item or "").strip().lower()
+            for item in configured
+            if str(item or "").strip().lower() in ERP_MODULE_SLUG_SET
+        }
+        if normalized:
+            return normalized
+    return set(_default_plan_module_slugs(plan.name))
+
+
 def _serialize_employee_roles(org):
     rows = (
         OrganizationEmployeeRole.objects
@@ -143,6 +194,8 @@ def _serialize_org_users(org):
 
 
 def _serialize_modules(org):
+    subscription = _get_active_erp_subscription(org)
+    allowed_slugs = _get_plan_erp_module_slugs(subscription.plan if subscription and subscription.plan else None)
     rows = (
         OrganizationModule.objects
         .filter(organization=org, module__is_active=True)
@@ -154,8 +207,8 @@ def _serialize_modules(org):
             "id": row.module_id,
             "name": row.module.name,
             "slug": row.module.slug,
-            "enabled": bool(row.enabled),
-            "eligible": True,
+            "enabled": bool(row.enabled and row.module.slug in allowed_slugs),
+            "eligible": bool(row.module.slug in allowed_slugs),
             "path": MODULE_PATHS.get(row.module.slug, f"/{row.module.slug}"),
         }
         for row in rows
@@ -258,6 +311,10 @@ def org_enabled_modules(request):
         module = Module.objects.filter(slug=module_slug, is_active=True).first()
         if not module:
             return JsonResponse({"detail": "module_not_found"}, status=404)
+        active_sub = _get_active_erp_subscription(org)
+        allowed_slugs = _get_plan_erp_module_slugs(active_sub.plan if active_sub and active_sub.plan else None)
+        if enabled and module_slug not in allowed_slugs:
+            return JsonResponse({"detail": "module_not_allowed_for_plan"}, status=400)
         org_module, _ = OrganizationModule.objects.get_or_create(
             organization=org,
             module=module,

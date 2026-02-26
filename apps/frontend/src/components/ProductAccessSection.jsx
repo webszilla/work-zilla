@@ -228,11 +228,11 @@ export default function ProductAccessSection({
                   </div>
                 ) : null}
                 {isCurrentProduct ? (
-                  <button type="button" className="btn btn-outline-light btn-sm mt-auto mx-auto" disabled>
+                  <button type="button" className="btn btn-outline-light btn-sm mt-auto w-100" disabled>
                     {actionLabel}
                   </button>
                 ) : actionHref ? (
-                  <a href={actionHref} className="btn btn-primary btn-sm mt-auto mx-auto">
+                  <a href={actionHref} className="btn btn-primary btn-sm mt-auto w-100">
                     {actionLabel}
                   </a>
                 ) : (

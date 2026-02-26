@@ -1,11 +1,13 @@
 from django.shortcuts import render
 from django.http import Http404
 from django.db import models
+from django.db.utils import OperationalError, ProgrammingError
 from django.http import JsonResponse
 from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
 from .models import Plan, ChatWidget
 from apps.backend.products.models import Product
+from saas_admin.models import Product as SaaSAdminProduct
 from core.subscription_utils import is_free_plan
 from dashboard.views import get_active_org
 from core.models import Subscription, SubscriptionHistory
@@ -33,6 +35,15 @@ def _public_product_name(value, slug):
     if slug == "whatsapp-automation":
         return "WhatsApp Automation"
     return value
+
+
+def _normalize_saas_admin_public_slug(value):
+    slug = (value or "").strip().lower()
+    if slug == "work-suite":
+        return "worksuite"
+    if slug == "online-storage":
+        return "storage"
+    return slug
 
 
 def _storage_is_free_plan(plan):
@@ -135,11 +146,32 @@ def public_chatbox(request, slug, code):
 
 @require_http_methods(["GET"])
 def public_products(request):
-    products = (
+    products = list(
         Product.objects
         .filter(is_active=True)
         .exclude(slug="ai-chat-widget")
         .order_by("sort_order", "name")
+    )
+    public_order_map = {}
+    try:
+        saas_order_rows = (
+            SaaSAdminProduct.objects
+            .filter(status="active")
+            .order_by("sort_order", "name")
+            .values("slug", "sort_order")
+        )
+        public_order_map = {
+            _normalize_saas_admin_public_slug(row["slug"]): index
+            for index, row in enumerate(saas_order_rows, start=1)
+        }
+    except (OperationalError, ProgrammingError):
+        public_order_map = {}
+    products.sort(
+        key=lambda product: (
+            public_order_map.get(_public_product_slug(product.slug), 10_000),
+            product.sort_order or 0,
+            (product.name or "").lower(),
+        )
     )
     return JsonResponse({
         "products": [

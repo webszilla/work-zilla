@@ -40,14 +40,13 @@
             <div class="form-field">
               <label>Phone Number *</label>
               <div class="phone-input-group">
-                <input type="text" name="phone_country" class="form-control" list="phone-country-options" data-phone-country placeholder="+91" value="" required>
+                <select name="phone_country" class="form-control" data-phone-country required>
+                  {% include "partials/phone_country_options.html" %}
+                </select>
                 <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="" required>
               </div>
             </div>
           </div>
-          <datalist id="phone-country-options">
-            {% include "partials/phone_country_options.html" %}
-          </datalist>
           <button class="btn btn-outline mt-3" type="submit">Save Profile</button>
         </form>
     </div>

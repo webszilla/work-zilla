@@ -302,6 +302,14 @@
         .join(" ");
     }
 
+    function formatProductPlanTitle(value, productSlug) {
+      const title = formatPlanTitle(value);
+      if (productSlug === "business-autopilot-erp") {
+        return title.replace(/\s+ERP$/i, "");
+      }
+      return title;
+    }
+
     function formatStorageLabel(gbValue) {
       const gb = Number(gbValue);
       if (!Number.isFinite(gb) || gb <= 0) return "-";
@@ -383,9 +391,50 @@
         ];
       }
       if (productSlug === "business-autopilot-erp") {
+        const featureFlags = plan.features || {};
+        const moduleLabelMap = {
+          crm: "CRM Module",
+          hrm: "HR Management",
+          projects: "Project Management",
+          accounts: "Accounts / ERP",
+          ticketing: "Ticketing System",
+          stocks: "Stocks Management"
+        };
+        const configuredModules = Array.isArray(featureFlags.erp_enabled_modules)
+          ? featureFlags.erp_enabled_modules.map((slug) => moduleLabelMap[String(slug || "").toLowerCase()]).filter(Boolean)
+          : [];
+        const roleBasedAccessEnabled = featureFlags.role_based_access !== false;
         const planKey = String(plan.name || "").toLowerCase();
+        const buildProItems = () => {
+          const items = [
+            "Everything in Growth",
+            "HR + Payroll Integration",
+            "CRM Integration",
+            "Automation Workflows",
+            "Custom Dashboards",
+            "Advanced Role Permissions",
+            "Audit Logs",
+            "Priority Support"
+          ];
+          if (roleBasedAccessEnabled) items.push("Role Based Access");
+          if (configuredModules.length) items.push(...configuredModules);
+          return Array.from(new Set(items));
+        };
+        if (planKey === "free") {
+          if (String(featureFlags.trial_features || "").toLowerCase() === "pro") {
+            return Array.from(new Set([
+              ...buildProItems(),
+              "2 Add-on Users Included (Trial)"
+            ]));
+          }
+          const items = configuredModules.length
+            ? [...configuredModules]
+            : ["CRM Module", "HR Management", "Project Management", "Accounts / ERP"];
+          if (roleBasedAccessEnabled) items.push("Role Based Access");
+          return Array.from(new Set(items));
+        }
         if (planKey.includes("starter")) {
-          return [
+          const items = [
             "Basic Accounting",
             "Invoice & Billing",
             "Expense Tracking",
@@ -394,9 +443,12 @@
             "1 Organization",
             "Email Support"
           ];
+          if (roleBasedAccessEnabled) items.push("Role Based Access");
+          if (configuredModules.length) items.push(...configuredModules);
+          return Array.from(new Set(items));
         }
         if (planKey.includes("growth")) {
-          return [
+          const items = [
             "Everything in Starter",
             "Inventory Management",
             "Purchase Orders",
@@ -406,17 +458,11 @@
             "Advanced Reports",
             "API Access"
           ];
+          if (roleBasedAccessEnabled) items.push("Role Based Access");
+          if (configuredModules.length) items.push(...configuredModules);
+          return Array.from(new Set(items));
         }
-        return [
-          "Everything in Growth",
-          "HR + Payroll Integration",
-          "CRM Integration",
-          "Automation Workflows",
-          "Custom Dashboards",
-          "Advanced Role Permissions",
-          "Audit Logs",
-          "Priority Support"
-        ];
+        return buildProItems();
       }
       if (productSlug === "whatsapp-automation") {
         const key = String(plan.name || "").toLowerCase();
@@ -505,12 +551,108 @@
         { text: `Max messages/conversation: ${limits.max_messages_per_conversation ?? "-"}` },
         { text: `Max chars/message: ${limits.max_chars_per_message ?? "-"}` },
         { text: "Quick enquiry form", ok: true },
-        { text: "Allow Agent Add-Ons", ok: !!flags.allow_addons },
-        { text: "Remove branding", ok: !!flags.remove_branding },
-        { text: "Analytics (basic)", ok: !!flags.analytics_basic },
-        { text: "CSV export", ok: !!flags.csv_export },
         { text: "Agent inbox", ok: !!flags.agent_inbox },
+        { text: "Allow Agent Add-Ons", ok: !!flags.allow_addons },
+        { text: "Analytics (basic)", ok: !!flags.analytics_basic },
+        { text: "Remove branding", ok: !!flags.remove_branding },
+        { text: "CSV export", ok: !!flags.csv_export },
         { text: "Extra agents billed separately" }
+      ];
+    }
+
+    function buildBusinessAutopilotPricingFeatures(plan) {
+      const features = plan.features || {};
+      const flags = plan.flags || {};
+      const limits = plan.limits || {};
+      const planKey = String(plan.name || "").trim().toLowerCase();
+      const tier = planKey.includes("starter")
+        ? "starter"
+        : planKey.includes("growth")
+          ? "growth"
+          : planKey.includes("pro")
+            ? "pro"
+            : "free";
+      const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
+
+      const defaultsByTier = {
+        free: { crm: true, hrm: true, projects: true, accounts: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+        starter: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+        growth: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
+        pro: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
+      };
+      const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
+
+      const configuredModules = Array.isArray(features.erp_enabled_modules)
+        ? features.erp_enabled_modules.map((s) => String(s || "").toLowerCase())
+        : null;
+      const hasModule = (slug, fallback) => (configuredModules ? configuredModules.includes(slug) : fallback);
+      const boolFrom = (keys, fallback) => {
+        for (const key of keys) {
+          if (typeof features[key] === "boolean") return features[key];
+          if (typeof flags[key] === "boolean") return flags[key];
+          if (typeof limits[key] === "boolean") return limits[key];
+        }
+        return fallback;
+      };
+
+      const rows = [
+        { text: "CRM Module", ok: hasModule("crm", defaults.crm) },
+        { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
+        { text: "Project Management", ok: hasModule("projects", defaults.projects) },
+        { text: "Accounts / ERP", ok: hasModule("accounts", defaults.accounts) },
+        { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
+        { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
+        { text: "Invoice & Billing", ok: boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
+        { text: "Expense Tracking", ok: boolFrom(["expense_tracking"], defaults.expense) },
+        { text: "GST Ready (India)", ok: boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
+        { text: "Reports", ok: boolFrom(["reports", "basic_reports", "advanced_reports"], defaults.reports) },
+        { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
+        { text: "Purchase Orders", ok: boolFrom(["purchase_orders"], defaults.purchase) },
+        { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
+        { text: "API Access", ok: boolFrom(["api_access"], defaults.api) },
+        { text: "Custom Dashboards", ok: boolFrom(["custom_dashboards"], defaults.dashboards) },
+        { text: "Audit Logs", ok: boolFrom(["audit_logs"], defaults.audit) },
+        { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+      ];
+      if (trialPro) rows.push({ text: "2 Add-on Users Included (Trial)" });
+      return rows;
+    }
+
+    function buildWhatsAppAutomationPricingFeatures(plan) {
+      const features = plan.features || {};
+      const flags = plan.flags || {};
+      const limits = plan.limits || {};
+      const planKey = String(plan.name || "").trim().toLowerCase();
+      const tier = (planKey.includes("starter") || planKey.includes("basic"))
+        ? "starter"
+        : (planKey.includes("growth") || planKey.includes("plus"))
+          ? "growth"
+          : planKey.includes("pro")
+            ? "pro"
+            : "free";
+      const defaultsByTier = {
+        free: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: false, addons: false, priority: false },
+        starter: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: true, addons: false, priority: false },
+        growth: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: false },
+        pro: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: true },
+      };
+      const defaults = defaultsByTier[tier] || defaultsByTier.free;
+      const boolFrom = (keys, fallback) => {
+        for (const key of keys) {
+          if (typeof features[key] === "boolean") return features[key];
+          if (typeof flags[key] === "boolean") return flags[key];
+          if (typeof limits[key] === "boolean") return limits[key];
+        }
+        return fallback;
+      };
+      return [
+        { text: "Company Digital Card", ok: boolFrom(["digital_card", "digital_card_enabled"], defaults.card) },
+        { text: "WhatsApp Catalogue", ok: boolFrom(["catalogue", "catalogue_enabled"], defaults.catalogue) },
+        { text: "Basic Automation", ok: boolFrom(["basic_automation", "automation"], defaults.basicAuto) },
+        { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
+        { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },
+        { text: "Advanced Automation Flows", ok: boolFrom(["advanced_automation", "automation_flows"], defaults.advancedAuto) },
+        { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
       ];
     }
 
@@ -635,6 +777,8 @@
         const features = buildFeatureList(plan, normalizedSlug);
         const monitorFeatures = isMonitor ? buildMonitorFeatures(plan) : [];
         const chatbotFeatures = isChatbot ? buildAiChatbotFeatures(plan) : [];
+        const erpFeatureFlags = isBusinessAutopilot ? buildBusinessAutopilotPricingFeatures(plan) : [];
+        const waFeatureFlags = isWhatsAppAutomation ? buildWhatsAppAutomationPricingFeatures(plan) : [];
         const activePlanId = activePlans[data.product.slug]?.plan_id || null;
         const isCurrentPlan = activePlanId === plan.id;
         const activePlan = data.plans.find((item) => item.id === activePlanId) || null;
@@ -665,7 +809,7 @@
           ? `${isMonitor ? 15 : data.trial_days} days free trial`
           : null;
         card.innerHTML = `
-          <h2 class="plan-title">${escapeHtml(formatPlanTitle(plan.name))}</h2>
+          <h2 class="plan-title">${escapeHtml(formatProductPlanTitle(plan.name, normalizedSlug))}</h2>
           <p>${isMonitor
             ? escapeHtml(monitorPlanDescription(plan.name))
             : normalizedSlug === "ai-chatbot"
@@ -718,6 +862,15 @@
           ` : isChatbot ? `
             <ul class="plan-features">
               ${chatbotFeatures.map((item) => `
+                <li>
+                  ${item.ok === undefined
+                    ? escapeHtml(item.text)
+                    : `<span class="feature-flag ${item.ok ? "ok" : "no"}"></span>${escapeHtml(item.text)}`}
+                </li>`).join("")}
+            </ul>
+          ` : (isBusinessAutopilot || isWhatsAppAutomation) ? `
+            <ul class="plan-features">
+              ${(isBusinessAutopilot ? erpFeatureFlags : waFeatureFlags).map((item) => `
                 <li>
                   ${item.ok === undefined
                     ? escapeHtml(item.text)
@@ -1060,19 +1213,9 @@
       fetch("/api/public/products")
         .then((response) => response.json())
         .then((data) => {
-          const desiredOrder = ["worksuite", "ai-chatbot", "whatsapp-automation", "online-storage", "business-autopilot-erp"];
           const products = (data.products || [])
             .filter((item) => item.slug !== "ai-chat-widget" && item.slug !== "digital-card")
-            .sort((a, b) => {
-              const ai = desiredOrder.indexOf(a.slug);
-              const bi = desiredOrder.indexOf(b.slug);
-              if (ai !== -1 || bi !== -1) {
-                if (ai === -1) return 1;
-                if (bi === -1) return -1;
-                if (ai !== bi) return ai - bi;
-              }
-              return String(a.name || "").localeCompare(String(b.name || ""));
-            });
+            ;
           window.__pricingProducts = products;
           const monitor = products.find((item) => item.slug === "monitor");
           const preferred = getInitialProductSlug(products);

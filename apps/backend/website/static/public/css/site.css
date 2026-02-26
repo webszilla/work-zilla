@@ -236,6 +236,13 @@ body.site-body {
   border: 1px solid #d6d9df;
   border-radius: 10px;
   padding: 10px 12px;
+  color: #0f172a;
+  background: #fff;
+}
+
+.form-field select option {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .form-field-action {

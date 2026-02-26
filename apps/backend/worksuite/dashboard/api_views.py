@@ -47,6 +47,7 @@ from core.models import (
     InvoiceSellerProfile,
     Device,
     UserProfile,
+    ThemeSettings,
 )
 from saas_admin.models import Product
 from dashboard import views as dashboard_views
@@ -65,6 +66,7 @@ User = get_user_model()
 
 DEFAULT_ALLOWED_INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30]
 GSTIN_REGEX = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
+HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
 def _normalize_text(value):
@@ -75,6 +77,15 @@ def _validate_gstin(value):
     if not value:
         return False
     return bool(re.match(GSTIN_REGEX, value))
+
+
+def _normalize_hex_color(value, fallback=""):
+    color = str(value or "").strip()
+    if not color:
+        return fallback
+    if not HEX_COLOR_RE.match(color):
+        return fallback
+    return color.lower()
 
 
 def _billing_profile_payload(profile):
@@ -1410,6 +1421,7 @@ def employees_delete(request, emp_id):
             f"({app_usage_activity_count} app usage + {gaming_ott_activity_count} gaming/OTT), "
             f"and {stop_event_count} monitor stop records."
         ),
+        request=request,
     )
     return JsonResponse(
         {
@@ -1814,6 +1826,7 @@ def screenshots_delete(request, shot_id):
         request.user,
         "Delete Screenshot",
         f"Screenshot ID {shot.id} deleted for {shot.employee.name}",
+        request=request,
     )
 
     if shot.image:
@@ -1844,6 +1857,7 @@ def screenshots_delete_all(request):
         request.user,
         "Delete All Screenshots",
         f"Deleted {deleted_count} screenshots for org {org.name}",
+        request=request,
     )
 
     return JsonResponse({"deleted": True, "count": deleted_count})
@@ -1881,6 +1895,7 @@ def screenshots_delete_employee(request):
         request.user,
         "Delete Employee Screenshots",
         f"{deleted_count} screenshots deleted for {employee.name}",
+        request=request,
     )
 
     return JsonResponse({"deleted": True, "count": deleted_count})
@@ -1938,6 +1953,7 @@ def screenshots_delete_selected(request):
             request.user,
             "Delete Selected Screenshots",
             details,
+            request=request,
         )
 
     return JsonResponse({"deleted": True, "count": deleted_count})
@@ -2959,6 +2975,7 @@ def company_update_name(request):
         request.user,
         "Update Company Name",
         f"Company name changed from '{old_name}' to '{org.name}'",
+        request=request,
     )
 
     return JsonResponse({"updated": True, "name": org.name})
@@ -2999,6 +3016,7 @@ def company_update_interval(request):
         request.user,
         "Update Screenshot Interval",
         f"Interval changed from {previous_interval} to {interval_val} minute(s)",
+        request=request,
     )
 
     return JsonResponse({"screenshot_interval_minutes": interval_val})
@@ -3072,6 +3090,7 @@ def company_update_screenshot_privacy(request):
             request.user,
             "Update Screenshot Privacy",
             f"Updated: {', '.join(changes)}",
+            request=request,
         )
 
     return JsonResponse({
@@ -3117,6 +3136,7 @@ def company_update_privacy(request):
         request.user,
         "Update Privacy Mode",
         f"Monitoring mode changed from '{previous_mode}' to '{privacy_settings.monitoring_mode}'",
+        request=request,
     )
 
     return JsonResponse({
@@ -3173,6 +3193,7 @@ def company_update_support(request):
             f"previous_hours={previous_hours}, "
             f"previous_until={_format_datetime(previous_enabled_until) if previous_enabled_until else '-'}"
         ),
+        request=request,
     )
 
     support_active = dashboard_views.has_active_support_access(privacy_settings)
@@ -4816,6 +4837,7 @@ def plans_rollback(request):
         request.user,
         "Rollback Plan",
         f"Rolled back to {target_plan.name} until { _format_datetime(rollback_entry['end_date']) }",
+        request=request,
     )
 
     return JsonResponse({
@@ -4945,6 +4967,15 @@ def profile_summary(request):
     org, error = _get_org_or_error(request)
     if error:
         return error
+    org_settings, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    global_theme = ThemeSettings.get_active()
+    org_theme_primary = _normalize_hex_color(org_settings.theme_primary_color)
+    org_theme_secondary = _normalize_hex_color(org_settings.theme_secondary_color)
+    sidebar_menu_style = (org_settings.sidebar_menu_style or "default").strip().lower() or "default"
+    if sidebar_menu_style not in {"default", "compact"}:
+        sidebar_menu_style = "default"
+    effective_theme_primary = org_theme_primary or _normalize_hex_color(global_theme.primary_color, "#e11d48")
+    effective_theme_secondary = org_theme_secondary or _normalize_hex_color(global_theme.secondary_color, "#f59e0b")
 
     referral_code = ensure_referral_code(org)
     referral_link = request.build_absolute_uri(f"/signup/?ref={referral_code}") if referral_code else ""
@@ -4960,11 +4991,17 @@ def profile_summary(request):
         else:
             phone_number = profile.phone_number.strip()
 
+    requested_product_slug = (request.GET.get("product") or "").strip().lower()
+    if requested_product_slug == "monitor":
+        requested_product_slug = "worksuite"
+
     recent_actions_qs = (
         AdminActivity.objects
         .filter(user__userprofile__organization=org)
         .select_related("user")
     )
+    if requested_product_slug:
+        recent_actions_qs = recent_actions_qs.filter(product_slug=requested_product_slug)
     search_query = (request.GET.get("q") or "").strip()
     if search_query:
         recent_actions_qs = recent_actions_qs.filter(
@@ -5018,6 +5055,17 @@ def profile_summary(request):
             "phone_number": profile.phone_number or "",
         },
         "org_timezone": org_timezone,
+        "theme_primary": effective_theme_primary,
+        "theme_secondary": effective_theme_secondary,
+        "theme_defaults": {
+            "primary": _normalize_hex_color(global_theme.primary_color, "#e11d48"),
+            "secondary": _normalize_hex_color(global_theme.secondary_color, "#f59e0b"),
+        },
+        "theme_overrides": {
+            "primary": org_theme_primary,
+            "secondary": org_theme_secondary,
+        },
+        "sidebar_menu_style": sidebar_menu_style,
         "phone_country": phone_country,
         "phone_number": phone_number,
         "recent_actions": [
@@ -5052,8 +5100,17 @@ def profile_update_email(request):
     phone_country = (payload.get("phone_country") or "").strip() or "+91"
     phone_number = (payload.get("phone_number") or "").strip()
     org_timezone = (payload.get("org_timezone") or "").strip()
+    theme_primary = _normalize_hex_color(payload.get("theme_primary"))
+    theme_secondary = _normalize_hex_color(payload.get("theme_secondary"))
+    sidebar_menu_style = (payload.get("sidebar_menu_style") or "").strip().lower()
+    if "sidebar_menu_style" in payload and sidebar_menu_style not in {"default", "compact"}:
+        return _json_error("Invalid sidebar menu style.", status=400)
     if not email:
         return _json_error("Email is required.", status=400)
+    if "theme_primary" in payload and not theme_primary:
+        return _json_error("Invalid primary color.", status=400)
+    if "theme_secondary" in payload and not theme_secondary:
+        return _json_error("Invalid secondary color.", status=400)
 
     user = request.user
     profile = dashboard_views.get_profile(user)
@@ -5080,20 +5137,35 @@ def profile_update_email(request):
         if error:
             return error
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+        updates = []
         if org_timezone:
             settings_obj.org_timezone = normalize_timezone(org_timezone)
-            settings_obj.save(update_fields=["org_timezone"])
+            updates.append("org_timezone")
+        if "theme_primary" in payload:
+            settings_obj.theme_primary_color = theme_primary
+            updates.append("theme_primary_color")
+        if "theme_secondary" in payload:
+            settings_obj.theme_secondary_color = theme_secondary
+            updates.append("theme_secondary_color")
+        if "sidebar_menu_style" in payload:
+            settings_obj.sidebar_menu_style = sidebar_menu_style or "default"
+            updates.append("sidebar_menu_style")
+        if updates:
+            settings_obj.save(update_fields=updates)
         saved_timezone = settings_obj.org_timezone or "UTC"
     if old_email != new_email:
         send_email_verification(user, request=request, force=True)
 
-    dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}")
+    dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}", request=request)
 
     return JsonResponse({
         "updated": True,
         "email": user.email,
         "phone_number": profile.phone_number or "",
         "org_timezone": saved_timezone,
+        "theme_primary": theme_primary,
+        "theme_secondary": theme_secondary,
+        "sidebar_menu_style": sidebar_menu_style or "default",
         "email_verified": user.email_verified,
     })
 
@@ -5128,7 +5200,7 @@ def profile_update_password(request):
     user.set_password(new_password)
     user.save()
     update_session_auth_hash(request, user)
-    dashboard_views.log_admin_activity(user, "Update Password", "Password updated")
+    dashboard_views.log_admin_activity(user, "Update Password", "Password updated", request=request)
     notify_password_changed(user)
 
     return JsonResponse({"updated": True})

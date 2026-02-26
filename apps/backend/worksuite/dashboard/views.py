@@ -1502,7 +1502,7 @@ def delete_screenshot(request, shot_id):
         shot.image.delete(save=False)
     shot.delete()
 
-    log_admin_activity(request.user, "Delete Screenshot", f"Screenshot ID {shot_id}")
+    log_admin_activity(request.user, "Delete Screenshot", f"Screenshot ID {shot_id}", request=request)
     messages.success(request, "Screenshot deleted successfully.")
     return redirect(request.META.get("HTTP_REFERER", "/dashboard/screenshots/"))
 
@@ -1527,7 +1527,7 @@ def delete_employee_screenshots(request, emp_id):
 
     shots.delete()
 
-    log_admin_activity(request.user, "Delete Employee Screenshots", f"{deleted_count} screenshots deleted for {employee.name}")
+    log_admin_activity(request.user, "Delete Employee Screenshots", f"{deleted_count} screenshots deleted for {employee.name}", request=request)
     messages.success(request, f"Deleted {deleted_count} screenshots for {employee.name}.")
     return redirect(f"/dashboard/screenshots/?employee_id={employee.id}")
 
@@ -2117,7 +2117,7 @@ def user_profile(request):
                     phone_value = f"{form_phone_country} {form_phone_number}".strip()
                 profile.phone_number = phone_value
                 profile.save()
-                log_admin_activity(request.user, "Update Email", f"Updated email to {email}")
+                log_admin_activity(request.user, "Update Email", f"Updated email to {email}", request=request)
                 messages.success(request, "Email updated successfully.")
             return redirect("/dashboard/profile/")
 
@@ -2143,7 +2143,7 @@ def user_profile(request):
             user.set_password(new_password)
             user.save()
             update_session_auth_hash(request, user)
-            log_admin_activity(request.user, "Update Password", "Password updated")
+            log_admin_activity(request.user, "Update Password", "Password updated", request=request)
             messages.success(request, "Password updated successfully.")
             return redirect("/dashboard/profile/")
 

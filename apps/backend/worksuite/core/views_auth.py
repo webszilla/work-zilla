@@ -314,6 +314,7 @@ def auth_me(request):
 
     org_payload = None
     org_timezone = "UTC"
+    org_settings = None
     if org:
         org_settings, _ = OrganizationSettings.objects.get_or_create(organization=org)
         org_timezone = normalize_timezone(org_settings.org_timezone, fallback="UTC")
@@ -476,6 +477,20 @@ def auth_me(request):
         onboarding_state = "needs_plan"
 
     theme = ThemeSettings.get_active()
+    theme_primary = (theme.primary_color or "").strip() or "#e11d48"
+    theme_secondary = (theme.secondary_color or "").strip() or "#f59e0b"
+    if org_settings:
+        org_theme_primary = (org_settings.theme_primary_color or "").strip()
+        org_theme_secondary = (org_settings.theme_secondary_color or "").strip()
+        if org_theme_primary:
+            theme_primary = org_theme_primary
+        if org_theme_secondary:
+            theme_secondary = org_theme_secondary
+    sidebar_menu_style = "default"
+    if org_settings:
+        sidebar_menu_style = (org_settings.sidebar_menu_style or "default").strip().lower() or "default"
+    if sidebar_menu_style not in {"default", "compact"}:
+        sidebar_menu_style = "default"
     retention_status = None
     grace_until = None
     archive_until = None
@@ -515,8 +530,9 @@ def auth_me(request):
                 timezone.localtime(free_plan_expiry).strftime("%d %b %Y")
                 if free_plan_expiry else ""
             ),
-            "theme_primary": theme.primary_color,
-            "theme_secondary": theme.secondary_color,
+            "theme_primary": theme_primary,
+            "theme_secondary": theme_secondary,
+            "sidebar_menu_style": sidebar_menu_style,
             "read_only": read_only,
             "retention_status": retention_status,
             "grace_until": grace_until.isoformat() if grace_until else "",

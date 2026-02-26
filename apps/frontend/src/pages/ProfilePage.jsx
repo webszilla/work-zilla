@@ -13,7 +13,7 @@ const emptyState = {
 const PROFILE_WHATSAPP_CONFIG_KEY = "wz_profile_whatsapp_api_config";
 const PROFILE_WHATSAPP_RULES_KEY = "wz_profile_whatsapp_event_rules";
 const WHATSAPP_DEPARTMENTS = ["HR", "Sales", "Accounts", "Support", "Projects", "Operations", "Client"];
-const WHATSAPP_EVENT_OPTIONS = [
+const WHATSAPP_COMPANY_EVENT_OPTIONS = [
   "New Lead Assigned",
   "Payment Pending",
   "Invoice Generated",
@@ -21,8 +21,67 @@ const WHATSAPP_EVENT_OPTIONS = [
   "Attendance Alert",
   "Low Stock Alert",
   "Leave Request",
-  "Custom Event",
 ];
+const WHATSAPP_CLIENT_EVENT_OPTIONS = [
+  "Welcome Message",
+  "Invoice Shared",
+  "Payment Reminder",
+  "Payment Received Confirmation",
+  "Order / Service Status Update",
+  "Appointment Reminder",
+  "Support Response Update",
+  "Delivery / Dispatch Update",
+  "Custom Client Notification",
+];
+const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
+
+function normalizeHexColor(value, fallback = "") {
+  const color = String(value || "").trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? color.toLowerCase() : fallback;
+}
+
+function applyOrgThemePreview(theme) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const root = document.documentElement;
+  const vars = [
+    "--color-primary",
+    "--color-primary-hover",
+    "--color-accent",
+    "--color-highlight",
+    "--color-accent-rgb",
+    "--color-primary-rgb",
+  ];
+  if (!theme?.primary) {
+    vars.forEach((name) => root.style.removeProperty(name));
+    return;
+  }
+  const hexToRgb = (value) => {
+    const hex = String(value || "").replace("#", "").trim();
+    if (hex.length === 3) {
+      return `${parseInt(hex[0] + hex[0], 16)}, ${parseInt(hex[1] + hex[1], 16)}, ${parseInt(hex[2] + hex[2], 16)}`;
+    }
+    if (hex.length === 6) {
+      return `${parseInt(hex.slice(0, 2), 16)}, ${parseInt(hex.slice(2, 4), 16)}, ${parseInt(hex.slice(4, 6), 16)}`;
+    }
+    return "";
+  };
+  const primary = normalizeHexColor(theme.primary);
+  const secondary = normalizeHexColor(theme.secondary, primary) || primary;
+  if (!primary) {
+    vars.forEach((name) => root.style.removeProperty(name));
+    return;
+  }
+  root.style.setProperty("--color-primary", primary);
+  root.style.setProperty("--color-primary-hover", primary);
+  root.style.setProperty("--color-accent", secondary);
+  root.style.setProperty("--color-highlight", secondary);
+  const primaryRgb = hexToRgb(primary);
+  const accentRgb = hexToRgb(secondary);
+  if (primaryRgb) root.style.setProperty("--color-primary-rgb", primaryRgb);
+  if (accentRgb) root.style.setProperty("--color-accent-rgb", accentRgb);
+}
 
 function buildDefaultWhatsappApiConfig() {
   return {
@@ -59,6 +118,10 @@ export default function ProfilePage() {
   const [phoneCountry, setPhoneCountry] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [orgTimezone, setOrgTimezone] = useState("UTC");
+  const [themePrimary, setThemePrimary] = useState("#e11d48");
+  const [themeSecondary, setThemeSecondary] = useState("#f59e0b");
+  const [themeDefaults, setThemeDefaults] = useState({ primary: "#e11d48", secondary: "#f59e0b" });
+  const [sidebarMenuStyle, setSidebarMenuStyle] = useState("default");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -76,6 +139,21 @@ export default function ProfilePage() {
   const [whatsappRuleForm, setWhatsappRuleForm] = useState(buildEmptyWhatsappRule(""));
   const [editingWhatsappRuleId, setEditingWhatsappRuleId] = useState("");
   const [viewWhatsappRule, setViewWhatsappRule] = useState(null);
+  const [whatsappRulesTab, setWhatsappRulesTab] = useState("company");
+  const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
+  const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
+  const currentProductSlug = globalSlug
+    || (rawPath.includes("/ai-chatbot")
+      ? "ai-chatbot"
+      : rawPath.includes("/storage")
+      ? "storage"
+      : rawPath.includes("/business-autopilot")
+      ? "business-autopilot-erp"
+      : rawPath.includes("/whatsapp-automation")
+      ? "whatsapp-automation"
+      : rawPath.includes("/worksuite") || rawPath.includes("/monitor")
+      ? "worksuite"
+      : "");
 
   useEffect(() => {
     let active = true;
@@ -88,6 +166,9 @@ export default function ProfilePage() {
         }
         if (tableSearchQuery) {
           params.set("q", tableSearchQuery);
+        }
+        if (currentProductSlug) {
+          params.set("product", currentProductSlug);
         }
         const browserTimezone = getBrowserTimezone();
         if (browserTimezone) {
@@ -107,6 +188,14 @@ export default function ProfilePage() {
         const timezone = data.org_timezone || "UTC";
         setOrgTimezone(timezone);
         applyOrgTimezone(timezone);
+        const defaults = {
+          primary: normalizeHexColor(data.theme_defaults?.primary, "#e11d48"),
+          secondary: normalizeHexColor(data.theme_defaults?.secondary, "#f59e0b"),
+        };
+        setThemeDefaults(defaults);
+        setThemePrimary(normalizeHexColor(data.theme_primary, defaults.primary));
+        setThemeSecondary(normalizeHexColor(data.theme_secondary, defaults.secondary));
+        setSidebarMenuStyle(data.sidebar_menu_style === "compact" ? "compact" : "default");
       } catch (error) {
         if (error?.data?.redirect) {
           window.location.href = error.data.redirect;
@@ -126,7 +215,7 @@ export default function ProfilePage() {
     return () => {
       active = false;
     };
-  }, [adminPage, tableSearchQuery]);
+  }, [adminPage, tableSearchQuery, currentProductSlug]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -245,11 +334,28 @@ export default function ProfilePage() {
           email,
           phone_country: phoneCountry,
           phone_number: phoneNumber,
-          org_timezone: orgTimezone
+          org_timezone: orgTimezone,
+          theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+          theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+          sidebar_menu_style: sidebarMenuStyle === "compact" ? "compact" : "default",
         })
       });
       applyOrgTimezone(orgTimezone || "UTC");
-      setNotice("Email updated successfully.");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+      }
+      applyOrgThemePreview({
+        primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+        secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("wz:sidebar-menu-style-change", {
+            detail: { style: sidebarMenuStyle === "compact" ? "compact" : "default" }
+          })
+        );
+      }
+      setNotice("Profile and UI theme updated successfully.");
     } catch (error) {
       setState((prev) => ({
         ...prev,
@@ -338,6 +444,13 @@ export default function ProfilePage() {
       .filter(Boolean);
     return Array.from(new Set(options));
   }, [data.org, user.email, user.username]);
+  const filteredWhatsappEventRules = useMemo(() => {
+    const rows = Array.isArray(whatsappEventRules) ? whatsappEventRules : [];
+    if (whatsappRulesTab === "client") {
+      return rows.filter((row) => String(row?.department || "").trim().toLowerCase() === "client");
+    }
+    return rows.filter((row) => String(row?.department || "").trim().toLowerCase() !== "client");
+  }, [whatsappEventRules, whatsappRulesTab]);
 
   useEffect(() => {
     setWhatsappRuleForm((prev) => {
@@ -525,6 +638,88 @@ export default function ProfilePage() {
                 </select>
                 </div>
               ) : null}
+              {showTimezone ? (
+                <div className="mt-3 pt-2 border-top">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <label className="form-label mb-0">UI Theme Colors (All Products)</label>
+                    <button
+                      type="button"
+                      className="btn btn-outline-light btn-sm"
+                      onClick={() => {
+                        setThemePrimary(themeDefaults.primary);
+                        setThemeSecondary(themeDefaults.secondary);
+                      }}
+                    >
+                      Use Defaults
+                    </button>
+                  </div>
+                  <div className="row g-2">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small mb-1">Primary Color</label>
+                      <div className="input-group">
+                        <input
+                          type="color"
+                          className="form-control form-control-color"
+                          value={normalizeHexColor(themePrimary, themeDefaults.primary)}
+                          onChange={(event) => setThemePrimary(event.target.value)}
+                          title="Primary color"
+                        />
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={themePrimary}
+                          onChange={(event) => setThemePrimary(event.target.value)}
+                          placeholder="#e11d48"
+                        />
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small mb-1">Secondary Color</label>
+                      <div className="input-group">
+                        <input
+                          type="color"
+                          className="form-control form-control-color"
+                          value={normalizeHexColor(themeSecondary, themeDefaults.secondary)}
+                          onChange={(event) => setThemeSecondary(event.target.value)}
+                          title="Secondary color"
+                        />
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={themeSecondary}
+                          onChange={(event) => setThemeSecondary(event.target.value)}
+                          placeholder="#f59e0b"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="form-text text-secondary mt-2">
+                    Org admin-selected colors apply globally across your organization dashboards in all products.
+                  </div>
+                  <div className="mt-3 pt-2 border-top">
+                    <label className="form-label mb-2">React UI Side Menu Style</label>
+                    <div className="d-flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${sidebarMenuStyle === "default" ? "btn-primary" : "btn-outline-light"}`}
+                        onClick={() => setSidebarMenuStyle("default")}
+                      >
+                        Default Menu
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${sidebarMenuStyle === "compact" ? "btn-primary" : "btn-outline-light"}`}
+                        onClick={() => setSidebarMenuStyle("compact")}
+                      >
+                        Compact Center Menu
+                      </button>
+                    </div>
+                    <div className="form-text text-secondary mt-2 mb-3">
+                      Option 2 uses reduced sidebar width, bigger centered icons/text, and icon-only light/dark toggle buttons.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <button className="btn btn-primary btn-sm">Update Details</button>
             </form>
           </div>
@@ -572,7 +767,7 @@ export default function ProfilePage() {
       ) : null}
 
       {profileTopTab === "whatsappApi" ? (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <h5>WhatsApp API Connection & Event Notifications</h5>
         <p className="text-secondary mb-3">
           Configure WhatsApp API connection and create important event notifications for departments (including Client).
@@ -658,18 +853,23 @@ export default function ProfilePage() {
                 <div className="row g-3">
                   <div className="col-12 col-md-6">
                     <label className="form-label small mb-1">Important Event</label>
-                    <input
-                      className="form-control"
-                      list="profile-whatsapp-event-options"
+                    <select
+                      className="form-select"
                       value={whatsappRuleForm.eventName}
                       onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, eventName: event.target.value }))}
-                      placeholder="Select or type event"
-                    />
-                    <datalist id="profile-whatsapp-event-options">
-                      {WHATSAPP_EVENT_OPTIONS.map((item) => (
-                        <option key={item} value={item} />
-                      ))}
-                    </datalist>
+                    >
+                      <option value="">Select Event</option>
+                      <optgroup label="Company">
+                        {WHATSAPP_COMPANY_EVENT_OPTIONS.map((item) => (
+                          <option key={`company-${item}`} value={item}>{item}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Client">
+                        {WHATSAPP_CLIENT_EVENT_OPTIONS.map((item) => (
+                          <option key={`client-${item}`} value={item}>{item}</option>
+                        ))}
+                      </optgroup>
+                    </select>
                   </div>
                   <div className="col-12 col-md-6">
                     <label className="form-label small mb-1">Department</label>
@@ -686,7 +886,7 @@ export default function ProfilePage() {
                   <div className="col-12 col-md-6">
                     <label className="form-label small mb-1">Assign Org Admin</label>
                     <input
-                      className="form-control"
+                      className="form-control datalist-readable-input"
                       list="profile-whatsapp-admin-options"
                       value={whatsappRuleForm.assignedOrgAdmin}
                       onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, assignedOrgAdmin: event.target.value }))}
@@ -754,7 +954,23 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="table-responsive mt-3">
+        <div className="d-flex flex-wrap gap-2 mt-3 mb-2">
+          <button
+            type="button"
+            className={`btn btn-sm ${whatsappRulesTab === "company" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setWhatsappRulesTab("company")}
+          >
+            Company
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${whatsappRulesTab === "client" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setWhatsappRulesTab("client")}
+          >
+            Client
+          </button>
+        </div>
+        <div className="table-responsive">
           <table className="table table-dark table-striped table-hover align-middle">
             <thead>
               <tr>
@@ -768,8 +984,8 @@ export default function ProfilePage() {
               </tr>
             </thead>
             <tbody>
-              {whatsappEventRules.length ? (
-                whatsappEventRules.map((row) => (
+              {filteredWhatsappEventRules.length ? (
+                filteredWhatsappEventRules.map((row) => (
                   <tr key={row.id}>
                     <td>{row.eventName || "-"}</td>
                     <td>{row.department || "-"}</td>
@@ -794,7 +1010,11 @@ export default function ProfilePage() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7">No WhatsApp event notification rules yet.</td>
+                  <td colSpan="7">
+                    {whatsappRulesTab === "client"
+                      ? "No Client WhatsApp event notification rules yet."
+                      : "No Company WhatsApp event notification rules yet."}
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -804,7 +1024,7 @@ export default function ProfilePage() {
       ) : null}
 
       {profileTopTab === "profile" ? (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <h5>Downloads & Backups</h5>
         <p className="text-secondary">
           Generate a downloadable backup of your organization&apos;s data.
@@ -896,7 +1116,7 @@ export default function ProfilePage() {
       ) : null}
 
       {profileTopTab === "profile" ? (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <h5>Referral Program</h5>
         <p>
           <strong>Commission Rate:</strong> {referral.commission_rate ?? 0}%
@@ -930,7 +1150,7 @@ export default function ProfilePage() {
       ) : null}
 
       {profileTopTab === "profile" ? (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <h5>Referral Income</h5>
         <div className="table-responsive">
           <table className="table table-dark table-striped table-hover align-middle mt-2">
@@ -974,7 +1194,7 @@ export default function ProfilePage() {
       ) : null}
 
       {profileTopTab === "profile" ? (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <h5>Admin Activity</h5>
         <div className="table-controls">
           <div className="table-length">Show {pageSize} entries</div>

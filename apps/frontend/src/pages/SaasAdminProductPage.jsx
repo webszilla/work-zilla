@@ -22,6 +22,24 @@ const defaultAiCostAssumptions = {
   warnVeryHighInr: 2000
 };
 
+const ERP_MODULE_OPTIONS = [
+  { slug: "crm", label: "CRM" },
+  { slug: "hrm", label: "HR Management" },
+  { slug: "projects", label: "Project Management" },
+  { slug: "accounts", label: "Accounts / ERP" },
+  { slug: "ticketing", label: "Ticketing System" },
+  { slug: "stocks", label: "Stocks Management" },
+];
+
+function getDefaultErpModulesForPlanName(planName) {
+  const key = String(planName || "").trim().toLowerCase();
+  if (key.includes("free")) return ["crm", "hrm", "projects", "accounts"];
+  if (key.includes("starter")) return ["crm", "hrm", "projects", "accounts"];
+  if (key.includes("growth")) return ERP_MODULE_OPTIONS.map((item) => item.slug);
+  if (key.includes("pro")) return ERP_MODULE_OPTIONS.map((item) => item.slug);
+  return ERP_MODULE_OPTIONS.map((item) => item.slug);
+}
+
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -933,6 +951,7 @@ export default function SaasAdminProductPage() {
   const resolvedSlug = product?.slug || slug;
   const isAiChatbotProduct = resolvedSlug === "ai-chatbot";
   const isStorageProduct = resolvedSlug === "storage" || resolvedSlug === "online-storage";
+  const isBusinessAutopilotProduct = resolvedSlug === "business-autopilot-erp";
   const stats = data.stats || {};
   const monthlySales = data.monthly_sales || {};
   const monthlyInr = monthlySales.INR ?? 0;
@@ -1290,6 +1309,10 @@ export default function SaasAdminProductPage() {
             allow_addons: Boolean(plan.allow_addons),
             allow_app_usage: Boolean(plan.allow_app_usage),
             allow_hr_view: Boolean(plan.allow_hr_view),
+            role_based_access: Boolean(features.role_based_access ?? true),
+            erp_enabled_modules: Array.isArray(features.erp_enabled_modules)
+              ? features.erp_enabled_modules.filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
+              : getDefaultErpModulesForPlanName(plan.name || ""),
             widgets: limits.widgets ?? "",
             included_agents: limits.included_agents ?? "",
             conversations_per_month: limits.conversations_per_month ?? "",
@@ -1324,6 +1347,8 @@ export default function SaasAdminProductPage() {
             allow_addons: true,
             allow_app_usage: false,
             allow_hr_view: false,
+            role_based_access: true,
+            erp_enabled_modules: getDefaultErpModulesForPlanName(""),
             widgets: "",
             included_agents: "",
             conversations_per_month: "",
@@ -1539,6 +1564,12 @@ export default function SaasAdminProductPage() {
         agent_inbox: Boolean(planModal.form.agent_inbox),
         ai_enabled: Boolean(planModal.form.ai_enabled)
       };
+      if (isBusinessAutopilotProduct) {
+        features.role_based_access = Boolean(planModal.form.role_based_access ?? true);
+        features.erp_enabled_modules = Array.isArray(planModal.form.erp_enabled_modules)
+          ? planModal.form.erp_enabled_modules.filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
+          : [];
+      }
       const payload = {
         name: trimmedName,
         product_slug: slug,
@@ -5067,6 +5098,91 @@ export default function SaasAdminProductPage() {
                     </select>
                     {getFieldError("allow_hr_view")}
                   </div>
+                  {isBusinessAutopilotProduct ? (
+                    <>
+                      <div className="modal-form-field">
+                        <label className="form-label">Role Based Access</label>
+                        <select
+                          className="form-select"
+                          value={planModal.form.role_based_access ? "true" : "false"}
+                          onChange={(event) =>
+                            setPlanModal((prev) => ({
+                              ...prev,
+                              form: { ...prev.form, role_based_access: event.target.value === "true" }
+                            }))
+                          }
+                        >
+                          <option value="true">Enabled</option>
+                          <option value="false">Disabled</option>
+                        </select>
+                        <div className="text-secondary small mt-1">Recommended: enable for Free, Starter, Growth, and Pro.</div>
+                      </div>
+                      <div className="modal-form-field" style={{ gridColumn: "1 / -1" }}>
+                        <label className="form-label">Enabled ERP Modules for this Plan</label>
+                        <div className="row g-2">
+                          {ERP_MODULE_OPTIONS.map((module) => {
+                            const checked = Array.isArray(planModal.form.erp_enabled_modules)
+                              ? planModal.form.erp_enabled_modules.includes(module.slug)
+                              : false;
+                            return (
+                              <div className="col-12 col-md-6 col-xl-4" key={`erp-module-opt-${module.slug}`}>
+                                <label className="d-flex align-items-center gap-2 border rounded px-2 py-2 h-100">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      setPlanModal((prev) => {
+                                        const selected = new Set(Array.isArray(prev.form.erp_enabled_modules) ? prev.form.erp_enabled_modules : []);
+                                        if (event.target.checked) {
+                                          selected.add(module.slug);
+                                        } else {
+                                          selected.delete(module.slug);
+                                        }
+                                        return {
+                                          ...prev,
+                                          form: { ...prev.form, erp_enabled_modules: Array.from(selected) }
+                                        };
+                                      });
+                                    }}
+                                  />
+                                  <span>{module.label}</span>
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="d-flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() =>
+                              setPlanModal((prev) => ({
+                                ...prev,
+                                form: {
+                                  ...prev.form,
+                                  erp_enabled_modules: getDefaultErpModulesForPlanName(prev.form.name || "")
+                                }
+                              }))
+                            }
+                          >
+                            Auto by Plan Name
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() =>
+                              setPlanModal((prev) => ({
+                                ...prev,
+                                form: { ...prev.form, erp_enabled_modules: ERP_MODULE_OPTIONS.map((item) => item.slug) }
+                              }))
+                            }
+                          >
+                            Select All
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>

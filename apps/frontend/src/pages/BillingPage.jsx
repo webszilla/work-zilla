@@ -138,10 +138,25 @@ function getErpPerUserPriceFromLimits(limits, cycle, currency) {
     : (source.user_price_inr_month ?? "-");
 }
 
-function getErpPlanFeatures(planName) {
-  const name = String(planName || "").toLowerCase();
+function getErpPlanFeatures(plan) {
+  const configuredModules = Array.isArray(plan?.features?.erp_enabled_modules)
+    ? plan.features.erp_enabled_modules
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const moduleLabelMap = {
+    crm: "CRM Module",
+    hrm: "HR Management",
+    projects: "Projects",
+    accounts: "Accounts / ERP",
+    ticketing: "Ticketing",
+    stocks: "Stocks",
+  };
+  const configuredModuleLabels = configuredModules.map((slug) => moduleLabelMap[slug]).filter(Boolean);
+  const roleBasedAccessEnabled = plan?.features?.role_based_access !== false;
+  const name = String(plan?.name || "").toLowerCase();
   if (name.includes("starter")) {
-    return [
+    const features = [
       "Basic Accounting",
       "Invoice & Billing",
       "Expense Tracking",
@@ -149,9 +164,12 @@ function getErpPlanFeatures(planName) {
       "Basic Reports",
       "1 Organization",
     ];
+    if (roleBasedAccessEnabled) features.push("Role Based Access");
+    if (configuredModuleLabels.length) features.push(...configuredModuleLabels);
+    return features;
   }
   if (name.includes("growth")) {
-    return [
+    const features = [
       "Everything in Starter",
       "Inventory Management",
       "Purchase Orders",
@@ -159,9 +177,12 @@ function getErpPlanFeatures(planName) {
       "Project Accounting",
       "CRM + HR Modules",
     ];
+    if (roleBasedAccessEnabled) features.push("Role Based Access");
+    if (configuredModuleLabels.length) features.push(...configuredModuleLabels);
+    return features;
   }
   if (name.includes("pro")) {
-    return [
+    const features = [
       "Everything in Growth",
       "Advanced Role Permissions",
       "Automation Workflows",
@@ -169,8 +190,11 @@ function getErpPlanFeatures(planName) {
       "Audit Logs",
       "Priority Support",
     ];
+    if (roleBasedAccessEnabled && !features.includes("Role Based Access")) features.push("Role Based Access");
+    if (configuredModuleLabels.length) features.push(...configuredModuleLabels);
+    return features;
   }
-  return [
+  const fallback = configuredModuleLabels.length ? configuredModuleLabels : [
     "CRM Module",
     "HR Management",
     "Projects",
@@ -178,6 +202,14 @@ function getErpPlanFeatures(planName) {
     "Ticketing",
     "Stocks",
   ];
+  if (roleBasedAccessEnabled) fallback.push("Role Based Access");
+  return Array.from(new Set(fallback));
+}
+
+function getBusinessAutopilotPlanDisplayName(planName) {
+  const raw = String(planName || "").trim();
+  if (!raw) return "-";
+  return raw.replace(/\s+ERP$/i, "");
 }
 
 export default function BillingPage() {
@@ -610,7 +642,9 @@ export default function BillingPage() {
                   <div className="billing-current-plan__header">
                     <div>
                       <div className="billing-current-plan__title">Current Plan</div>
-                      <div className="billing-current-plan__plan">{sub.plan || "-"}</div>
+                      <div className="billing-current-plan__plan">
+                        {isBusinessAutopilot ? getBusinessAutopilotPlanDisplayName(sub.plan) : (sub.plan || "-")}
+                      </div>
                     </div>
                     <span className="badge bg-success text-white text-uppercase">
                       {formatValue(sub.status)}
@@ -743,7 +777,7 @@ export default function BillingPage() {
                           <span>{sub.employee_limit === 0 ? "Unlimited" : formatValue(sub.employee_limit)}</span>
                         </div>
                         <div className="plan-feature-divider" />
-                        {getErpPlanFeatures(sub.plan).map((feature) => (
+                        {getErpPlanFeatures(sub).map((feature) => (
                           <div className="plan-feature" key={`erp-feature-${feature}`}>
                             <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
                             <span>{feature}</span>

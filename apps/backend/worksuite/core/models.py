@@ -1116,6 +1116,9 @@ class OrganizationSettings(models.Model):
     auto_blur_card_fields = models.BooleanField(default=True)
     auto_blur_email_inbox = models.BooleanField(default=True)
     org_timezone = models.CharField(max_length=64, default="UTC")
+    theme_primary_color = models.CharField(max_length=20, blank=True, default="")
+    theme_secondary_color = models.CharField(max_length=20, blank=True, default="")
+    sidebar_menu_style = models.CharField(max_length=32, blank=True, default="default")
     ai_chatbot_premade_replies = models.TextField(blank=True, default="")
     ai_chatbot_user_attachments_enabled = models.BooleanField(default=False)
 
@@ -1162,6 +1165,7 @@ class AdminActivity(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     action = models.CharField(max_length=200)
     details = models.TextField(blank=True)
+    product_slug = models.CharField(max_length=120, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -1220,14 +1224,39 @@ class AdminNotification(models.Model):
 ADMIN_ACTIVITY_MAX_PER_USER = 500
 
 
-def log_admin_activity(user, action, details=""):
+def _infer_admin_activity_product_slug(request=None):
+    if not request:
+        return ""
+    path = str(getattr(request, "path", "") or "")
+    referer = ""
+    try:
+        referer = str((request.headers or {}).get("Referer") or "")
+    except Exception:
+        referer = ""
+    source = f"{path} {referer}".lower()
+    if "/app/business-autopilot" in source:
+        return "business-autopilot-erp"
+    if "/app/ai-chatbot" in source:
+        return "ai-chatbot"
+    if "/app/storage" in source:
+        return "storage"
+    if "/app/whatsapp-automation" in source:
+        return "whatsapp-automation"
+    if "/app/worksuite" in source or "/app/monitor" in source:
+        return "worksuite"
+    return ""
+
+
+def log_admin_activity(user, action, details="", product_slug="", request=None):
     if not user:
         return
+    resolved_product_slug = str(product_slug or "").strip().lower() or _infer_admin_activity_product_slug(request)
 
     AdminActivity.objects.create(
         user=user,
         action=action,
         details=details,
+        product_slug=resolved_product_slug,
     )
 
     old_ids = list(

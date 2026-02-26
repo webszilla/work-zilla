@@ -460,6 +460,12 @@ img {
   border: 1px solid rgba(15, 23, 42, 0.2);
   border-radius: 10px;
   background: #fff;
+  color: #0f172a;
+}
+
+.form-field select option {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .input-group {
@@ -477,16 +483,19 @@ img {
   align-items: center;
 }
 
-.phone-input-group input {
+.phone-input-group input,
+.phone-input-group select {
   width: 100%;
 }
 
-.phone-input-group input:first-child {
+.phone-input-group input:first-child,
+.phone-input-group select:first-child {
   max-width: 70px;
   min-width: 70px;
 }
 
-.phone-input-group input:last-child {
+.phone-input-group input:last-child,
+.phone-input-group select:last-child {
   min-width: 0;
 }
 
@@ -981,7 +990,7 @@ img {
 .price-suffix-inline {
   display: inline-block;
   margin-left: 0;
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   letter-spacing: 0.05em;
   color: var(--color-muted);
   white-space: nowrap;

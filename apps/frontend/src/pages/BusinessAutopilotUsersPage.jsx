@@ -557,7 +557,7 @@ export default function BusinessAutopilotUsersPage() {
                   </button>
                 </div>
               </form>
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3 mb-2">
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
                 <span className="badge bg-secondary">{filteredEmployeeRoles.length} items</span>
                 <div className="table-search">
                   <i className="bi bi-search" aria-hidden="true" />
@@ -652,7 +652,7 @@ export default function BusinessAutopilotUsersPage() {
                   </button>
                 </div>
               </form>
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3 mb-2">
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
                 <span className="badge bg-secondary">{filteredDepartments.length} items</span>
                 <div className="table-search">
                   <i className="bi bi-search" aria-hidden="true" />
@@ -812,7 +812,7 @@ export default function BusinessAutopilotUsersPage() {
 
           <div>
             <h6 className="mb-3">User List</h6>
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mb-2">
               <span className="badge bg-secondary">{filteredUsers.length} items</span>
               <div className="table-search">
                 <i className="bi bi-search" aria-hidden="true" />

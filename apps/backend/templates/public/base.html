@@ -55,11 +55,23 @@
             Products
           </a>
           <div class="nav-dropdown-menu" role="menu" aria-label="Products submenu">
-            <a class="nav-link nav-sub-link" href="/products/{{ branding.public_slug|default:'worksuite' }}/" role="menuitem">{{ branding.display_name|default:"Work Suite" }}</a>
-            <a class="nav-link nav-sub-link" href="/products/ai-chatbot/" role="menuitem">AI Chatbot</a>
-            <a class="nav-link nav-sub-link" href="/products/whatsapp-automation/" role="menuitem">WhatsApp Automation</a>
-            <a class="nav-link nav-sub-link" href="/products/online-storage/" role="menuitem">Online Storage</a>
-            <a class="nav-link nav-sub-link" href="/products/business-autopilot-erp/" role="menuitem">Business Autopilot ERP</a>
+            {% if site_nav.product_links %}
+              {% for item in site_nav.product_links %}
+                <a class="nav-link nav-sub-link" href="{{ item.href }}" role="menuitem">
+                  {% if item.slug == branding.public_slug|default:'worksuite' %}
+                    {{ branding.display_name|default:item.name }}
+                  {% else %}
+                    {{ item.name }}
+                  {% endif %}
+                </a>
+              {% endfor %}
+            {% else %}
+              <a class="nav-link nav-sub-link" href="/products/{{ branding.public_slug|default:'worksuite' }}/" role="menuitem">{{ branding.display_name|default:"Work Suite" }}</a>
+              <a class="nav-link nav-sub-link" href="/products/ai-chatbot/" role="menuitem">AI Chatbot</a>
+              <a class="nav-link nav-sub-link" href="/products/whatsapp-automation/" role="menuitem">WhatsApp Automation</a>
+              <a class="nav-link nav-sub-link" href="/products/online-storage/" role="menuitem">Online Storage</a>
+              <a class="nav-link nav-sub-link" href="/products/business-autopilot-erp/" role="menuitem">Business Autopilot ERP</a>
+            {% endif %}
           </div>
         </div>
         <a class="nav-link" href="/pricing/">Pricing</a>

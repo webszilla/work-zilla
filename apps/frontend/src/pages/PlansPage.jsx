@@ -212,9 +212,26 @@ function getErpPerUserPrice(plan, cycle, currency) {
 }
 
 function getErpPlanFeatures(plan) {
+  const configuredModules = Array.isArray(plan?.features?.erp_enabled_modules)
+    ? plan.features.erp_enabled_modules
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const moduleLabelMap = {
+    crm: "CRM Module",
+    hrm: "HR Management",
+    projects: "Projects",
+    accounts: "Accounts / ERP",
+    ticketing: "Ticketing",
+    stocks: "Stocks",
+  };
+  const configuredModuleLabels = configuredModules
+    .map((slug) => moduleLabelMap[slug])
+    .filter(Boolean);
+  const roleBasedAccessEnabled = plan?.features?.role_based_access !== false;
   const name = String(plan?.name || "").toLowerCase();
   if (name.includes("starter")) {
-    return [
+    const features = [
       "Basic Accounting",
       "Invoice & Billing",
       "Expense Tracking",
@@ -222,9 +239,16 @@ function getErpPlanFeatures(plan) {
       "Basic Reports",
       "1 Organization",
     ];
+    if (roleBasedAccessEnabled) {
+      features.push("Role Based Access");
+    }
+    if (configuredModuleLabels.length) {
+      features.push(...configuredModuleLabels);
+    }
+    return features;
   }
   if (name.includes("growth")) {
-    return [
+    const features = [
       "Everything in Starter",
       "Inventory Management",
       "Purchase Orders",
@@ -232,9 +256,16 @@ function getErpPlanFeatures(plan) {
       "Project Accounting",
       "CRM + HR Modules",
     ];
+    if (roleBasedAccessEnabled) {
+      features.push("Role Based Access");
+    }
+    if (configuredModuleLabels.length) {
+      features.push(...configuredModuleLabels);
+    }
+    return features;
   }
   if (name.includes("pro")) {
-    return [
+    const features = [
       "Everything in Growth",
       "Advanced Role Permissions",
       "Automation Workflows",
@@ -242,13 +273,32 @@ function getErpPlanFeatures(plan) {
       "Audit Logs",
       "Priority Support",
     ];
+    if (roleBasedAccessEnabled && !features.includes("Role Based Access")) {
+      features.push("Role Based Access");
+    }
+    if (configuredModuleLabels.length) {
+      features.push(...configuredModuleLabels);
+    }
+    return features;
   }
-  return [
+  const fallback = configuredModuleLabels.length
+    ? configuredModuleLabels
+    : [
     "CRM Module",
     "HR Management",
     "Projects",
     "Accounts / ERP",
-  ];
+    ];
+  if (roleBasedAccessEnabled) {
+    fallback.push("Role Based Access");
+  }
+  return Array.from(new Set(fallback));
+}
+
+function getBusinessAutopilotPlanDisplayName(planName) {
+  const raw = String(planName || "").trim();
+  if (!raw) return "-";
+  return raw.replace(/\s+ERP$/i, "");
 }
 
 function getProrationNote(plan, cycle, activeSub) {
@@ -670,7 +720,7 @@ export default function PlansPage() {
 
       {activeSub ? (
         <p className="text-secondary">
-          Current Plan: <strong>{activeSub.plan}</strong>
+          Current Plan: <strong>{isBusinessAutopilot ? getBusinessAutopilotPlanDisplayName(activeSub.plan) : activeSub.plan}</strong>
           {activeSub.end_date ? ` (Valid till ${activeSub.end_date})` : ""}
         </p>
       ) : null}
@@ -788,7 +838,7 @@ export default function PlansPage() {
                 />
               </div>
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
               <label className="form-label">Address Line 1</label>
               <input
                 type="text"
@@ -799,7 +849,7 @@ export default function PlansPage() {
                 required
               />
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
               <label className="form-label">Address Line 2 (optional)</label>
               <input
                 type="text"
@@ -809,7 +859,7 @@ export default function PlansPage() {
                 onChange={updateBillingField}
               />
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
               <label className="form-label">City</label>
               <input
                 type="text"
@@ -825,7 +875,7 @@ export default function PlansPage() {
               <input
                 type="text"
                 name="country"
-                className={`form-control ${invalidBillingFields.includes("country") ? "is-invalid" : ""}`}
+                className={`form-control plans-billing-datalist-field ${invalidBillingFields.includes("country") ? "is-invalid" : ""}`}
                 value={billingProfile.country}
                 onChange={updateBillingField}
                 list="country-options"
@@ -837,7 +887,7 @@ export default function PlansPage() {
               <input
                 type="text"
                 name="state"
-                className={`form-control ${invalidBillingFields.includes("state") ? "is-invalid" : ""}`}
+                className={`form-control plans-billing-datalist-field ${invalidBillingFields.includes("state") ? "is-invalid" : ""}`}
                 value={billingProfile.state}
                 onChange={updateBillingField}
                 list="state-options"
@@ -872,6 +922,11 @@ export default function PlansPage() {
                 placeholder="15-character GSTIN"
               />
             </div>
+            <div className="col-12 col-md-3 d-flex align-items-end">
+              <button className="btn btn-primary btn-sm w-100" type="submit" disabled={billingSaving}>
+                {billingSaving ? "Saving..." : "Save Billing Details"}
+              </button>
+            </div>
           </div>
           <datalist id="country-options">
             {COUNTRY_OPTIONS.map((option) => (
@@ -883,9 +938,6 @@ export default function PlansPage() {
               <option key={option} value={option} />
             ))}
           </datalist>
-          <button className="btn btn-primary btn-sm mt-3" type="submit" disabled={billingSaving}>
-            {billingSaving ? "Saving..." : "Save Billing Details"}
-          </button>
         </form>
       </div>
 
@@ -929,7 +981,7 @@ export default function PlansPage() {
             return (
               <div className="col-12 col-md-6 col-xl-3" key={plan.id}>
                 <div className="card p-3 plan-card h-100">
-                  <h4 className="mb-2">{plan.name}</h4>
+                  <h4 className="mb-2">{isBusinessAutopilot ? getBusinessAutopilotPlanDisplayName(plan.name) : plan.name}</h4>
                   <p className="price-monthly">
                     Monthly: {formatCurrencyLabel(currency)}{" "}
                     <span className={priceMonthlyDiff ? "highlight-text" : ""}>{planPrice || "-"}</span>

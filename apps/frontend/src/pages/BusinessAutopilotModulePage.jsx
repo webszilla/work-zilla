@@ -10,6 +10,83 @@ const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const DEFAULT_TABLE_PAGE_SIZE = 5;
+
+function normalizeCountryName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getAccountsTaxUiConfig(countryValue) {
+  const country = String(countryValue || "India").trim() || "India";
+  const normalized = normalizeCountryName(country);
+  if (normalized === "india") {
+    return {
+      country,
+      mode: "gst",
+      templatesLabel: "GST Templates",
+      templateSingular: "GST Template",
+      templateListTitle: "GST Template List",
+      createTitle: "Create GST Template",
+      editTitle: "Edit GST Template",
+      createActionLabel: "Create GST Template",
+      editActionLabel: "Update GST Template",
+      scopeLabel: "Scope",
+      defaultScope: "Intra State",
+      scopeOptions: ["Intra State", "Inter State", "Export"],
+      namePlaceholder: "India GST 18%",
+      notesPlaceholder: "Template notes",
+      cgstLabel: "CGST %",
+      sgstLabel: "SGST %",
+      igstLabel: "IGST %",
+      cessLabel: "CESS %",
+      helperText: "India billing profile detected. GST rule template defaults are enabled."
+    };
+  }
+  if (normalized === "united states" || normalized === "usa" || normalized === "us") {
+    return {
+      country,
+      mode: "us_sales_tax",
+      templatesLabel: "Tax Templates",
+      templateSingular: "Tax Template",
+      templateListTitle: "Tax Template List",
+      createTitle: "Create Tax Template",
+      editTitle: "Edit Tax Template",
+      createActionLabel: "Create Tax Template",
+      editActionLabel: "Update Tax Template",
+      scopeLabel: "Jurisdiction",
+      defaultScope: "Same State",
+      scopeOptions: ["Same State", "Out of State", "International"],
+      namePlaceholder: "US Sales Tax",
+      notesPlaceholder: "Tax rule notes",
+      cgstLabel: "State Tax %",
+      sgstLabel: "County/Local Tax %",
+      igstLabel: "Combined Sales Tax %",
+      cessLabel: "Extra Tax %",
+      helperText: "US billing profile detected. Sales-tax style rule labels are shown."
+    };
+  }
+  return {
+    country,
+    mode: "vat",
+    templatesLabel: "Tax Templates",
+    templateSingular: "Tax Template",
+    templateListTitle: "Tax Template List",
+    createTitle: "Create Tax Template",
+    editTitle: "Edit Tax Template",
+    createActionLabel: "Create Tax Template",
+    editActionLabel: "Update Tax Template",
+    scopeLabel: "Scope",
+    defaultScope: "Domestic",
+    scopeOptions: ["Domestic", "Cross Border", "Export"],
+    namePlaceholder: `${country} VAT`,
+    notesPlaceholder: "VAT / tax rule notes",
+    cgstLabel: "Regional Tax %",
+    sgstLabel: "Local Tax %",
+    igstLabel: "VAT / Main Tax %",
+    cessLabel: "Additional Tax %",
+    helperText: `${country} billing profile detected. VAT/Tax rule labels are shown.`
+  };
+}
+
 const MODULE_CONTENT = {
   crm: {
     title: "CRM",
@@ -76,7 +153,7 @@ const MODULE_CONTENT = {
     ]
   },
   stocks: {
-    title: "Stocks Management",
+    title: "Inventory",
     subtitle: "Manage inventory levels, stock movement, reorder alerts, and warehouses.",
     stats: [
       { label: "Items In Stock", value: "428" },
@@ -168,7 +245,7 @@ const CRM_SECTION_CONFIG = {
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
       { key: "dueDate", label: "Due Date", type: "date" },
       { key: "owner", label: "Owner", placeholder: "Sales owner" },
-      { key: "status", label: "Status", type: "select", options: ["Pending", "Done", "Missed"], defaultValue: "Pending" }
+      { key: "status", label: "Status", type: "select", options: ["Pending", "Completed", "Missed"], defaultValue: "Pending" }
     ]
   },
   activities: {
@@ -205,12 +282,13 @@ const CRM_SECTION_CONFIG = {
     ],
     fields: [
       { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
+      { key: "companyOrClientName", label: "Company / Client Name", type: "datalist", datalistSource: "crmContacts", placeholder: "Select company / client from contacts" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
       { key: "meetingDate", label: "Meeting Date", type: "date" },
       { key: "meetingTime", label: "Meeting Time", type: "time" },
       { key: "owner", label: "Owner", placeholder: "Sales owner / Team member" },
       { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
-      { key: "reminderChannel", label: "Reminder Channel", type: "select", options: ["App Alert", "Email", "SMS", "WhatsApp"], defaultValue: "App Alert" },
+      { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: ["App Alert", "Email", "SMS", "WhatsApp"], defaultValue: ["App Alert"] },
       { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: ["5", "10", "15", "30", "60", "120", "1440"], defaultValue: "15" },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "Scheduled" }
     ]
@@ -331,12 +409,28 @@ const HR_TAB_CONFIG = {
     columns: [
       { key: "name", label: "Name" },
       { key: "department", label: "Department" },
-      { key: "designation", label: "Designation" }
+      { key: "designation", label: "Employee Role" }
     ],
     fields: [
-      { key: "name", label: "Name", placeholder: "Enter employee name" },
-      { key: "department", label: "Department", placeholder: "HR / Sales / Engineering" },
-      { key: "designation", label: "Designation", placeholder: "Executive / Manager" }
+      { key: "name", label: "Name", placeholder: "Select employee from created users" },
+      { key: "department", label: "Department", placeholder: "Auto from user / editable" },
+      { key: "designation", label: "Employee Role", placeholder: "Auto from user / editable" },
+      { key: "dateOfBirth", label: "Date of Birth", type: "date" },
+      { key: "bloodGroup", label: "Blood Group", type: "select", options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
+      { key: "fatherName", label: "Father Name", placeholder: "Father name" },
+      { key: "motherName", label: "Mother Name", placeholder: "Mother name" },
+      { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorced", "Widowed"] },
+      { key: "wifeName", label: "Wife Name", placeholder: "Wife name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
+      { key: "permanentAddress", label: "Permanent Address", placeholder: "Permanent address", type: "textarea" },
+      { key: "permanentCountry", label: "Permanent Country", placeholder: "Country" },
+      { key: "permanentState", label: "Permanent State", placeholder: "State" },
+      { key: "permanentCity", label: "Permanent City", placeholder: "City" },
+      { key: "permanentPincode", label: "Permanent Pincode", placeholder: "Pincode" },
+      { key: "temporaryAddress", label: "Temporary Address", placeholder: "Temporary address", type: "textarea" },
+      { key: "temporaryCountry", label: "Temporary Country", placeholder: "Country" },
+      { key: "temporaryState", label: "Temporary State", placeholder: "State" },
+      { key: "temporaryCity", label: "Temporary City", placeholder: "City" },
+      { key: "temporaryPincode", label: "Temporary Pincode", placeholder: "Pincode" }
     ]
   },
   attendance: {
@@ -451,8 +545,10 @@ const TICKETING_TAB_CONFIG = {
     fields: [
       { key: "ticketNo", label: "Ticket No", placeholder: "TK-1001" },
       { key: "subject", label: "Subject", placeholder: "Customer login issue" },
-      { key: "category", label: "Category", placeholder: "Technical Support / Login Issue" },
-      { key: "status", label: "Status", placeholder: "Open / In Progress / Closed" }
+      { key: "mainCategory", label: "Category", placeholder: "Select category" },
+      { key: "subCategory", label: "Sub Category", placeholder: "Select sub category" },
+      { key: "status", label: "Status", placeholder: "Open / In Progress / Closed" },
+      { key: "description", label: "Description", type: "textarea", placeholder: "Ticket description / issue details" }
     ]
   }
 };
@@ -467,25 +563,27 @@ const DEFAULT_TICKETING_DATA = {
     { id: "ts2", name: "Refund Request", mainCategory: "Billing", priority: "Medium" }
   ],
   tickets: [
-    { id: "tt1", ticketNo: "TK-1001", subject: "Customer login issue", category: "Technical Support / Login Issue", status: "Open" },
-    { id: "tt2", ticketNo: "TK-1002", subject: "Refund follow-up", category: "Billing / Refund Request", status: "In Progress" }
+    { id: "tt1", ticketNo: "TK-1001", subject: "Customer login issue", mainCategory: "Technical Support", subCategory: "Login Issue", category: "Technical Support / Login Issue", status: "Open", description: "Customer unable to login after password reset." },
+    { id: "tt2", ticketNo: "TK-1002", subject: "Refund follow-up", mainCategory: "Billing", subCategory: "Refund Request", category: "Billing / Refund Request", status: "In Progress", description: "Customer requested refund status update." }
   ]
 };
 
 const STOCKS_TAB_CONFIG = {
   items: {
-    label: "Stock Items",
-    itemLabel: "Stock Item",
+    label: "Inventory Items",
+    itemLabel: "Inventory Item",
     columns: [
       { key: "itemName", label: "Item Name" },
       { key: "sku", label: "SKU" },
-      { key: "category", label: "Category" },
+      { key: "mainCategory", label: "Main Category" },
+      { key: "subCategory", label: "Sub Category" },
       { key: "qty", label: "Qty" }
     ],
     fields: [
       { key: "itemName", label: "Item Name", placeholder: "Dell Laptop 14" },
       { key: "sku", label: "SKU", placeholder: "DL-14-001" },
-      { key: "category", label: "Category", placeholder: "Electronics / Laptops" },
+      { key: "mainCategory", label: "Main Category", placeholder: "Type / select main category" },
+      { key: "subCategory", label: "Sub Category", placeholder: "Type / select sub category" },
       { key: "qty", label: "Qty", placeholder: "25" }
     ]
   },
@@ -537,6 +635,8 @@ const DEFAULT_STOCKS_DATA = {
 const GST_STATUS_OPTIONS = ["Active", "Inactive"];
 const ESTIMATE_STATUS_OPTIONS = ["Draft", "Sent", "Approved", "Rejected", "Converted"];
 const INVOICE_STATUS_OPTIONS = ["Draft", "Sent", "Partially Paid", "Paid", "Overdue", "Cancelled"];
+const INVOICE_PAYMENT_STATUS_OPTIONS = ["Pending", "Partially Paid", "Paid", "Failed", "Refunded"];
+const INVOICE_DELIVERY_STATUS_OPTIONS = ["Pending", "Packed", "Shipped", "Completed", "Cancelled"];
 
 const DEFAULT_ACCOUNTS_DATA = {
   customers: [
@@ -553,7 +653,9 @@ const DEFAULT_ACCOUNTS_DATA = {
     {
       id: "itm_1",
       name: "POS Billing Setup",
+      itemType: "Service",
       sku: "POS-SETUP",
+      hsnSacCode: "998313",
       unit: "Nos",
       defaultRate: "24999",
       taxPercent: "18"
@@ -561,7 +663,9 @@ const DEFAULT_ACCOUNTS_DATA = {
     {
       id: "itm_2",
       name: "Thermal Printer",
+      itemType: "Product",
       sku: "THERMAL-PRN",
+      hsnSacCode: "844332",
       unit: "Nos",
       defaultRate: "15000",
       taxPercent: "18"
@@ -675,6 +779,7 @@ function createEmptyDocLine() {
   return {
     id: `line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     itemMasterId: "",
+    inventoryItemId: "",
     description: "",
     qty: "1",
     rate: "",
@@ -699,6 +804,9 @@ function createEmptyBillingDocument(kind = "invoice") {
     billingAddress: "",
     notes: "",
     termsText: "",
+    paymentStatus: kind === "invoice" ? "Pending" : "",
+    deliveryStatus: kind === "invoice" ? "Pending" : "",
+    inventoryCommitted: false,
     items: [createEmptyDocLine()]
   };
 }
@@ -726,7 +834,11 @@ function computeDocumentTotals(doc, gstTemplates) {
 
 function buildEmptyValues(fields) {
   return fields.reduce((acc, field) => {
-    acc[field.key] = field.defaultValue ?? "";
+    if (field.type === "multiselect") {
+      acc[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
+    } else {
+      acc[field.key] = field.defaultValue ?? "";
+    }
     return acc;
   }, {});
 }
@@ -829,6 +941,8 @@ function SearchablePaginatedTableCard({
   enableExport = false,
   exportFileName = "table-data",
   exportCellValue,
+  actionHeaderStyle = null,
+  actionCellStyle = null,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
@@ -909,8 +1023,9 @@ function SearchablePaginatedTableCard({
   }
 
   function exportAsPdf() {
-    const win = window.open("", "_blank", "noopener,noreferrer,width=1000,height=700");
+    const win = window.open("", "_blank", "width=1000,height=700");
     if (!win) {
+      window.alert("Popup blocked. Please allow popups to export PDF.");
       return;
     }
     const escapeHtml = (value) => String(value ?? "")
@@ -949,13 +1064,24 @@ function SearchablePaginatedTableCard({
       </html>
     `);
     win.document.close();
-    win.focus();
-    win.print();
+    const triggerPrint = () => {
+      try {
+        win.focus();
+        win.print();
+      } catch (_error) {
+        // ignore print trigger issues
+      }
+    };
+    // Safari/WebKit often needs a render delay before print is triggered.
+    win.onload = () => {
+      win.setTimeout(triggerPrint, 250);
+    };
+    win.setTimeout(triggerPrint, 500);
   }
 
   const toolbarControls = (
     <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
-      {badgeLabel ? <span className="badge bg-secondary">{badgeLabel}</span> : null}
+      {badgeLabel ? <span className="badge bg-secondary table-count-badge">{badgeLabel}</span> : null}
       {enableExport ? (
         <>
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsExcelCsv}>
@@ -997,9 +1123,15 @@ function SearchablePaginatedTableCard({
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column.key || column.label}>{column.label}</th>
+                <th
+                  key={column.key || column.label}
+                  className={column.headerClassName || ""}
+                  style={column.thStyle || undefined}
+                >
+                  {column.label}
+                </th>
               ))}
-              {renderActions ? <th className="text-end">Action</th> : null}
+              {renderActions ? <th className="text-end" style={actionHeaderStyle || undefined}>Action</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -1013,17 +1145,29 @@ function SearchablePaginatedTableCard({
               pagedRows.map((row, rowIndex) => (
                 <tr key={row.id || row.key || JSON.stringify(row)}>
                   {renderCells(row).map((cell, index) => (
+                    (() => {
+                      const column = columns[index] || {};
+                      return (
                     <td
                       key={`${row.id || "row"}-${index}`}
-                      style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}
+                      className={column.cellClassName || ""}
+                      style={{
+                        backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
+                        ...(column.tdStyle || {}),
+                      }}
                     >
                       {cell}
                     </td>
+                      );
+                    })()
                   ))}
                   {renderActions ? (
                     <td
                       className="text-end"
-                      style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}
+                      style={{
+                        backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
+                        ...(actionCellStyle || {}),
+                      }}
                     >
                       {renderActions(row)}
                     </td>
@@ -1105,7 +1249,11 @@ function CrmOnePageModule() {
       .filter((row) => !["won", "lost", "closed"].includes(String(row.status || "").toLowerCase()))
       .reduce((sum, row) => sum + parseNumber(row.amount), 0);
     const today = new Date().toISOString().slice(0, 10);
-    const followupsToday = followUps.filter((row) => String(row.dueDate || "") === today && String(row.status || "").toLowerCase() !== "done").length;
+    const followupsToday = followUps.filter((row) => {
+      if (String(row.dueDate || "") !== today) return false;
+      const status = String(row.status || "").toLowerCase();
+      return status !== "done" && status !== "completed";
+    }).length;
     return [
       { label: "Open Leads", value: String(openLeads), icon: "bi-person-plus" },
       { label: "Pipeline Value", value: `INR ${pipelineValue.toLocaleString("en-IN")}`, icon: "bi-graph-up-arrow" },
@@ -1135,7 +1283,20 @@ function CrmOnePageModule() {
     setEditingIds((prev) => ({ ...prev, [sectionKey]: row.id }));
     const nextValues = {};
     CRM_SECTION_CONFIG[sectionKey].fields.forEach((field) => {
-      nextValues[field.key] = row[field.key] ?? field.defaultValue ?? "";
+      const rowValue = row[field.key];
+      if (field.type === "multiselect") {
+        if (Array.isArray(rowValue)) {
+          nextValues[field.key] = rowValue;
+        } else if (typeof rowValue === "string" && rowValue.trim()) {
+          nextValues[field.key] = rowValue.split(",").map((v) => v.trim()).filter(Boolean);
+        } else if (Array.isArray(field.defaultValue)) {
+          nextValues[field.key] = [...field.defaultValue];
+        } else {
+          nextValues[field.key] = [];
+        }
+      } else {
+        nextValues[field.key] = rowValue ?? field.defaultValue ?? "";
+      }
     });
     setForms((prev) => ({ ...prev, [sectionKey]: nextValues }));
   }
@@ -1154,16 +1315,26 @@ function CrmOnePageModule() {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
-    const hasEmptyField = config.fields.some((field) => !String(values[field.key] || "").trim());
+    const hasEmptyField = config.fields.some((field) => {
+      if (field.type === "multiselect") {
+        return !Array.isArray(values[field.key]) || values[field.key].length === 0;
+      }
+      return !String(values[field.key] || "").trim();
+    });
     if (hasEmptyField) {
       return;
     }
     const payload = {};
     config.fields.forEach((field) => {
-      payload[field.key] = String(values[field.key] || "").trim();
+      if (field.type === "multiselect") {
+        payload[field.key] = Array.isArray(values[field.key]) ? values[field.key].map((v) => String(v).trim()).filter(Boolean) : [];
+      } else {
+        payload[field.key] = String(values[field.key] || "").trim();
+      }
     });
     if (sectionKey === "meetings") {
-      payload.reminderSummary = `${payload.reminderChannel} • ${payload.reminderMinutes} min before`;
+      const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
+      payload.reminderSummary = `${reminderChannels.join(", ")} • ${payload.reminderMinutes} min before`;
     }
     const editingId = editingIds[sectionKey];
     setModuleData((prev) => {
@@ -1319,13 +1490,88 @@ function CrmOnePageModule() {
                   {config.fields.map((field) => (
                     <Fragment key={`${sectionKey}-${field.key}`}>
                       {hasPhoneCountryCodeField && field.key === "phoneCountryCode" ? null : (
-                      <div className="col-12 col-md-6 col-xl-4" key={`${sectionKey}-${field.key}`}>
+                      <div
+                        className={
+                          sectionKey === "leads"
+                            ? (
+                                field.key === "name" || field.key === "company"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "phone"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "stage" || field.key === "status"
+                                  ? "col-12 col-md-6 col-xl-1"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "activities"
+                            ? (
+                                field.key === "activityType" || field.key === "relatedTo"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "date"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "owner"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "notes"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "contacts"
+                            ? (
+                                field.key === "name" || field.key === "company" || field.key === "email"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "phone"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "tag"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "deals"
+                            ? (
+                                field.key === "dealName" || field.key === "company"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "stage"
+                                  ? "col-12 col-md-6 col-xl-1"
+                                  : field.key === "amount"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "status"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "followUps"
+                            ? (
+                                field.key === "subject" || field.key === "relatedTo"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "dueDate"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "owner"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "status"
+                                  ? "col-12 col-md-6 col-xl-1"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "meetings"
+                            ? (
+                                field.key === "title" || field.key === "companyOrClientName"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "relatedTo"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "meetingDate" || field.key === "meetingTime"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : field.key === "owner"
+                                  ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "meetingMode" || field.key === "reminderChannel" || field.key === "reminderMinutes" || field.key === "status"
+                                  ? "col-12 col-md-6 col-xl-2"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : "col-12 col-md-6 col-xl-4"
+                        }
+                        key={`${sectionKey}-${field.key}`}
+                      >
                         <label className="form-label small text-secondary mb-1">{field.label}</label>
                         {hasPhoneCountryCodeField && field.key === "phone" ? (
                           <div className="input-group">
                             <select
                               className="form-select"
-                              style={{ maxWidth: "220px" }}
+                              style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
                               value={formValues.phoneCountryCode || "+91"}
                               onChange={(event) => setField(sectionKey, "phoneCountryCode", event.target.value)}
                             >
@@ -1341,6 +1587,44 @@ function CrmOnePageModule() {
                               onChange={(event) => setField(sectionKey, "phone", event.target.value)}
                             />
                           </div>
+                        ) : field.type === "datalist" ? (
+                          <Fragment>
+                            <input
+                              type="text"
+                              list={`${sectionKey}-${field.key}-datalist`}
+                              className="form-control datalist-readable-input"
+                              placeholder={field.placeholder}
+                              value={formValues[field.key] || ""}
+                              onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                            />
+                            <datalist id={`${sectionKey}-${field.key}-datalist`}>
+                              {field.datalistSource === "crmContacts"
+                                ? (moduleData.contacts || []).flatMap((contact) => {
+                                    const options = [];
+                                    if (String(contact.name || "").trim()) options.push(contact.name.trim());
+                                    if (String(contact.company || "").trim()) options.push(contact.company.trim());
+                                    return options;
+                                  }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
+                                    <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                  ))
+                                : null}
+                            </datalist>
+                          </Fragment>
+                        ) : field.type === "multiselect" ? (
+                          <select
+                            className="form-select"
+                            multiple
+                            size={1}
+                            value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
+                            onChange={(event) => {
+                              const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
+                              setField(sectionKey, field.key, selectedValues);
+                            }}
+                          >
+                            {(field.options || []).map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
                         ) : field.type === "select" ? (
                           <select
                             className="form-select"
@@ -1370,10 +1654,31 @@ function CrmOnePageModule() {
                         )}
                       </div>
                       )}
-                      {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings") && field.key === "status" ? (
-                        <div className="col-12 col-md-6 col-xl-4 d-flex align-items-end">
-                          <div className="d-flex gap-2 flex-wrap">
-                            <button type="submit" className="btn btn-success btn-sm">
+                      {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                        <div
+                            className={
+                              sectionKey === "leads"
+                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : sectionKey === "deals"
+                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : sectionKey === "followUps"
+                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : sectionKey === "activities"
+                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : sectionKey === "meetings"
+                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
+                          }
+                        >
+                          <div className="d-flex gap-2 flex-wrap w-100">
+                            <button
+                              type="submit"
+                              className={`btn btn-success btn-sm ${
+                                ["leads", "contacts", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
+                                  ? "single-row-form-submit-btn"
+                                  : ""
+                              }`}
+                            >
                               {editingId ? "Update" : "Create"}
                             </button>
                             {editingId ? (
@@ -1385,9 +1690,9 @@ function CrmOnePageModule() {
                         </div>
                       ) : null}
                       {sectionKey === "contacts" && field.key === "tag" ? (
-                        <div className="col-12 col-md-6 col-xl-4 d-flex align-items-end">
-                          <div className="d-flex gap-2 flex-wrap">
-                            <button type="submit" className="btn btn-success btn-sm">
+                        <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
+                          <div className="d-flex gap-2 flex-wrap w-100">
+                            <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
                               {editingId ? "Update" : "Create"}
                             </button>
                             {editingId ? (
@@ -1401,7 +1706,7 @@ function CrmOnePageModule() {
                     </Fragment>
                   ))}
                 </div>
-                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" ? (
+                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                   <div className="d-flex gap-2">
                     <button type="submit" className="btn btn-success btn-sm">
                       {editingId ? "Update" : "Create"}
@@ -1469,7 +1774,10 @@ function CrmOnePageModule() {
                   return formatTimeToAmPm(row[column.key]);
                 }
                 if (column.key === "reminderSummary") {
-                  return row.reminderSummary || `${row.reminderChannel || ""} ${row.reminderMinutes ? `• ${row.reminderMinutes} min before` : ""}`.trim();
+                  const reminderChannels = Array.isArray(row.reminderChannel)
+                    ? row.reminderChannel.join(", ")
+                    : String(row.reminderChannel || "");
+                  return row.reminderSummary || `${reminderChannels} ${row.reminderMinutes ? `• ${row.reminderMinutes} min before` : ""}`.trim();
                 }
                 return row[column.key] || "";
               }}
@@ -1616,7 +1924,7 @@ function CrmOnePageModule() {
               </div>
               <div className="col-6">
                 <div className="text-secondary">Reminder</div>
-                <div className="fw-semibold">{meetingPopup.reminderSummary || `${meetingPopup.reminderChannel || "-"} • ${meetingPopup.reminderMinutes || "-"} min before`}</div>
+                <div className="fw-semibold">{meetingPopup.reminderSummary || `${Array.isArray(meetingPopup.reminderChannel) ? meetingPopup.reminderChannel.join(", ") : (meetingPopup.reminderChannel || "-")} • ${meetingPopup.reminderMinutes || "-"} min before`}</div>
               </div>
               <div className="col-6">
                 <div className="text-secondary">Status</div>
@@ -1662,6 +1970,7 @@ function ProjectManagementModule() {
 
   const config = PROJECT_TAB_CONFIG[activeTab];
   const currentRows = moduleData[activeTab] || [];
+  const projectInlineSubmitTabs = new Set(["projects"]);
 
   const stats = useMemo(() => {
     const activeProjects = (moduleData.projects || []).filter((item) => item.status.toLowerCase() === "active").length;
@@ -1780,28 +2089,6 @@ function ProjectManagementModule() {
         ))}
       </div>
 
-      <SearchablePaginatedTableCard
-        title={config.label}
-        badgeLabel={`${currentRows.length} items`}
-        rows={currentRows}
-        columns={config.columns}
-        withoutOuterCard={activeTab === "projects"}
-        searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-        noRowsText={`No ${config.label.toLowerCase()} yet.`}
-        searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-        renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
-        renderActions={(row) => (
-          <div className="d-inline-flex gap-2">
-            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
-              Edit
-            </button>
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
-              Delete
-            </button>
-          </div>
-        )}
-      />
-
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
@@ -1814,8 +2101,22 @@ function ProjectManagementModule() {
                 if (!isVisible) {
                   return null;
                 }
+                const isInlineProjectsTab = activeTab === "projects";
                 return (
-                  <div className="col-12 col-md-4" key={field.key}>
+                  <div
+                    className={
+                      isInlineProjectsTab
+                        ? (
+                            field.key === "projectName" || field.key === "owner"
+                              ? "col-12 col-md-6 col-xl-4"
+                              : field.key === "status"
+                              ? "col-12 col-md-6 col-xl-3"
+                              : "col-12 col-md-4"
+                          )
+                        : "col-12 col-md-4"
+                    }
+                    key={field.key}
+                  >
                     <label className="form-label small text-secondary mb-1">{field.label}</label>
                     {field.type === "select" ? (
                       <select
@@ -1841,19 +2142,52 @@ function ProjectManagementModule() {
                 );
               })()
             ))}
-          </div>
-          <div className="d-flex gap-2">
-            <button type="submit" className="btn btn-success btn-sm">
-              {editingId ? "Update" : "Create"}
-            </button>
-            {editingId ? (
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
-                Cancel
-              </button>
+            {projectInlineSubmitTabs.has(activeTab) ? (
+              <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
+                <div className="w-100 d-flex gap-2 flex-wrap">
+                  <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                    {editingId ? "Update" : "Create"}
+                  </button>
+                </div>
+              </div>
             ) : null}
           </div>
+          {!projectInlineSubmitTabs.has(activeTab) ? (
+            <div className="d-flex gap-2">
+              <button type="submit" className="btn btn-success btn-sm">
+                {editingId ? "Update" : "Create"}
+              </button>
+              {editingId ? (
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </form>
       </div>
+
+      <SearchablePaginatedTableCard
+        title={config.label}
+        badgeLabel={`${currentRows.length} items`}
+        rows={currentRows}
+        columns={config.columns}
+        withoutOuterCard={activeTab === "projects"}
+        searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+        noRowsText={`No ${config.label.toLowerCase()} yet.`}
+        searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+        renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+        renderActions={(row) => (
+          <div className="d-inline-flex gap-2">
+            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+              Edit
+            </button>
+            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+              Delete
+            </button>
+          </div>
+        )}
+      />
     </div>
   );
 }
@@ -1862,6 +2196,7 @@ function HrManagementModule() {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
   const [formValues, setFormValues] = useState(buildEmptyValues(HR_TAB_CONFIG.employees.fields));
+  const [hrUserDirectory, setHrUserDirectory] = useState([]);
   const [editingId, setEditingId] = useState("");
   const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
   const [attendanceEmployeeSuggestOpen, setAttendanceEmployeeSuggestOpen] = useState(false);
@@ -1875,6 +2210,15 @@ function HrManagementModule() {
     taskNotes: "",
     mode: "edit",
   });
+  const [attendanceNotesModal, setAttendanceNotesModal] = useState({
+    open: false,
+    rowId: "",
+    employee: "",
+    date: "",
+    notes: "",
+  });
+  const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
+  const [attendanceMonthFilter, setAttendanceMonthFilter] = useState("");
 
   useEffect(() => {
     try {
@@ -1912,6 +2256,25 @@ function HrManagementModule() {
   }, [moduleData]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadHrUserDirectory() {
+      try {
+        const data = await apiFetch("/api/business-autopilot/users");
+        if (cancelled) return;
+        setHrUserDirectory(Array.isArray(data?.users) ? data.users : []);
+      } catch (_error) {
+        if (!cancelled) {
+          setHrUserDirectory([]);
+        }
+      }
+    }
+    loadHrUserDirectory();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setEditingId("");
     const next = buildEmptyValues(HR_TAB_CONFIG[activeTab].fields);
     if (activeTab === "attendance") {
@@ -1921,12 +2284,54 @@ function HrManagementModule() {
   }, [activeTab]);
 
   const config = HR_TAB_CONFIG[activeTab];
+  const hrTableColumns = useMemo(() => {
+    if (activeTab !== "attendance") {
+      return config.columns;
+    }
+    return (config.columns || []).map((column) => {
+      if (column.key === "date") {
+        return {
+          ...column,
+          thStyle: { width: "140px", minWidth: "140px", whiteSpace: "nowrap" },
+          tdStyle: { width: "140px", minWidth: "140px", whiteSpace: "nowrap" },
+        };
+      }
+      if (column.key === "inTime" || column.key === "outTime") {
+        return {
+          ...column,
+          thStyle: { width: "120px", minWidth: "120px", whiteSpace: "nowrap" },
+          tdStyle: { width: "120px", minWidth: "120px", whiteSpace: "nowrap" },
+        };
+      }
+      return column;
+    });
+  }, [activeTab, config.columns]);
   const currentRows = moduleData[activeTab] || [];
   const todayIso = getTodayIsoDate();
   const employeeNameOptions = useMemo(
     () => Array.from(new Set((moduleData.employees || []).map((item) => String(item.name || "").trim()).filter(Boolean))),
     [moduleData.employees]
   );
+  const hrUserNameOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (hrUserDirectory || [])
+            .map((item) => String(item?.name || "").trim())
+            .filter(Boolean)
+        )
+      ),
+    [hrUserDirectory]
+  );
+  const hrUserLookupByName = useMemo(() => {
+    const map = new Map();
+    (hrUserDirectory || []).forEach((item) => {
+      const key = String(item?.name || "").trim().toLowerCase();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [hrUserDirectory]);
   const attendanceEmployeeSuggestions = useMemo(() => {
     if (activeTab !== "attendance") {
       return [];
@@ -1938,12 +2343,79 @@ function HrManagementModule() {
     return filtered.slice(0, 8);
   }, [activeTab, employeeNameOptions, formValues.employee]);
 
+  const attendanceDateMeta = useMemo(() => {
+    const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    const validDates = rows
+      .map((row) => String(row?.date || "").trim())
+      .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+      .sort();
+    if (!validDates.length) {
+      const now = new Date();
+      return {
+        minYear: now.getFullYear(),
+        maxYear: now.getFullYear(),
+        minMonthByYear: new Map([[String(now.getFullYear()), now.getMonth() + 1]]),
+        maxMonthByYear: new Map([[String(now.getFullYear()), now.getMonth() + 1]]),
+      };
+    }
+    const min = validDates[0];
+    const max = validDates[validDates.length - 1];
+    const minYear = Number(min.slice(0, 4));
+    const maxYear = Number(max.slice(0, 4));
+    const minMonthByYear = new Map();
+    const maxMonthByYear = new Map();
+    validDates.forEach((iso) => {
+      const yearKey = iso.slice(0, 4);
+      const monthNum = Number(iso.slice(5, 7));
+      if (!minMonthByYear.has(yearKey) || monthNum < minMonthByYear.get(yearKey)) {
+        minMonthByYear.set(yearKey, monthNum);
+      }
+      if (!maxMonthByYear.has(yearKey) || monthNum > maxMonthByYear.get(yearKey)) {
+        maxMonthByYear.set(yearKey, monthNum);
+      }
+    });
+    return { minYear, maxYear, minMonthByYear, maxMonthByYear };
+  }, [moduleData.attendance]);
+
+  const attendanceYearOptions = useMemo(() => {
+    const years = [];
+    for (let y = attendanceDateMeta.minYear; y <= attendanceDateMeta.maxYear; y += 1) {
+      years.push(String(y));
+    }
+    return years;
+  }, [attendanceDateMeta]);
+
+  const attendanceMonthOptions = useMemo(() => {
+    const selectedYear = String(attendanceYearFilter || "");
+    if (!selectedYear) return [];
+    const minMonth = attendanceDateMeta.minMonthByYear.get(selectedYear) || 1;
+    const maxMonth = attendanceDateMeta.maxMonthByYear.get(selectedYear) || 12;
+    const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [];
+    for (let month = minMonth; month <= maxMonth; month += 1) {
+      months.push({ value: String(month).padStart(2, "0"), label: labels[month - 1] || String(month) });
+    }
+    return months;
+  }, [attendanceDateMeta, attendanceYearFilter]);
+
   useEffect(() => {
     if (myAttendanceEmployee && employeeNameOptions.includes(myAttendanceEmployee)) {
       return;
     }
     setMyAttendanceEmployee(employeeNameOptions[0] || "");
   }, [employeeNameOptions, myAttendanceEmployee]);
+
+  useEffect(() => {
+    const yearOptions = attendanceYearOptions;
+    if (!yearOptions.length) return;
+    setAttendanceYearFilter((prev) => (prev && yearOptions.includes(prev) ? prev : yearOptions[0]));
+  }, [attendanceYearOptions]);
+
+  useEffect(() => {
+    const monthOptions = attendanceMonthOptions;
+    if (!monthOptions.length) return;
+    setAttendanceMonthFilter((prev) => (prev && monthOptions.some((m) => m.value === prev) ? prev : monthOptions[0].value));
+  }, [attendanceMonthOptions]);
 
   const stats = useMemo(() => {
     const employees = (moduleData.employees || []).length;
@@ -1963,6 +2435,13 @@ function HrManagementModule() {
   function onChangeField(fieldKey, nextValue) {
     setFormValues((prev) => {
       const next = { ...prev, [fieldKey]: nextValue };
+      if (activeTab === "employees" && fieldKey === "name") {
+        const matchedUser = hrUserLookupByName.get(String(nextValue || "").trim().toLowerCase());
+        if (matchedUser) {
+          next.department = String(matchedUser.department || next.department || "").trim();
+          next.designation = String(matchedUser.employee_role || next.designation || "").trim();
+        }
+      }
       if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
         next.permissionHours = "";
       }
@@ -2161,6 +2640,47 @@ function HrManagementModule() {
     [moduleData.attendance, myAttendanceEmployee, todayIso]
   );
 
+  const attendanceFilteredRows = useMemo(() => {
+    if (activeTab !== "attendance") {
+      return currentRows;
+    }
+    return (currentRows || []).filter((row) => {
+      const date = String(row?.date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true;
+      if (attendanceYearFilter && date.slice(0, 4) !== attendanceYearFilter) return false;
+      if (attendanceMonthFilter && date.slice(5, 7) !== attendanceMonthFilter) return false;
+      return true;
+    });
+  }, [activeTab, currentRows, attendanceYearFilter, attendanceMonthFilter]);
+
+  function openAttendanceNotesModal(row) {
+    setAttendanceNotesModal({
+      open: true,
+      rowId: String(row?.id || ""),
+      employee: String(row?.employee || "").trim(),
+      date: String(row?.date || todayIso).trim() || todayIso,
+      notes: String(row?.notes || "").trim(),
+    });
+  }
+
+  function closeAttendanceNotesModal() {
+    setAttendanceNotesModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function submitAttendanceNotesModal(event) {
+    event.preventDefault();
+    const rowId = String(attendanceNotesModal.rowId || "").trim();
+    if (!rowId) return;
+    const notes = String(attendanceNotesModal.notes || "").trim();
+    setModuleData((prev) => ({
+      ...prev,
+      attendance: (prev.attendance || []).map((row) => (
+        String(row.id || "") === rowId ? { ...row, notes } : row
+      ))
+    }));
+    closeAttendanceNotesModal();
+  }
+
   return (
     <div className="d-flex flex-column gap-3">
       <div>
@@ -2255,6 +2775,23 @@ function HrManagementModule() {
                           </div>
                         ) : null}
                       </div>
+                    ) : activeTab === "employees" && field.key === "name" ? (
+                      <>
+                        <input
+                          type="text"
+                          className="form-control datalist-readable-input"
+                          list="hr-employee-user-list"
+                          autoComplete="off"
+                          placeholder={field.placeholder}
+                          value={formValues[field.key] || ""}
+                          onChange={(event) => onChangeField(field.key, event.target.value)}
+                        />
+                        <datalist id="hr-employee-user-list">
+                          {hrUserNameOptions.map((name) => (
+                            <option key={`hr-user-name-${name}`} value={name} />
+                          ))}
+                        </datalist>
+                      </>
                     ) : field.type === "select" ? (
                       <select
                         className="form-select"
@@ -2266,6 +2803,14 @@ function HrManagementModule() {
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </select>
+                    ) : field.type === "textarea" ? (
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        placeholder={field.placeholder}
+                        value={formValues[field.key] || ""}
+                        onChange={(event) => onChangeField(field.key, event.target.value)}
+                      />
                     ) : (
                       <input
                         type={field.type || "text"}
@@ -2385,9 +2930,42 @@ function HrManagementModule() {
 
       <SearchablePaginatedTableCard
         title={config.label}
-        badgeLabel={`${currentRows.length} items`}
-        rows={currentRows}
-        columns={config.columns}
+        badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : currentRows).length} items`}
+        rows={activeTab === "attendance" ? attendanceFilteredRows : currentRows}
+        columns={hrTableColumns}
+        withoutOuterCard={["attendance", "leaves", "payroll"].includes(activeTab)}
+        headerBottom={activeTab === "attendance" ? (
+          <div className="d-flex flex-wrap align-items-end gap-2">
+            <div>
+              <label className="form-label small text-secondary mb-1">Year</label>
+              <select
+                className="form-select form-select-sm"
+                value={attendanceYearFilter}
+                onChange={(e) => setAttendanceYearFilter(e.target.value)}
+                style={{ minWidth: "110px" }}
+              >
+                {attendanceYearOptions.map((year) => (
+                  <option key={`attendance-year-${year}`} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="form-label small text-secondary mb-1">Month</label>
+              <select
+                className="form-select form-select-sm"
+                value={attendanceMonthFilter}
+                onChange={(e) => setAttendanceMonthFilter(e.target.value)}
+                style={{ minWidth: "120px" }}
+              >
+                {attendanceMonthOptions.map((month) => (
+                  <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : null}
+        actionHeaderStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+        actionCellStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
         searchPlaceholder={`Search ${config.label.toLowerCase()}`}
         noRowsText={`No ${config.label.toLowerCase()} yet.`}
         searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
@@ -2408,12 +2986,28 @@ function HrManagementModule() {
           return row[column.key] || "-";
         })}
         renderActions={(row) => (
-          <div className="d-inline-flex gap-2">
-            {activeTab === "attendance" ? (
-              <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => openAttendanceTaskModal(row)}>
-                Task
-              </button>
-            ) : null}
+          <div className="d-inline-flex gap-2 flex-nowrap">
+            {activeTab === "attendance" ? (() => {
+              const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
+              return (
+                <>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => openAttendanceTaskModal(row)}
+                  >
+                    Task
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-outline-primary" : "btn-outline-secondary"}`}
+                    onClick={() => openAttendanceNotesModal(row)}
+                  >
+                    Notes
+                  </button>
+                </>
+              );
+            })() : null}
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
               Edit
             </button>
@@ -2484,6 +3078,52 @@ function HrManagementModule() {
           </div>
         </div>
       ) : null}
+
+      {activeTab === "attendance" && attendanceNotesModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeAttendanceNotesModal}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(640px, 100%)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-2">
+              <div>
+                <h5 className="mb-1">Attendance Notes / Queries</h5>
+                <div className="small text-secondary">
+                  {attendanceNotesModal.employee || "-"} • {attendanceNotesModal.date || "-"}
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceNotesModal}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <form className="d-flex flex-column gap-3" onSubmit={submitAttendanceNotesModal}>
+              <div>
+                <label className="form-label small text-secondary mb-1">Notes / Queries</label>
+                <textarea
+                  className="form-control"
+                  rows={6}
+                  placeholder="Add notes, queries, clarifications, pending items..."
+                  value={attendanceNotesModal.notes}
+                  onChange={(e) => setAttendanceNotesModal((prev) => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">Save Notes</button>
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceNotesModal}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2495,14 +3135,18 @@ function CategoryCrudModule({
   defaultData,
   storageKey,
   statsBuilder,
-  statIcons = []
+  statIcons = [],
+  defaultActiveTab = ""
 }) {
   const CATEGORY_ENTRY_LIMIT = 100;
   const firstTab = Object.keys(tabConfig)[0];
   const hasCombinedCategoryTabs = Boolean(tabConfig?.mainCategories && tabConfig?.subCategories);
-  const initialTab = hasCombinedCategoryTabs && (firstTab === "mainCategories" || firstTab === "subCategories")
-    ? "categories"
-    : firstTab;
+  const preferredInitialTab = Object.prototype.hasOwnProperty.call(tabConfig || {}, defaultActiveTab)
+    ? defaultActiveTab
+    : (hasCombinedCategoryTabs && (firstTab === "mainCategories" || firstTab === "subCategories")
+      ? "categories"
+      : firstTab);
+  const initialTab = preferredInitialTab;
   const [activeTab, setActiveTab] = useState(initialTab);
   const [moduleData, setModuleData] = useState(defaultData);
   const [formValues, setFormValues] = useState(buildEmptyValues(tabConfig[firstTab].fields));
@@ -2578,6 +3222,18 @@ function CategoryCrudModule({
     setFormValues(buildEmptyValues(tabConfig[activeTab].fields));
   }, [activeTab, tabConfig]);
 
+  useEffect(() => {
+    if (!tabConfig?.tickets) {
+      return undefined;
+    }
+    const onTicketingMenuClick = () => {
+      setActiveTab("tickets");
+      setEditingId("");
+    };
+    window.addEventListener("wz:ticketing-menu-click", onTicketingMenuClick);
+    return () => window.removeEventListener("wz:ticketing-menu-click", onTicketingMenuClick);
+  }, [tabConfig]);
+
   const visibleTabs = useMemo(() => {
     if (!hasCombinedCategoryTabs) {
       return Object.entries(tabConfig).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
@@ -2587,9 +3243,47 @@ function CategoryCrudModule({
       .map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
     return [...nonCategoryEntries, { key: "categories", label: "Category" }];
   }, [hasCombinedCategoryTabs, tabConfig]);
+  const hasOverviewTab = useMemo(
+    () => Object.prototype.hasOwnProperty.call(tabConfig || {}, "overview"),
+    [tabConfig]
+  );
 
   const config = activeTab === "categories" ? null : tabConfig[activeTab];
   const currentRows = activeTab === "categories" ? [] : (moduleData[activeTab] || []);
+  const isInventoryItemsTab = storageKey === STOCKS_STORAGE_KEY && activeTab === "items";
+  const isTicketingTicketsTab = storageKey === TICKETING_STORAGE_KEY && activeTab === "tickets";
+  const inventoryMainCategoryOptions = useMemo(
+    () => Array.from(new Set((moduleData.mainCategories || []).map((row) => String(row?.name || "").trim()).filter(Boolean))),
+    [moduleData.mainCategories]
+  );
+  const inventorySubCategoryOptions = useMemo(() => {
+    const selectedMain = String(formValues.mainCategory || "").trim().toLowerCase();
+    return Array.from(new Set(
+      (moduleData.subCategories || [])
+        .filter((row) => {
+          if (!selectedMain) return true;
+          return String(row?.mainCategory || "").trim().toLowerCase() === selectedMain;
+        })
+        .map((row) => String(row?.name || "").trim())
+        .filter(Boolean)
+    ));
+  }, [formValues.mainCategory, moduleData.subCategories]);
+  const ticketingMainCategoryOptions = useMemo(
+    () => Array.from(new Set((moduleData.mainCategories || []).map((row) => String(row?.name || "").trim()).filter(Boolean))),
+    [moduleData.mainCategories]
+  );
+  const ticketingSubCategoryOptions = useMemo(() => {
+    const selectedMain = String(formValues.mainCategory || "").trim().toLowerCase();
+    return Array.from(new Set(
+      (moduleData.subCategories || [])
+        .filter((row) => {
+          if (!selectedMain) return true;
+          return String(row?.mainCategory || "").trim().toLowerCase() === selectedMain;
+        })
+        .map((row) => String(row?.name || "").trim())
+        .filter(Boolean)
+    ));
+  }, [formValues.mainCategory, moduleData.subCategories]);
   const stats = useMemo(() => statsBuilder(moduleData), [moduleData, statsBuilder]);
   const taskAssignToOptions = useMemo(() => {
     if (activeTab !== "tasks") {
@@ -2614,6 +3308,18 @@ function CategoryCrudModule({
     setEditingId(row.id);
     const nextValues = {};
     config.fields.forEach((field) => {
+      if (isTicketingTicketsTab && (field.key === "mainCategory" || field.key === "subCategory")) {
+        const [mainCategory = "", subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+        nextValues.mainCategory = row.mainCategory || mainCategory || "";
+        nextValues.subCategory = row.subCategory || subCategory || "";
+        return;
+      }
+      if (isInventoryItemsTab && (field.key === "mainCategory" || field.key === "subCategory")) {
+        const [mainCategory = "", subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+        nextValues.mainCategory = row.mainCategory || mainCategory || "";
+        nextValues.subCategory = row.subCategory || subCategory || "";
+        return;
+      }
       nextValues[field.key] = row[field.key] || "";
     });
     setFormValues(nextValues);
@@ -2644,6 +3350,20 @@ function CategoryCrudModule({
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
     });
+    if (isInventoryItemsTab) {
+      const mainCategory = String(payload.mainCategory || "").trim();
+      const subCategory = String(payload.subCategory || "").trim();
+      payload.mainCategory = mainCategory;
+      payload.subCategory = subCategory;
+      payload.category = [mainCategory, subCategory].filter(Boolean).join(" / ");
+    }
+    if (isTicketingTicketsTab) {
+      const mainCategory = String(payload.mainCategory || "").trim();
+      const subCategory = String(payload.subCategory || "").trim();
+      payload.mainCategory = mainCategory;
+      payload.subCategory = subCategory;
+      payload.category = [mainCategory, subCategory].filter(Boolean).join(" / ");
+    }
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
@@ -2756,7 +3476,7 @@ function CategoryCrudModule({
         </div>
       </div>
 
-      {activeTab !== "categories" ? (
+      {activeTab !== "categories" && hasOverviewTab && activeTab === "overview" ? (
         <div className="row g-3">
           {stats.map((item, index) => (
             <div className="col-12 col-md-4" key={item.label}>
@@ -2787,30 +3507,49 @@ function CategoryCrudModule({
               const editId = categoryEditingIds[tabKey];
               return (
                 <div className="col-12 col-xl-6" key={`category-panel-${tabKey}`}>
-                  <div className="border rounded p-3 h-100 d-flex flex-column gap-3">
+                  <div className="h-100 d-flex flex-column gap-3">
                     <div className="card p-3">
                       <h6 className="mb-3">{editId ? `Edit ${cfg.itemLabel}` : `Create ${cfg.itemLabel}`}</h6>
                       <form className="d-flex flex-column gap-3" onSubmit={(event) => onCategorySubmit(event, tabKey)}>
                         <div className="row g-3">
                           {cfg.fields.map((field) => (
-                            <div className="col-12" key={`${tabKey}-${field.key}`}>
+                            <div className="col-12 col-xl-4" key={`${tabKey}-${field.key}`}>
                               <label className="form-label small text-secondary mb-1">{field.label}</label>
-                              <input
-                                type={field.type || "text"}
-                                className="form-control"
-                                placeholder={field.placeholder}
-                                value={form[field.key] || ""}
-                                onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
-                              />
+                              {storageKey === STOCKS_STORAGE_KEY && tabKey === "subCategories" && field.key === "mainCategory" ? (
+                                <select
+                                  className="form-select"
+                                  value={form[field.key] || ""}
+                                  onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
+                                >
+                                  <option value="">Select Main Category</option>
+                                  {inventoryMainCategoryOptions.map((name) => (
+                                    <option key={`stock-sub-main-${name}`} value={name}>
+                                      {name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type={field.type || "text"}
+                                  className="form-control"
+                                  placeholder={field.placeholder}
+                                  value={form[field.key] || ""}
+                                  onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
+                                />
+                              )}
                             </div>
                           ))}
                         </div>
                         <div className="d-flex gap-2">
-                          <button type="submit" className="btn btn-success btn-sm">
+                          <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
                             {editId ? "Update" : "Create"}
                           </button>
                           {editId ? (
-                            <button type="button" className="btn btn-outline-light btn-sm" onClick={() => onCategoryCancelEdit(tabKey)}>
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm single-row-form-submit-btn"
+                              onClick={() => onCategoryCancelEdit(tabKey)}
+                            >
                               Cancel
                             </button>
                           ) : null}
@@ -2848,7 +3587,7 @@ function CategoryCrudModule({
         </div>
       ) : null}
 
-      {activeTab !== "categories" && activeTab !== "tickets" ? (
+      {activeTab !== "categories" && activeTab !== "tickets" && !isInventoryItemsTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
           badgeLabel={`${currentRows.length} items`}
@@ -2858,7 +3597,17 @@ function CategoryCrudModule({
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
           noRowsText={`No ${config.label.toLowerCase()} added yet.`}
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-          renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+          renderCells={(row) => config.columns.map((column) => {
+            if (isInventoryItemsTab && column.key === "mainCategory") {
+              const [mainCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+              return row.mainCategory || mainCategory || "-";
+            }
+            if (isInventoryItemsTab && column.key === "subCategory") {
+              const [, subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+              return row.subCategory || subCategory || "-";
+            }
+            return row[column.key] || "-";
+          })}
           renderActions={(row) => (
             <div className="d-inline-flex gap-2">
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
@@ -2878,7 +3627,29 @@ function CategoryCrudModule({
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           <div className="row g-3">
             {config.fields.map((field) => (
-              <div className="col-12 col-md-6 col-xl-3" key={field.key}>
+              <div
+                className={
+                  isInventoryItemsTab
+                    ? ({
+                        itemName: "col-12 col-md-6 col-xl-2",
+                        sku: "col-12 col-md-6 col-xl-2",
+                        mainCategory: "col-12 col-md-6 col-xl-3",
+                        subCategory: "col-12 col-md-6 col-xl-3",
+                        qty: "col-12 col-md-3 col-xl-1",
+                      }[field.key] || "col-12 col-md-6 col-xl-2")
+                    : isTicketingTicketsTab
+                      ? ({
+                          ticketNo: "col-12 col-md-6 col-xl-2",
+                          subject: "col-12 col-md-6 col-xl-3",
+                          mainCategory: "col-12 col-md-6 col-xl-2",
+                          subCategory: "col-12 col-md-6 col-xl-2",
+                          status: "col-12 col-md-6 col-xl-2",
+                          description: "col-12",
+                        }[field.key] || "col-12 col-md-6 col-xl-3")
+                    : "col-12 col-md-6 col-xl-3"
+                }
+                key={field.key}
+              >
                 <label className="form-label small text-secondary mb-1">{field.label}</label>
                 {field.key === "department" && departmentOptions.length ? (
                   <select
@@ -2896,6 +3667,43 @@ function CategoryCrudModule({
                       <option value={formValues[field.key]}>{formValues[field.key]}</option>
                     ) : null}
                   </select>
+                ) : isTicketingTicketsTab && field.key === "mainCategory" ? (
+                  <select
+                    className="form-select"
+                    value={formValues[field.key] || ""}
+                    onChange={(event) => {
+                      onChangeField(field.key, event.target.value);
+                      setFormValues((prev) => ({ ...prev, subCategory: "" }));
+                    }}
+                  >
+                    <option value="">Select Category</option>
+                    {ticketingMainCategoryOptions.map((name) => (
+                      <option key={`ticket-main-${name}`} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : isTicketingTicketsTab && field.key === "subCategory" ? (
+                  <select
+                    className="form-select"
+                    value={formValues[field.key] || ""}
+                    onChange={(event) => onChangeField(field.key, event.target.value)}
+                  >
+                    <option value="">Select Sub Category</option>
+                    {ticketingSubCategoryOptions.map((name) => (
+                      <option key={`ticket-sub-${name}`} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : field.type === "textarea" ? (
+                  <textarea
+                    className="form-control"
+                    rows={3}
+                    placeholder={field.placeholder}
+                    value={formValues[field.key] || ""}
+                    onChange={(event) => onChangeField(field.key, event.target.value)}
+                  />
                 ) : (activeTab === "tasks" && field.key === "assignee") ? (
                   <>
                     <input
@@ -2912,6 +3720,41 @@ function CategoryCrudModule({
                       ))}
                     </datalist>
                   </>
+                ) : isInventoryItemsTab && field.key === "mainCategory" ? (
+                  <>
+                    <input
+                      type="text"
+                      className="form-control datalist-readable-input inventory-category-datalist"
+                      list="inventory-main-category-list"
+                      placeholder={field.placeholder}
+                      value={formValues[field.key] || ""}
+                      onChange={(event) => {
+                        onChangeField(field.key, event.target.value);
+                        setFormValues((prev) => ({ ...prev, subCategory: "" }));
+                      }}
+                    />
+                    <datalist id="inventory-main-category-list">
+                      {inventoryMainCategoryOptions.map((name) => (
+                        <option key={`inventory-main-${name}`} value={name} />
+                      ))}
+                    </datalist>
+                  </>
+                ) : isInventoryItemsTab && field.key === "subCategory" ? (
+                  <>
+                    <input
+                      type="text"
+                      className="form-control datalist-readable-input inventory-category-datalist"
+                      list="inventory-sub-category-list"
+                      placeholder={field.placeholder}
+                      value={formValues[field.key] || ""}
+                      onChange={(event) => onChangeField(field.key, event.target.value)}
+                    />
+                    <datalist id="inventory-sub-category-list">
+                      {inventorySubCategoryOptions.map((name) => (
+                        <option key={`inventory-sub-${name}`} value={name} />
+                      ))}
+                    </datalist>
+                  </>
                 ) : (
                   <input
                     type={field.type || "text"}
@@ -2923,8 +3766,26 @@ function CategoryCrudModule({
                 )}
               </div>
             ))}
+            {isInventoryItemsTab ? (
+              <div className="col-12 col-md-9 col-xl-1 d-flex align-items-end">
+                <div className="d-flex gap-2 w-100 flex-xl-column">
+                  <button type="submit" className="btn btn-success btn-sm w-100 single-row-form-submit-btn">
+                    {editingId ? "Update" : "Create"}
+                  </button>
+                  {editingId ? (
+                    <button
+                      type="button"
+                      className="btn btn-outline-light btn-sm w-100 single-row-form-submit-btn"
+                      onClick={onCancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
-          <div className="d-flex gap-2">
+          {!isInventoryItemsTab ? <div className="d-flex gap-2">
             <button type="submit" className="btn btn-success btn-sm">
               {editingId ? "Update" : "Create"}
             </button>
@@ -2933,9 +3794,43 @@ function CategoryCrudModule({
                 Cancel
               </button>
             ) : null}
-          </div>
+          </div> : null}
         </form>
       </div>
+      ) : null}
+
+      {isInventoryItemsTab ? (
+        <SearchablePaginatedTableCard
+          title={`${config.label} List`}
+          badgeLabel={`${currentRows.length} items`}
+          rows={currentRows}
+          columns={config.columns}
+          withoutOuterCard
+          searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+          noRowsText={`No ${config.label.toLowerCase()} added yet.`}
+          searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+          renderCells={(row) => config.columns.map((column) => {
+            if (column.key === "mainCategory") {
+              const [mainCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+              return row.mainCategory || mainCategory || "-";
+            }
+            if (column.key === "subCategory") {
+              const [, subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
+              return row.subCategory || subCategory || "-";
+            }
+            return row[column.key] || "-";
+          })}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                Delete
+              </button>
+            </div>
+          )}
+        />
       ) : null}
 
       {activeTab === "tickets" ? (
@@ -2987,6 +3882,7 @@ function TicketingSystemModule() {
       storageKey={TICKETING_STORAGE_KEY}
       statsBuilder={statsBuilder}
       statIcons={["bi-life-preserver", "bi-hourglass-split", "bi-tags"]}
+      defaultActiveTab="tickets"
     />
   );
 }
@@ -2997,7 +3893,7 @@ function StocksManagementModule() {
     const lowStockAlerts = (data.items || []).filter((row) => Number(row.qty || 0) > 0 && Number(row.qty || 0) <= 5).length;
     const categoryCount = (data.mainCategories || []).length + (data.subCategories || []).length;
     return [
-      { label: "Stock Items", value: String(itemCount) },
+      { label: "Inventory Items", value: String(itemCount) },
       { label: "Low Stock Alerts", value: String(lowStockAlerts) },
       { label: "Categories", value: String(categoryCount) }
     ];
@@ -3005,8 +3901,8 @@ function StocksManagementModule() {
 
   return (
     <CategoryCrudModule
-      heading="Stocks Management"
-      subtitle="Create main/sub categories and manage stock items with create, edit, and delete actions."
+      heading="Inventory"
+      subtitle="Create main/sub categories and manage inventory items with create, edit, and delete actions."
       tabConfig={STOCKS_TAB_CONFIG}
       defaultData={DEFAULT_STOCKS_DATA}
       storageKey={STOCKS_STORAGE_KEY}
@@ -3018,7 +3914,9 @@ function StocksManagementModule() {
 
 function AccountsErpModule() {
   const [activeTab, setActiveTab] = useState("overview");
+  const [overviewDocTab, setOverviewDocTab] = useState("invoice");
   const [moduleData, setModuleData] = useState(DEFAULT_ACCOUNTS_DATA);
+  const [orgBillingCountry, setOrgBillingCountry] = useState("India");
   const [isAccountsLoading, setIsAccountsLoading] = useState(true);
   const [accountsSyncStatus, setAccountsSyncStatus] = useState("Loading...");
   const [accountsSyncError, setAccountsSyncError] = useState("");
@@ -3042,7 +3940,10 @@ function AccountsErpModule() {
     docType: "Invoice",
     gstTemplateId: "",
     prefix: "",
+    invStartFrom: "",
     themeColor: "#22c55e",
+    companyLogoDataUrl: "",
+    companyLogoName: "",
     footerNote: "",
     termsText: "",
     status: "Active"
@@ -3074,13 +3975,27 @@ function AccountsErpModule() {
   const [itemMasterForm, setItemMasterForm] = useState({
     id: "",
     name: "",
+    itemType: "Product",
     sku: "",
+    hsnSacCode: "",
     unit: "Nos",
     defaultRate: "",
     taxPercent: ""
   });
   const [editingItemMasterId, setEditingItemMasterId] = useState("");
+  const [itemMasterListTypeFilter, setItemMasterListTypeFilter] = useState("Product");
   const [erpUsersForSales, setErpUsersForSales] = useState([]);
+  const [inventoryWorkspace, setInventoryWorkspace] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA;
+    } catch {
+      return DEFAULT_STOCKS_DATA;
+    }
+  });
+  const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
+  const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
 
   useEffect(() => {
     let active = true;
@@ -3133,6 +4048,58 @@ function AccountsErpModule() {
           hasLoadedWorkspaceRef.current = true;
           setIsAccountsLoading(false);
         }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function syncInventoryFromStorage() {
+      try {
+        const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setInventoryWorkspace(parsed);
+        }
+      } catch {
+        // ignore invalid local cache
+      }
+    }
+    window.addEventListener("storage", syncInventoryFromStorage);
+    return () => window.removeEventListener("storage", syncInventoryFromStorage);
+  }, []);
+
+  useEffect(() => {
+    if (editingGstId) return;
+    setGstForm((prev) => {
+      const isPristine = !String(prev.id || "").trim()
+        && !String(prev.name || "").trim()
+        && !String(prev.cgst || "").trim()
+        && !String(prev.sgst || "").trim()
+        && !String(prev.igst || "").trim()
+        && !String(prev.cess || "").trim()
+        && !String(prev.notes || "").trim();
+      if (!isPristine) return prev;
+      if (String(prev.taxScope || "") === String(taxUi.defaultScope || "")) return prev;
+      return { ...prev, taxScope: taxUi.defaultScope };
+    });
+  }, [editingGstId, taxUi.defaultScope]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await apiFetch("/api/dashboard/billing-profile");
+        if (!active) return;
+        const country = String(data?.profile?.country || "").trim();
+        if (country) {
+          setOrgBillingCountry(country);
+        }
+      } catch {
+        // keep default India when billing profile is unavailable
       }
     })();
     return () => {
@@ -3201,12 +4168,24 @@ function AccountsErpModule() {
       { label: "Invoices", value: String(invoices.length), icon: "bi-receipt-cutoff" },
       { label: "Estimates", value: String(estimates.length), icon: "bi-file-earmark-text" },
       { label: "Receivables", value: formatInr(receivables), icon: "bi-cash-coin" },
-      { label: "GST Templates", value: String(gstTemplates.length), icon: "bi-file-earmark-ruled" }
+      { label: taxUi.templatesLabel, value: String(gstTemplates.length), icon: "bi-file-earmark-ruled" }
     ];
-  }, [moduleData]);
+  }, [moduleData, taxUi.templatesLabel]);
 
   const customerOptions = moduleData.customers || [];
   const itemMasterOptions = moduleData.itemMasters || [];
+  const filteredItemMasterRows = useMemo(
+    () => (moduleData.itemMasters || []).filter((row) => {
+      const type = String(row?.itemType || "Product");
+      return type === itemMasterListTypeFilter;
+    }),
+    [moduleData.itemMasters, itemMasterListTypeFilter]
+  );
+  const inventoryItems = useMemo(() => Array.isArray(inventoryWorkspace?.items) ? inventoryWorkspace.items : [], [inventoryWorkspace]);
+  const inventoryItemLookup = useMemo(
+    () => new Map(inventoryItems.map((row) => [String(row.id || ""), row])),
+    [inventoryItems]
+  );
   const customerStateOptions = getStateOptionsForCountry(String(customerForm.country || "India"));
 
   function normalizeCustomerRecord(row = {}) {
@@ -3287,7 +4266,7 @@ function AccountsErpModule() {
     setGstForm({
       id: "",
       name: "",
-      taxScope: "Intra State",
+      taxScope: taxUi.defaultScope,
       cgst: "",
       sgst: "",
       igst: "",
@@ -3305,11 +4284,33 @@ function AccountsErpModule() {
       docType: "Invoice",
       gstTemplateId: activeGstTemplates[0]?.id || "",
       prefix: "",
+      invStartFrom: "",
       themeColor: "#22c55e",
+      companyLogoDataUrl: "",
+      companyLogoName: "",
       footerNote: "",
       termsText: "",
       status: "Active"
     });
+  }
+
+  function handleBillingTemplateLogoChange(file) {
+    if (!file) {
+      return;
+    }
+    if (!String(file.type || "").startsWith("image/")) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      setTemplateForm((prev) => ({
+        ...prev,
+        companyLogoDataUrl: dataUrl,
+        companyLogoName: file.name || "company-logo"
+      }));
+    };
+    reader.readAsDataURL(file);
   }
 
   function saveGstTemplate(event) {
@@ -3507,7 +4508,9 @@ function AccountsErpModule() {
     setItemMasterForm({
       id: "",
       name: "",
+      itemType: "Product",
       sku: "",
+      hsnSacCode: "",
       unit: "Nos",
       defaultRate: "",
       taxPercent: ""
@@ -3522,7 +4525,9 @@ function AccountsErpModule() {
     const payload = {
       ...itemMasterForm,
       name: String(itemMasterForm.name || "").trim(),
+      itemType: String(itemMasterForm.itemType || "Product").trim() || "Product",
       sku: String(itemMasterForm.sku || "").trim(),
+      hsnSacCode: String(itemMasterForm.hsnSacCode || "").trim(),
       unit: String(itemMasterForm.unit || "").trim(),
       defaultRate: String(itemMasterForm.defaultRate || "").trim(),
       taxPercent: String(itemMasterForm.taxPercent || "").trim()
@@ -3539,7 +4544,12 @@ function AccountsErpModule() {
 
   function editItemMaster(row) {
     setEditingItemMasterId(row.id);
-    setItemMasterForm({ ...row });
+    setItemMasterForm({
+      ...row,
+      itemType: row.itemType || "Product",
+      hsnSacCode: row.hsnSacCode || ""
+    });
+    setItemMasterListTypeFilter(String(row.itemType || "Product"));
     setActiveTab("items");
   }
 
@@ -3587,6 +4597,117 @@ function AccountsErpModule() {
           : row
       ))
     }));
+  }
+
+  function saveInventoryWorkspace(nextWorkspace) {
+    setInventoryWorkspace(nextWorkspace);
+    try {
+      window.localStorage.setItem(STOCKS_STORAGE_KEY, JSON.stringify(nextWorkspace));
+    } catch {
+      // ignore local storage quota/storage errors
+    }
+  }
+
+  function getInventoryReservationMap(invoices = [], excludeInvoiceId = "") {
+    const map = new Map();
+    (invoices || []).forEach((invoice) => {
+      if (!invoice || (excludeInvoiceId && invoice.id === excludeInvoiceId)) return;
+      const deliveryStatus = String(invoice.deliveryStatus || "").toLowerCase();
+      const status = String(invoice.status || "").toLowerCase();
+      if (deliveryStatus === "completed" || status === "cancelled") return;
+      (invoice.items || []).forEach((line) => {
+        const inventoryItemId = String(line?.inventoryItemId || "").trim();
+        if (!inventoryItemId) return;
+        const qty = parseNumber(line?.qty);
+        if (qty <= 0) return;
+        map.set(inventoryItemId, (map.get(inventoryItemId) || 0) + qty);
+      });
+    });
+    return map;
+  }
+
+  const invoiceReservationMap = useMemo(
+    () => getInventoryReservationMap(moduleData.invoices || []),
+    [moduleData.invoices]
+  );
+
+  function availableInventoryQty(itemId, currentDoc = null, currentLineId = "") {
+    const item = inventoryItemLookup.get(String(itemId || ""));
+    const onHandQty = parseNumber(item?.qty);
+    let reserved = parseNumber(invoiceReservationMap.get(String(itemId || "")) || 0);
+    if (currentDoc && Array.isArray(currentDoc.items)) {
+      currentDoc.items.forEach((line) => {
+        if (String(line?.inventoryItemId || "") !== String(itemId || "")) return;
+        if (currentLineId && String(line?.id || "") !== String(currentLineId)) return;
+        reserved -= parseNumber(line?.qty);
+      });
+    }
+    return Math.max(0, onHandQty - Math.max(0, reserved));
+  }
+
+  function applyInventoryItemToLine(kind, lineId, selectedValue) {
+    const normalizedValue = String(selectedValue || "").trim();
+    if (!normalizedValue) {
+      updateDocLine(kind, lineId, "inventoryItemId", "");
+      return;
+    }
+    const selected = inventoryItems.find((row) => (
+      String(row?.id || "") === normalizedValue
+      || String(row?.itemName || "").trim() === normalizedValue
+    ));
+    if (!selected) return;
+    const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
+    setter((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (
+        row.id === lineId
+          ? {
+              ...row,
+              inventoryItemId: selected.id,
+              description: selected.itemName || row.description || "",
+            }
+          : row
+      ))
+    }));
+  }
+
+  function applyInventoryDeductionForInvoiceCompletion(previousInvoice, nextInvoice) {
+    if (!nextInvoice || String(nextInvoice.deliveryStatus || "").toLowerCase() !== "completed") {
+      return nextInvoice;
+    }
+    if (nextInvoice.inventoryCommitted) {
+      return nextInvoice;
+    }
+    const previousDeliveryCompleted = String(previousInvoice?.deliveryStatus || "").toLowerCase() === "completed";
+    if (previousDeliveryCompleted && previousInvoice?.inventoryCommitted) {
+      return { ...nextInvoice, inventoryCommitted: true };
+    }
+    if (!inventoryWorkspace || !Array.isArray(inventoryWorkspace.items)) {
+      return { ...nextInvoice, inventoryCommitted: true };
+    }
+    const deductionByItem = new Map();
+    (nextInvoice.items || []).forEach((line) => {
+      const itemId = String(line?.inventoryItemId || "").trim();
+      if (!itemId) return;
+      const qty = parseNumber(line?.qty);
+      if (qty <= 0) return;
+      deductionByItem.set(itemId, (deductionByItem.get(itemId) || 0) + qty);
+    });
+    if (!deductionByItem.size) {
+      return { ...nextInvoice, inventoryCommitted: true };
+    }
+    const nextWorkspace = {
+      ...inventoryWorkspace,
+      items: (inventoryWorkspace.items || []).map((row) => {
+        const key = String(row?.id || "");
+        const deductQty = parseNumber(deductionByItem.get(key) || 0);
+        if (!deductQty) return row;
+        const currentQty = parseNumber(row?.qty);
+        return { ...row, qty: String(Math.max(0, currentQty - deductQty)) };
+      })
+    };
+    saveInventoryWorkspace(nextWorkspace);
+    return { ...nextInvoice, inventoryCommitted: true };
   }
 
   function openDocumentPrint(kind, id) {
@@ -3640,10 +4761,14 @@ function AccountsErpModule() {
       salesperson: String(form.salesperson || "").trim(),
       notes: String(form.notes || "").trim(),
       termsText: String(form.termsText || "").trim(),
+      paymentStatus: kind === "invoice" ? String(form.paymentStatus || "Pending").trim() : "",
+      deliveryStatus: kind === "invoice" ? String(form.deliveryStatus || "Pending").trim() : "",
+      inventoryCommitted: kind === "invoice" ? Boolean(form.inventoryCommitted) : false,
       items: (form.items || [])
         .map((row) => ({
           ...row,
           itemMasterId: row.itemMasterId || "",
+          inventoryItemId: row.inventoryItemId || "",
           description: String(row.description || "").trim(),
           qty: String(row.qty || "").trim(),
           rate: String(row.rate || "").trim(),
@@ -3659,7 +4784,20 @@ function AccountsErpModule() {
     setModuleData((prev) => {
       const rows = prev[listKey] || [];
       if (editingId) {
+        if (kind === "invoice") {
+          return {
+            ...prev,
+            [listKey]: rows.map((row) => {
+              if (row.id !== editingId) return row;
+              return applyInventoryDeductionForInvoiceCompletion(row, { ...row, ...payload });
+            })
+          };
+        }
         return { ...prev, [listKey]: rows.map((row) => (row.id === editingId ? { ...row, ...payload } : row)) };
+      }
+      if (kind === "invoice") {
+        const nextInvoice = applyInventoryDeductionForInvoiceCompletion(null, { ...payload, id: `${kind}_${Date.now()}` });
+        return { ...prev, [listKey]: [nextInvoice, ...rows] };
       }
       return { ...prev, [listKey]: [{ ...payload, id: `${kind}_${Date.now()}` }, ...rows] };
     });
@@ -3678,11 +4816,15 @@ function AccountsErpModule() {
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         id: item.id || createEmptyDocLine().id,
         itemMasterId: item.itemMasterId || "",
+        inventoryItemId: item.inventoryItemId || "",
         description: item.description || "",
         qty: String(item.qty ?? ""),
         rate: String(item.rate ?? ""),
         taxPercent: String(item.taxPercent ?? "")
-      }))
+      })),
+      paymentStatus: kind === "invoice" ? (row.paymentStatus || "Pending") : (row.paymentStatus || ""),
+      deliveryStatus: kind === "invoice" ? (row.deliveryStatus || "Pending") : (row.deliveryStatus || ""),
+      inventoryCommitted: Boolean(row.inventoryCommitted)
     };
     if (kind === "estimate") {
       setEditingEstimateId(row.id);
@@ -3719,6 +4861,23 @@ function AccountsErpModule() {
     }));
   }
 
+  function updateInvoicePaymentStatus(id, paymentStatus) {
+    setModuleData((prev) => ({
+      ...prev,
+      invoices: (prev.invoices || []).map((row) => (row.id === id ? { ...row, paymentStatus } : row))
+    }));
+  }
+
+  function updateInvoiceDeliveryStatus(id, deliveryStatus) {
+    setModuleData((prev) => ({
+      ...prev,
+      invoices: (prev.invoices || []).map((row) => {
+        if (row.id !== id) return row;
+        return applyInventoryDeductionForInvoiceCompletion(row, { ...row, deliveryStatus });
+      })
+    }));
+  }
+
   function resolveGstTemplateName(id) {
     return (moduleData.gstTemplates || []).find((row) => row.id === id)?.name || "-";
   }
@@ -3741,7 +4900,6 @@ function AccountsErpModule() {
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) =>
       String(row.docType || "").toLowerCase() === kindLabel.toLowerCase()
     );
-    const selectedCustomerId = (moduleData.customers || []).find((row) => (row.companyName || row.name) === form.customerName)?.id || "";
     const salesPeople = (erpUsersForSales || [])
       .filter((user) => Boolean(user?.name))
       .map((user) => user.name);
@@ -3751,24 +4909,12 @@ function AccountsErpModule() {
           <h6 className="mb-0">{editingId ? `Edit ${kindLabel}` : `Create ${kindLabel}`}</h6>
         </div>
         <form className="d-flex flex-column gap-3" onSubmit={onSave}>
-          <div className="border rounded p-3">
+          <div className="p-0">
             <div className="row g-3">
-              <div className="col-12 col-xl-6">
+              <div className="col-12 col-xl-3">
                 <label className="form-label small text-secondary mb-1">Client / Company Name</label>
-                <select
-                  className="form-select mb-2"
-                  value={selectedCustomerId}
-                  onChange={(e) => applyCustomerToDocument(kind, e.target.value)}
-                >
-                  <option value="">Select Client / Company</option>
-                  {customerOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.companyName || row.name}{row.clientName ? ` (${row.clientName})` : ""}
-                    </option>
-                  ))}
-                </select>
                 <input
-                  className="form-control"
+                  className="form-control datalist-readable-input"
                   list={`${kind}-client-company-list`}
                   value={form.customerName || ""}
                   onChange={(e) => {
@@ -3792,31 +4938,37 @@ function AccountsErpModule() {
                   ))}
                 </datalist>
               </div>
-              <div className="col-12 col-xl-3">
+              <div className="col-12 col-xl-1">
                 <label className="form-label small text-secondary mb-1">{kindLabel} No</label>
                 <input className="form-control" value={form.docNo || ""} onChange={(e) => setField("docNo", e.target.value)} placeholder={kind === "estimate" ? "EST-1001" : "INV-1001"} />
               </div>
-              <div className="col-12 col-xl-3">
+              <div className="col-12 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Sales Person</label>
-                <select className="form-select" value={form.salesperson || ""} onChange={(e) => setField("salesperson", e.target.value)}>
-                  <option value="">Select Sales Person</option>
+                <input
+                  className="form-control datalist-readable-input"
+                  list={`${kind}-salesperson-list`}
+                  value={form.salesperson || ""}
+                  onChange={(e) => setField("salesperson", e.target.value)}
+                  placeholder="Select Sales Person"
+                />
+                <datalist id={`${kind}-salesperson-list`}>
                   {salesPeople.map((name) => (
-                    <option key={`${kind}-sales-${name}`} value={name}>{name}</option>
+                    <option key={`${kind}-sales-${name}`} value={name} />
                   ))}
-                </select>
+                </datalist>
               </div>
-              <div className="col-12 col-md-6 col-xl-3">
+              <div className="col-12 col-md-6 col-xl-1">
                 <label className="form-label small text-secondary mb-1">Issue Date</label>
                 <input type="date" className="form-control" value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
               </div>
-              <div className="col-12 col-md-6 col-xl-3">
+              <div className="col-12 col-md-6 col-xl-1">
                 <label className="form-label small text-secondary mb-1">Due Date</label>
                 <input type="date" className="form-control" value={form.dueDate || ""} onChange={(e) => setField("dueDate", e.target.value)} />
               </div>
-              <div className="col-12 col-md-6 col-xl-3">
-                <label className="form-label small text-secondary mb-1">GST Template</label>
+              <div className="col-12 col-md-6 col-xl-2">
+                <label className="form-label small text-secondary mb-1">{taxUi.templateSingular}</label>
                 <select className="form-select" value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
-                  <option value="">Select GST Template</option>
+                  <option value="">{`Select ${taxUi.templateSingular}`}</option>
                   {(moduleData.gstTemplates || []).map((row) => (
                     <option key={row.id} value={row.id}>
                       {row.name} ({gstTemplateTotalPercent(row)}%)
@@ -3824,7 +4976,7 @@ function AccountsErpModule() {
                   ))}
                 </select>
               </div>
-              <div className="col-12 col-md-6 col-xl-3">
+              <div className="col-12 col-md-6 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Billing Template</label>
                 <select className="form-select" value={form.billingTemplateId || ""} onChange={(e) => setField("billingTemplateId", e.target.value)}>
                   <option value="">Select Billing Template</option>
@@ -3833,6 +4985,26 @@ function AccountsErpModule() {
                   ))}
                 </select>
               </div>
+              {kind === "invoice" ? (
+                <>
+                  <div className="col-12 col-md-6 col-xl-3">
+                    <label className="form-label small text-secondary mb-1">Payment Status</label>
+                    <select className="form-select" value={form.paymentStatus || "Pending"} onChange={(e) => setField("paymentStatus", e.target.value)}>
+                      {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
+                        <option key={`inv-pay-${status}`} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-3">
+                    <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                    <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                      {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                        <option key={`inv-del-${status}`} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -3861,22 +5033,36 @@ function AccountsErpModule() {
                     return (
                       <tr key={line.id}>
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
-                          <select
-                            className="form-select mb-2"
-                            value={line.itemMasterId || ""}
-                            onChange={(e) => applyItemMasterToLine(kind, line.id, e.target.value)}
-                          >
-                            <option value="">Select Item Master</option>
-                            {itemMasterOptions.map((row) => (
-                              <option key={row.id} value={row.id}>{row.name} ({row.sku || "-"})</option>
-                            ))}
-                          </select>
                           <input
-                            className="form-control"
+                            className="form-control datalist-readable-input"
+                            list={`${kind}-inventory-item-list-${line.id}`}
                             value={line.description || ""}
-                            onChange={(e) => updateDocLine(kind, line.id, "description", e.target.value)}
+                            onChange={(e) => {
+                              const nextValue = e.target.value;
+                              updateDocLine(kind, line.id, "description", nextValue);
+                              const matched = inventoryItems.find((item) => {
+                                const label = `${item.itemName || ""} (Available: ${availableInventoryQty(item.id, form, line.id)})`;
+                                return label === nextValue || String(item.itemName || "") === nextValue;
+                              });
+                              if (matched) {
+                                applyInventoryItemToLine(kind, line.id, matched.id);
+                              }
+                            }}
                             placeholder="Type or click to select an item"
                           />
+                          <datalist id={`${kind}-inventory-item-list-${line.id}`}>
+                            {inventoryItems.map((item) => (
+                              <option
+                                key={`${kind}-inventory-${item.id}`}
+                                value={`${item.itemName || ""} (Available: ${availableInventoryQty(item.id, form, line.id)})`}
+                              />
+                            ))}
+                          </datalist>
+                          {line.inventoryItemId ? (
+                            <div className="small text-secondary mt-1">
+                              Available Qty: {availableInventoryQty(line.inventoryItemId, form, line.id)}
+                            </div>
+                          ) : null}
                         </td>
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
@@ -3918,7 +5104,7 @@ function AccountsErpModule() {
 
           <div className="row g-3">
             <div className="col-12 col-xl-7">
-              <div className="card p-3 h-100 border">
+              <div className="h-100">
                 <label className="form-label small text-secondary mb-1">Customer Notes</label>
                 <textarea className="form-control mb-3" rows="3" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
@@ -3960,14 +5146,22 @@ function AccountsErpModule() {
         title={kind === "estimate" ? "Estimate List" : "Invoice List"}
         badgeLabel={`${rows.length} items`}
         rows={rows}
-        withoutOuterCard={activeTab === "overview"}
+        withoutOuterCard={
+          activeTab === "overview"
+          || (kind === "invoice" && activeTab === "invoices")
+          || (kind === "estimate" && activeTab === "estimates")
+        }
         columns={[
           { key: "docNo", label: kind === "estimate" ? "Estimate No" : "Invoice No" },
           { key: "customerName", label: "Customer" },
           { key: "issueDate", label: "Date" },
           { key: "dueDate", label: "Due Date" },
           { key: "total", label: "Total" },
-          { key: "gstTemplateId", label: "GST Template" },
+          { key: "gstTemplateId", label: taxUi.templateSingular },
+          ...(kind === "invoice" ? [
+            { key: "paymentStatus", label: "Payment Status" },
+            { key: "deliveryStatus", label: "Delivery Status" },
+          ] : []),
           { key: "status", label: "Status" },
         ]}
         searchPlaceholder={`Search ${kind}s`}
@@ -3982,6 +5176,30 @@ function AccountsErpModule() {
             row.dueDate || "-",
             formatInr(totals.grandTotal),
             resolveGstTemplateName(row.gstTemplateId),
+            ...(kind === "invoice" ? [
+              (
+                <select
+                  className="form-select form-select-sm"
+                  value={row.paymentStatus || "Pending"}
+                  onChange={(e) => updateInvoicePaymentStatus(row.id, e.target.value)}
+                >
+                  {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
+                    <option key={`${row.id}-pay-${status}`} value={status}>{status}</option>
+                  ))}
+                </select>
+              ),
+              (
+                <select
+                  className="form-select form-select-sm"
+                  value={row.deliveryStatus || "Pending"}
+                  onChange={(e) => updateInvoiceDeliveryStatus(row.id, e.target.value)}
+                >
+                  {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                    <option key={`${row.id}-delivery-${status}`} value={status}>{status}</option>
+                  ))}
+                </select>
+              ),
+            ] : []),
             (
               <select
                 className="form-select form-select-sm"
@@ -4032,7 +5250,7 @@ function AccountsErpModule() {
             { key: "overview", label: "Overview" },
             { key: "invoices", label: "Invoices" },
             { key: "estimates", label: "Estimates" },
-            { key: "gst", label: "GST Templates" },
+            { key: "gst", label: taxUi.templatesLabel },
             { key: "templates", label: "Billing Templates" },
             { key: "customers", label: "Customers" },
             { key: "items", label: "Items" }
@@ -4049,29 +5267,46 @@ function AccountsErpModule() {
         </div>
       </div>
 
-      <div className="row g-3">
-        {overviewStats.map((item) => (
-          <div className="col-12 col-md-6 col-xl-3" key={item.label}>
-            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
-              <div className="stat-icon stat-icon-primary mb-2">
-                <i className={`bi ${item.icon || "bi-grid"}`} aria-hidden="true" />
+      {activeTab === "overview" ? (
+        <div className="row g-3">
+          {overviewStats.map((item) => (
+            <div className="col-12 col-md-6 col-xl-3" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${item.icon || "bi-grid"}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
               </div>
-              <div className="text-secondary small">{item.label}</div>
-              <h5 className="mb-0 mt-1">{item.value}</h5>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
       {activeTab === "overview" ? (
         <>
-          <div className="row g-3">
-            <div className="col-12 col-xl-6">
+          <div className="d-flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`btn btn-sm ${overviewDocTab === "invoice" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setOverviewDocTab("invoice")}
+            >
+              Invoice List
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${overviewDocTab === "estimate" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setOverviewDocTab("estimate")}
+            >
+              Estimate List
+            </button>
+          </div>
+          <div>
+            {overviewDocTab === "invoice" ? (
               <DocumentTable kind="invoice" rows={moduleData.invoices || []} statusOptions={INVOICE_STATUS_OPTIONS} />
-            </div>
-            <div className="col-12 col-xl-6">
+            ) : (
               <DocumentTable kind="estimate" rows={moduleData.estimates || []} statusOptions={ESTIMATE_STATUS_OPTIONS} />
-            </div>
+            )}
           </div>
         </>
       ) : null}
@@ -4079,21 +5314,21 @@ function AccountsErpModule() {
       {activeTab === "gst" ? (
         <>
           <SearchablePaginatedTableCard
-            title="GST Template List"
+            title={taxUi.templateListTitle}
             badgeLabel={`${(moduleData.gstTemplates || []).length} templates`}
             rows={moduleData.gstTemplates || []}
             columns={[
               { key: "name", label: "Template Name" },
-              { key: "taxScope", label: "Scope" },
-              { key: "cgst", label: "CGST" },
-              { key: "sgst", label: "SGST" },
-              { key: "igst", label: "IGST" },
-              { key: "cess", label: "CESS" },
+              { key: "taxScope", label: taxUi.scopeLabel },
+              { key: "cgst", label: taxUi.cgstLabel.replace(" %", "") },
+              { key: "sgst", label: taxUi.sgstLabel.replace(" %", "") },
+              { key: "igst", label: taxUi.igstLabel.replace(" %", "") },
+              { key: "cess", label: taxUi.cessLabel.replace(" %", "") },
               { key: "total", label: "Total" },
               { key: "status", label: "Status" },
             ]}
-            searchPlaceholder="Search GST templates"
-            noRowsText="No GST templates yet."
+            searchPlaceholder={`Search ${taxUi.templatesLabel.toLowerCase()}`}
+            noRowsText={`No ${taxUi.templatesLabel.toLowerCase()} yet.`}
             searchBy={(row) => [row.name, row.taxScope, row.status, row.notes].join(" ")}
             renderCells={(row) => [
               <div>
@@ -4127,35 +5362,36 @@ function AccountsErpModule() {
           />
 
           <div className="card p-3">
-            <h6 className="mb-3">{editingGstId ? "Edit GST Template" : "Create GST Template"}</h6>
+            <h6 className="mb-1">{editingGstId ? taxUi.editTitle : taxUi.createTitle}</h6>
+            <div className="small text-secondary mb-3">{taxUi.helperText}</div>
             <form className="d-flex flex-column gap-3" onSubmit={saveGstTemplate}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Template Name</label>
-                  <input className="form-control" value={gstForm.name || ""} onChange={(e) => setGstForm((p) => ({ ...p, name: e.target.value }))} placeholder="India GST 18%" />
+                  <input className="form-control" value={gstForm.name || ""} onChange={(e) => setGstForm((p) => ({ ...p, name: e.target.value }))} placeholder={taxUi.namePlaceholder} />
                 </div>
                 <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Scope</label>
-                  <select className="form-select" value={gstForm.taxScope || "Intra State"} onChange={(e) => setGstForm((p) => ({ ...p, taxScope: e.target.value }))}>
-                    <option value="Intra State">Intra State</option>
-                    <option value="Inter State">Inter State</option>
-                    <option value="Export">Export</option>
+                  <label className="form-label small text-secondary mb-1">{taxUi.scopeLabel}</label>
+                  <select className="form-select" value={gstForm.taxScope || taxUi.defaultScope} onChange={(e) => setGstForm((p) => ({ ...p, taxScope: e.target.value }))}>
+                    {Array.from(new Set([...(taxUi.scopeOptions || []), String(gstForm.taxScope || "").trim()].filter(Boolean))).map((scope) => (
+                      <option key={scope} value={scope}>{scope}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="col-6 col-md-3 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">CGST %</label>
+                  <label className="form-label small text-secondary mb-1">{taxUi.cgstLabel}</label>
                   <input className="form-control" value={gstForm.cgst || ""} onChange={(e) => setGstForm((p) => ({ ...p, cgst: e.target.value }))} />
                 </div>
                 <div className="col-6 col-md-3 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">SGST %</label>
+                  <label className="form-label small text-secondary mb-1">{taxUi.sgstLabel}</label>
                   <input className="form-control" value={gstForm.sgst || ""} onChange={(e) => setGstForm((p) => ({ ...p, sgst: e.target.value }))} />
                 </div>
                 <div className="col-6 col-md-3 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">IGST %</label>
+                  <label className="form-label small text-secondary mb-1">{taxUi.igstLabel}</label>
                   <input className="form-control" value={gstForm.igst || ""} onChange={(e) => setGstForm((p) => ({ ...p, igst: e.target.value }))} />
                 </div>
                 <div className="col-6 col-md-3 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">CESS %</label>
+                  <label className="form-label small text-secondary mb-1">{taxUi.cessLabel}</label>
                   <input className="form-control" value={gstForm.cess || ""} onChange={(e) => setGstForm((p) => ({ ...p, cess: e.target.value }))} />
                 </div>
                 <div className="col-12 col-xl-2">
@@ -4168,11 +5404,11 @@ function AccountsErpModule() {
                 </div>
                 <div className="col-12">
                   <label className="form-label small text-secondary mb-1">Notes</label>
-                  <textarea className="form-control" rows="2" value={gstForm.notes || ""} onChange={(e) => setGstForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Template notes" />
+                  <textarea className="form-control" rows="2" value={gstForm.notes || ""} onChange={(e) => setGstForm((p) => ({ ...p, notes: e.target.value }))} placeholder={taxUi.notesPlaceholder} />
                 </div>
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">{editingGstId ? "Update GST Template" : "Create GST Template"}</button>
+                <button type="submit" className="btn btn-success btn-sm">{editingGstId ? taxUi.editActionLabel : taxUi.createActionLabel}</button>
                 {editingGstId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetGstForm}>Cancel</button> : null}
               </div>
             </form>
@@ -4410,23 +5646,97 @@ function AccountsErpModule() {
 
       {activeTab === "items" ? (
         <>
+          <div className="card p-3">
+            <h6 className="mb-3">{editingItemMasterId ? "Edit Item Master" : "Create Item Master"}</h6>
+            <form className="d-flex flex-column gap-3" onSubmit={saveItemMaster}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-3">
+                  <label className="form-label small text-secondary mb-1">Item Name</label>
+                  <input className="form-control" value={itemMasterForm.name || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, name: e.target.value }))} placeholder="Item name" />
+                </div>
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Type</label>
+                  <select className="form-select" value={itemMasterForm.itemType || "Product"} onChange={(e) => setItemMasterForm((p) => ({ ...p, itemType: e.target.value }))}>
+                    <option value="Product">Product</option>
+                    <option value="Service">Service</option>
+                  </select>
+                </div>
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">SKU</label>
+                  <input className="form-control" value={itemMasterForm.sku || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, sku: e.target.value }))} placeholder="SKU" />
+                </div>
+                {isIndiaBillingOrg ? (
+                  <div className="col-12 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">
+                      {String(itemMasterForm.itemType || "Product") === "Service" ? "SAC Code" : "HSN Code"}
+                    </label>
+                    <input
+                      className="form-control"
+                      value={itemMasterForm.hsnSacCode || ""}
+                      onChange={(e) => setItemMasterForm((p) => ({ ...p, hsnSacCode: e.target.value }))}
+                      placeholder={String(itemMasterForm.itemType || "Product") === "Service" ? "SAC" : "HSN"}
+                    />
+                  </div>
+                ) : null}
+                <div className="col-12 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Unit</label>
+                  <input className="form-control" value={itemMasterForm.unit || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, unit: e.target.value }))} placeholder="Nos" />
+                </div>
+                <div className="col-12 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Default Rate</label>
+                  <input className="form-control" value={itemMasterForm.defaultRate || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, defaultRate: e.target.value }))} placeholder="0.00" />
+                </div>
+                <div className="col-12 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Tax %</label>
+                  <input className="form-control" value={itemMasterForm.taxPercent || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, taxPercent: e.target.value }))} placeholder="18" />
+                </div>
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">{editingItemMasterId ? "Update Item" : "Create Item"}</button>
+                {editingItemMasterId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetItemMasterForm}>Cancel</button> : null}
+              </div>
+            </form>
+          </div>
+
+          <div className="d-flex flex-wrap gap-2 align-items-center">
+            <button
+              type="button"
+              className={`btn btn-sm ${itemMasterListTypeFilter === "Product" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setItemMasterListTypeFilter("Product")}
+            >
+              Products
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${itemMasterListTypeFilter === "Service" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setItemMasterListTypeFilter("Service")}
+            >
+              Service
+            </button>
+          </div>
+
           <SearchablePaginatedTableCard
-            title="Item Master List"
-            badgeLabel={`${(moduleData.itemMasters || []).length} items`}
-            rows={moduleData.itemMasters || []}
+            title={`Item Master List (${itemMasterListTypeFilter})`}
+            badgeLabel={`${filteredItemMasterRows.length} items`}
+            rows={filteredItemMasterRows}
+            withoutOuterCard
             columns={[
               { key: "name", label: "Item Name" },
+              { key: "itemType", label: "Type" },
               { key: "sku", label: "SKU" },
+              ...(isIndiaBillingOrg ? [{ key: "hsnSacCode", label: "HSN / SAC" }] : []),
               { key: "unit", label: "Unit" },
               { key: "defaultRate", label: "Default Rate" },
               { key: "taxPercent", label: "Tax %" },
             ]}
-            searchPlaceholder="Search items"
-            noRowsText="No item masters yet."
-            searchBy={(row) => [row.name, row.sku, row.unit, row.defaultRate, row.taxPercent].join(" ")}
+            searchPlaceholder={`Search ${String(itemMasterListTypeFilter).toLowerCase()} items`}
+            noRowsText={`No ${String(itemMasterListTypeFilter).toLowerCase()} item masters yet.`}
+            searchBy={(row) => [row.name, row.itemType, row.sku, row.hsnSacCode, row.unit, row.defaultRate, row.taxPercent].join(" ")}
             renderCells={(row) => [
               <span className="fw-semibold">{row.name || "-"}</span>,
+              row.itemType || "Product",
               row.sku || "-",
+              ...(isIndiaBillingOrg ? [row.hsnSacCode || "-"] : []),
               row.unit || "-",
               row.defaultRate || "-",
               row.taxPercent || "-",
@@ -4438,51 +5748,122 @@ function AccountsErpModule() {
               </div>
             )}
           />
-
-          <div className="card p-3">
-            <h6 className="mb-3">{editingItemMasterId ? "Edit Item Master" : "Create Item Master"}</h6>
-            <form className="d-flex flex-column gap-3" onSubmit={saveItemMaster}>
-              <div className="row g-3">
-                <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Item Name</label>
-                  <input className="form-control" value={itemMasterForm.name || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, name: e.target.value }))} placeholder="Item name" />
-                </div>
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">SKU</label>
-                  <input className="form-control" value={itemMasterForm.sku || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, sku: e.target.value }))} placeholder="SKU" />
-                </div>
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Unit</label>
-                  <input className="form-control" value={itemMasterForm.unit || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, unit: e.target.value }))} placeholder="Nos" />
-                </div>
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Default Rate</label>
-                  <input className="form-control" value={itemMasterForm.defaultRate || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, defaultRate: e.target.value }))} placeholder="0.00" />
-                </div>
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Tax %</label>
-                  <input className="form-control" value={itemMasterForm.taxPercent || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, taxPercent: e.target.value }))} placeholder="18" />
-                </div>
-              </div>
-              <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">{editingItemMasterId ? "Update Item" : "Create Item"}</button>
-                {editingItemMasterId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetItemMasterForm}>Cancel</button> : null}
-              </div>
-            </form>
-          </div>
         </>
       ) : null}
 
       {activeTab === "templates" ? (
         <>
+          <div className="card p-3">
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h6 className="mb-0">{editingTemplateId ? "Edit Billing Template" : "Create Billing Template"}</h6>
+              <span className="badge bg-dark border">GST Template option included</span>
+            </div>
+            <form className="d-flex flex-column gap-3" onSubmit={saveBillingTemplate}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Template Name</label>
+                  <input className="form-control" value={templateForm.name || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, name: e.target.value }))} placeholder="Default GST Invoice Template" />
+                </div>
+                <div className="col-12 col-md-4 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Document Type</label>
+                  <select className="form-select" value={templateForm.docType || "Invoice"} onChange={(e) => setTemplateForm((p) => ({ ...p, docType: e.target.value }))}>
+                    <option value="Invoice">Invoice</option>
+                    <option value="Estimate">Estimate</option>
+                  </select>
+                </div>
+                <div className="col-12 col-md-4 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">GST Template</label>
+                  <select className="form-select" value={templateForm.gstTemplateId || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, gstTemplateId: e.target.value }))}>
+                    <option value="">Select GST Template</option>
+                    {(moduleData.gstTemplates || []).map((row) => (
+                      <option key={row.id} value={row.id}>{row.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-12 col-md-4 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Prefix</label>
+                  <input className="form-control" value={templateForm.prefix || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, prefix: e.target.value }))} placeholder="INV" />
+                </div>
+                <div className="col-12 col-md-4 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Inv Start From</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    className="form-control"
+                    value={templateForm.invStartFrom || ""}
+                    onChange={(e) => setTemplateForm((p) => ({ ...p, invStartFrom: e.target.value }))}
+                    placeholder="1001"
+                  />
+                </div>
+                <div className="col-12 col-md-4 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Color</label>
+                  <input type="color" className="form-control form-control-color w-100" value={templateForm.themeColor || "#22c55e"} onChange={(e) => setTemplateForm((p) => ({ ...p, themeColor: e.target.value }))} />
+                </div>
+                <div className="col-12 col-md-4 col-xl-1">
+                  <label className="form-label small text-secondary mb-1">Status</label>
+                  <select className="form-select" value={templateForm.status || "Active"} onChange={(e) => setTemplateForm((p) => ({ ...p, status: e.target.value }))}>
+                    {GST_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Company Logo</label>
+                  <div className="d-flex flex-wrap align-items-center gap-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="form-control form-control-sm"
+                      onChange={(e) => handleBillingTemplateLogoChange(e.target.files?.[0])}
+                    />
+                    {templateForm.companyLogoDataUrl ? (
+                      <>
+                        <img
+                          src={templateForm.companyLogoDataUrl}
+                          alt="Company logo preview"
+                          style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 6, border: "1px solid var(--bs-border-color)" }}
+                        />
+                        <span className="small text-secondary text-truncate" style={{ maxWidth: 180 }}>
+                          {templateForm.companyLogoName || "logo"}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          onClick={() => setTemplateForm((p) => ({ ...p, companyLogoDataUrl: "", companyLogoName: "" }))}
+                        >
+                          Remove
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Footer Note</label>
+                  <input className="form-control" value={templateForm.footerNote || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, footerNote: e.target.value }))} placeholder="Thank you for your business" />
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Terms Text</label>
+                  <input className="form-control" value={templateForm.termsText || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, termsText: e.target.value }))} placeholder="Payment terms and conditions" />
+                </div>
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">{editingTemplateId ? "Update Billing Template" : "Create Billing Template"}</button>
+                {editingTemplateId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetTemplateForm}>Cancel</button> : null}
+              </div>
+            </form>
+          </div>
+
           <SearchablePaginatedTableCard
             title="Billing Template List"
             badgeLabel={`${(moduleData.billingTemplates || []).length} templates`}
             rows={moduleData.billingTemplates || []}
+            withoutOuterCard
             columns={[
               { key: "name", label: "Template" },
               { key: "docType", label: "Type" },
               { key: "gstTemplateId", label: "GST Template" },
+              { key: "companyLogoDataUrl", label: "Logo" },
               { key: "prefix", label: "Prefix" },
               { key: "themeColor", label: "Theme" },
               { key: "status", label: "Status" },
@@ -4497,6 +5878,18 @@ function AccountsErpModule() {
               </div>,
               row.docType,
               resolveGstTemplateName(row.gstTemplateId),
+              row.companyLogoDataUrl ? (
+                <div className="d-flex align-items-center gap-2">
+                  <img
+                    src={row.companyLogoDataUrl}
+                    alt={row.companyLogoName || "Company logo"}
+                    style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 4, border: "1px solid var(--bs-border-color)" }}
+                  />
+                  <span className="small text-secondary">{row.companyLogoName || "Logo"}</span>
+                </div>
+              ) : (
+                <span className="small text-secondary">No logo</span>
+              ),
               row.prefix || "-",
               <div className="d-flex align-items-center gap-2">
                 <span style={{ width: 14, height: 14, borderRadius: 4, background: row.themeColor || "#22c55e", display: "inline-block" }} />
@@ -4521,65 +5914,6 @@ function AccountsErpModule() {
               </div>
             )}
           />
-
-          <div className="card p-3">
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <h6 className="mb-0">{editingTemplateId ? "Edit Billing Template" : "Create Billing Template"}</h6>
-              <span className="badge bg-dark border">GST Template option included</span>
-            </div>
-            <form className="d-flex flex-column gap-3" onSubmit={saveBillingTemplate}>
-              <div className="row g-3">
-                <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Template Name</label>
-                  <input className="form-control" value={templateForm.name || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, name: e.target.value }))} placeholder="Default GST Invoice Template" />
-                </div>
-                <div className="col-12 col-md-4 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Document Type</label>
-                  <select className="form-select" value={templateForm.docType || "Invoice"} onChange={(e) => setTemplateForm((p) => ({ ...p, docType: e.target.value }))}>
-                    <option value="Invoice">Invoice</option>
-                    <option value="Estimate">Estimate</option>
-                  </select>
-                </div>
-                <div className="col-12 col-md-4 col-xl-3">
-                  <label className="form-label small text-secondary mb-1">GST Template</label>
-                  <select className="form-select" value={templateForm.gstTemplateId || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, gstTemplateId: e.target.value }))}>
-                    <option value="">Select GST Template</option>
-                    {(moduleData.gstTemplates || []).map((row) => (
-                      <option key={row.id} value={row.id}>{row.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-12 col-md-4 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">Prefix</label>
-                  <input className="form-control" value={templateForm.prefix || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, prefix: e.target.value }))} placeholder="INV" />
-                </div>
-                <div className="col-12 col-md-4 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">Color</label>
-                  <input type="color" className="form-control form-control-color w-100" value={templateForm.themeColor || "#22c55e"} onChange={(e) => setTemplateForm((p) => ({ ...p, themeColor: e.target.value }))} />
-                </div>
-                <div className="col-12 col-md-4 col-xl-1">
-                  <label className="form-label small text-secondary mb-1">Status</label>
-                  <select className="form-select" value={templateForm.status || "Active"} onChange={(e) => setTemplateForm((p) => ({ ...p, status: e.target.value }))}>
-                    {GST_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Footer Note</label>
-                  <input className="form-control" value={templateForm.footerNote || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, footerNote: e.target.value }))} placeholder="Thank you for your business" />
-                </div>
-                <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Terms Text</label>
-                  <input className="form-control" value={templateForm.termsText || ""} onChange={(e) => setTemplateForm((p) => ({ ...p, termsText: e.target.value }))} placeholder="Payment terms and conditions" />
-                </div>
-              </div>
-              <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">{editingTemplateId ? "Update Billing Template" : "Create Billing Template"}</button>
-                {editingTemplateId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetTemplateForm}>Cancel</button> : null}
-              </div>
-            </form>
-          </div>
         </>
       ) : null}
 
@@ -4603,7 +5937,6 @@ function AccountsErpModule() {
 
       {activeTab === "invoices" ? (
         <>
-          <DocumentTable kind="invoice" rows={moduleData.invoices || []} statusOptions={INVOICE_STATUS_OPTIONS} />
           <BillingDocumentEditor
             kind="invoice"
             form={invoiceForm}

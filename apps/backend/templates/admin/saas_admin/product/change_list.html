@@ -1,8 +1,205 @@
 {% extends "admin/change_list.html" %}
 
+{% block extrahead %}
+  {{ block.super }}
+  <style>
+    #result_list tbody tr.product-row-draggable {
+      cursor: move;
+    }
+    #result_list tbody tr.product-row-draggable.is-dragging {
+      opacity: 0.55;
+    }
+    #result_list tbody tr.product-row-draggable.drop-target {
+      outline: 2px dashed #6fa9c8;
+      outline-offset: -2px;
+    }
+    .product-drag-handle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      margin-right: 6px;
+      color: #7b8a97;
+      font-weight: 700;
+      user-select: none;
+    }
+    .product-reorder-help {
+      margin: 8px 0 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #f6fbff;
+      border: 1px solid #d7e8f2;
+      color: #335;
+      font-size: 12px;
+    }
+    .product-reorder-help.is-saving {
+      background: #fff8dd;
+      border-color: #f0d86b;
+    }
+    .product-reorder-help.is-error {
+      background: #fff0f0;
+      border-color: #f2b2b2;
+      color: #8a2a2a;
+    }
+    .product-reorder-help.is-success {
+      background: #eefaf0;
+      border-color: #a8dfb0;
+      color: #256a31;
+    }
+  </style>
+{% endblock %}
+
 {% block object-tools %}
   <div class="admin-changelist-action">
     <a class="button" href="{% url 'admin:saas_admin_product_changelist' %}">All Created Products</a>
   </div>
   {{ block.super }}
+{% endblock %}
+
+{% block result_list %}
+  <div id="product-reorder-help" class="product-reorder-help">
+    Drag and drop product rows to change order. Website product dropdown and pricing page will follow this order.
+  </div>
+  {{ block.super }}
+{% endblock %}
+
+{% block footer %}
+  {{ block.super }}
+  <script>
+    (function () {
+      const table = document.getElementById("result_list");
+      const helpBox = document.getElementById("product-reorder-help");
+      if (!table) return;
+      const tbody = table.querySelector("tbody");
+      if (!tbody) return;
+      const reorderUrl = "{% url product_reorder_url %}";
+      let draggedRow = null;
+      let saveTimer = null;
+
+      function getCsrfToken() {
+        const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : "";
+      }
+
+      function setHelpState(message, type) {
+        if (!helpBox) return;
+        helpBox.textContent = message;
+        helpBox.classList.remove("is-saving", "is-error", "is-success");
+        if (type) helpBox.classList.add(type);
+      }
+
+      function getProductRows() {
+        return Array.from(tbody.querySelectorAll("tr")).filter((row) => {
+          const checkbox = row.querySelector('input.action-select[type="checkbox"]');
+          return checkbox && checkbox.value;
+        });
+      }
+
+      function rowProductId(row) {
+        return row.querySelector('input.action-select[type="checkbox"]')?.value || "";
+      }
+
+      function refreshVisibleSortOrderCells() {
+        getProductRows().forEach((row, index) => {
+          const sortCell = row.querySelector("td.field-sort_order");
+          if (sortCell) {
+            sortCell.textContent = String(index + 1);
+          }
+        });
+      }
+
+      function addHandlesAndDraggable() {
+        getProductRows().forEach((row) => {
+          row.classList.add("product-row-draggable");
+          row.setAttribute("draggable", "true");
+          const nameCell = row.querySelector("td.field-name, th.field-name");
+          if (nameCell && !nameCell.querySelector(".product-drag-handle")) {
+            const handle = document.createElement("span");
+            handle.className = "product-drag-handle";
+            handle.textContent = "⋮⋮";
+            handle.title = "Drag to reorder";
+            nameCell.prepend(handle);
+          }
+        });
+      }
+
+      async function saveOrder() {
+        const productIds = getProductRows().map(rowProductId).filter(Boolean);
+        if (!productIds.length) return;
+        setHelpState("Saving product order...", "is-saving");
+        try {
+          const res = await fetch(reorderUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": getCsrfToken(),
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({ product_ids: productIds })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.ok) {
+            throw new Error(data.error || "Unable to save product order.");
+          }
+          setHelpState("Product order saved. Website dropdown and pricing page will use this order.", "is-success");
+        } catch (error) {
+          setHelpState(error.message || "Unable to save product order.", "is-error");
+        }
+      }
+
+      function queueSave() {
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+        }
+        saveTimer = setTimeout(saveOrder, 120);
+      }
+
+      tbody.addEventListener("dragstart", (event) => {
+        const row = event.target.closest("tr.product-row-draggable");
+        if (!row) return;
+        draggedRow = row;
+        row.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        try {
+          event.dataTransfer.setData("text/plain", rowProductId(row));
+        } catch (_e) {}
+      });
+
+      tbody.addEventListener("dragover", (event) => {
+        if (!draggedRow) return;
+        const targetRow = event.target.closest("tr.product-row-draggable");
+        if (!targetRow || targetRow === draggedRow) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        getProductRows().forEach((row) => row.classList.remove("drop-target"));
+        targetRow.classList.add("drop-target");
+      });
+
+      tbody.addEventListener("drop", (event) => {
+        if (!draggedRow) return;
+        const targetRow = event.target.closest("tr.product-row-draggable");
+        if (!targetRow || targetRow === draggedRow) return;
+        event.preventDefault();
+
+        const targetRect = targetRow.getBoundingClientRect();
+        const insertAfter = event.clientY > (targetRect.top + targetRect.height / 2);
+        if (insertAfter) {
+          targetRow.after(draggedRow);
+        } else {
+          targetRow.before(draggedRow);
+        }
+        getProductRows().forEach((row) => row.classList.remove("drop-target"));
+        refreshVisibleSortOrderCells();
+        queueSave();
+      });
+
+      tbody.addEventListener("dragend", () => {
+        getProductRows().forEach((row) => row.classList.remove("is-dragging", "drop-target"));
+        draggedRow = null;
+      });
+
+      addHandlesAndDraggable();
+      refreshVisibleSortOrderCells();
+    })();
+  </script>
 {% endblock %}

@@ -161,14 +161,16 @@ function MonthlyComparisonChartCard({
               x2={width}
               y1={(height - 20) - ((height - 20) * line) + 6}
               y2={(height - 20) - ((height - 20) * line) + 6}
-              stroke="rgba(255,255,255,0.08)"
+              stroke="var(--bs-border-color)"
+              strokeOpacity="0.6"
               strokeWidth="1"
             />
           ))}
           <polyline
             points={previousPoints}
             fill="none"
-            stroke="rgba(255,255,255,0.35)"
+            stroke="var(--bs-secondary-color)"
+            strokeOpacity="0.95"
             strokeWidth="3"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -191,7 +193,7 @@ function MonthlyComparisonChartCard({
 
       <div className="d-flex flex-wrap align-items-center gap-3 mt-2 small">
         <span className="d-inline-flex align-items-center gap-1">
-          <span style={{ width: 12, height: 2, background: "rgba(255,255,255,0.35)", display: "inline-block" }} />
+          <span style={{ width: 12, height: 2, background: "var(--bs-secondary-color)", opacity: 0.95, display: "inline-block" }} />
           {previousYear} (Previous)
         </span>
         <span className="d-inline-flex align-items-center gap-1">
@@ -513,7 +515,7 @@ export default function BusinessAutopilotDashboardPage({
           No modules are enabled for this organization yet.
         </div>
       )}
-      <div className="mt-4">
+      <div style={{ marginTop: "40px" }}>
         <div className="row g-3">
           <div className="col-12 col-xl-8">
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
@@ -536,7 +538,7 @@ export default function BusinessAutopilotDashboardPage({
               </div>
             </div>
             <div className="row g-3">
-              <div className="col-12">
+              <div className="col-12 col-lg-6">
                 <MonthlyComparisonChartCard
                   title="Monthly Sales"
                   icon="bi-graph-up-arrow"
@@ -546,7 +548,7 @@ export default function BusinessAutopilotDashboardPage({
                   previousSeries={comparisonData.salesPrevious}
                 />
               </div>
-              <div className="col-12">
+              <div className="col-12 col-lg-6">
                 <MonthlyComparisonChartCard
                   title="Monthly Expenses"
                   icon="bi-graph-down-arrow"
@@ -627,16 +629,18 @@ export default function BusinessAutopilotDashboardPage({
                 <div className="d-flex align-items-center justify-content-between border rounded px-2 py-2 h-100 gap-2">
                   <div className="min-w-0">
                     <div className="fw-semibold">{module.name}</div>
-                    <div className="text-secondary small">{module.enabled ? "Enabled" : "Disabled"}</div>
+                    <div className="text-secondary small">
+                      {module.eligible ? (module.enabled ? "Enabled" : "Disabled") : "Plan Locked"}
+                    </div>
                   </div>
                   <div className="flex-shrink-0">
                     <button
                       type="button"
                       className={`btn btn-sm ${module.enabled ? "btn-outline-danger" : "btn-outline-success"}`}
-                      disabled={savingModuleSlug === module.slug}
+                      disabled={savingModuleSlug === module.slug || module.eligible === false}
                       onClick={() => onToggleModule && onToggleModule(module.slug, !module.enabled)}
                     >
-                      {savingModuleSlug === module.slug ? "Saving..." : module.enabled ? "Disable" : "Enable"}
+                      {savingModuleSlug === module.slug ? "Saving..." : module.eligible === false ? "Locked" : module.enabled ? "Disable" : "Enable"}
                     </button>
                   </div>
                 </div>
