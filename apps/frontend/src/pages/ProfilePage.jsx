@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 import TablePagination from "../components/TablePagination.jsx";
@@ -10,6 +10,42 @@ const emptyState = {
   error: "",
   data: null
 };
+const PROFILE_WHATSAPP_CONFIG_KEY = "wz_profile_whatsapp_api_config";
+const PROFILE_WHATSAPP_RULES_KEY = "wz_profile_whatsapp_event_rules";
+const WHATSAPP_DEPARTMENTS = ["HR", "Sales", "Accounts", "Support", "Projects", "Operations", "Client"];
+const WHATSAPP_EVENT_OPTIONS = [
+  "New Lead Assigned",
+  "Payment Pending",
+  "Invoice Generated",
+  "Support Ticket Created",
+  "Attendance Alert",
+  "Low Stock Alert",
+  "Leave Request",
+  "Custom Event",
+];
+
+function buildDefaultWhatsappApiConfig() {
+  return {
+    providerName: "Meta WhatsApp Cloud API",
+    apiBaseUrl: "",
+    phoneNumberId: "",
+    accessToken: "",
+    webhookVerifyToken: "",
+    status: "Disconnected",
+  };
+}
+
+function buildEmptyWhatsappRule(adminName = "") {
+  return {
+    eventName: "",
+    department: "HR",
+    assignedOrgAdmin: adminName || "",
+    priority: "High",
+    triggerStatus: "Active",
+    clientMessageTemplate: "",
+    internalNotes: "",
+  };
+}
 
 const phoneCountries = PHONE_COUNTRIES;
 export default function ProfilePage() {
@@ -26,6 +62,7 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [profileTopTab, setProfileTopTab] = useState("profile");
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState("");
   const [backupItems, setBackupItems] = useState([]);
@@ -33,6 +70,12 @@ export default function ProfilePage() {
   const [backupProductSlug, setBackupProductSlug] = useState("");
   const [backupActionLoading, setBackupActionLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState("");
+  const [whatsappApiConfig, setWhatsappApiConfig] = useState(buildDefaultWhatsappApiConfig());
+  const [whatsappApiNotice, setWhatsappApiNotice] = useState("");
+  const [whatsappEventRules, setWhatsappEventRules] = useState([]);
+  const [whatsappRuleForm, setWhatsappRuleForm] = useState(buildEmptyWhatsappRule(""));
+  const [editingWhatsappRuleId, setEditingWhatsappRuleId] = useState("");
+  const [viewWhatsappRule, setViewWhatsappRule] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -158,6 +201,40 @@ export default function ProfilePage() {
     };
   }, [backupProductSlug]);
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PROFILE_WHATSAPP_CONFIG_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setWhatsappApiConfig((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      // ignore invalid cache
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PROFILE_WHATSAPP_RULES_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setWhatsappEventRules(parsed);
+      }
+    } catch {
+      // ignore invalid cache
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(PROFILE_WHATSAPP_CONFIG_KEY, JSON.stringify(whatsappApiConfig));
+  }, [whatsappApiConfig]);
+
+  useEffect(() => {
+    window.localStorage.setItem(PROFILE_WHATSAPP_RULES_KEY, JSON.stringify(whatsappEventRules));
+  }, [whatsappEventRules]);
+
   async function handleEmailSubmit(event) {
     event.preventDefault();
     setNotice("");
@@ -229,15 +306,6 @@ export default function ProfilePage() {
     }
   }
 
-  if (state.loading) {
-    return (
-      <div className="card p-4 text-center">
-        <div className="spinner" />
-        <p className="mb-0">Loading profile...</p>
-      </div>
-    );
-  }
-
   const data = state.data || {};
   const user = data.user || {};
   const recentActions = data.recent_actions || [];
@@ -258,19 +326,146 @@ export default function ProfilePage() {
   const endEntry = totalItems
     ? Math.min(currentPage * pageSize, totalItems)
     : 0;
+  const orgAdminAssigneeOptions = useMemo(() => {
+    const options = [
+      user.username,
+      user.email,
+      data.org?.owner_name,
+      data.org?.admin_name,
+      "Org Admin",
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return Array.from(new Set(options));
+  }, [data.org, user.email, user.username]);
+
+  useEffect(() => {
+    setWhatsappRuleForm((prev) => {
+      if (prev.assignedOrgAdmin) {
+        return prev;
+      }
+      return {
+        ...prev,
+        assignedOrgAdmin: orgAdminAssigneeOptions[0] || "Org Admin",
+      };
+    });
+  }, [orgAdminAssigneeOptions]);
+
+  if (state.loading) {
+    return (
+      <div className="card p-4 text-center">
+        <div className="spinner" />
+        <p className="mb-0">Loading profile...</p>
+      </div>
+    );
+  }
 
   function openUsersModal(users) {
     setUsersModal({ open: true, users });
+  }
+
+  function handleSaveWhatsappApiConfig(event) {
+    event.preventDefault();
+    setWhatsappApiNotice("WhatsApp API connection settings saved.");
+    setWhatsappApiConfig((prev) => ({
+      ...prev,
+      status: prev.apiBaseUrl && prev.phoneNumberId && prev.accessToken ? "Connected" : "Disconnected",
+    }));
+  }
+
+  function resetWhatsappRuleForm() {
+    setEditingWhatsappRuleId("");
+    setWhatsappRuleForm(buildEmptyWhatsappRule(orgAdminAssigneeOptions[0] || "Org Admin"));
+  }
+
+  function handleWhatsappRuleSubmit(event) {
+    event.preventDefault();
+    const payload = {
+      ...whatsappRuleForm,
+      eventName: String(whatsappRuleForm.eventName || "").trim(),
+      department: String(whatsappRuleForm.department || "").trim(),
+      assignedOrgAdmin: String(whatsappRuleForm.assignedOrgAdmin || "").trim(),
+      priority: String(whatsappRuleForm.priority || "High").trim(),
+      triggerStatus: String(whatsappRuleForm.triggerStatus || "Active").trim(),
+      clientMessageTemplate: String(whatsappRuleForm.clientMessageTemplate || "").trim(),
+      internalNotes: String(whatsappRuleForm.internalNotes || "").trim(),
+    };
+    if (!payload.eventName || !payload.department || !payload.assignedOrgAdmin) {
+      setState((prev) => ({ ...prev, error: "Event, department, and assigned org admin are required." }));
+      return;
+    }
+    if (payload.department === "Client" && !payload.clientMessageTemplate) {
+      setState((prev) => ({ ...prev, error: "Client WhatsApp message is required when department is Client." }));
+      return;
+    }
+    setState((prev) => ({ ...prev, error: "" }));
+    setWhatsappEventRules((prev) => {
+      if (editingWhatsappRuleId) {
+        return prev.map((row) =>
+          row.id === editingWhatsappRuleId ? { ...row, ...payload, updatedAt: new Date().toISOString() } : row
+        );
+      }
+      return [
+        {
+          id: `wa_rule_${Date.now()}`,
+          ...payload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ];
+    });
+    resetWhatsappRuleForm();
+  }
+
+  function handleEditWhatsappRule(row) {
+    setEditingWhatsappRuleId(row.id);
+    setWhatsappRuleForm({
+      eventName: row.eventName || "",
+      department: row.department || "HR",
+      assignedOrgAdmin: row.assignedOrgAdmin || (orgAdminAssigneeOptions[0] || "Org Admin"),
+      priority: row.priority || "High",
+      triggerStatus: row.triggerStatus || "Active",
+      clientMessageTemplate: row.clientMessageTemplate || "",
+      internalNotes: row.internalNotes || "",
+    });
+  }
+
+  function handleDeleteWhatsappRule(rowId) {
+    setWhatsappEventRules((prev) => prev.filter((row) => row.id !== rowId));
+    if (editingWhatsappRuleId === rowId) {
+      resetWhatsappRuleForm();
+    }
+    if (viewWhatsappRule?.id === rowId) {
+      setViewWhatsappRule(null);
+    }
   }
 
   return (
     <>
       <h2 className="page-title">Profile</h2>
       <hr className="section-divider" />
+      <div className="d-flex flex-wrap gap-2 mb-3">
+        <button
+          type="button"
+          className={`btn btn-sm ${profileTopTab === "profile" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("profile")}
+        >
+          Profile
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${profileTopTab === "whatsappApi" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("whatsappApi")}
+        >
+          WhatsApp API
+        </button>
+      </div>
 
       {notice ? <div className="alert alert-success">{notice}</div> : null}
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
 
+      {profileTopTab === "profile" ? (
       <div className="row g-3 mt-1">
         <div className="col-12 col-lg-6">
           <div className="card p-3 h-100">
@@ -374,7 +569,241 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+      ) : null}
 
+      {profileTopTab === "whatsappApi" ? (
+      <div className="card p-3 mt-3">
+        <h5>WhatsApp API Connection & Event Notifications</h5>
+        <p className="text-secondary mb-3">
+          Configure WhatsApp API connection and create important event notifications for departments (including Client).
+        </p>
+        {whatsappApiNotice ? <div className="alert alert-success py-2">{whatsappApiNotice}</div> : null}
+
+        <div className="row g-3">
+          <div className="col-12 col-xl-5">
+            <div className="border rounded p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0">WhatsApp API Connection</h6>
+                <span className={`badge ${whatsappApiConfig.status === "Connected" ? "bg-success" : "bg-secondary"}`}>
+                  {whatsappApiConfig.status}
+                </span>
+              </div>
+              <form className="d-flex flex-column gap-2" onSubmit={handleSaveWhatsappApiConfig}>
+                <div>
+                  <label className="form-label small mb-1">Provider</label>
+                  <input
+                    className="form-control"
+                    value={whatsappApiConfig.providerName}
+                    onChange={(event) => setWhatsappApiConfig((prev) => ({ ...prev, providerName: event.target.value }))}
+                    placeholder="Meta WhatsApp Cloud API"
+                  />
+                </div>
+                <div>
+                  <label className="form-label small mb-1">API Base URL</label>
+                  <input
+                    className="form-control"
+                    value={whatsappApiConfig.apiBaseUrl}
+                    onChange={(event) => setWhatsappApiConfig((prev) => ({ ...prev, apiBaseUrl: event.target.value }))}
+                    placeholder="https://graph.facebook.com/vXX.X"
+                  />
+                </div>
+                <div>
+                  <label className="form-label small mb-1">Phone Number ID</label>
+                  <input
+                    className="form-control"
+                    value={whatsappApiConfig.phoneNumberId}
+                    onChange={(event) => setWhatsappApiConfig((prev) => ({ ...prev, phoneNumberId: event.target.value }))}
+                    placeholder="Enter phone number id"
+                  />
+                </div>
+                <div>
+                  <label className="form-label small mb-1">Access Token</label>
+                  <input
+                    className="form-control"
+                    value={whatsappApiConfig.accessToken}
+                    onChange={(event) => setWhatsappApiConfig((prev) => ({ ...prev, accessToken: event.target.value }))}
+                    placeholder="Permanent access token"
+                  />
+                </div>
+                <div>
+                  <label className="form-label small mb-1">Webhook Verify Token</label>
+                  <input
+                    className="form-control"
+                    value={whatsappApiConfig.webhookVerifyToken}
+                    onChange={(event) => setWhatsappApiConfig((prev) => ({ ...prev, webhookVerifyToken: event.target.value }))}
+                    placeholder="Webhook verify token"
+                  />
+                </div>
+                <div className="d-flex gap-2 pt-1">
+                  <button type="submit" className="btn btn-success btn-sm">Save Connection</button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() => {
+                      setWhatsappApiConfig(buildDefaultWhatsappApiConfig());
+                      setWhatsappApiNotice("");
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div className="col-12 col-xl-7">
+            <div className="border rounded p-3 h-100">
+              <h6 className="mb-2">{editingWhatsappRuleId ? "Edit Event Notification Rule" : "Create Event Notification Rule"}</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={handleWhatsappRuleSubmit}>
+                <div className="row g-3">
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small mb-1">Important Event</label>
+                    <input
+                      className="form-control"
+                      list="profile-whatsapp-event-options"
+                      value={whatsappRuleForm.eventName}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, eventName: event.target.value }))}
+                      placeholder="Select or type event"
+                    />
+                    <datalist id="profile-whatsapp-event-options">
+                      {WHATSAPP_EVENT_OPTIONS.map((item) => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small mb-1">Department</label>
+                    <select
+                      className="form-select"
+                      value={whatsappRuleForm.department}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, department: event.target.value }))}
+                    >
+                      {WHATSAPP_DEPARTMENTS.map((dept) => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small mb-1">Assign Org Admin</label>
+                    <input
+                      className="form-control"
+                      list="profile-whatsapp-admin-options"
+                      value={whatsappRuleForm.assignedOrgAdmin}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, assignedOrgAdmin: event.target.value }))}
+                      placeholder="Assign org admin"
+                    />
+                    <datalist id="profile-whatsapp-admin-options">
+                      {orgAdminAssigneeOptions.map((item) => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="col-6 col-md-3">
+                    <label className="form-label small mb-1">Priority</label>
+                    <select
+                      className="form-select"
+                      value={whatsappRuleForm.priority}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, priority: event.target.value }))}
+                    >
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                  </div>
+                  <div className="col-6 col-md-3">
+                    <label className="form-label small mb-1">Status</label>
+                    <select
+                      className="form-select"
+                      value={whatsappRuleForm.triggerStatus}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, triggerStatus: event.target.value }))}
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label small mb-1">Client WhatsApp Message</label>
+                    <textarea
+                      className="form-control"
+                      rows={3}
+                      value={whatsappRuleForm.clientMessageTemplate}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, clientMessageTemplate: event.target.value }))}
+                      placeholder={whatsappRuleForm.department === "Client" ? "Required for Client notifications" : "Optional client-facing message template"}
+                    />
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label small mb-1">Internal Notes</label>
+                    <input
+                      className="form-control"
+                      value={whatsappRuleForm.internalNotes}
+                      onChange={(event) => setWhatsappRuleForm((prev) => ({ ...prev, internalNotes: event.target.value }))}
+                      placeholder="Optional notes for admin team"
+                    />
+                  </div>
+                </div>
+                <div className="d-flex gap-2">
+                  <button type="submit" className="btn btn-primary btn-sm">
+                    {editingWhatsappRuleId ? "Update Rule" : "Create Rule"}
+                  </button>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={resetWhatsappRuleForm}>
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div className="table-responsive mt-3">
+          <table className="table table-dark table-striped table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Department</th>
+                <th>Assigned Org Admin</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Client Message</th>
+                <th className="text-end">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {whatsappEventRules.length ? (
+                whatsappEventRules.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.eventName || "-"}</td>
+                    <td>{row.department || "-"}</td>
+                    <td>{row.assignedOrgAdmin || "-"}</td>
+                    <td>{row.triggerStatus || "-"}</td>
+                    <td>{row.priority || "-"}</td>
+                    <td>{row.clientMessageTemplate ? `${String(row.clientMessageTemplate).slice(0, 40)}${String(row.clientMessageTemplate).length > 40 ? "..." : ""}` : "-"}</td>
+                    <td className="text-end">
+                      <div className="d-inline-flex gap-2">
+                        <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewWhatsappRule(row)}>
+                          View
+                        </button>
+                        <button type="button" className="btn btn-outline-info btn-sm" onClick={() => handleEditWhatsappRule(row)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDeleteWhatsappRule(row.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="7">No WhatsApp event notification rules yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "profile" ? (
       <div className="card p-3 mt-3">
         <h5>Downloads & Backups</h5>
         <p className="text-secondary">
@@ -464,7 +893,9 @@ export default function ProfilePage() {
           </table>
         </div>
       </div>
+      ) : null}
 
+      {profileTopTab === "profile" ? (
       <div className="card p-3 mt-3">
         <h5>Referral Program</h5>
         <p>
@@ -496,7 +927,9 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+      ) : null}
 
+      {profileTopTab === "profile" ? (
       <div className="card p-3 mt-3">
         <h5>Referral Income</h5>
         <div className="table-responsive">
@@ -538,7 +971,9 @@ export default function ProfilePage() {
           </table>
         </div>
       </div>
+      ) : null}
 
+      {profileTopTab === "profile" ? (
       <div className="card p-3 mt-3">
         <h5>Admin Activity</h5>
         <div className="table-controls">
@@ -613,6 +1048,7 @@ export default function ProfilePage() {
           />
         </div>
       </div>
+      ) : null}
 
       {usersModal.open ? (
         <div
@@ -645,6 +1081,34 @@ export default function ProfilePage() {
                 type="button"
                 onClick={() => setUsersModal({ open: false, users: [] })}
               >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {viewWhatsappRule ? (
+        <div className="modal-overlay" onClick={() => setViewWhatsappRule(null)}>
+          <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
+            <h5>WhatsApp Event Rule Details</h5>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped align-middle mb-0">
+                <tbody>
+                  <tr><th style={{ width: 220 }}>Event</th><td>{viewWhatsappRule.eventName || "-"}</td></tr>
+                  <tr><th>Department</th><td>{viewWhatsappRule.department || "-"}</td></tr>
+                  <tr><th>Assigned Org Admin</th><td>{viewWhatsappRule.assignedOrgAdmin || "-"}</td></tr>
+                  <tr><th>Status</th><td>{viewWhatsappRule.triggerStatus || "-"}</td></tr>
+                  <tr><th>Priority</th><td>{viewWhatsappRule.priority || "-"}</td></tr>
+                  <tr><th>Client WhatsApp Message</th><td style={{ whiteSpace: "pre-wrap" }}>{viewWhatsappRule.clientMessageTemplate || "-"}</td></tr>
+                  <tr><th>Internal Notes</th><td>{viewWhatsappRule.internalNotes || "-"}</td></tr>
+                  <tr><th>Created</th><td>{viewWhatsappRule.createdAt || "-"}</td></tr>
+                  <tr><th>Updated</th><td>{viewWhatsappRule.updatedAt || "-"}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button className="modal-close" type="button" onClick={() => setViewWhatsappRule(null)}>
                 Close
               </button>
             </div>

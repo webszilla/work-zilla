@@ -3,8 +3,10 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import ProductAccessSection from "../components/ProductAccessSection.jsx";
 
+const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
+const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function normalizeDateValue(value) {
@@ -59,6 +61,56 @@ function buildPolylinePoints(series, width, height, maxValue) {
     .join(" ");
 }
 
+function toIsoDateLocal(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildMeetingCalendarModel(monthDate, meetings = []) {
+  const base = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const monthStart = new Date(base.getFullYear(), base.getMonth(), 1);
+  const monthEnd = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+  const startOffset = (monthStart.getDay() + 6) % 7; // Monday-first
+  const gridStart = new Date(monthStart);
+  gridStart.setDate(monthStart.getDate() - startOffset);
+
+  const meetingMap = new Map();
+  (meetings || []).forEach((row) => {
+    const isoDate = String(row?.meetingDate || "").trim();
+    if (!isoDate) return;
+    if (!meetingMap.has(isoDate)) {
+      meetingMap.set(isoDate, []);
+    }
+    meetingMap.get(isoDate).push(row);
+  });
+
+  const cells = Array.from({ length: 35 }).map((_, idx) => {
+    const cellDate = new Date(gridStart);
+    cellDate.setDate(gridStart.getDate() + idx);
+    const isoDate = toIsoDateLocal(cellDate);
+    return {
+      isoDate,
+      day: cellDate.getDate(),
+      inMonth: cellDate.getMonth() === monthStart.getMonth(),
+      isToday: isoDate === toIsoDateLocal(new Date()),
+      meetings: (meetingMap.get(isoDate) || []).slice().sort((a, b) => String(a.meetingTime || "").localeCompare(String(b.meetingTime || ""))),
+    };
+  });
+
+  return {
+    monthLabel: monthStart.toLocaleString("en-US", { month: "long", year: "numeric" }),
+    monthStart,
+    monthEnd,
+    cells,
+  };
+}
+
 function MonthlyComparisonChartCard({
   title,
   currentYear,
@@ -81,8 +133,11 @@ function MonthlyComparisonChartCard({
     <div className="card p-3 h-100">
       <div className="d-flex align-items-center justify-content-between mb-2">
         <div className="d-flex align-items-center gap-2">
-          <div className="stat-icon stat-icon-primary" style={{ width: 34, height: 34 }}>
-            <i className={`bi ${icon}`} aria-hidden="true" />
+          <div
+            className="stat-icon stat-icon-primary flex-shrink-0 d-inline-flex align-items-center justify-content-center"
+            style={{ width: 32, height: 32 }}
+          >
+            <i className={`bi ${icon}`} aria-hidden="true" style={{ fontSize: "1.15rem", lineHeight: 1 }} />
           </div>
           <div>
             <h6 className="mb-0">{title}</h6>
@@ -164,12 +219,17 @@ export default function BusinessAutopilotDashboardPage({
   const [products, setProducts] = useState([]);
   const [accountsWorkspace, setAccountsWorkspace] = useState({});
   const [selectedComparisonYear, setSelectedComparisonYear] = useState(new Date().getFullYear());
+  const [crmMeetings, setCrmMeetings] = useState([]);
+  const [meetingCalendarMonthDate, setMeetingCalendarMonthDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [quickStats, setQuickStats] = useState({
+    myAttendance: 0,
     userCount: 0,
     billPendingAmount: 0,
     openTickets: 0,
     todayMeetings: 0,
-    newInboxAlert: 0,
     myPlans: Array.isArray(subscriptions) ? subscriptions.length : 0,
   });
   const entries = Array.isArray(modules) ? modules : [];
@@ -228,12 +288,22 @@ export default function BusinessAutopilotDashboardPage({
   useEffect(() => {
     let active = true;
     async function loadQuickStats() {
+      let myAttendance = 0;
       let userCount = 0;
       let billPendingAmount = 0;
       let openTickets = 0;
       let todayMeetings = 0;
-      let newInboxAlert = 0;
       const myPlans = Array.isArray(subscriptions) ? subscriptions.length : 0;
+      const todayIso = new Date().toISOString().slice(0, 10);
+
+      try {
+        const raw = window.localStorage.getItem(HR_STORAGE_KEY);
+        const localData = raw ? JSON.parse(raw) : {};
+        const attendanceRows = Array.isArray(localData?.attendance) ? localData.attendance : [];
+        myAttendance = attendanceRows.some((row) => String(row?.date || "").trim() === todayIso) ? 1 : 0;
+      } catch {
+        myAttendance = 0;
+      }
 
       try {
         const usersData = await apiFetch("/api/business-autopilot/users");
@@ -278,28 +348,29 @@ export default function BusinessAutopilotDashboardPage({
       }
 
       try {
-        const dashboardSummary = await apiFetch("/api/dashboard/summary");
-        const possibleUnread =
-          dashboardSummary?.unread_notifications
-          ?? dashboardSummary?.new_inbox_alert
-          ?? dashboardSummary?.inbox_alerts
-          ?? dashboardSummary?.alerts?.inbox
-          ?? dashboardSummary?.notifications?.unread
-          ?? 0;
-        newInboxAlert = Number(possibleUnread) || 0;
+        const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+        const localData = raw ? JSON.parse(raw) : {};
+        const meetings = Array.isArray(localData?.meetings) ? localData.meetings : [];
+        if (active) {
+          setCrmMeetings(meetings);
+        }
+        todayMeetings = meetings.filter((row) => String(row?.meetingDate || "").trim() === todayIso).length;
       } catch {
-        newInboxAlert = 0;
+        if (active) {
+          setCrmMeetings([]);
+        }
+        todayMeetings = 0;
       }
 
       if (!active) {
         return;
       }
       setQuickStats({
+        myAttendance,
         userCount,
         billPendingAmount,
         openTickets,
         todayMeetings,
-        newInboxAlert,
         myPlans,
       });
     }
@@ -308,6 +379,15 @@ export default function BusinessAutopilotDashboardPage({
       active = false;
     };
   }, [subscriptions]);
+
+  const meetingCalendar = useMemo(
+    () => buildMeetingCalendarModel(meetingCalendarMonthDate, crmMeetings),
+    [crmMeetings, meetingCalendarMonthDate]
+  );
+
+  function changeMeetingCalendarMonth(offset) {
+    setMeetingCalendarMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+  }
 
   const toModulePath = (module) => {
     const rawPath = module?.path || `/${module?.slug || ""}`;
@@ -334,11 +414,11 @@ export default function BusinessAutopilotDashboardPage({
     `INR ${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const statCards = [
+    { key: "myAttendance", label: "My Attendance", value: String(quickStats.myAttendance || 0), icon: "bi-calendar-check", href: withProductBase("/hrm#attendance") },
     { key: "users", label: "Total Users", value: String(quickStats.userCount || 0), icon: "bi-people", href: withProductBase("/users") },
     { key: "billing", label: "Bill Pendings", value: formatCurrency(quickStats.billPendingAmount), icon: "bi-wallet2", href: withProductBase("/billing") },
     { key: "tickets", label: "Open Tickets", value: String(quickStats.openTickets || 0), icon: "bi-life-preserver", href: withProductBase("/ticketing") },
     { key: "meetings", label: "Today Meetings", value: String(quickStats.todayMeetings || 0), icon: "bi-calendar-event", href: "#" },
-    { key: "inbox", label: "New Inbox Alert", value: String(quickStats.newInboxAlert || 0), icon: "bi-bell", href: withProductBase("/notifications-inbox") },
     { key: "plans", label: "My Plans", value: String(quickStats.myPlans || 0), icon: "bi-clipboard-check", href: withProductBase("/plans") },
   ];
 
@@ -433,8 +513,112 @@ export default function BusinessAutopilotDashboardPage({
           No modules are enabled for this organization yet.
         </div>
       )}
+      <div className="mt-4">
+        <div className="row g-3">
+          <div className="col-12 col-xl-8">
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <h4 className="mb-0">Monthly Sales & Expenses Comparison</h4>
+              <div className="d-flex align-items-center gap-2">
+                <label className="small text-secondary mb-0" htmlFor="baerp-comparison-year">Year</label>
+                <select
+                  id="baerp-comparison-year"
+                  className="form-select form-select-sm"
+                  style={{ minWidth: "110px" }}
+                  value={comparisonData.selectedYear}
+                  onChange={(event) => setSelectedComparisonYear(Number(event.target.value))}
+                >
+                  {comparisonData.yearOptions.map((year) => (
+                    <option value={year} key={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="row g-3">
+              <div className="col-12">
+                <MonthlyComparisonChartCard
+                  title="Monthly Sales"
+                  icon="bi-graph-up-arrow"
+                  currentYear={comparisonData.selectedYear}
+                  previousYear={comparisonData.previousYear}
+                  currentSeries={comparisonData.salesCurrent}
+                  previousSeries={comparisonData.salesPrevious}
+                />
+              </div>
+              <div className="col-12">
+                <MonthlyComparisonChartCard
+                  title="Monthly Expenses"
+                  icon="bi-graph-down-arrow"
+                  currentYear={comparisonData.selectedYear}
+                  previousYear={comparisonData.previousYear}
+                  currentSeries={comparisonData.expensesCurrent}
+                  previousSeries={comparisonData.expensesPrevious}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-xl-4">
+            <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0">Meeting Calendar</h6>
+                <div className="d-flex align-items-center gap-1">
+                  <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(-1)}>
+                    <i className="bi bi-chevron-left" aria-hidden="true" />
+                  </button>
+                  <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(1)}>
+                    <i className="bi bi-chevron-right" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <div className="small text-secondary mb-2">{meetingCalendar.monthLabel}</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                  gap: "6px",
+                }}
+              >
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayLabel) => (
+                  <div key={`head-${dayLabel}`} className="small text-secondary text-center fw-semibold">
+                    {dayLabel}
+                  </div>
+                ))}
+                {meetingCalendar.cells.map((cell) => (
+                  <div
+                    key={cell.isoDate}
+                    className="rounded"
+                    style={{
+                      minHeight: "56px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      padding: "4px",
+                      background: cell.isToday ? "rgba(var(--bs-primary-rgb),0.12)" : "rgba(255,255,255,0.02)",
+                      opacity: cell.inMonth ? 1 : 0.45,
+                    }}
+                    title={cell.meetings.length ? `${cell.meetings.length} meeting(s)` : ""}
+                  >
+                    <div className="small fw-semibold" style={{ lineHeight: 1.1 }}>{cell.day}</div>
+                    {cell.meetings.length ? (
+                      <div className="mt-1">
+                        <span className="badge bg-success" style={{ fontSize: "0.65rem" }}>
+                          {cell.meetings.length}
+                        </span>
+                        {cell.meetings[0]?.meetingTime ? (
+                          <div className="small text-truncate mt-1" style={{ fontSize: "0.68rem" }}>
+                            {String(cell.meetings[0].meetingTime)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       {canManageModules ? (
-        <div className="mt-3">
+        <div className="mt-4">
           <h6 className="mb-2">Module Access Settings</h6>
           <div className="text-secondary small mb-3">Enable or disable eligible ERP modules for your organization.</div>
           <div className="row g-2">
@@ -466,49 +650,6 @@ export default function BusinessAutopilotDashboardPage({
         subscriptions={subscriptions}
         currentProductKey="business-autopilot-erp"
       />
-      <div className="mt-4">
-        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-          <h4 className="mb-0">Monthly Sales & Expenses Comparison</h4>
-          <div className="d-flex align-items-center gap-2">
-            <label className="small text-secondary mb-0" htmlFor="baerp-comparison-year">Year</label>
-            <select
-              id="baerp-comparison-year"
-              className="form-select form-select-sm"
-              style={{ minWidth: "110px" }}
-              value={comparisonData.selectedYear}
-              onChange={(event) => setSelectedComparisonYear(Number(event.target.value))}
-            >
-              {comparisonData.yearOptions.map((year) => (
-                <option value={year} key={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="row g-3">
-          <div className="col-12 col-xl-6">
-            <MonthlyComparisonChartCard
-              title="Monthly Sales"
-              icon="bi-graph-up-arrow"
-              currentYear={comparisonData.selectedYear}
-              previousYear={comparisonData.previousYear}
-              currentSeries={comparisonData.salesCurrent}
-              previousSeries={comparisonData.salesPrevious}
-            />
-          </div>
-          <div className="col-12 col-xl-6">
-            <MonthlyComparisonChartCard
-              title="Monthly Expenses"
-              icon="bi-graph-down-arrow"
-              currentYear={comparisonData.selectedYear}
-              previousYear={comparisonData.previousYear}
-              currentSeries={comparisonData.expensesCurrent}
-              previousSeries={comparisonData.expensesPrevious}
-            />
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

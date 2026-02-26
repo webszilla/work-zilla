@@ -47,6 +47,7 @@ urlpatterns = [
     path("profile/email", api_views.profile_update_email, name="api_profile_update_email"),
     path("profile/password", api_views.profile_update_password, name="api_profile_update_password"),
     path("inbox", api_views.org_inbox_list, name="api_org_inbox_list"),
+    path("inbox/compose", api_views.org_inbox_compose, name="api_org_inbox_compose"),
     path("inbox/read", api_views.org_inbox_mark_read, name="api_org_inbox_mark_read"),
     path("inbox/<int:notification_id>", api_views.org_inbox_delete, name="api_org_inbox_delete"),
     path("dealer/summary", guard(api_views.dealer_summary), name="api_dealer_summary"),

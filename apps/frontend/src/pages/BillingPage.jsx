@@ -126,6 +126,60 @@ function formatUserLimit(value) {
   return value;
 }
 
+function getErpPerUserPriceFromLimits(limits, cycle, currency) {
+  const source = limits || {};
+  if (currency === "USD") {
+    return cycle === "yearly"
+      ? (source.user_price_usdt_year ?? source.user_price_usd_year ?? "-")
+      : (source.user_price_usdt_month ?? source.user_price_usd_month ?? "-");
+  }
+  return cycle === "yearly"
+    ? (source.user_price_inr_year ?? "-")
+    : (source.user_price_inr_month ?? "-");
+}
+
+function getErpPlanFeatures(planName) {
+  const name = String(planName || "").toLowerCase();
+  if (name.includes("starter")) {
+    return [
+      "Basic Accounting",
+      "Invoice & Billing",
+      "Expense Tracking",
+      "GST Ready (India)",
+      "Basic Reports",
+      "1 Organization",
+    ];
+  }
+  if (name.includes("growth")) {
+    return [
+      "Everything in Starter",
+      "Inventory Management",
+      "Purchase Orders",
+      "Vendor Management",
+      "Project Accounting",
+      "CRM + HR Modules",
+    ];
+  }
+  if (name.includes("pro")) {
+    return [
+      "Everything in Growth",
+      "Advanced Role Permissions",
+      "Automation Workflows",
+      "Custom Dashboards",
+      "Audit Logs",
+      "Priority Support",
+    ];
+  }
+  return [
+    "CRM Module",
+    "HR Management",
+    "Projects",
+    "Accounts / ERP",
+    "Ticketing",
+    "Stocks",
+  ];
+}
+
 export default function BillingPage() {
   const getStatusPillClass = (status) => {
     const value = String(status || "").toLowerCase();
@@ -148,6 +202,7 @@ export default function BillingPage() {
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
+  const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -673,6 +728,28 @@ export default function BillingPage() {
                           <span>{formatUserLimit(getMaxUsers(sub))}</span>
                         </div>
                       </>
+                    ) : isBusinessAutopilot ? (
+                      <>
+                        <div className="billing-current-plan__row">
+                          <span>Base Platform ({showCurrency})</span>
+                          <span>{formatValue(prices[sub.billing_cycle === "yearly" ? "yearly" : "monthly"])}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>Per User ({showCurrency})</span>
+                          <span>{formatValue(getErpPerUserPriceFromLimits(sub.limits, sub.billing_cycle, showCurrency))}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>Employees Allowed</span>
+                          <span>{sub.employee_limit === 0 ? "Unlimited" : formatValue(sub.employee_limit)}</span>
+                        </div>
+                        <div className="plan-feature-divider" />
+                        {getErpPlanFeatures(sub.plan).map((feature) => (
+                          <div className="plan-feature" key={`erp-feature-${feature}`}>
+                            <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
+                      </>
                     ) : (
                       <>
                         <div className="billing-current-plan__row">
@@ -734,7 +811,7 @@ export default function BillingPage() {
                       <span>Billing Cycle</span>
                       <span>{titleCase(sub.billing_cycle)}</span>
                     </div>
-                    {!isAiChatbot && !isStorage ? (
+                    {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
                       <div className="billing-current-plan__row">
                         <span>Screenshot Storage</span>
                         <span>{formatValue(sub.retention_days)} day(s)</span>

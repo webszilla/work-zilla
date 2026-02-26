@@ -20,3 +20,10 @@ export async function deleteOrgInboxNotification(id) {
     method: "DELETE",
   });
 }
+
+export async function composeOrgInboxNotification(payload) {
+  return apiFetch("/api/dashboard/inbox/compose", {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}

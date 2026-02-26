@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchOrgInbox, markOrgInboxRead, deleteOrgInboxNotification } from "../api/orgInbox.js";
+import {
+  fetchOrgInbox,
+  markOrgInboxRead,
+  deleteOrgInboxNotification,
+  composeOrgInboxNotification,
+} from "../api/orgInbox.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 
@@ -8,6 +13,7 @@ const emptyState = {
   error: "",
   data: null,
 };
+const INBOX_RETENTION_NOTE = "Auto cleanup: Older inbox messages are automatically deleted when inbox exceeds 100 notifications (same rule for all products).";
 
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -27,6 +33,9 @@ export default function OrgInboxPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [page, setPage] = useState(1);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeForm, setComposeForm] = useState({ title: "", message: "", channel: "email" });
+  const [composeState, setComposeState] = useState({ sending: false, error: "", success: "" });
   const confirm = useConfirm();
   const PAGE_SIZE = 20;
 
@@ -134,6 +143,34 @@ export default function OrgInboxPage() {
     }
   }
 
+  async function handleComposeSubmit(event) {
+    event.preventDefault();
+    const title = String(composeForm.title || "").trim();
+    const message = String(composeForm.message || "").trim();
+    if (!title || !message) {
+      setComposeState({ sending: false, error: "Subject and message are required.", success: "" });
+      return;
+    }
+    setComposeState({ sending: true, error: "", success: "" });
+    try {
+      await composeOrgInboxNotification({
+        title,
+        message,
+        channel: composeForm.channel || "email",
+      });
+      setComposeForm({ title: "", message: "", channel: "email" });
+      setComposeState({ sending: false, error: "", success: "Message sent to all users inbox." });
+      setShowCompose(false);
+      await loadInbox({ keepSelection: false });
+    } catch (error) {
+      setComposeState({
+        sending: false,
+        error: error?.message || "Unable to send message to inbox.",
+        success: "",
+      });
+    }
+  }
+
   if (state.loading) {
     return (
       <div className="card p-4 text-center">
@@ -148,7 +185,20 @@ export default function OrgInboxPage() {
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <h3 className="page-title mb-0">Inbox</h3>
         <div className="d-flex align-items-center gap-2 flex-wrap">
-          <span className="badge bg-primary">{unreadCount} unread</span>
+          <span className="btn btn-primary btn-sm disabled" role="status" aria-live="polite">
+            {unreadCount} unread
+          </span>
+          <button
+            type="button"
+            className={`btn btn-sm ${showCompose ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => {
+              setShowCompose((prev) => !prev);
+              setComposeState((prev) => ({ ...prev, error: "", success: "" }));
+            }}
+          >
+            <i className="bi bi-pencil-square me-1" aria-hidden="true" />
+            Compose
+          </button>
           <button type="button" className="btn btn-outline-light btn-sm" onClick={handleMarkAllRead}>
             Mark all read
           </button>
@@ -168,6 +218,70 @@ export default function OrgInboxPage() {
       </div>
 
       {state.error ? <div className="alert alert-danger mt-3">{state.error}</div> : null}
+      {composeState.success ? <div className="alert alert-success mt-3 py-2">{composeState.success}</div> : null}
+      <div className="small text-secondary mt-3">{INBOX_RETENTION_NOTE}</div>
+
+      {showCompose ? (
+        <div className="card mt-3 p-3">
+          <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+            <h6 className="mb-0">Compose Admin Message</h6>
+            <span className="badge bg-secondary">Send to all users inbox</span>
+          </div>
+          <form className="d-flex flex-column gap-3" onSubmit={handleComposeSubmit}>
+            <div className="row g-3">
+              <div className="col-12 col-lg-6">
+                <label className="form-label small text-secondary mb-1">Subject</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Enter subject"
+                  value={composeForm.title}
+                  onChange={(event) => setComposeForm((prev) => ({ ...prev, title: event.target.value }))}
+                />
+              </div>
+              <div className="col-12 col-lg-3">
+                <label className="form-label small text-secondary mb-1">Channel</label>
+                <select
+                  className="form-select"
+                  value={composeForm.channel}
+                  onChange={(event) => setComposeForm((prev) => ({ ...prev, channel: event.target.value }))}
+                >
+                  <option value="email">Email</option>
+                  <option value="system">System</option>
+                  <option value="whatsapp">WhatsApp</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="form-label small text-secondary mb-1">Message</label>
+              <textarea
+                className="form-control"
+                rows={4}
+                placeholder="Write message for all users..."
+                value={composeForm.message}
+                onChange={(event) => setComposeForm((prev) => ({ ...prev, message: event.target.value }))}
+              />
+            </div>
+            {composeState.error ? <div className="alert alert-danger py-2 mb-0">{composeState.error}</div> : null}
+            <div className="d-flex gap-2">
+              <button type="submit" className="btn btn-primary btn-sm" disabled={composeState.sending}>
+                {composeState.sending ? "Sending..." : "Send to All Users"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                disabled={composeState.sending}
+                onClick={() => {
+                  setShowCompose(false);
+                  setComposeState((prev) => ({ ...prev, error: "" }));
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       <div className="inbox-layout mt-3">
         <div className="card inbox-list">

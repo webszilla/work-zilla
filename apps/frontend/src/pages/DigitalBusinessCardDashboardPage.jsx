@@ -471,12 +471,12 @@ export default function DigitalBusinessCardDashboardPage() {
                 <div className="input-group">
                   <select
                     className="form-select"
-                    style={{ maxWidth: 180 }}
+                    style={{ maxWidth: 220 }}
                     value={form.phone_country_code || "+91"}
                     onChange={(e) => setPhoneField("phone", "phone_country_code", e.target.value)}
                   >
                     {COUNTRY_CODE_OPTIONS.map((opt) => (
-                      <option key={`${opt.code}-${opt.label}`} value={opt.code}>{opt.code} {opt.label}</option>
+                      <option key={`${opt.code}-${opt.label}`} value={opt.code}>{opt.label} {opt.code}</option>
                     ))}
                   </select>
                   <input
@@ -494,12 +494,12 @@ export default function DigitalBusinessCardDashboardPage() {
                 <div className="input-group">
                   <select
                     className="form-select"
-                    style={{ maxWidth: 180 }}
+                    style={{ maxWidth: 220 }}
                     value={form.whatsapp_country_code || "+91"}
                     onChange={(e) => setPhoneField("whatsapp", "whatsapp_country_code", e.target.value)}
                   >
                     {COUNTRY_CODE_OPTIONS.map((opt) => (
-                      <option key={`wa-${opt.code}-${opt.label}`} value={opt.code}>{opt.code} {opt.label}</option>
+                      <option key={`wa-${opt.code}-${opt.label}`} value={opt.code}>{opt.label} {opt.code}</option>
                     ))}
                   </select>
                   <input

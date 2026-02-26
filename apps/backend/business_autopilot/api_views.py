@@ -28,6 +28,15 @@ MODULE_PATHS = {
     "stocks": "/stocks",
 }
 
+DEFAULT_ERP_MODULES = [
+    {"name": "CRM", "slug": "crm", "sort_order": 1},
+    {"name": "HR Management", "slug": "hrm", "sort_order": 2},
+    {"name": "Project Management", "slug": "projects", "sort_order": 3},
+    {"name": "Accounts / ERP", "slug": "accounts", "sort_order": 4},
+    {"name": "Ticketing System", "slug": "ticketing", "sort_order": 5},
+    {"name": "Stocks Management", "slug": "stocks", "sort_order": 6},
+]
+
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
 
@@ -61,7 +70,21 @@ def _can_manage_users(user: User):
     return profile.role in {"company_admin", "superadmin", "super_admin"}
 
 
+def _ensure_default_module_catalog():
+    # Keeps local/stale DBs usable even if seed migrations were not applied yet.
+    for row in DEFAULT_ERP_MODULES:
+        Module.objects.update_or_create(
+            slug=row["slug"],
+            defaults={
+                "name": row["name"],
+                "is_active": True,
+                "sort_order": row["sort_order"],
+            },
+        )
+
+
 def _ensure_org_modules(org):
+    _ensure_default_module_catalog()
     active_modules = list(Module.objects.filter(is_active=True).order_by("sort_order", "name"))
     if not active_modules:
         return []
@@ -523,6 +546,57 @@ def org_employee_roles(request):
     )
 
 
+@require_http_methods(["PUT", "DELETE"])
+def org_employee_role_detail(request, role_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if not _can_manage_users(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    role = OrganizationEmployeeRole.objects.filter(
+        organization=org,
+        id=role_id,
+    ).first()
+    if not role:
+        return JsonResponse({"detail": "employee_role_not_found"}, status=404)
+
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"detail": "name_required"}, status=400)
+        duplicate = (
+            OrganizationEmployeeRole.objects
+            .filter(organization=org, name=name, is_active=True)
+            .exclude(id=role.id)
+            .exists()
+        )
+        if duplicate:
+            return JsonResponse({"detail": "employee_role_exists"}, status=400)
+        role.name = name
+        role.is_active = True
+        role.save(update_fields=["name", "is_active", "updated_at"])
+    else:
+        if role.is_active:
+            role.is_active = False
+            role.save(update_fields=["is_active", "updated_at"])
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "employee_roles": _serialize_employee_roles(org),
+            "departments": _serialize_departments(org),
+            "can_manage_users": _can_manage_users(request.user),
+        }
+    )
+
+
 @require_http_methods(["GET", "POST"])
 def org_departments(request):
     if not request.user.is_authenticated:
@@ -560,6 +634,57 @@ def org_departments(request):
             },
             "departments": _serialize_departments(org),
             "can_manage_users": can_manage_users,
+        }
+    )
+
+
+@require_http_methods(["PUT", "DELETE"])
+def org_department_detail(request, department_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if not _can_manage_users(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    department = OrganizationDepartment.objects.filter(
+        organization=org,
+        id=department_id,
+    ).first()
+    if not department:
+        return JsonResponse({"detail": "department_not_found"}, status=404)
+
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"detail": "name_required"}, status=400)
+        duplicate = (
+            OrganizationDepartment.objects
+            .filter(organization=org, name=name, is_active=True)
+            .exclude(id=department.id)
+            .exists()
+        )
+        if duplicate:
+            return JsonResponse({"detail": "department_exists"}, status=400)
+        department.name = name
+        department.is_active = True
+        department.save(update_fields=["name", "is_active", "updated_at"])
+    else:
+        if department.is_active:
+            department.is_active = False
+            department.save(update_fields=["is_active", "updated_at"])
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "departments": _serialize_departments(org),
+            "employee_roles": _serialize_employee_roles(org),
+            "can_manage_users": _can_manage_users(request.user),
         }
     )
 

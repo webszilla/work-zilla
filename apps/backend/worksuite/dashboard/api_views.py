@@ -55,6 +55,7 @@ from core.email_utils import send_templated_email
 from core.subscription_utils import is_subscription_active
 from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
 from core.notification_emails import notify_password_changed, notify_account_limit_reached, send_email_verification
+from core.notifications import create_org_admin_inbox_notification
 from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 
@@ -271,6 +272,58 @@ def org_inbox_delete(request, notification_id):
     if not updated:
         return JsonResponse({"error": "not_found"}, status=404)
     return JsonResponse({"status": "ok"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def org_inbox_compose(request):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+
+    is_org_admin = bool(
+        request.user
+        and (
+            getattr(request.user, "is_staff", False)
+            or getattr(org, "owner_id", None) == getattr(request.user, "id", None)
+        )
+    )
+    if not is_org_admin:
+        return JsonResponse({"error": "admin_only"}, status=403)
+
+    try:
+        data = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+
+    title = _normalize_text(data.get("title") or data.get("subject") or "")
+    message = str(data.get("message") or "").strip()
+    channel = _normalize_text(data.get("channel") or "email").lower() or "email"
+    if channel not in {"email", "system", "whatsapp"}:
+        channel = "email"
+
+    if not title:
+        return _json_error("title_required", status=400)
+    if not message:
+        return _json_error("message_required", status=400)
+
+    item = create_org_admin_inbox_notification(
+        title=title,
+        message=message,
+        organization=org,
+        event_type="system",
+        product_slug="business-autopilot-erp",
+        channel=channel,
+    )
+    if not item:
+        return _json_error("unable_to_create_notification", status=500)
+
+    return JsonResponse({
+        "status": "ok",
+        "message": "Notification sent to all organization users inbox.",
+        "notification": serialize_notification(item),
+    })
 
 
 def _cleanup_old_monitor_data(org, days=30):

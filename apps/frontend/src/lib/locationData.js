@@ -31,6 +31,37 @@ export const DIAL_CODE_OPTIONS = Array.from(
   return a.localeCompare(b, undefined, { numeric: true });
 });
 
+function preferredCountryNameForDialCode(code) {
+  const normalized = String(code || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const matches = PHONE_COUNTRIES
+    .filter((item) => String(item?.code || "").trim() === normalized)
+    .map((item) => String(item?.label || "").trim())
+    .filter(Boolean);
+  if (!matches.length) {
+    return "";
+  }
+  const unique = Array.from(new Set(matches));
+  const prioritized = unique.find((name) => PRIORITY_COUNTRIES.includes(name));
+  return prioritized || unique[0];
+}
+
+export function getDialCodeDisplayLabel(code) {
+  const normalized = String(code || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const country = preferredCountryNameForDialCode(normalized);
+  return country ? `${country} ${normalized}` : normalized;
+}
+
+export const DIAL_CODE_LABEL_OPTIONS = DIAL_CODE_OPTIONS.map((code) => ({
+  value: code,
+  label: getDialCodeDisplayLabel(code),
+}));
+
 const STATE_OPTIONS_BY_COUNTRY = {
   India: [
     "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana",
@@ -75,4 +106,3 @@ export function getStateOptionsForCountry(countryName) {
   const key = String(countryName || "").trim();
   return STATE_OPTIONS_BY_COUNTRY[key] || [];
 }
-

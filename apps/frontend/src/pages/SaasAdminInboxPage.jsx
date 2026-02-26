@@ -8,6 +8,7 @@ const emptyState = {
   error: "",
   data: null
 };
+const INBOX_RETENTION_NOTE = "Auto cleanup: Older inbox messages are automatically deleted when inbox exceeds 100 notifications (same rule for all products).";
 
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -171,7 +172,9 @@ export default function SaasAdminInboxPage() {
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <h3 className="page-title mb-0">Inbox</h3>
         <div className="d-flex align-items-center gap-2 flex-wrap">
-          <span className="badge bg-primary">{unreadCount} unread</span>
+          <span className="btn btn-primary btn-sm disabled" role="status" aria-live="polite">
+            {unreadCount} unread
+          </span>
           <button type="button" className="btn btn-outline-light btn-sm" onClick={handleMarkAllRead}>
             Mark all read
           </button>
@@ -191,6 +194,7 @@ export default function SaasAdminInboxPage() {
       </div>
 
       {state.error ? <div className="alert alert-danger mt-3">{state.error}</div> : null}
+      <div className="small text-secondary mt-3">{INBOX_RETENTION_NOTE}</div>
 
       <div className="inbox-layout mt-3">
         <div className="card inbox-list">

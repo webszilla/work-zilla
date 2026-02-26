@@ -3,6 +3,7 @@ const DATE_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/
 const TIME_ONLY_RE = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
 const ORG_TIMEZONE_KEY = "wz_org_timezone";
 const FALLBACK_TIMEZONE = "UTC";
+const ORG_TIMEZONE_PATCH_FLAG = "__wzOrgTimezoneDateLocalePatched__";
 
 function isValidTimezone(value) {
   const tz = String(value || "").trim();
@@ -44,6 +45,52 @@ export function getOrgTimezone() {
     return orgTimezone;
   }
   return setOrgTimezone(window.localStorage.getItem(ORG_TIMEZONE_KEY) || orgTimezone);
+}
+
+function withOrgTimezoneLocaleArgs(argsLike) {
+  const args = Array.from(argsLike);
+  const locales = args[0];
+  const rawOptions = args[1];
+  const options =
+    rawOptions && typeof rawOptions === "object" && !Array.isArray(rawOptions)
+      ? rawOptions
+      : undefined;
+
+  if (options?.timeZone) {
+    return [locales, options];
+  }
+  return [locales, { ...(options || {}), timeZone: getOrgTimezone() }];
+}
+
+function patchDateLocaleMethod(methodName) {
+  if (typeof Date === "undefined") {
+    return;
+  }
+  const current = Date.prototype?.[methodName];
+  if (typeof current !== "function") {
+    return;
+  }
+  if (current[ORG_TIMEZONE_PATCH_FLAG]) {
+    return;
+  }
+
+  const original = current;
+  const wrapped = function patchedDateLocaleMethod(...args) {
+    return original.apply(this, withOrgTimezoneLocaleArgs(args));
+  };
+  Object.defineProperty(wrapped, ORG_TIMEZONE_PATCH_FLAG, {
+    value: true,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  Date.prototype[methodName] = wrapped;
+}
+
+export function installOrgTimezoneDateLocalePatch() {
+  patchDateLocaleMethod("toLocaleString");
+  patchDateLocaleMethod("toLocaleDateString");
+  patchDateLocaleMethod("toLocaleTimeString");
 }
 
 function parseDateOnly(value) {
@@ -137,3 +184,5 @@ export function formatDeviceTimeWithDate(timeValue, dateValue, fallback = "-") {
   }
   return parsed.toLocaleTimeString(undefined, { timeZone: getOrgTimezone() });
 }
+
+installOrgTimezoneDateLocalePatch();

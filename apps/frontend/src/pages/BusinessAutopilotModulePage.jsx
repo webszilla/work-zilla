@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { DIAL_CODE_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
+import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import TablePagination from "../components/TablePagination.jsx";
 
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
@@ -107,9 +107,10 @@ const CRM_SECTION_CONFIG = {
     fields: [
       { key: "name", label: "Lead Name", placeholder: "Enter lead name" },
       { key: "company", label: "Company", placeholder: "Company / Business name" },
+      { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
-      { key: "stage", label: "Stage", placeholder: "New / Qualified / Proposal" },
-      { key: "status", label: "Status", placeholder: "Open / Closed / Converted" }
+      { key: "stage", label: "Stage", type: "select", options: ["New", "Qualified", "Proposal"], defaultValue: "New" },
+      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Converted"], defaultValue: "Open" }
     ]
   },
   contacts: {
@@ -129,7 +130,7 @@ const CRM_SECTION_CONFIG = {
       { key: "email", label: "Email", placeholder: "contact@example.com" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
-      { key: "tag", label: "Tag", placeholder: "Customer / Prospect / Vendor" }
+      { key: "tag", label: "Tag", type: "select", options: ["Customer", "Prospect", "Vendor"], defaultValue: "Customer" }
     ]
   },
   deals: {
@@ -146,9 +147,9 @@ const CRM_SECTION_CONFIG = {
     fields: [
       { key: "dealName", label: "Deal Name", placeholder: "ERP rollout annual contract" },
       { key: "company", label: "Company", placeholder: "Customer company" },
-      { key: "stage", label: "Stage", placeholder: "Discovery / Proposal / Negotiation" },
+      { key: "stage", label: "Stage", type: "select", options: ["Discovery", "Proposal", "Negotiation"], defaultValue: "Discovery" },
       { key: "amount", label: "Amount", placeholder: "INR amount" },
-      { key: "status", label: "Status", placeholder: "Open / Won / Lost" }
+      { key: "status", label: "Status", type: "select", options: ["Open", "Won", "Lost"], defaultValue: "Open" }
     ]
   },
   followUps: {
@@ -165,9 +166,9 @@ const CRM_SECTION_CONFIG = {
     fields: [
       { key: "subject", label: "Subject", placeholder: "Demo callback / pricing follow-up" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
-      { key: "dueDate", label: "Due Date", placeholder: "YYYY-MM-DD" },
+      { key: "dueDate", label: "Due Date", type: "date" },
       { key: "owner", label: "Owner", placeholder: "Sales owner" },
-      { key: "status", label: "Status", placeholder: "Pending / Done / Missed" }
+      { key: "status", label: "Status", type: "select", options: ["Pending", "Done", "Missed"], defaultValue: "Pending" }
     ]
   },
   activities: {
@@ -218,8 +219,8 @@ const CRM_SECTION_CONFIG = {
 
 const DEFAULT_CRM_DATA = {
   leads: [
-    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phone: "9876543210", stage: "Qualified", status: "Open" },
-    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phone: "9123456780", stage: "Proposal", status: "Open" }
+    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phoneCountryCode: "+91", phone: "9876543210", stage: "Qualified", status: "Open" },
+    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phoneCountryCode: "+91", phone: "9123456780", stage: "Proposal", status: "Open" }
   ],
   contacts: [
     { id: "crm_c1", name: "Ravi Kumar", company: "Ultra HD Prints", email: "ravi@uhdprints.example", phoneCountryCode: "+91", phone: "9876543210", tag: "Customer" },
@@ -263,13 +264,15 @@ const PROJECT_TAB_CONFIG = {
     itemLabel: "Task",
     columns: [
       { key: "title", label: "Task" },
-      { key: "assignee", label: "Assignee" },
+      { key: "assignee", label: "Assign To" },
+      { key: "startDate", label: "Start Date" },
       { key: "dueDate", label: "Due Date" }
     ],
     fields: [
       { key: "title", label: "Task", placeholder: "Enter task title" },
-      { key: "assignee", label: "Assignee", placeholder: "Enter assignee name" },
-      { key: "dueDate", label: "Due Date", placeholder: "YYYY-MM-DD" }
+      { key: "assignee", label: "Assign To", placeholder: "Search user name" },
+      { key: "startDate", label: "Start Date", type: "date" },
+      { key: "dueDate", label: "Due Date", type: "date" }
     ]
   },
   milestones: {
@@ -308,8 +311,8 @@ const DEFAULT_PROJECT_DATA = {
     { id: "p2", name: "HR Automation", owner: "Nithya", status: "Planned" }
   ],
   tasks: [
-    { id: "t1", title: "Finalize sprint board", assignee: "Guru", dueDate: "2026-02-20" },
-    { id: "t2", title: "Client approval review", assignee: "Arun", dueDate: "2026-02-22" }
+    { id: "t1", title: "Finalize sprint board", assignee: "Guru", startDate: "2026-02-16", dueDate: "2026-02-20" },
+    { id: "t2", title: "Client approval review", assignee: "Arun", startDate: "2026-02-18", dueDate: "2026-02-22" }
   ],
   milestones: [
     { id: "m1", title: "Phase 1 Go-Live", project: "ERP Rollout", targetDate: "2026-03-10" },
@@ -342,12 +345,20 @@ const HR_TAB_CONFIG = {
     columns: [
       { key: "employee", label: "Employee" },
       { key: "date", label: "Date" },
+      { key: "inTime", label: "In Time" },
+      { key: "outTime", label: "Out Time" },
+      { key: "workedHours", label: "Worked" },
       { key: "status", label: "Status" }
     ],
     fields: [
       { key: "employee", label: "Employee", placeholder: "Enter employee name" },
-      { key: "date", label: "Date", placeholder: "YYYY-MM-DD" },
-      { key: "status", label: "Status", placeholder: "Present / Half Day / Leave" }
+      { key: "date", label: "Date", type: "date" },
+      { key: "entryMode", label: "Entry Side", type: "select", options: ["HR Side", "User Side"], defaultValue: "HR Side" },
+      { key: "inTime", label: "In Time", type: "time" },
+      { key: "outTime", label: "Out Time", type: "time" },
+      { key: "status", label: "Status", type: "select", options: ["Present", "Half Day", "Leave", "Permission"], defaultValue: "Present" },
+      { key: "permissionHours", label: "Permission Hours", placeholder: "e.g. 2", conditionalOn: { key: "status", value: "Permission" } },
+      { key: "notes", label: "Notes", placeholder: "Optional notes", optional: true }
     ]
   },
   leaves: {
@@ -386,8 +397,8 @@ const DEFAULT_HR_DATA = {
     { id: "e2", name: "Nithya", department: "HR", designation: "HR Executive" }
   ],
   attendance: [
-    { id: "a1", employee: "Guru", date: "2026-02-19", status: "Present" },
-    { id: "a2", employee: "Nithya", date: "2026-02-19", status: "Present" }
+    { id: "a1", employee: "Guru", date: "2026-02-19", entryMode: "HR Side", inTime: "09:10", outTime: "18:05", workedHours: "8h 55m", status: "Present", notes: "" },
+    { id: "a2", employee: "Nithya", date: "2026-02-19", entryMode: "User Side", inTime: "09:25", outTime: "17:48", workedHours: "8h 23m", status: "Present", notes: "" }
   ],
   leaves: [
     { id: "l1", employee: "Arun", leaveType: "Sick", status: "Pending" },
@@ -747,6 +758,61 @@ function isValidAccountsData(value) {
     && Array.isArray(value.invoices);
 }
 
+function formatTimeToAmPm(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "-";
+  }
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return raw;
+  }
+  let hours = Number(match[1]);
+  const minutes = match[2];
+  if (!Number.isFinite(hours)) {
+    return raw;
+  }
+  const suffix = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${hours}:${minutes} ${suffix}`;
+}
+
+function getTodayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getCurrentTimeHm() {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function computeWorkedDuration(inTime, outTime) {
+  const start = String(inTime || "").trim();
+  const end = String(outTime || "").trim();
+  const toMinutes = (value) => {
+    const match = value.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return (h * 60) + m;
+  };
+  const startMin = toMinutes(start);
+  const endMin = toMinutes(end);
+  if (startMin === null || endMin === null || endMin < startMin) {
+    return "";
+  }
+  const total = endMin - startMin;
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (!hours && !minutes) {
+    return "0h 0m";
+  }
+  return `${hours}h ${minutes}m`;
+}
+
 function SearchablePaginatedTableCard({
   title,
   badgeLabel = "",
@@ -759,6 +825,10 @@ function SearchablePaginatedTableCard({
   searchBy,
   pageSize = DEFAULT_TABLE_PAGE_SIZE,
   withoutOuterCard = false,
+  headerBottom = null,
+  enableExport = false,
+  exportFileName = "table-data",
+  exportCellValue,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
@@ -794,23 +864,134 @@ function SearchablePaginatedTableCard({
     }
   }, [page, totalPages]);
 
+  function getExportValue(row, column) {
+    if (typeof exportCellValue === "function") {
+      return String(exportCellValue(row, column) ?? "");
+    }
+    const value = row?.[column.key];
+    if (value === null || value === undefined) {
+      return "";
+    }
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch (_error) {
+        return String(value);
+      }
+    }
+    return String(value);
+  }
+
+  function exportAsExcelCsv() {
+    const headers = columns.map((column) => String(column.label || column.key || ""));
+    const csvEscape = (value) => {
+      const raw = String(value ?? "");
+      if (/[",\n]/.test(raw)) {
+        return `"${raw.replace(/"/g, "\"\"")}"`;
+      }
+      return raw;
+    };
+    const lines = [
+      headers.map(csvEscape).join(","),
+      ...filteredRows.map((row) =>
+        columns.map((column) => csvEscape(getExportValue(row, column))).join(",")
+      ),
+    ];
+    const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${exportFileName}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAsPdf() {
+    const win = window.open("", "_blank", "noopener,noreferrer,width=1000,height=700");
+    if (!win) {
+      return;
+    }
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const headCells = columns.map((column) => `<th>${escapeHtml(column.label || column.key || "")}</th>`).join("");
+    const bodyRows = filteredRows.length
+      ? filteredRows.map((row) => {
+          const cells = columns.map((column) => `<td>${escapeHtml(getExportValue(row, column))}</td>`).join("");
+          return `<tr>${cells}</tr>`;
+        }).join("")
+      : `<tr><td colspan="${columns.length}">No rows found.</td></tr>`;
+    win.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(title)} - Export</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+            h2 { margin: 0 0 12px 0; font-size: 20px; }
+            p { margin: 0 0 12px 0; color: #555; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; vertical-align: top; }
+            th { background: #f1f1f1; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(title)}</h2>
+          <p>Exported ${escapeHtml(new Date().toLocaleString())}</p>
+          <table>
+            <thead><tr>${headCells}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+  }
+
+  const toolbarControls = (
+    <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+      {badgeLabel ? <span className="badge bg-secondary">{badgeLabel}</span> : null}
+      {enableExport ? (
+        <>
+          <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsExcelCsv}>
+            <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+            Excel
+          </button>
+          <button type="button" className="btn btn-sm btn-outline-light" onClick={exportAsPdf}>
+            <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
+            PDF
+          </button>
+        </>
+      ) : null}
+      <label className="table-search mb-0">
+        <i className="bi bi-search" aria-hidden="true" />
+        <input
+          type="search"
+          placeholder={searchPlaceholder}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </label>
+    </div>
+  );
+
   return (
     <div className={withoutOuterCard ? "" : "card p-3"}>
-      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+      <div className={`d-flex flex-wrap align-items-center justify-content-between gap-2 ${headerBottom ? "mb-2" : "mb-3"}`}>
         <h6 className="mb-0">{title}</h6>
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          {badgeLabel ? <span className="badge bg-secondary">{badgeLabel}</span> : null}
-          <label className="table-search mb-0">
-            <i className="bi bi-search" aria-hidden="true" />
-            <input
-              type="search"
-              placeholder={searchPlaceholder}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </label>
-        </div>
+        {headerBottom ? null : toolbarControls}
       </div>
+      {headerBottom ? (
+        <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+          <div className="flex-grow-1" style={{ minWidth: "320px" }}>{headerBottom}</div>
+          {toolbarControls}
+        </div>
+      ) : null}
       <div className="table-responsive">
         <table className="table table-dark table-borderless align-middle mb-0">
           <thead>
@@ -879,6 +1060,8 @@ function CrmOnePageModule() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [meetingPopup, setMeetingPopup] = useState(null);
+  const [leadStatusTab, setLeadStatusTab] = useState("all");
+  const [meetingStatusTab, setMeetingStatusTab] = useState("all");
   const [forms, setForms] = useState(() =>
     Object.fromEntries(
       Object.entries(CRM_SECTION_CONFIG).map(([key, config]) => [key, buildEmptyValues(config.fields)])
@@ -1061,25 +1244,72 @@ function CrmOnePageModule() {
         </div>
       </div>
 
-      <div className="row g-3">
-        {stats.map((item) => (
-          <div className="col-12 col-md-4" key={item.label}>
-            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
-              <div className="stat-icon stat-icon-primary mb-2">
-                <i className={`bi ${item.icon}`} aria-hidden="true" />
+      {activeSection === "leads" ? (
+        <div className="row g-3">
+          {stats.map((item) => (
+            <div className="col-12 col-md-4" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${item.icon}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
               </div>
-              <div className="text-secondary small">{item.label}</div>
-              <h5 className="mb-0 mt-1">{item.value}</h5>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
       {sectionOrder.filter((sectionKey) => sectionKey === activeSection).map((sectionKey) => {
         const config = CRM_SECTION_CONFIG[sectionKey];
         const rows = moduleData[sectionKey] || [];
+        const leadStatusTabs = [
+          { key: "all", label: "All" },
+          { key: "open", label: "Open" },
+          { key: "closed", label: "Closed" },
+          { key: "converted", label: "Converted" },
+        ];
+        const meetingStatusTabs = [
+          { key: "all", label: "All" },
+          { key: "scheduled", label: "Scheduled" },
+          { key: "completed", label: "Completed" },
+          { key: "rescheduled", label: "Rescheduled" },
+          { key: "cancelled", label: "Cancelled" },
+        ];
+        const filteredRows = sectionKey === "leads"
+          ? rows.filter((row) => {
+              if (leadStatusTab === "all") {
+                return true;
+              }
+              return String(row.status || "").trim().toLowerCase() === leadStatusTab;
+            })
+          : sectionKey === "meetings"
+          ? rows.filter((row) => {
+              if (meetingStatusTab === "all") {
+                return true;
+              }
+              return String(row.status || "").trim().toLowerCase() === meetingStatusTab;
+            })
+          : rows;
+        const leadTabCounts = sectionKey === "leads"
+          ? leadStatusTabs.reduce((acc, tab) => {
+              acc[tab.key] = tab.key === "all"
+                ? rows.length
+                : rows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+              return acc;
+            }, {})
+          : {};
+        const meetingTabCounts = sectionKey === "meetings"
+          ? meetingStatusTabs.reduce((acc, tab) => {
+              acc[tab.key] = tab.key === "all"
+                ? rows.length
+                : rows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+              return acc;
+            }, {})
+          : {};
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
+        const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         return (
           <div key={sectionKey} className="d-flex flex-column gap-3">
             <div className="card p-3">
@@ -1087,50 +1317,186 @@ function CrmOnePageModule() {
               <form className="d-flex flex-column gap-3" onSubmit={(event) => onSubmit(sectionKey, event)}>
                 <div className="row g-3">
                   {config.fields.map((field) => (
-                    <div className="col-12 col-md-6 col-xl-4" key={`${sectionKey}-${field.key}`}>
-                      <label className="form-label small text-secondary mb-1">{field.label}</label>
-                      {field.type === "select" ? (
-                        <select
-                          className="form-select"
-                          value={formValues[field.key] || field.defaultValue || ""}
-                          onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                        >
-                          <option value="">Select {field.label}</option>
-                          {(field.options || []).map((option) => (
-                            <option key={option} value={option}>{option}</option>
-                          ))}
-                        </select>
-                      ) : field.type === "date" || field.type === "time" ? (
-                        <input
-                          type={field.type}
-                          className="form-control"
-                          value={formValues[field.key] || ""}
-                          onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                        />
-                      ) : (
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder={field.placeholder}
-                          value={formValues[field.key] || ""}
-                          onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                        />
+                    <Fragment key={`${sectionKey}-${field.key}`}>
+                      {hasPhoneCountryCodeField && field.key === "phoneCountryCode" ? null : (
+                      <div className="col-12 col-md-6 col-xl-4" key={`${sectionKey}-${field.key}`}>
+                        <label className="form-label small text-secondary mb-1">{field.label}</label>
+                        {hasPhoneCountryCodeField && field.key === "phone" ? (
+                          <div className="input-group">
+                            <select
+                              className="form-select"
+                              style={{ maxWidth: "220px" }}
+                              value={formValues.phoneCountryCode || "+91"}
+                              onChange={(event) => setField(sectionKey, "phoneCountryCode", event.target.value)}
+                            >
+                              {DIAL_CODE_LABEL_OPTIONS.map((option) => (
+                                <option key={`contact-phone-code-${option.value}`} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              className="form-control"
+                              placeholder={field.placeholder}
+                              value={formValues.phone || ""}
+                              onChange={(event) => setField(sectionKey, "phone", event.target.value)}
+                            />
+                          </div>
+                        ) : field.type === "select" ? (
+                          <select
+                            className="form-select"
+                            value={formValues[field.key] || field.defaultValue || ""}
+                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                          >
+                            <option value="">Select {field.label}</option>
+                            {(field.options || []).map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        ) : field.type === "date" || field.type === "time" ? (
+                          <input
+                            type={field.type}
+                            className="form-control"
+                            value={formValues[field.key] || ""}
+                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder={field.placeholder}
+                            value={formValues[field.key] || ""}
+                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                          />
+                        )}
+                      </div>
                       )}
-                    </div>
+                      {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings") && field.key === "status" ? (
+                        <div className="col-12 col-md-6 col-xl-4 d-flex align-items-end">
+                          <div className="d-flex gap-2 flex-wrap">
+                            <button type="submit" className="btn btn-success btn-sm">
+                              {editingId ? "Update" : "Create"}
+                            </button>
+                            {editingId ? (
+                              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                                Cancel
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                      {sectionKey === "contacts" && field.key === "tag" ? (
+                        <div className="col-12 col-md-6 col-xl-4 d-flex align-items-end">
+                          <div className="d-flex gap-2 flex-wrap">
+                            <button type="submit" className="btn btn-success btn-sm">
+                              {editingId ? "Update" : "Create"}
+                            </button>
+                            {editingId ? (
+                              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                                Cancel
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </Fragment>
                   ))}
                 </div>
-                <div className="d-flex gap-2">
-                  <button type="submit" className="btn btn-success btn-sm">
-                    {editingId ? "Update" : "Create"}
-                  </button>
-                  {editingId ? (
-                    <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
-                      Cancel
+                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" ? (
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm">
+                      {editingId ? "Update" : "Create"}
                     </button>
-                  ) : null}
-                </div>
+                    {editingId ? (
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </form>
             </div>
+
+            <SearchablePaginatedTableCard
+              title={`${config.label} List`}
+              badgeLabel={`${filteredRows.length} items`}
+              rows={filteredRows}
+              columns={config.columns}
+              withoutOuterCard
+              searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+              noRowsText={`No ${config.label.toLowerCase()} yet.`}
+              enableExport
+              exportFileName={`crm-${config.label.toLowerCase().replace(/\s+/g, "-")}`}
+              headerBottom={sectionKey === "leads" ? (
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
+                    {leadStatusTabs.map((tab) => (
+                      <button
+                        key={`lead-status-tab-${tab.key}`}
+                        type="button"
+                        className={`btn btn-sm ${leadStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                        onClick={() => setLeadStatusTab(tab.key)}
+                      >
+                        {tab.label} ({leadTabCounts[tab.key] || 0})
+                      </button>
+                    ))}
+                  </div>
+                  <div className="small text-secondary">
+                    Closed and converted leads older than 180 days will be automatically deleted.
+                  </div>
+                </div>
+              ) : sectionKey === "meetings" ? (
+                <div className="d-flex flex-wrap gap-2">
+                  {meetingStatusTabs.map((tab) => (
+                    <button
+                      key={`meeting-status-tab-${tab.key}`}
+                      type="button"
+                      className={`btn btn-sm ${meetingStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                      onClick={() => setMeetingStatusTab(tab.key)}
+                    >
+                      {tab.label} ({meetingTabCounts[tab.key] || 0})
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+              exportCellValue={(row, column) => {
+                if (column.key === "phone") {
+                  const phone = String(row.phone || "").trim();
+                  if (!phone) return "";
+                  return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
+                }
+                if (sectionKey === "meetings" && column.key === "meetingTime") {
+                  return formatTimeToAmPm(row[column.key]);
+                }
+                if (column.key === "reminderSummary") {
+                  return row.reminderSummary || `${row.reminderChannel || ""} ${row.reminderMinutes ? `• ${row.reminderMinutes} min before` : ""}`.trim();
+                }
+                return row[column.key] || "";
+              }}
+              renderCells={(row) =>
+                config.columns.map((column) => {
+                  if (column.key === "phone") {
+                    const phone = String(row.phone || "").trim();
+                    if (!phone) return "-";
+                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
+                  }
+                  if (sectionKey === "meetings" && column.key === "meetingTime") {
+                    return formatTimeToAmPm(row[column.key]);
+                  }
+                  return row[column.key] || "-";
+                })
+              }
+              renderActions={(row) => (
+                <div className="d-inline-flex gap-2">
+                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEdit(sectionKey, row)}>
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDelete(sectionKey, row.id)}>
+                    Delete
+                  </button>
+                </div>
+              )}
+            />
 
             {sectionKey === "meetings" ? (
               <div className="card p-3">
@@ -1167,7 +1533,7 @@ function CrmOnePageModule() {
                     <div
                       key={cell.isoDate}
                       style={{
-                        minHeight: "106px",
+                        minHeight: "84px",
                         border: "1px solid rgba(255,255,255,0.08)",
                         borderRadius: "10px",
                         padding: "8px",
@@ -1190,10 +1556,10 @@ function CrmOnePageModule() {
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                             }}
-                            title={`${meeting.meetingTime || ""} ${meeting.title || ""}`}
+                            title={`${formatTimeToAmPm(meeting.meetingTime)} ${meeting.title || ""}`}
                             onClick={() => openMeetingPopup(meeting)}
                           >
-                            {(meeting.meetingTime || "--:--").slice(0, 5)} {meeting.title || "Meeting"}
+                            {formatTimeToAmPm(meeting.meetingTime)} {meeting.title || "Meeting"}
                           </button>
                         ))}
                         {cell.meetings.length > 3 ? (
@@ -1205,37 +1571,6 @@ function CrmOnePageModule() {
                 </div>
               </div>
             ) : null}
-
-            <SearchablePaginatedTableCard
-              title={`${config.label} List`}
-              badgeLabel={`${rows.length} items`}
-              rows={rows}
-              columns={config.columns}
-              withoutOuterCard
-              searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-              noRowsText={`No ${config.label.toLowerCase()} yet.`}
-              searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-              renderCells={(row) =>
-                config.columns.map((column) => {
-                  if (sectionKey === "contacts" && column.key === "phone") {
-                    const phone = String(row.phone || "").trim();
-                    if (!phone) return "-";
-                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
-                  }
-                  return row[column.key] || "-";
-                })
-              }
-              renderActions={(row) => (
-                <div className="d-inline-flex gap-2">
-                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEdit(sectionKey, row)}>
-                    Edit
-                  </button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDelete(sectionKey, row.id)}>
-                    Delete
-                  </button>
-                </div>
-              )}
-            />
           </div>
         );
       })}
@@ -1269,7 +1604,7 @@ function CrmOnePageModule() {
               </div>
               <div className="col-6">
                 <div className="text-secondary">Time</div>
-                <div className="fw-semibold">{meetingPopup.meetingTime || "-"}</div>
+                <div className="fw-semibold">{formatTimeToAmPm(meetingPopup.meetingTime)}</div>
               </div>
               <div className="col-6">
                 <div className="text-secondary">Owner</div>
@@ -1343,14 +1678,20 @@ function ProjectManagementModule() {
   }, [moduleData]);
 
   function onChangeField(fieldKey, nextValue) {
-    setFormValues((prev) => ({ ...prev, [fieldKey]: nextValue }));
+    setFormValues((prev) => {
+      const next = { ...prev, [fieldKey]: nextValue };
+      if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
+        next.permissionHours = "";
+      }
+      return next;
+    });
   }
 
   function onEditRow(row) {
     setEditingId(row.id);
     const nextValues = {};
     config.fields.forEach((field) => {
-      nextValues[field.key] = row[field.key] || "";
+      nextValues[field.key] = row[field.key] || field.defaultValue || "";
     });
     setFormValues(nextValues);
   }
@@ -1372,7 +1713,14 @@ function ProjectManagementModule() {
 
   function onSubmit(event) {
     event.preventDefault();
-    const hasEmptyField = config.fields.some((field) => !String(formValues[field.key] || "").trim());
+    const visibleFields = config.fields.filter((field) => {
+      const condition = field.conditionalOn;
+      if (!condition) {
+        return true;
+      }
+      return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+    });
+    const hasEmptyField = visibleFields.some((field) => !String(formValues[field.key] || "").trim());
     if (hasEmptyField) {
       return;
     }
@@ -1380,6 +1728,9 @@ function ProjectManagementModule() {
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
     });
+    if (activeTab === "attendance" && payload.status !== "Permission") {
+      payload.permissionHours = "";
+    }
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
@@ -1456,16 +1807,39 @@ function ProjectManagementModule() {
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           <div className="row g-3">
             {config.fields.map((field) => (
-              <div className="col-12 col-md-4" key={field.key}>
-                <label className="form-label small text-secondary mb-1">{field.label}</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={field.placeholder}
-                  value={formValues[field.key] || ""}
-                  onChange={(event) => onChangeField(field.key, event.target.value)}
-                />
-              </div>
+              (() => {
+                const condition = field.conditionalOn;
+                const isVisible = !condition
+                  || String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+                if (!isVisible) {
+                  return null;
+                }
+                return (
+                  <div className="col-12 col-md-4" key={field.key}>
+                    <label className="form-label small text-secondary mb-1">{field.label}</label>
+                    {field.type === "select" ? (
+                      <select
+                        className="form-select"
+                        value={formValues[field.key] || field.defaultValue || ""}
+                        onChange={(event) => onChangeField(field.key, event.target.value)}
+                      >
+                        <option value="">Select {field.label}</option>
+                        {(field.options || []).map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.type || "text"}
+                        className="form-control"
+                        placeholder={field.placeholder}
+                        value={formValues[field.key] || ""}
+                        onChange={(event) => onChangeField(field.key, event.target.value)}
+                      />
+                    )}
+                  </div>
+                );
+              })()
             ))}
           </div>
           <div className="d-flex gap-2">
@@ -1489,6 +1863,18 @@ function HrManagementModule() {
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
   const [formValues, setFormValues] = useState(buildEmptyValues(HR_TAB_CONFIG.employees.fields));
   const [editingId, setEditingId] = useState("");
+  const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
+  const [attendanceEmployeeSuggestOpen, setAttendanceEmployeeSuggestOpen] = useState(false);
+  const [attendanceTaskModal, setAttendanceTaskModal] = useState({
+    open: false,
+    employee: "",
+    date: "",
+    source: "User Side",
+    outTime: "",
+    completedTasks: "",
+    taskNotes: "",
+    mode: "edit",
+  });
 
   useEffect(() => {
     try {
@@ -1506,16 +1892,58 @@ function HrManagementModule() {
   }, []);
 
   useEffect(() => {
+    const applyHashTab = () => {
+      const rawHash = String(window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
+      if (rawHash === "attendance") {
+        setActiveTab("attendance");
+      } else if (rawHash === "employees" || rawHash === "leaves" || rawHash === "payroll") {
+        setActiveTab(rawHash);
+      }
+    };
+    applyHashTab();
+    window.addEventListener("hashchange", applyHashTab);
+    return () => {
+      window.removeEventListener("hashchange", applyHashTab);
+    };
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(moduleData));
   }, [moduleData]);
 
   useEffect(() => {
     setEditingId("");
-    setFormValues(buildEmptyValues(HR_TAB_CONFIG[activeTab].fields));
+    const next = buildEmptyValues(HR_TAB_CONFIG[activeTab].fields);
+    if (activeTab === "attendance") {
+      next.date = getTodayIsoDate();
+    }
+    setFormValues(next);
   }, [activeTab]);
 
   const config = HR_TAB_CONFIG[activeTab];
   const currentRows = moduleData[activeTab] || [];
+  const todayIso = getTodayIsoDate();
+  const employeeNameOptions = useMemo(
+    () => Array.from(new Set((moduleData.employees || []).map((item) => String(item.name || "").trim()).filter(Boolean))),
+    [moduleData.employees]
+  );
+  const attendanceEmployeeSuggestions = useMemo(() => {
+    if (activeTab !== "attendance") {
+      return [];
+    }
+    const term = String(formValues.employee || "").trim().toLowerCase();
+    const filtered = term
+      ? employeeNameOptions.filter((name) => name.toLowerCase().includes(term))
+      : employeeNameOptions;
+    return filtered.slice(0, 8);
+  }, [activeTab, employeeNameOptions, formValues.employee]);
+
+  useEffect(() => {
+    if (myAttendanceEmployee && employeeNameOptions.includes(myAttendanceEmployee)) {
+      return;
+    }
+    setMyAttendanceEmployee(employeeNameOptions[0] || "");
+  }, [employeeNameOptions, myAttendanceEmployee]);
 
   const stats = useMemo(() => {
     const employees = (moduleData.employees || []).length;
@@ -1533,14 +1961,24 @@ function HrManagementModule() {
   }, [moduleData]);
 
   function onChangeField(fieldKey, nextValue) {
-    setFormValues((prev) => ({ ...prev, [fieldKey]: nextValue }));
+    setFormValues((prev) => {
+      const next = { ...prev, [fieldKey]: nextValue };
+      if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
+        next.permissionHours = "";
+      }
+      if (activeTab === "attendance" && fieldKey === "entryMode" && nextValue === "User Side") {
+        next.inTime = "";
+        next.outTime = "";
+      }
+      return next;
+    });
   }
 
   function onEditRow(row) {
     setEditingId(row.id);
     const nextValues = {};
     config.fields.forEach((field) => {
-      nextValues[field.key] = row[field.key] || "";
+      nextValues[field.key] = row[field.key] || field.defaultValue || "";
     });
     setFormValues(nextValues);
   }
@@ -1562,7 +2000,14 @@ function HrManagementModule() {
 
   function onSubmit(event) {
     event.preventDefault();
-    const hasEmptyField = config.fields.some((field) => !String(formValues[field.key] || "").trim());
+    const visibleFields = config.fields.filter((field) => {
+      const condition = field.conditionalOn;
+      if (!condition) {
+        return true;
+      }
+      return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+    });
+    const hasEmptyField = visibleFields.some((field) => !field.optional && !String(formValues[field.key] || "").trim());
     if (hasEmptyField) {
       return;
     }
@@ -1570,6 +2015,16 @@ function HrManagementModule() {
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
     });
+    if (activeTab === "attendance") {
+      payload.date = payload.date || todayIso;
+      payload.entryMode = payload.entryMode || "HR Side";
+      if (payload.status !== "Permission") {
+        payload.permissionHours = "";
+      }
+      payload.workedHours = computeWorkedDuration(payload.inTime, payload.outTime);
+      payload.completedTasks = String(payload.completedTasks || "").trim();
+      payload.taskNotes = String(payload.taskNotes || "").trim();
+    }
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
@@ -1585,6 +2040,126 @@ function HrManagementModule() {
     });
     onCancelEdit();
   }
+
+  function upsertAttendanceRecord({ employee, date = todayIso, patch = {} }) {
+    const employeeName = String(employee || "").trim();
+    const isoDate = String(date || todayIso).trim() || todayIso;
+    if (!employeeName) {
+      return;
+    }
+    setModuleData((prev) => {
+      const rows = prev.attendance || [];
+      const index = rows.findIndex((row) =>
+        String(row.employee || "").trim() === employeeName
+        && String(row.date || "").trim() === isoDate
+      );
+      const base = index >= 0 ? rows[index] : {
+        id: `attendance_${Date.now()}`,
+        employee: employeeName,
+        date: isoDate,
+        entryMode: "User Side",
+        inTime: "",
+        outTime: "",
+        workedHours: "",
+        status: "Present",
+        permissionHours: "",
+        notes: "",
+        completedTasks: "",
+        taskNotes: "",
+      };
+      const nextRow = { ...base, ...patch };
+      nextRow.workedHours = computeWorkedDuration(nextRow.inTime, nextRow.outTime);
+      if (nextRow.status !== "Permission") {
+        nextRow.permissionHours = "";
+      }
+      if (index >= 0) {
+        return {
+          ...prev,
+          attendance: rows.map((row, rowIndex) => (rowIndex === index ? nextRow : row))
+        };
+      }
+      return {
+        ...prev,
+        attendance: [nextRow, ...rows]
+      };
+    });
+  }
+
+  function handleAttendancePunch(action, employeeName, source = "User Side") {
+    const name = String(employeeName || "").trim();
+    if (!name) {
+      return;
+    }
+    const currentTime = getCurrentTimeHm();
+    if (action === "out") {
+      const existing = (moduleData.attendance || []).find((row) =>
+        String(row.employee || "").trim() === name && String(row.date || "").trim() === todayIso
+      );
+      setAttendanceTaskModal({
+        open: true,
+        employee: name,
+        date: todayIso,
+        source,
+        outTime: currentTime,
+        completedTasks: String(existing?.completedTasks || "").trim(),
+        taskNotes: String(existing?.taskNotes || "").trim(),
+        mode: "punchOut",
+      });
+      return;
+    }
+    upsertAttendanceRecord({
+      employee: name,
+      date: todayIso,
+      patch: action === "in"
+        ? { entryMode: source, inTime: currentTime, status: "Present" }
+        : { entryMode: source, outTime: currentTime, status: "Present" }
+    });
+  }
+
+  function openAttendanceTaskModal(row) {
+    setAttendanceTaskModal({
+      open: true,
+      employee: String(row?.employee || "").trim(),
+      date: String(row?.date || todayIso).trim() || todayIso,
+      source: String(row?.entryMode || "HR Side").trim() || "HR Side",
+      outTime: String(row?.outTime || "").trim(),
+      completedTasks: String(row?.completedTasks || "").trim(),
+      taskNotes: String(row?.taskNotes || "").trim(),
+      mode: "edit",
+    });
+  }
+
+  function closeAttendanceTaskModal() {
+    setAttendanceTaskModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function submitAttendanceTaskModal(event) {
+    event.preventDefault();
+    const employee = String(attendanceTaskModal.employee || "").trim();
+    const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
+    if (!employee) {
+      return;
+    }
+    const patch = {
+      completedTasks: String(attendanceTaskModal.completedTasks || "").trim(),
+      taskNotes: String(attendanceTaskModal.taskNotes || "").trim(),
+    };
+    if (attendanceTaskModal.mode === "punchOut") {
+      patch.entryMode = attendanceTaskModal.source || "User Side";
+      patch.outTime = attendanceTaskModal.outTime || getCurrentTimeHm();
+      patch.status = "Present";
+    }
+    upsertAttendanceRecord({ employee, date, patch });
+    closeAttendanceTaskModal();
+  }
+
+  const myAttendanceToday = useMemo(
+    () => (moduleData.attendance || []).find((row) =>
+      String(row.employee || "").trim() === String(myAttendanceEmployee || "").trim()
+      && String(row.date || "").trim() === todayIso
+    ) || null,
+    [moduleData.attendance, myAttendanceEmployee, todayIso]
+  );
 
   return (
     <div className="d-flex flex-column gap-3">
@@ -1605,37 +2180,128 @@ function HrManagementModule() {
         </div>
       </div>
 
-      <div className="row g-3">
-        {stats.map((item) => (
-          <div className="col-12 col-md-4" key={item.label}>
-            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
-              <div className="stat-icon stat-icon-primary mb-2">
-                <i className={`bi ${item.icon || "bi-bar-chart"}`} aria-hidden="true" />
+      {activeTab === "employees" ? (
+        <div className="row g-3">
+          {stats.map((item) => (
+            <div className="col-12 col-md-4" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${item.icon || "bi-bar-chart"}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
               </div>
-              <div className="text-secondary small">{item.label}</div>
-              <h5 className="mb-0 mt-1">{item.value}</h5>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           <div className="row g-3">
             {config.fields.map((field) => (
-              <div className="col-12 col-md-4" key={field.key}>
-                <label className="form-label small text-secondary mb-1">{field.label}</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={field.placeholder}
-                  value={formValues[field.key] || ""}
-                  onChange={(event) => onChangeField(field.key, event.target.value)}
-                />
-              </div>
+              (() => {
+                const condition = field.conditionalOn;
+                const isVisible = !condition
+                  || String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+                if (!isVisible) {
+                  return null;
+                }
+                return (
+                  <div className="col-12 col-md-4" key={field.key}>
+                    <label className="form-label small text-secondary mb-1">{field.label}</label>
+                    {activeTab === "attendance" && field.key === "employee" ? (
+                      <div className="position-relative">
+                        <input
+                          type="text"
+                          className="form-control"
+                          autoComplete="off"
+                          placeholder={field.placeholder}
+                          value={formValues[field.key] || ""}
+                          onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
+                          onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
+                          onChange={(event) => {
+                            onChangeField(field.key, event.target.value);
+                            setAttendanceEmployeeSuggestOpen(true);
+                          }}
+                        />
+                        {attendanceEmployeeSuggestOpen && attendanceEmployeeSuggestions.length ? (
+                          <div
+                            className="position-absolute start-0 end-0 mt-1 border rounded shadow-sm"
+                            style={{
+                              zIndex: 30,
+                              background: "#081528",
+                              borderColor: "rgba(255,255,255,0.16)",
+                              maxHeight: "220px",
+                              overflowY: "auto",
+                            }}
+                          >
+                            {attendanceEmployeeSuggestions.map((name) => (
+                              <button
+                                key={`attendance-emp-suggest-${name}`}
+                                type="button"
+                                className="w-100 text-start border-0 bg-transparent px-3 py-2"
+                                style={{ color: "#e9eef8" }}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  onChangeField(field.key, name);
+                                  setAttendanceEmployeeSuggestOpen(false);
+                                }}
+                              >
+                                {name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : field.type === "select" ? (
+                      <select
+                        className="form-select"
+                        value={formValues[field.key] || field.defaultValue || ""}
+                        onChange={(event) => onChangeField(field.key, event.target.value)}
+                      >
+                        <option value="">Select {field.label}</option>
+                        {(field.options || []).map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.type || "text"}
+                        className="form-control"
+                        placeholder={field.placeholder}
+                        value={formValues[field.key] || ""}
+                        onChange={(event) => onChangeField(field.key, event.target.value)}
+                      />
+                    )}
+                  </div>
+                );
+              })()
             ))}
           </div>
+          {activeTab === "attendance" ? (
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <span className="small text-secondary">User Login Attendance:</span>
+              <button
+                type="button"
+                className="btn btn-outline-success btn-sm"
+                disabled={!String(formValues.employee || "").trim()}
+                onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
+              >
+                Attendance In
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-info btn-sm"
+                disabled={!String(formValues.employee || "").trim()}
+                onClick={() => handleAttendancePunch("out", formValues.employee, "User Side")}
+              >
+                Attendance Out
+              </button>
+              <span className="small text-secondary">Selected employee + today date record will update.</span>
+            </div>
+          ) : null}
           <div className="d-flex gap-2">
             <button type="submit" className="btn btn-success btn-sm">
               {editingId ? "Update" : "Create"}
@@ -1649,6 +2315,74 @@ function HrManagementModule() {
         </form>
       </div>
 
+      {activeTab === "attendance" ? (
+        <div className="card p-3">
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h6 className="mb-0">My Attendance (HR)</h6>
+            <div className="d-flex align-items-center gap-2">
+              <label className="small text-secondary mb-0">Employee</label>
+              <select
+                className="form-select form-select-sm"
+                style={{ minWidth: "180px" }}
+                value={myAttendanceEmployee}
+                onChange={(e) => setMyAttendanceEmployee(e.target.value)}
+              >
+                <option value="">Select Employee</option>
+                {employeeNameOptions.map((name) => (
+                  <option key={`my-attendance-${name}`} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="row g-3 align-items-end">
+            <div className="col-12 col-md-2">
+              <div className="small text-secondary">Date</div>
+              <div className="fw-semibold">{todayIso}</div>
+            </div>
+            <div className="col-12 col-md-2">
+              <div className="small text-secondary">In Time</div>
+              <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
+            </div>
+            <div className="col-12 col-md-2">
+              <div className="small text-secondary">Out Time</div>
+              <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
+            </div>
+            <div className="col-12 col-md-2">
+              <div className="small text-secondary">Worked</div>
+              <div className="fw-semibold">{myAttendanceToday?.workedHours || "-"}</div>
+            </div>
+            <div className="col-12 col-md-2">
+              <div className="small text-secondary">Status</div>
+              <div className="fw-semibold">
+                {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
+                  ? `Permission (${myAttendanceToday.permissionHours} hrs)`
+                  : (myAttendanceToday?.status || "-")}
+              </div>
+            </div>
+            <div className="col-12 col-md-2">
+              <div className="d-flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-success btn-sm w-100"
+                  disabled={!myAttendanceEmployee}
+                  onClick={() => handleAttendancePunch("in", myAttendanceEmployee, "HR Self")}
+                >
+                  In
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-info btn-sm w-100"
+                  disabled={!myAttendanceEmployee}
+                  onClick={() => handleAttendancePunch("out", myAttendanceEmployee, "HR Self")}
+                >
+                  Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <SearchablePaginatedTableCard
         title={config.label}
         badgeLabel={`${currentRows.length} items`}
@@ -1657,9 +2391,29 @@ function HrManagementModule() {
         searchPlaceholder={`Search ${config.label.toLowerCase()}`}
         noRowsText={`No ${config.label.toLowerCase()} yet.`}
         searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-        renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+        renderCells={(row) => config.columns.map((column) => {
+          if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
+            return formatTimeToAmPm(row[column.key]);
+          }
+          if (activeTab === "attendance" && column.key === "workedHours") {
+            return row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
+          }
+          if (activeTab === "attendance" && column.key === "status") {
+            const status = String(row.status || "").trim();
+            if (status === "Permission" && String(row.permissionHours || "").trim()) {
+              return `Permission (${String(row.permissionHours).trim()} hrs)`;
+            }
+            return row.entryMode ? `${status || "-"}${row.entryMode ? ` (${row.entryMode})` : ""}` : (status || "-");
+          }
+          return row[column.key] || "-";
+        })}
         renderActions={(row) => (
           <div className="d-inline-flex gap-2">
+            {activeTab === "attendance" ? (
+              <button type="button" className="btn btn-sm btn-outline-warning" onClick={() => openAttendanceTaskModal(row)}>
+                Task
+              </button>
+            ) : null}
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
               Edit
             </button>
@@ -1669,6 +2423,67 @@ function HrManagementModule() {
           </div>
         )}
       />
+
+      {activeTab === "attendance" && attendanceTaskModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeAttendanceTaskModal}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(700px, 100%)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-2">
+              <div>
+                <h5 className="mb-1">
+                  {attendanceTaskModal.mode === "punchOut" ? "Attendance Out - Completed Tasks" : "Completed Work Tasks"}
+                </h5>
+                <div className="small text-secondary">
+                  {attendanceTaskModal.employee || "-"} • {attendanceTaskModal.date || todayIso}
+                  {attendanceTaskModal.mode === "punchOut" && attendanceTaskModal.outTime ? ` • Out Time ${formatTimeToAmPm(attendanceTaskModal.outTime)}` : ""}
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceTaskModal}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <form className="d-flex flex-column gap-3" onSubmit={submitAttendanceTaskModal}>
+              <div>
+                <label className="form-label small text-secondary mb-1">Completed Work Task List</label>
+                <textarea
+                  className="form-control"
+                  rows={5}
+                  placeholder="Enter completed tasks (one line per task / summary details)"
+                  value={attendanceTaskModal.completedTasks}
+                  onChange={(e) => setAttendanceTaskModal((prev) => ({ ...prev, completedTasks: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="form-label small text-secondary mb-1">Notes (Optional)</label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  placeholder="Blockers / pending follow-up / handover notes"
+                  value={attendanceTaskModal.taskNotes}
+                  onChange={(e) => setAttendanceTaskModal((prev) => ({ ...prev, taskNotes: e.target.value }))}
+                />
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">
+                  {attendanceTaskModal.mode === "punchOut" ? "Save & Attendance Out" : "Save Task Details"}
+                </button>
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceTaskModal}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1682,11 +2497,26 @@ function CategoryCrudModule({
   statsBuilder,
   statIcons = []
 }) {
+  const CATEGORY_ENTRY_LIMIT = 100;
   const firstTab = Object.keys(tabConfig)[0];
-  const [activeTab, setActiveTab] = useState(firstTab);
+  const hasCombinedCategoryTabs = Boolean(tabConfig?.mainCategories && tabConfig?.subCategories);
+  const initialTab = hasCombinedCategoryTabs && (firstTab === "mainCategories" || firstTab === "subCategories")
+    ? "categories"
+    : firstTab;
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [moduleData, setModuleData] = useState(defaultData);
   const [formValues, setFormValues] = useState(buildEmptyValues(tabConfig[firstTab].fields));
   const [editingId, setEditingId] = useState("");
+  const [categoryForms, setCategoryForms] = useState(() => (
+    hasCombinedCategoryTabs
+      ? {
+          mainCategories: buildEmptyValues(tabConfig.mainCategories.fields),
+          subCategories: buildEmptyValues(tabConfig.subCategories.fields),
+        }
+      : { mainCategories: {}, subCategories: {} }
+  ));
+  const [categoryEditingIds, setCategoryEditingIds] = useState({ mainCategories: "", subCategories: "" });
+  const [categoryNotice, setCategoryNotice] = useState("");
   const [departmentOptions, setDepartmentOptions] = useState([]);
 
   useEffect(() => {
@@ -1742,12 +2572,39 @@ function CategoryCrudModule({
 
   useEffect(() => {
     setEditingId("");
+    if (activeTab === "categories") {
+      return;
+    }
     setFormValues(buildEmptyValues(tabConfig[activeTab].fields));
   }, [activeTab, tabConfig]);
 
-  const config = tabConfig[activeTab];
-  const currentRows = moduleData[activeTab] || [];
+  const visibleTabs = useMemo(() => {
+    if (!hasCombinedCategoryTabs) {
+      return Object.entries(tabConfig).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
+    }
+    const nonCategoryEntries = Object.entries(tabConfig)
+      .filter(([tabKey]) => tabKey !== "mainCategories" && tabKey !== "subCategories")
+      .map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
+    return [...nonCategoryEntries, { key: "categories", label: "Category" }];
+  }, [hasCombinedCategoryTabs, tabConfig]);
+
+  const config = activeTab === "categories" ? null : tabConfig[activeTab];
+  const currentRows = activeTab === "categories" ? [] : (moduleData[activeTab] || []);
   const stats = useMemo(() => statsBuilder(moduleData), [moduleData, statsBuilder]);
+  const taskAssignToOptions = useMemo(() => {
+    if (activeTab !== "tasks") {
+      return [];
+    }
+    const names = [
+      ...((moduleData.team || []).map((row) => row?.name)),
+      ...((moduleData.tasks || []).map((row) => row?.assignee)),
+      ...((moduleData.projects || []).map((row) => row?.owner)),
+      ...((DEFAULT_HR_DATA.employees || []).map((row) => row?.name)),
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  }, [activeTab, moduleData]);
 
   function onChangeField(fieldKey, nextValue) {
     setFormValues((prev) => ({ ...prev, [fieldKey]: nextValue }));
@@ -1803,61 +2660,219 @@ function CategoryCrudModule({
     onCancelEdit();
   }
 
+  function onCategoryChangeField(tabKey, fieldKey, nextValue) {
+    setCategoryForms((prev) => ({
+      ...prev,
+      [tabKey]: { ...(prev[tabKey] || {}), [fieldKey]: nextValue }
+    }));
+  }
+
+  function onCategoryEditRow(tabKey, row) {
+    const cfg = tabConfig[tabKey];
+    if (!cfg) {
+      return;
+    }
+    const nextValues = {};
+    cfg.fields.forEach((field) => {
+      nextValues[field.key] = row[field.key] || "";
+    });
+    setCategoryEditingIds((prev) => ({ ...prev, [tabKey]: row.id || "" }));
+    setCategoryForms((prev) => ({ ...prev, [tabKey]: nextValues }));
+  }
+
+  function onCategoryCancelEdit(tabKey) {
+    const cfg = tabConfig[tabKey];
+    if (!cfg) {
+      return;
+    }
+    setCategoryEditingIds((prev) => ({ ...prev, [tabKey]: "" }));
+    setCategoryForms((prev) => ({ ...prev, [tabKey]: buildEmptyValues(cfg.fields) }));
+  }
+
+  function onCategoryDeleteRow(tabKey, rowId) {
+    setModuleData((prev) => ({
+      ...prev,
+      [tabKey]: (prev[tabKey] || []).filter((row) => row.id !== rowId)
+    }));
+    if (categoryEditingIds[tabKey] === rowId) {
+      onCategoryCancelEdit(tabKey);
+    }
+  }
+
+  function onCategorySubmit(event, tabKey) {
+    event.preventDefault();
+    const cfg = tabConfig[tabKey];
+    if (!cfg) {
+      return;
+    }
+    const values = categoryForms[tabKey] || {};
+    const hasEmptyField = cfg.fields.some((field) => !String(values[field.key] || "").trim());
+    if (hasEmptyField) {
+      return;
+    }
+    const payload = {};
+    cfg.fields.forEach((field) => {
+      payload[field.key] = String(values[field.key] || "").trim();
+    });
+    const editId = categoryEditingIds[tabKey];
+    setModuleData((prev) => {
+      const existing = prev[tabKey] || [];
+      if (editId) {
+        setCategoryNotice("");
+        return {
+          ...prev,
+          [tabKey]: existing.map((row) => (row.id === editId ? { ...row, ...payload } : row))
+        };
+      }
+      if (existing.length >= CATEGORY_ENTRY_LIMIT) {
+        setCategoryNotice(`${cfg.label}: Maximum ${CATEGORY_ENTRY_LIMIT} entries are allowed.`);
+        return prev;
+      }
+      setCategoryNotice("");
+      return {
+        ...prev,
+        [tabKey]: [{ id: `${tabKey}_${Date.now()}`, ...payload }, ...existing]
+      };
+    });
+    onCategoryCancelEdit(tabKey);
+  }
+
   return (
     <div className="d-flex flex-column gap-3">
       <div>
         <h4 className="mb-2">{heading}</h4>
         <p className="text-secondary mb-3">{subtitle}</p>
         <div className="d-flex flex-wrap gap-2">
-          {Object.entries(tabConfig).map(([tabKey, tabValue]) => (
+          {visibleTabs.map(({ key: tabKey, label }) => (
             <button
               key={tabKey}
               type="button"
               className={`btn btn-sm ${activeTab === tabKey ? "btn-success" : "btn-outline-light"}`}
               onClick={() => setActiveTab(tabKey)}
             >
-              {tabValue.label}
+              {label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="row g-3">
-        {stats.map((item, index) => (
-          <div className="col-12 col-md-4" key={item.label}>
-            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
-              <div className="stat-icon stat-icon-primary mb-2">
-                <i className={`bi ${statIcons[index] || "bi-grid"}`} aria-hidden="true" />
+      {activeTab !== "categories" ? (
+        <div className="row g-3">
+          {stats.map((item, index) => (
+            <div className="col-12 col-md-4" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${statIcons[index] || "bi-grid"}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
               </div>
-              <div className="text-secondary small">{item.label}</div>
-              <h5 className="mb-0 mt-1">{item.value}</h5>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
-      <SearchablePaginatedTableCard
-        title={`${config.label} List`}
-        badgeLabel={`${currentRows.length} items`}
-        rows={currentRows}
-        columns={config.columns}
-        withoutOuterCard={activeTab === "mainCategories" || activeTab === "items"}
-        searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-        noRowsText={`No ${config.label.toLowerCase()} added yet.`}
-        searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-        renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
-        renderActions={(row) => (
-          <div className="d-inline-flex gap-2">
-            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
-              Edit
-            </button>
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
-              Delete
-            </button>
-          </div>
-        )}
-      />
+      {activeTab === "categories" ? (
+        <div>
+          <h5 className="mb-2">Category</h5>
+          <p className="text-secondary small mb-2">
+            Maximum 100 entries are allowed for Main Category and Sub Category.
+          </p>
+          {categoryNotice ? <div className="alert alert-warning py-2 mb-3">{categoryNotice}</div> : null}
+          <div className="row g-3">
+            {["mainCategories", "subCategories"].map((tabKey) => {
+              const cfg = tabConfig[tabKey];
+              const rows = moduleData[tabKey] || [];
+              const form = categoryForms[tabKey] || {};
+              const editId = categoryEditingIds[tabKey];
+              return (
+                <div className="col-12 col-xl-6" key={`category-panel-${tabKey}`}>
+                  <div className="border rounded p-3 h-100 d-flex flex-column gap-3">
+                    <div className="card p-3">
+                      <h6 className="mb-3">{editId ? `Edit ${cfg.itemLabel}` : `Create ${cfg.itemLabel}`}</h6>
+                      <form className="d-flex flex-column gap-3" onSubmit={(event) => onCategorySubmit(event, tabKey)}>
+                        <div className="row g-3">
+                          {cfg.fields.map((field) => (
+                            <div className="col-12" key={`${tabKey}-${field.key}`}>
+                              <label className="form-label small text-secondary mb-1">{field.label}</label>
+                              <input
+                                type={field.type || "text"}
+                                className="form-control"
+                                placeholder={field.placeholder}
+                                value={form[field.key] || ""}
+                                onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="d-flex gap-2">
+                          <button type="submit" className="btn btn-success btn-sm">
+                            {editId ? "Update" : "Create"}
+                          </button>
+                          {editId ? (
+                            <button type="button" className="btn btn-outline-light btn-sm" onClick={() => onCategoryCancelEdit(tabKey)}>
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </form>
+                    </div>
 
+                    <SearchablePaginatedTableCard
+                      title={`${cfg.label} List`}
+                      badgeLabel={`${rows.length} items`}
+                      rows={rows}
+                      columns={cfg.columns}
+                      withoutOuterCard
+                      pageSize={5}
+                      searchPlaceholder={`Search ${cfg.label.toLowerCase()}`}
+                      noRowsText={`No ${cfg.label.toLowerCase()} added yet.`}
+                      searchBy={(row) => cfg.columns.map((column) => row[column.key] || "").join(" ")}
+                      renderCells={(row) => cfg.columns.map((column) => row[column.key] || "-")}
+                      renderActions={(row) => (
+                        <div className="d-inline-flex gap-2">
+                          <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onCategoryEditRow(tabKey, row)}>
+                            Edit
+                          </button>
+                          <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onCategoryDeleteRow(tabKey, row.id)}>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab !== "categories" && activeTab !== "tickets" ? (
+        <SearchablePaginatedTableCard
+          title={`${config.label} List`}
+          badgeLabel={`${currentRows.length} items`}
+          rows={currentRows}
+          columns={config.columns}
+          withoutOuterCard={activeTab === "mainCategories" || activeTab === "items"}
+          searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+          noRowsText={`No ${config.label.toLowerCase()} added yet.`}
+          searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+          renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                Delete
+              </button>
+            </div>
+          )}
+        />
+      ) : null}
+
+      {activeTab !== "categories" ? (
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
@@ -1881,9 +2896,25 @@ function CategoryCrudModule({
                       <option value={formValues[field.key]}>{formValues[field.key]}</option>
                     ) : null}
                   </select>
+                ) : (activeTab === "tasks" && field.key === "assignee") ? (
+                  <>
+                    <input
+                      type="text"
+                      className="form-control"
+                      list="project-task-assign-to-list"
+                      placeholder={field.placeholder}
+                      value={formValues[field.key] || ""}
+                      onChange={(event) => onChangeField(field.key, event.target.value)}
+                    />
+                    <datalist id="project-task-assign-to-list">
+                      {taskAssignToOptions.map((name) => (
+                        <option key={`task-assign-${name}`} value={name} />
+                      ))}
+                    </datalist>
+                  </>
                 ) : (
                   <input
-                    type="text"
+                    type={field.type || "text"}
                     className="form-control"
                     placeholder={field.placeholder}
                     value={formValues[field.key] || ""}
@@ -1905,6 +2936,32 @@ function CategoryCrudModule({
           </div>
         </form>
       </div>
+      ) : null}
+
+      {activeTab === "tickets" ? (
+        <SearchablePaginatedTableCard
+          title={`${config.label} List`}
+          badgeLabel={`${currentRows.length} items`}
+          rows={currentRows}
+          columns={config.columns}
+          withoutOuterCard
+          pageSize={15}
+          searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+          noRowsText={`No ${config.label.toLowerCase()} added yet.`}
+          searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+          renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                Delete
+              </button>
+            </div>
+          )}
+        />
+      ) : null}
     </div>
   );
 }
@@ -3146,12 +4203,12 @@ function AccountsErpModule() {
                   <div className="d-flex gap-2">
                     <select
                       className="form-select"
-                      style={{ maxWidth: "110px" }}
+                      style={{ maxWidth: "220px" }}
                       value={customerForm.phoneCountryCode || "+91"}
                       onChange={(e) => setCustomerForm((p) => ({ ...p, phoneCountryCode: e.target.value }))}
                     >
-                      {DIAL_CODE_OPTIONS.map((code) => (
-                        <option key={code} value={code}>{code}</option>
+                      {DIAL_CODE_LABEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
                     <input className="form-control" value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
@@ -3209,15 +4266,15 @@ function AccountsErpModule() {
                     <div className="d-flex gap-2 mb-2" key={`phone-${index}`}>
                       <select
                         className="form-select"
-                        style={{ maxWidth: "110px" }}
+                        style={{ maxWidth: "220px" }}
                         value={row.countryCode || "+91"}
                         onChange={(e) => setCustomerForm((p) => ({
                           ...p,
                           additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: e.target.value } : item))
                         }))}
                       >
-                        {DIAL_CODE_OPTIONS.map((code) => (
-                          <option key={code} value={code}>{code}</option>
+                        {DIAL_CODE_LABEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
                       <input
