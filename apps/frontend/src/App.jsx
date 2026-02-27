@@ -58,6 +58,11 @@ import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
 import StorageUsersPage from "./pages/StorageUsersPage.jsx";
 import StorageDashboardPage from "./pages/StorageDashboardPage.jsx";
+import ImpositionProductDashboardPage from "./pages/ImpositionProductDashboardPage.jsx";
+import ImpositionProductUsersPage from "./pages/ImpositionProductUsersPage.jsx";
+import ImpositionProductBillingPage from "./pages/ImpositionProductBillingPage.jsx";
+import ImpositionProductPlanPage from "./pages/ImpositionProductPlanPage.jsx";
+import ImpositionProductProfilePage from "./pages/ImpositionProductProfilePage.jsx";
 import BusinessAutopilotUsersPage from "./pages/BusinessAutopilotUsersPage.jsx";
 import AiChatbotInboxPage from "./pages/AiChatbotInboxPage.jsx";
 import AiChatbotWidgetsPage from "./pages/AiChatbotWidgetsPage.jsx";
@@ -155,9 +160,11 @@ function applyThemeColors(theme) {
 
 const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "storage" },
+  { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "imposition-software" },
   { label: "Files", path: "/files", icon: "bi-cloud", productOnly: "storage" },
   { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "storage" },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "storage", adminOnly: true },
+  { label: "Users", path: "/users", icon: "bi-people", productOnly: "imposition-software", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
   { label: "Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
@@ -267,6 +274,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isMonitorProduct = productSlug === "worksuite";
   const isBusinessAutopilot = productSlug === "business-autopilot-erp";
   const isWhatsappAutomationProduct = productSlug === "whatsapp-automation";
+  const isImpositionProduct = productSlug === "imposition-software";
   const productLabel = productSlug === "ai-chatbot"
     ? "AI Chatbot"
     : productSlug === "worksuite"
@@ -277,9 +285,26 @@ function AppShell({ state, productPrefix, productSlug }) {
     ? "Whatsapp Automation"
     : productSlug === "business-autopilot-erp"
     ? "Business Autopilot ERP"
+    : productSlug === "imposition-software"
+    ? "Imposition Software"
     : productSlug === "saas-admin"
     ? "SaaS Admin"
     : "Work Zilla";
+  const currentProductSubscription = useMemo(() => {
+    const normalizedProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
+    return (state.subscriptions || []).find((item) => item.product_slug === normalizedProductSlug) || null;
+  }, [productSlug, state.subscriptions]);
+  const currentSubscriptionStatus = String(currentProductSubscription?.status || "").toLowerCase();
+  const currentFreePlanEndValue = currentProductSubscription?.trial_end || currentProductSubscription?.ends_at || "";
+  const currentFreePlanExpiry = currentFreePlanEndValue
+    ? formatDeviceDate(currentFreePlanEndValue, "")
+    : "";
+  const shouldShowCurrentProductFreePlanPopup = Boolean(
+    currentProductSubscription &&
+    currentProductSubscription.plan_is_free &&
+    (currentSubscriptionStatus === "active" || currentSubscriptionStatus === "trialing") &&
+    currentFreePlanExpiry
+  );
   const isProductsSection =
     location.pathname.startsWith("/saas-admin/products") ||
     location.hash === "#products";
@@ -417,8 +442,24 @@ function AppShell({ state, productPrefix, productSlug }) {
   }, [themePrimary, themeSecondary]);
 
   useEffect(() => {
-    setShowFreePlanModal(Boolean(state.freePlanPopup && state.freePlanExpiry));
-  }, [state.freePlanPopup, state.freePlanExpiry]);
+    if (!shouldShowCurrentProductFreePlanPopup) {
+      setShowFreePlanModal(false);
+      return;
+    }
+    if (typeof window === "undefined") {
+      setShowFreePlanModal(true);
+      return;
+    }
+    const popupDate = new Date().toISOString().slice(0, 10);
+    const popupKey = `wz_free_plan_popup_date:${productSlug || "worksuite"}`;
+    const lastShown = window.localStorage.getItem(popupKey);
+    if (lastShown === popupDate) {
+      setShowFreePlanModal(false);
+      return;
+    }
+    setShowFreePlanModal(true);
+    window.localStorage.setItem(popupKey, popupDate);
+  }, [productSlug, shouldShowCurrentProductFreePlanPopup]);
 
   useEffect(() => {
     let active = true;
@@ -506,6 +547,9 @@ function AppShell({ state, productPrefix, productSlug }) {
       return false;
     }
     if (productSlug === "whatsapp-automation" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
+      return false;
+    }
+    if (productSlug === "imposition-software" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
       return false;
     }
     if (item.productOnly && item.productOnly !== productSlug) {
@@ -852,6 +896,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <StorageDashboardPage subscriptions={state.subscriptions} />
                 : productSlug === "ai-chatbot"
                 ? <AiChatbotDashboardPage subscriptions={state.subscriptions} />
+                : productSlug === "imposition-software"
+                ? <ImpositionProductDashboardPage isAdmin={isAdmin} />
                 : productSlug === "business-autopilot-erp"
                 ? (
                   <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
@@ -951,6 +997,8 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               productSlug === "storage" && isAdmin
                 ? <StorageUsersPage />
+                : productSlug === "imposition-software" && isAdmin
+                ? <ImpositionProductUsersPage />
                 : isBusinessAutopilot && autopilotCanManageUsers
                 ? <BusinessAutopilotUsersPage />
                 : <Navigate to={withBase("/")} replace />
@@ -1010,15 +1058,27 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/billing"
-            element={isAdmin && !isHrView ? <BillingPage /> : <Navigate to={withBase("/")} replace />}
+            element={
+              isAdmin && !isHrView
+                ? (isImpositionProduct ? <ImpositionProductBillingPage /> : <BillingPage />)
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/plans"
-            element={isAdmin && !isHrView ? <PlansPage /> : <Navigate to={withBase("/")} replace />}
+            element={
+              isAdmin && !isHrView
+                ? (isImpositionProduct ? <ImpositionProductPlanPage /> : <PlansPage />)
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/profile"
-            element={isAdmin && !isHrView ? <ProfilePage /> : <Navigate to={withBase("/")} replace />}
+            element={
+              isAdmin && !isHrView
+                ? (isImpositionProduct ? <ImpositionProductProfilePage /> : <ProfilePage />)
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/dashboard/company-profile"
@@ -1227,9 +1287,9 @@ function AppShell({ state, productPrefix, productSlug }) {
       {showFreePlanModal ? (
         <div className="modal-overlay" onClick={() => setShowFreePlanModal(false)}>
           <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
-            <h5>Free Plan Will Expire</h5>
+            <h5>Free Plan Will Expire - {productLabel}</h5>
             <div className="text-secondary mb-2">
-              Your free plan will expire on <strong>{state.freePlanExpiry}</strong>.
+              Your <strong>{productLabel}</strong> free plan will expire on <strong>{currentFreePlanExpiry}</strong>.
               Please choose a paid plan to continue without interruption.
             </div>
             <div className="d-flex justify-content-end gap-2 mt-3">
@@ -1262,55 +1322,18 @@ function BrandingShell({ children, getProductRoute }) {
   );
 }
 
-function UnauthenticatedShell({
-  loginError,
-  loginForm,
-  loginSubmitting,
-  onLoginSubmit,
-  onFormChange
-}) {
-  const { branding } = useBranding();
-  const monitorLabel =
-    branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
+function ForceHtmlLoginRedirect() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const target = `/auth/login/?next=${encodeURIComponent(`/app${location.pathname}${location.search}${location.hash}`)}`;
+    window.location.replace(target);
+  }, [location.pathname, location.search, location.hash]);
 
   return (
     <div className="page-center">
       <div className="panel">
-        <h1>Welcome to Work Zilla {monitorLabel}</h1>
-        <p>Please log in to access the dashboard.</p>
-        {loginError ? (
-          <div className="alert alert-danger" role="alert">
-            {loginError}
-          </div>
-        ) : null}
-        <form onSubmit={onLoginSubmit} className="d-grid gap-2">
-          <input
-            type="email"
-            className="form-control"
-            placeholder="Email"
-            value={loginForm.email}
-            onChange={(event) =>
-              onFormChange((prev) => ({ ...prev, email: event.target.value }))
-            }
-          />
-          <input
-            type="password"
-            className="form-control"
-            placeholder="Password"
-            value={loginForm.password}
-            onChange={(event) =>
-              onFormChange((prev) => ({ ...prev, password: event.target.value }))
-            }
-          />
-          <button className="app-btn app-btn-primary" type="submit" disabled={loginSubmitting}>
-            {loginSubmitting ? "Signing in..." : "Login"}
-          </button>
-        </form>
-        <div className="button-row">
-          <a className="app-btn app-btn-secondary" href="/auth/signup/">
-            Create Account
-          </a>
-        </div>
+        <p>Redirecting to login...</p>
       </div>
     </div>
   );
@@ -1318,9 +1341,6 @@ function UnauthenticatedShell({
 
 export default function App() {
   const [state, setState] = useState(emptyState);
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [loginError, setLoginError] = useState("");
-  const [loginSubmitting, setLoginSubmitting] = useState(false);
 
   const applyProfileState = useCallback((data) => {
     if (typeof window !== "undefined") {
@@ -1409,59 +1429,19 @@ export default function App() {
     };
   }, [loadProfile]);
 
-  async function handleLoginSubmit(event) {
-    event.preventDefault();
-    if (!loginForm.email || !loginForm.password) {
-      setLoginError("Email and password are required.");
-      return;
-    }
-    setLoginError("");
-    setLoginSubmitting(true);
-    try {
-      await fetch("/api/auth/csrf", { credentials: "include" });
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email: loginForm.email,
-          password: loginForm.password
-        })
-      });
-      if (!response.ok) {
-        let message = "Login failed. Check credentials and try again.";
-        try {
-          const data = await response.json();
-          if (data?.error) {
-            message = data.error;
-          }
-        } catch (error) {
-          // ignore JSON parse error
-        }
-        setLoginError(message);
-        return;
-      }
-      await loadProfile();
-    } catch (error) {
-      setLoginError("Login failed. Check credentials and try again.");
-    } finally {
-      setLoginSubmitting(false);
-    }
-  }
-
   const productRoutes = [
-    { prefix: "/worksuite", slug: "worksuite", label: "Work Suite" },
+    { prefix: "/work-suite", slug: "worksuite", label: "Work Suite" },
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
+    { prefix: "/imposition", slug: "imposition-software", label: "Imposition Software" },
     { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot ERP" },
     { prefix: "/whatsapp-automation", slug: "whatsapp-automation", label: "Whatsapp Automation" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
   ];
   const legacyProductRoutes = [
-    { prefix: "/monitor", slug: "worksuite", label: "Work Suite", redirectPrefix: "/worksuite" }
+    { prefix: "/monitor", slug: "worksuite", label: "Work Suite", redirectPrefix: "/work-suite" },
+    { prefix: "/worksuite", slug: "worksuite", label: "Work Suite", redirectPrefix: "/work-suite" }
   ];
 
   function getProductRoute(pathname) {
@@ -1576,6 +1556,10 @@ export default function App() {
     }
   }
 
+    if (location.pathname === "/" || location.pathname === "") {
+      return <Navigate to="/work-suite/" replace />;
+    }
+
     const match = getProductRoute(location.pathname);
     if (match?.redirectPrefix && location.pathname.startsWith(match.prefix)) {
       const nextPath = match.redirectPrefix + location.pathname.slice(match.prefix.length);
@@ -1624,13 +1608,7 @@ export default function App() {
               <ProductShell />
             </ErrorBoundary>
           ) : (
-            <UnauthenticatedShell
-              loginError={loginError}
-              loginForm={loginForm}
-              loginSubmitting={loginSubmitting}
-              onLoginSubmit={handleLoginSubmit}
-              onFormChange={setLoginForm}
-            />
+            <ForceHtmlLoginRedirect />
           )}
         </BrandingShell>
       </BrowserRouter>

@@ -98,11 +98,24 @@ function setupCountryState(form) {
 function splitPhoneValue(value) {
   const raw = String(value || "").trim();
   if (!raw) return { code: "+91", number: "" };
-  const match = raw.match(/^(\+?\d{1,4})\s*(.*)$/);
-  if (match) {
-    return { code: match[1], number: match[2].trim() };
+  const startCodeMatch = raw.match(/^(\+?\d{1,4})\s*(.*)$/);
+  if (startCodeMatch) {
+    return { code: startCodeMatch[1], number: startCodeMatch[2].trim() };
   }
-  return { code: "+91", number: raw };
+  const inlineCodeMatch = raw.match(/(\+\d{1,4})/);
+  if (inlineCodeMatch) {
+    const code = inlineCodeMatch[1];
+    const number = raw
+      .slice(raw.indexOf(code) + code.length)
+      .replace(/^[^0-9]*/, "")
+      .trim();
+    return { code, number };
+  }
+  const numberMatch = raw.match(/([0-9][0-9\s-]{5,})$/);
+  if (numberMatch) {
+    return { code: "+91", number: numberMatch[1].trim() };
+  }
+  return { code: "+91", number: raw.replace(/[^0-9\s-]/g, "").trim() };
 }
 
 function setupPhoneFields(form) {

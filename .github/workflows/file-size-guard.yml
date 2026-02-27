@@ -1,0 +1,16 @@
+name: File Size Guard
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tracked binary sizes
+        run: ./scripts/check_github_file_size.sh

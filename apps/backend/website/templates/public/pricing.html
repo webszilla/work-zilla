@@ -228,9 +228,12 @@
         const planId = card.getAttribute("data-plan-id");
         const plan = pricingCache[planId];
         if (!plan) return;
-        const isFree = String(plan.name || "").toLowerCase() === "free";
+        const planName = String(plan.name || "").toLowerCase();
+        const isTrialLike = planName.includes("trial") || Boolean((plan.features || {}).is_trial);
+        const isFree = planName === "free" || isTrialLike;
         const isBusinessAutopilot = pricingState.product === "business-autopilot-erp";
         const isWhatsAppAutomation = pricingState.product === "whatsapp-automation";
+        const isImposition = pricingState.product === "imposition-software";
         const value = pricingState.billing === "yearly"
           ? (pricingState.currency === "usd" ? plan.price_usdt_year : plan.price_inr_year)
           : (pricingState.currency === "usd" ? plan.price_usdt_month : plan.price_inr_month);
@@ -241,7 +244,7 @@
             suffixTarget.textContent = extra;
             return;
           }
-          const cycleText = pricingState.product === "storage"
+          const cycleText = pricingState.product === "storage" || isImposition
             ? (pricingState.billing === "monthly" ? "/org per month" : "/org per year")
             : isBusinessAutopilot
             ? (pricingState.billing === "monthly" ? "/platform per month" : "/platform per year")
@@ -338,6 +341,47 @@
 
     function buildFeatureList(plan, productSlug) {
       const limits = plan.limits || {};
+      if (productSlug === "imposition-software") {
+        const planName = String(plan.name || "").toLowerCase();
+        const isImpositionTrial = planName.includes("free") || planName.includes("trial") || Boolean((plan.features || {}).is_trial);
+        const featureFlags = { ...(plan.features || {}) };
+        if (isImpositionTrial) {
+          [
+            "manual_card_upload",
+            "export_print_pdf",
+            "batch_processing",
+            "print_marks",
+            "export_hd_print_files",
+            "excel_data_import",
+            "serial_number_generator",
+            "team_users",
+            "id_card_data_update",
+            "business_card_data_update",
+            "bulk_card_generation",
+            "layout_templates",
+            "priority_processing",
+            "api_integration_ready",
+          ].forEach((key) => {
+            featureFlags[key] = true;
+          });
+        }
+        const includedUsers = limits.user_limit ?? limits.included_users ?? plan.employee_limit ?? (isImpositionTrial ? 2 : 1);
+        return [
+          { text: `Devices: ${limits.device_limit ?? plan.device_limit ?? 1}` },
+          { text: `Users: ${includedUsers}` },
+          { text: "ID Card Layout", ok: true },
+          { text: "Business Card Layout", ok: true },
+          { text: "Manual Card Upload", ok: !!featureFlags.manual_card_upload },
+          { text: "Export Print PDF", ok: !!featureFlags.export_print_pdf },
+          { text: "Batch Processing", ok: !!featureFlags.batch_processing },
+          { text: "Print Marks", ok: !!featureFlags.print_marks },
+          { text: "Export HD Print Files", ok: !!featureFlags.export_hd_print_files },
+          { text: "Excel Data Import", ok: !!featureFlags.excel_data_import },
+          { text: "Serial Number Generator", ok: !!featureFlags.serial_number_generator },
+          { text: "Team Users", ok: !!featureFlags.team_users },
+          { text: `Additional User: ${pricingState.currency === "usd" ? "$4" : "₹300"} / month` },
+        ];
+      }
       if (productSlug === "storage") {
         const rawUsers = limits.max_users;
         const usersNumber = Number(rawUsers);
@@ -732,6 +776,26 @@
       return "Full WhatsApp automation platform with branding, team management, and lower add-on user pricing.";
     }
 
+    function impositionPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key.includes("free") || key.includes("trial")) {
+        return "7-day free trial with all imposition functions enabled and 2 users included.";
+      }
+      if (key === "starter") {
+        return "Basic imposition setup for ID and business card print layouts.";
+      }
+      if (key === "pro") {
+        return "Advanced imposition with batch processing, marks, and HD output.";
+      }
+      if (key === "business") {
+        return "Designed for production teams with excel import and bulk card generation.";
+      }
+      if (key === "enterprise") {
+        return "For high-volume operations with team users, presets, and priority processing.";
+      }
+      return "Plan built for print-ready card imposition workflows.";
+    }
+
     function renderPlans(data) {
       const container = document.getElementById("pricing-plans");
       container.innerHTML = "";
@@ -742,7 +806,74 @@
       const freeEligible = data.free_eligible !== false;
       const isStorageProduct = data.product.slug === "storage" || data.product.slug === "online-storage";
       const normalizedSlug = isStorageProduct ? "storage" : data.product.slug;
+      const isImpositionProduct = normalizedSlug === "imposition-software";
       const orderedPlans = [...data.plans];
+      if (isImpositionProduct) {
+        const hasTrialPlan = orderedPlans.some((plan) => {
+          const planName = String(plan.name || "").toLowerCase();
+          return planName.includes("trial") || Boolean((plan.features || {}).is_trial);
+        });
+        if (!hasTrialPlan) {
+          const fallbackTrialId = Number(data.trial_plan_id || 0);
+          orderedPlans.push({
+            id: fallbackTrialId || "",
+            code: "free-trial",
+            name: "Free Trial",
+            price_inr_month: 0,
+            price_usdt_month: 0,
+            price_inr_year: 0,
+            price_usdt_year: 0,
+            allow_addons: false,
+            limits: {
+              device_limit: 1,
+              user_limit: 2,
+              included_users: 2,
+              custom_sheet_size: true
+            },
+            features: {
+              is_trial: true,
+              trial_days: data.trial_days || 7,
+              basic_imposition: true,
+              advanced_imposition: true,
+              id_card_layout: true,
+              business_card_layout: true,
+              manual_card_upload: true,
+              export_print_pdf: true,
+              export_hd_print_files: true,
+              custom_sheet_size: true,
+              excel_data_import: true,
+              id_card_data_update: true,
+              business_card_data_update: true,
+              bulk_card_generation: true,
+              layout_templates: true,
+              serial_number_generator: true,
+              team_users: true,
+              priority_processing: true,
+              api_integration_ready: true
+            },
+            __synthetic_trial: true
+          });
+        }
+        const impositionOrder = ["free trial", "free", "trial", "pro", "business", "enterprise"];
+        const visibleImpositionPlans = orderedPlans.filter((plan) => String(plan.name || "").toLowerCase() !== "starter");
+        visibleImpositionPlans.sort((a, b) => {
+          const aName = String(a.name || "").toLowerCase();
+          const bName = String(b.name || "").toLowerCase();
+          const aIdx = impositionOrder.indexOf(aName);
+          const bIdx = impositionOrder.indexOf(bName);
+          if (aIdx !== -1 || bIdx !== -1) {
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            if (aIdx !== bIdx) return aIdx - bIdx;
+          }
+          const aPrice = Number(a.price_inr_month || 0);
+          const bPrice = Number(b.price_inr_month || 0);
+          if (aPrice !== bPrice) return aPrice - bPrice;
+          return aName.localeCompare(bName);
+        });
+        orderedPlans.length = 0;
+        orderedPlans.push(...visibleImpositionPlans);
+      }
       if (isStorageProduct) {
         const storageOrder = ["free", "basic", "standard", "pro"];
         orderedPlans.sort((a, b) => {
@@ -768,11 +899,18 @@
         const isStorage = isStorageProduct;
         const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
         const isWhatsAppAutomation = normalizedSlug === "whatsapp-automation";
+        const isImposition = normalizedSlug === "imposition-software";
         const waFeatures = plan.features || {};
         const hasDigitalCardFeature = Boolean(
           waFeatures.digital_card || waFeatures.digital_card_enabled || (plan.limits || {}).digital_card_enabled
         );
         const isFreePlan = String(plan.name || "").toLowerCase() === "free";
+        const isTrialPlan = isImposition && (
+          String(plan.name || "").toLowerCase().includes("trial") ||
+          Boolean((plan.features || {}).is_trial)
+        );
+        const hasTrialPlanId = Number(plan.id) > 0;
+        const trialNotConfigured = isTrialPlan && !hasTrialPlanId;
         const storageTrialOnly = isStorage && isFreePlan;
         const features = buildFeatureList(plan, normalizedSlug);
         const monitorFeatures = isMonitor ? buildMonitorFeatures(plan) : [];
@@ -785,19 +923,21 @@
         const activePlanIsFree = activePlan
           ? String(activePlan.name || "").toLowerCase() === "free"
           : false;
-        const trialLocked = isLoggedIn && !freeEligible && (isFreePlan || storageTrialOnly);
+        const trialLocked = isLoggedIn && !freeEligible && (isFreePlan || isTrialPlan || storageTrialOnly);
         const actionLabel = !isLoggedIn
-          ? (isStorage
-            ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay")
+          ? (isStorage || isImposition
+            ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
             : isFreePlan
               ? "Take a Free Trial"
               : "Process to Pay")
+          : trialNotConfigured
+          ? "Trial Not Configured"
           : trialLocked
           ? "Trial Unavailable"
-          : isCurrentPlan
+        : isCurrentPlan
           ? "Current Plan"
-          : isStorage
-          ? (storageTrialOnly ? "Start Free Trial" : "Process to Pay")
+        : isStorage || isImposition
+          ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
           : isFreePlan
           ? "Take a Free Trial"
           : "Process to Pay";
@@ -805,11 +945,11 @@
         card.className = "plan-card card";
         card.setAttribute("data-plan-card", "1");
         card.setAttribute("data-plan-id", plan.id);
-        const trialSuffix = (storageTrialOnly || (!isStorage && (plan.name && plan.name.toLowerCase() === "free")))
+        const trialSuffix = (storageTrialOnly || isTrialPlan || (!isStorage && (plan.name && plan.name.toLowerCase() === "free")))
           ? `${isMonitor ? 15 : data.trial_days} days free trial`
           : null;
         card.innerHTML = `
-          <h2 class="plan-title">${escapeHtml(formatProductPlanTitle(plan.name, normalizedSlug))}</h2>
+          <h2 class="plan-title">${escapeHtml(isImposition && isTrialPlan ? "Free" : formatProductPlanTitle(plan.name, normalizedSlug))}</h2>
           <p>${isMonitor
             ? escapeHtml(monitorPlanDescription(plan.name))
             : normalizedSlug === "ai-chatbot"
@@ -820,6 +960,8 @@
                   ? escapeHtml(erpPlanDescription(plan.name))
                   : normalizedSlug === "whatsapp-automation"
                     ? escapeHtml(whatsappAutomationPlanDescription(plan.name))
+                    : normalizedSlug === "imposition-software"
+                      ? escapeHtml(impositionPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
           <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
             <span data-price>Custom</span>
@@ -879,7 +1021,15 @@
             </ul>
           ` : `
             <ul class="plan-features">
-              ${features.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+              ${features.map((item) => {
+                if (item && typeof item === "object") {
+                  if (item.ok === undefined) {
+                    return `<li>${escapeHtml(item.text || "")}</li>`;
+                  }
+                  return `<li><span class="feature-flag ${item.ok ? "ok" : "no"}"></span>${escapeHtml(item.text || "")}</li>`;
+                }
+                return `<li>${escapeHtml(item)}</li>`;
+              }).join("")}
             </ul>
           `}
           <button class="btn btn-outline" data-plan-action>${escapeHtml(actionLabel)}</button>
@@ -891,15 +1041,24 @@
           actionBtn.style.cursor = "not-allowed";
           actionBtn.style.pointerEvents = "none";
         }
+        if (trialNotConfigured) {
+          actionBtn.disabled = true;
+          actionBtn.style.opacity = "0.6";
+          actionBtn.style.cursor = "not-allowed";
+          actionBtn.style.pointerEvents = "none";
+        }
         actionBtn.addEventListener("click", () => {
           if (isCurrentPlan || trialLocked) {
+            return;
+          }
+          if (trialNotConfigured) {
             return;
           }
           if (!isLoggedIn) {
             window.location.href = "/auth/login/?next=/pricing/";
             return;
           }
-          if ((isStorage && storageTrialOnly) || (!isStorage && isFreePlan)) {
+          if ((isStorage && storageTrialOnly) || isTrialPlan || (!isStorage && isFreePlan)) {
             if (!freeEligible) {
               return;
             }
@@ -1005,6 +1164,16 @@
         setTextContentById("pricing-header-subtitle", "Dynamic pricing from admin plans with Digital Card add-on user pricing.", headerSubtitle?.dataset.default);
         setButtonById("pricing-hero-primary", "View Plans", "/pricing/?product=whatsapp-automation");
         setButtonById("pricing-hero-secondary", "Talk to Sales", "/contact/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      } else if (productSlug === "imposition-software") {
+        setTextContentById("pricing-hero-title", "Imposition Software Pricing", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "License-based card imposition plans with device limits and print-ready export control.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Imposition Software Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose Free Trial, Pro, Business, or Enterprise based on your team and workflow needs.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "View Product", "/imposition-software.html");
+        setButtonById("pricing-hero-secondary", "Start Free Trial", "/imposition-software-pricing.html");
         if (addonSection) addonSection.style.display = "none";
         if (trialNote) trialNote.style.display = "none";
         if (footerCta) footerCta.style.display = "none";

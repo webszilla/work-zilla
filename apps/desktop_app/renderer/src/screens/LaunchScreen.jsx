@@ -6,6 +6,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   const enabledProducts = new Set(auth?.enabled_products || []);
   const canUseMonitor = enabledProducts.has("monitor") || enabledProducts.has("worksuite");
   const canUseStorage = enabledProducts.has("storage");
+  const canUseImposition = enabledProducts.has("imposition-software") || enabledProducts.has("imposition");
   const [agentVersion, setAgentVersion] = useState("");
 
   useEffect(() => {
@@ -77,8 +78,21 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
               {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
             </button>
           ) : null}
+
+          {isAuthed && canUseImposition ? (
+            <button
+              type="button"
+              className="launch-tile"
+              onClick={() => handleClick("imposition")}
+              disabled={!isOnline}
+            >
+              <div className="tile-title">Imposition Software</div>
+              <div className="tile-desc">ID card and business card print layout imposition.</div>
+              {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
+            </button>
+          ) : null}
         </div>
-        {isAuthed && !canUseMonitor && !canUseStorage ? (
+        {isAuthed && !canUseMonitor && !canUseStorage && !canUseImposition ? (
           <div className="launch-version">No active product enabled for this account.</div>
         ) : null}
         {agentVersion ? (

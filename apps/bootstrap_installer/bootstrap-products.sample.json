@@ -6,5 +6,9 @@
   "storage": {
     "windows": "https://cdn.example.com/workzilla/storage/latest/WorkZillaStorageSetup.exe",
     "mac": "https://cdn.example.com/workzilla/storage/latest/WorkZillaStorage.dmg"
+  },
+  "imposition": {
+    "windows": "https://cdn.example.com/workzilla/imposition/latest/imposition-win.pkg",
+    "mac": "https://cdn.example.com/workzilla/imposition/latest/imposition-mac.pkg"
   }
 }

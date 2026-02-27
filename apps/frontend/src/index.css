@@ -245,6 +245,9 @@ a{
 .app-shell.sidebar-style-compact.sidebar-collapsed .brand{
   font-size:16px;
 }
+.app-shell.sidebar-style-compact.sidebar-collapsed .brand span:only-child{
+  display:block;
+}
 .app-shell.sidebar-style-compact.sidebar-collapsed .org{
   display:none;
 }

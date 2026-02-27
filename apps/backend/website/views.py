@@ -35,6 +35,8 @@ from core.models import (
 from apps.backend.common_auth.models import User
 from core.notification_emails import send_email_verification
 
+BOOTSTRAP_INSTALLER_VERSION = "0.1.8"
+
 
 def _resolve_download_path(*candidates):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,16 +68,8 @@ def _prefer_arm64_mac(request):
 
 def download_windows_agent(request):
     file_path, filename = _resolve_download_path(
-        "Work Zilla Installer-win-x64-0.1.7.exe",
-        "Work Zilla Installer-win-x64-0.1.6.exe",
-        "Work Zilla Installer-win-x64-0.1.5.exe",
-        "Work Zilla Installer-win-x64-0.1.4.exe",
-        "Work Zilla Installer-win-x64-0.1.3.exe",
-        "Work Zilla Installer-win-x64-0.1.2.exe",
-        "Work Zilla Installer-win-x64-0.1.1.exe",
-        "Work Zilla Installer-win-x64-0.1.0.exe",
-        "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
+        f"Work Zilla Installer-win-x64-{BOOTSTRAP_INSTALLER_VERSION}.exe",
+        "Work Zilla Installer-win-x64-latest.exe",
     )
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
@@ -110,26 +104,20 @@ def download_windows_storage_product_agent(request):
 
 def download_mac_agent(request):
     prefer_arm = _prefer_arm64_mac(request)
-    arm_file_latest = "Work Zilla Installer-mac-arm64-0.1.7.dmg"
-    x64_file_latest = "Work Zilla Installer-mac-x64-0.1.7.dmg"
-    arm_zip_latest = "Work Zilla Installer-mac-arm64-0.1.7.zip"
-    x64_zip_latest = "Work Zilla Installer-mac-x64-0.1.7.zip"
-    arm_file = "Work Zilla Installer-mac-arm64-0.1.0.dmg"
-    x64_file = "Work Zilla Installer-mac-x64-0.1.0.dmg"
-    arm_zip = "Work Zilla Installer-mac-arm64-0.1.0.zip"
-    x64_zip = "Work Zilla Installer-mac-x64-0.1.0.zip"
+    arm_file_latest = f"Work Zilla Installer-mac-arm64-{BOOTSTRAP_INSTALLER_VERSION}.dmg"
+    x64_file_latest = f"Work Zilla Installer-mac-x64-{BOOTSTRAP_INSTALLER_VERSION}.dmg"
+    arm_zip_latest = f"Work Zilla Installer-mac-arm64-{BOOTSTRAP_INSTALLER_VERSION}.zip"
+    x64_zip_latest = f"Work Zilla Installer-mac-x64-{BOOTSTRAP_INSTALLER_VERSION}.zip"
     if prefer_arm:
         file_path, filename = _resolve_download_path(
             arm_file_latest,
             arm_zip_latest,
             x64_file_latest,
             x64_zip_latest,
-            arm_file,
-            arm_zip,
-            x64_file,
-            x64_zip,
-            "WorkZillaInstaller.dmg",
-            "WorkZillaAgent.dmg",
+            "Work Zilla Installer-mac-arm64-latest.dmg",
+            "Work Zilla Installer-mac-arm64-latest.zip",
+            "Work Zilla Installer-mac-x64-latest.dmg",
+            "Work Zilla Installer-mac-x64-latest.zip",
         )
     else:
         file_path, filename = _resolve_download_path(
@@ -137,12 +125,10 @@ def download_mac_agent(request):
             x64_zip_latest,
             arm_file_latest,
             arm_zip_latest,
-            x64_file,
-            x64_zip,
-            arm_file,
-            arm_zip,
-            "WorkZillaInstaller.dmg",
-            "WorkZillaAgent.dmg",
+            "Work Zilla Installer-mac-x64-latest.dmg",
+            "Work Zilla Installer-mac-x64-latest.zip",
+            "Work Zilla Installer-mac-arm64-latest.dmg",
+            "Work Zilla Installer-mac-arm64-latest.zip",
         )
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
@@ -226,6 +212,30 @@ def download_mac_storage_product_agent(request):
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
+def download_windows_imposition_product_agent(request):
+    file_path, filename = _resolve_download_path(
+        "Work Zilla Imposition Setup 0.2.0.exe",
+    )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
+def download_mac_imposition_product_agent(request):
+    prefer_arm = _prefer_arm64_mac(request)
+    if prefer_arm:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Imposition-0.2.0-arm64.dmg",
+            "Work Zilla Imposition-0.2.0-arm64.pkg",
+            "Work Zilla Imposition-0.2.0-arm64-mac.zip",
+        )
+    else:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Imposition-0.2.0.dmg",
+            "Work Zilla Imposition-0.2.0.pkg",
+            "Work Zilla Imposition-0.2.0-mac.zip",
+        )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+
 def bootstrap_products_config(request):
     monitor_windows_candidates = (
         "Work Zilla Agent Setup 0.2.0.exe",
@@ -266,6 +276,20 @@ def bootstrap_products_config(request):
     monitor_mac_url = request.build_absolute_uri("/downloads/mac-monitor-product-agent/")
     storage_windows_url = request.build_absolute_uri("/downloads/windows-storage-product-agent/")
     storage_mac_url = request.build_absolute_uri("/downloads/mac-storage-product-agent/")
+    imposition_windows_url = request.build_absolute_uri("/downloads/windows-imposition-product-agent/")
+    imposition_mac_url = request.build_absolute_uri("/downloads/mac-imposition-product-agent/")
+
+    imposition_windows_candidates = (
+        "Work Zilla Imposition Setup 0.2.0.exe",
+    )
+    imposition_mac_candidates = (
+        "Work Zilla Imposition-0.2.0-arm64.dmg",
+        "Work Zilla Imposition-0.2.0-arm64.pkg",
+        "Work Zilla Imposition-0.2.0-arm64-mac.zip",
+        "Work Zilla Imposition-0.2.0.dmg",
+        "Work Zilla Imposition-0.2.0.pkg",
+        "Work Zilla Imposition-0.2.0-mac.zip",
+    )
 
     monitor_entry = {}
     if _has_download_artifact(*monitor_windows_candidates):
@@ -279,10 +303,18 @@ def bootstrap_products_config(request):
     if _has_download_artifact(*storage_mac_candidates):
         storage_entry["mac"] = storage_mac_url
 
+    imposition_entry = {}
+    if _has_download_artifact(*imposition_windows_candidates):
+        imposition_entry["windows"] = imposition_windows_url
+    if _has_download_artifact(*imposition_mac_candidates):
+        imposition_entry["mac"] = imposition_mac_url
+
     return JsonResponse(
         {
             "monitor": monitor_entry,
             "storage": storage_entry,
+            "imposition": imposition_entry,
+            "imposition-software": imposition_entry,
         }
     )
 
@@ -297,10 +329,36 @@ def _normalize_product_slug(value, default="monitor"):
 def _dashboard_path_for_product(value):
     slug = _normalize_product_slug(value)
     if slug == "monitor":
-        return "/app/worksuite/"
+        return "/app/work-suite/"
+    if slug == "imposition-software":
+        return "/app/imposition/"
     if slug == "business-autopilot-erp":
         return "/app/business-autopilot/"
     return f"/app/{slug}/"
+
+
+def _display_product_name(product=None, slug=None):
+    normalized_slug = _normalize_product_slug(
+        (getattr(product, "slug", None) if product else None) or slug
+    )
+    if normalized_slug == "monitor":
+        return "Work Suite"
+
+    if product and getattr(product, "name", None):
+        name = str(product.name).strip()
+        if name.lower() == "monitor":
+            return "Work Suite"
+        return name
+
+    if normalized_slug == "storage":
+        return "Online Storage"
+    if normalized_slug == "ai-chatbot":
+        return "AI Chatbot"
+    if normalized_slug == "imposition-software":
+        return "Imposition Software"
+    if normalized_slug == "business-autopilot-erp":
+        return "Business Autopilot ERP"
+    return "Work Suite"
 
 
 def _storage_is_free_plan(plan):
@@ -368,6 +426,7 @@ def _base_context(request):
         "storage",  # Online Storage
         "online-storage",  # compatibility alias if slug is renamed later
         "business-autopilot-erp",
+        "imposition-software",
     ]
     product_order = {slug: idx for idx, slug in enumerate(live_public_product_slugs)}
     products = list(
@@ -580,6 +639,55 @@ def pricing_view(request):
     return render(request, "public/pricing.html", context)
 
 
+def imposition_pricing_view(request):
+    context = _base_context(request)
+    product = Product.objects.filter(slug="imposition-software", is_active=True).first()
+    plans = []
+    trial_plan_id = None
+    plan_id_map = {}
+    if product:
+        all_plans = (
+            Plan.objects
+            .filter(product=product)
+            .order_by("monthly_price", "yearly_price", "name")
+        )
+        for plan in all_plans:
+            feature_flags = dict(plan.features or {})
+            plan_id_map[str(plan.name or "").strip().lower()] = plan.id
+            if feature_flags.get("is_trial"):
+                trial_plan_id = plan.id
+                continue
+            plans.append(plan)
+
+    context.update({
+        "imposition_product": product,
+        "imposition_plans": plans,
+        "imposition_trial_plan_id": trial_plan_id,
+        "imposition_plan_id_map_json": json.dumps(plan_id_map),
+    })
+    return render(request, "public/imposition_pricing.html", context)
+
+
+def imposition_software_view(request):
+    context = _base_context(request)
+    context["imposition_trial_plan_id"] = None
+    product = Product.objects.filter(slug="imposition-software", is_active=True).first()
+    if product:
+        all_plans = (
+            Plan.objects
+            .filter(product=product)
+            .order_by("monthly_price", "name")
+        )
+        trial_plan = None
+        for row in all_plans:
+            if (row.features or {}).get("is_trial"):
+                trial_plan = row
+                break
+        if trial_plan:
+            context["imposition_trial_plan_id"] = trial_plan.id
+    return render(request, "public/imposition_software.html", context)
+
+
 def contact_view(request):
     context = _base_context(request)
     site_brand = SiteBrandSettings.get_active()
@@ -683,7 +791,7 @@ def checkout_view(request):
         addon_count = 0
     addon_count = max(0, addon_count)
     plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
-    selected_product_name = product_slug.title() if product_slug else ""
+    selected_product_name = _display_product_name(slug=product_slug) if product_slug else ""
     price_suffix = "/user per month" if billing == "monthly" else "/user per year"
     if product_slug in ("storage", "online-storage"):
         try:
@@ -1007,7 +1115,7 @@ def subscription_start(request):
             return JsonResponse({
                 "status": "trialing",
                 "trial_end": trial_end.isoformat(),
-                "redirect": f"/app/{product_slug}/",
+                "redirect": _dashboard_path_for_product(product_slug),
                 "subscription_id": subscription.id,
             })
 
@@ -1514,7 +1622,7 @@ def account_view(request):
         slug = product.slug if product and product.slug else "monitor"
         existing_slugs.add(slug)
         sub.product_slug = slug
-        sub.product_name = product.name if product else "Work Suite"
+        sub.product_name = _display_product_name(product=product, slug=slug)
         sub.plan_rank = _plan_rank(plan)
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
         sub.is_free_plan = is_free_plan(plan)
@@ -1580,7 +1688,7 @@ def account_view(request):
         product = plan.product if plan else None
         slug = product.slug if product and product.slug else "monitor"
         sub.product_slug = slug
-        sub.product_name = product.name if product else "Work Suite"
+        sub.product_name = _display_product_name(product=product, slug=slug)
         sub.dashboard_path = _dashboard_path_for_product(slug)
         sub.plan_rank = _plan_rank(plan)
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
@@ -1597,7 +1705,7 @@ def account_view(request):
             product = transfer.plan.product if transfer.plan else None
             slug = product.slug if product else "monitor"
             pending_renewal_rows.append({
-                "product_name": product.name if product else "Work Suite",
+                "product_name": _display_product_name(product=product, slug=slug),
                 "product_slug": slug,
                 "plan_name": transfer.plan.name if transfer.plan else "-",
                 "billing_cycle": transfer.billing_cycle,
@@ -1618,7 +1726,7 @@ def account_view(request):
         for transfer in pending_payments:
             product = transfer.plan.product if transfer.plan else None
             pending_payment_rows.append({
-                "product_name": product.name if product else "Work Suite",
+                "product_name": _display_product_name(product=product, slug=product.slug if product else "monitor"),
                 "product_slug": product.slug if product else "monitor",
                 "plan_name": transfer.plan.name if transfer.plan else "-",
                 "billing_cycle": transfer.billing_cycle,
@@ -1926,7 +2034,7 @@ def billing_view(request):
             product = entry.plan.product if entry.plan else None
             billing_activity.append({
                 "type": "Subscription",
-                "product_name": product.name if product else "Work Suite",
+                "product_name": _display_product_name(product=product, slug=product.slug if product else "monitor"),
                 "plan": entry.plan.name if entry.plan else "-",
                 "status": entry.status,
                 "billing_cycle": entry.billing_cycle or "monthly",
@@ -1936,7 +2044,7 @@ def billing_view(request):
         product = transfer.plan.product if transfer.plan else None
         billing_activity.append({
             "type": "Payment",
-            "product_name": product.name if product else "Work Suite",
+            "product_name": _display_product_name(product=product, slug=product.slug if product else "monitor"),
             "plan": transfer.plan.name if transfer.plan else "-",
             "status": transfer.status,
             "billing_cycle": transfer.billing_cycle or "monthly",

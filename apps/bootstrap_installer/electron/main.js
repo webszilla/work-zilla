@@ -4,20 +4,39 @@ const path = require("path");
 const https = require("https");
 const http = require("http");
 const os = require("os");
+const { execFile } = require("child_process");
 const { URL } = require("url");
 
 const CONFIG_URLS = [
   process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL,
-  "https://getworkzilla.com/static/downloads/bootstrap-products.json",
   "https://getworkzilla.com/downloads/bootstrap-products.json",
+  "https://getworkzilla.com/static/downloads/bootstrap-products.json",
 ].filter(Boolean);
 
 const SUPPORTED_PRODUCTS = {
-  monitor: "Work Suite",
-  storage: "Online Storage",
+  monitor: {
+    label: "Work Suite",
+    description: "Employee monitoring and productivity insights.",
+    packageBasename: { windows: "monitor-win-installer", mac: "monitor-mac-installer" },
+  },
+  storage: {
+    label: "Online Storage",
+    description: "Secure cloud sync and backup.",
+    packageBasename: { windows: "storage-win-installer", mac: "storage-mac-installer" },
+  },
+  imposition: {
+    label: "Imposition Software",
+    description: "ID Card and Business Card Imposition Tool",
+    packageBasename: { windows: "imposition-win", mac: "imposition-mac" },
+  },
 };
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 const PRODUCT_KEYS = Object.keys(SUPPORTED_PRODUCTS);
+const PRODUCT_CONFIG_ALIASES = {
+  monitor: ["monitor"],
+  storage: ["storage"],
+  imposition: ["imposition", "imposition-software"],
+};
 
 function getPlatformKey() {
   if (process.platform === "win32") return "windows";
@@ -106,7 +125,7 @@ function sanitizeFilename(name) {
 
 function detectInstallerName(productKey, downloadUrl) {
   const platform = getPlatformKey();
-  const defaultSuffix = platform === "windows" ? ".exe" : ".dmg";
+  const defaultSuffix = platform === "windows" ? ".exe" : ".pkg";
   try {
     const parsed = new URL(downloadUrl);
     const base = path.basename(parsed.pathname) || "";
@@ -120,7 +139,9 @@ function detectInstallerName(productKey, downloadUrl) {
   } catch (_err) {
     // no-op
   }
-  return `${productKey}-${Date.now()}${defaultSuffix}`;
+  const meta = SUPPORTED_PRODUCTS[productKey] || {};
+  const preferredBase = meta.packageBasename?.[platform] || productKey;
+  return `${preferredBase}-${Date.now()}${defaultSuffix}`;
 }
 
 function ensureHttpsDownload(urlText) {
@@ -212,8 +233,26 @@ async function openInstaller(installerPath) {
   }
 }
 
+async function runSilentInstall(installerPath) {
+  const platform = getPlatformKey();
+  const ext = path.extname(installerPath).toLowerCase();
+  if (platform === "windows") {
+    if (ext === ".exe") {
+      await runExecFile(installerPath, ["/S"]);
+      return true;
+    }
+    if (ext === ".msi") {
+      await runExecFile("msiexec", ["/i", installerPath, "/qn", "/norestart"]);
+      return true;
+    }
+  }
+  // macOS pkg silent install needs elevated privileges; use interactive fallback.
+  return false;
+}
+
 function validateProductConfig(config, productKey, platformKey) {
-  const section = config?.[productKey];
+  const keys = PRODUCT_CONFIG_ALIASES[productKey] || [productKey];
+  const section = keys.map((key) => config?.[key]).find((item) => Boolean(item));
   if (!section) {
     throw new Error(`Missing product config: ${productKey}`);
   }
@@ -245,23 +284,11 @@ async function downloadFromUrls({ urls, destination, progressCb }) {
 }
 
 function detectInstalledProducts() {
-  const initial = { monitor: false, storage: false };
-  const platform = getPlatformKey();
-  let baseInstalled = false;
-  if (platform === "windows") {
-    const candidates = [
-      path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Work Zilla Agent.exe"),
-      path.join(process.env.ProgramFiles || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
-      path.join(process.env["ProgramFiles(x86)"] || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
-    ];
-    baseInstalled = candidates.some((p) => p && fs.existsSync(p));
-  } else if (platform === "mac") {
-    const candidates = [
-      "/Applications/Work Zilla Agent.app",
-      path.join(os.homedir(), "Applications", "Work Zilla Agent.app"),
-    ];
-    baseInstalled = candidates.some((p) => fs.existsSync(p));
-  }
+  const initial = PRODUCT_KEYS.reduce((acc, key) => {
+    acc[key] = false;
+    return acc;
+  }, {});
+  const baseInstalled = isBaseAgentInstalled();
   if (!baseInstalled) {
     return initial;
   }
@@ -270,10 +297,30 @@ function detectInstalledProducts() {
   if (!hasAnyProductInstalled) {
     return initial;
   }
-  return {
-    monitor: Boolean(state.monitor),
-    storage: Boolean(state.storage),
-  };
+  return PRODUCT_KEYS.reduce((acc, key) => {
+    acc[key] = Boolean(state[key]);
+    return acc;
+  }, {});
+}
+
+function isBaseAgentInstalled() {
+  const platform = getPlatformKey();
+  if (platform === "windows") {
+    const candidates = [
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Work Zilla Agent.exe"),
+      path.join(process.env.ProgramFiles || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
+      path.join(process.env["ProgramFiles(x86)"] || "", "Work Zilla Agent", "Work Zilla Agent.exe"),
+    ];
+    return candidates.some((candidate) => candidate && fs.existsSync(candidate));
+  }
+  if (platform === "mac") {
+    const candidates = [
+      "/Applications/Work Zilla Agent.app",
+      path.join(os.homedir(), "Applications", "Work Zilla Agent.app"),
+    ];
+    return candidates.some((candidate) => fs.existsSync(candidate));
+  }
+  return false;
 }
 
 function getInstalledStatePath() {
@@ -281,22 +328,27 @@ function getInstalledStatePath() {
 }
 
 function normalizeInstalledState(raw) {
-  return {
-    monitor: Boolean(raw?.monitor),
-    storage: Boolean(raw?.storage),
+  const normalized = {
+    lastInstalledProduct: PRODUCT_KEYS.includes(raw?.lastInstalledProduct)
+      ? raw.lastInstalledProduct
+      : "",
   };
+  for (const key of PRODUCT_KEYS) {
+    normalized[key] = Boolean(raw?.[key]);
+  }
+  return normalized;
 }
 
 function readInstalledState() {
   const statePath = getInstalledStatePath();
   try {
     if (!fs.existsSync(statePath)) {
-      return { monitor: false, storage: false };
+      return normalizeInstalledState({});
     }
     const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
     return normalizeInstalledState(raw);
   } catch (_err) {
-    return { monitor: false, storage: false };
+    return normalizeInstalledState({});
   }
 }
 
@@ -312,8 +364,86 @@ function writeInstalledState(nextState) {
 
 function markProductInstalled(productKey) {
   const state = readInstalledState();
+  for (const key of PRODUCT_KEYS) {
+    state[key] = Boolean(state[key]);
+  }
   state[productKey] = true;
+  state.lastInstalledProduct = productKey;
   writeInstalledState(state);
+}
+
+function markProductUninstalled(productKey) {
+  const state = readInstalledState();
+  state[productKey] = false;
+  if (state.lastInstalledProduct === productKey) {
+    state.lastInstalledProduct = "";
+  }
+  writeInstalledState(state);
+  return state;
+}
+
+function runExecFile(file, args = []) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function uninstallBaseAgentForWindows() {
+  const uninstallers = [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Uninstall Work Zilla Agent.exe"),
+    path.join(process.env.ProgramFiles || "", "Work Zilla Agent", "Uninstall Work Zilla Agent.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "", "Work Zilla Agent", "Uninstall Work Zilla Agent.exe"),
+  ].filter(Boolean);
+  const existing = uninstallers.filter((candidate) => fs.existsSync(candidate));
+  if (!existing.length) {
+    throw new Error("Uninstaller not found for Work Zilla Agent.");
+  }
+
+  let lastError = null;
+  for (const uninstaller of existing) {
+    for (const args of [["/S"], ["/quiet"], []]) {
+      try {
+        await runExecFile(uninstaller, args);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+  throw lastError || new Error("Unable to run Work Zilla Agent uninstaller.");
+}
+
+function uninstallBaseAgentForMac() {
+  const candidates = [
+    "/Applications/Work Zilla Agent.app",
+    path.join(os.homedir(), "Applications", "Work Zilla Agent.app"),
+  ];
+  const existing = candidates.filter((candidate) => fs.existsSync(candidate));
+  if (!existing.length) {
+    throw new Error("Work Zilla Agent app not found.");
+  }
+  for (const appPath of existing) {
+    fs.rmSync(appPath, { recursive: true, force: true });
+  }
+}
+
+async function uninstallBaseAgent() {
+  const platform = getPlatformKey();
+  if (platform === "windows") {
+    await uninstallBaseAgentForWindows();
+    return;
+  }
+  if (platform === "mac") {
+    uninstallBaseAgentForMac();
+    return;
+  }
+  throw new Error("Uninstall is not supported on this platform.");
 }
 
 ipcMain.handle("bootstrap:get-products", async () => {
@@ -324,9 +454,16 @@ ipcMain.handle("bootstrap:get-products", async () => {
 
   const { config, source } = await fetchConfigWithFallback();
   const installed = detectInstalledProducts();
-  const products = Object.entries(SUPPORTED_PRODUCTS).map(([key, label]) => {
-    const hasPackage = Boolean(config?.[key]?.[platform]);
-    return { key, label, available: hasPackage, installed: Boolean(installed[key]) };
+  const products = Object.entries(SUPPORTED_PRODUCTS).map(([key, meta]) => {
+    const aliases = PRODUCT_CONFIG_ALIASES[key] || [key];
+    const hasPackage = aliases.some((alias) => Boolean(config?.[alias]?.[platform]));
+    return {
+      key,
+      label: meta.label,
+      description: meta.description || "",
+      available: hasPackage,
+      installed: Boolean(installed[key]),
+    };
   });
 
   return {
@@ -372,7 +509,17 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     done: true,
   });
 
-  await openInstaller(destination);
+  let installMode = "interactive";
+  try {
+    const silentlyInstalled = await runSilentInstall(destination);
+    if (!silentlyInstalled) {
+      await openInstaller(destination);
+    } else {
+      installMode = "silent";
+    }
+  } catch (_err) {
+    await openInstaller(destination);
+  }
   markProductInstalled(productKey);
   return {
     ok: true,
@@ -381,7 +528,60 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     platform,
     sourceUrl: usedUrl,
     filename: path.basename(destination),
+    installMode,
+    firstLaunch: {
+      activationRequired: productKey === "imposition",
+      licenseEndpoint: "/api/imposition/license/validate",
+      registerEndpoint: "/api/imposition/device/register",
+      checkEndpoint: "/api/imposition/device/check",
+    },
   };
+});
+
+ipcMain.handle("bootstrap:uninstall-product", async (_event, productKey) => {
+  if (!SUPPORTED_PRODUCTS[productKey]) {
+    throw new Error("Unknown product selected.");
+  }
+  const state = readInstalledState();
+  if (!state[productKey]) {
+    return {
+      ok: true,
+      productKey,
+      message: `${SUPPORTED_PRODUCTS[productKey].label} is already not installed.`,
+    };
+  }
+
+  const nextState = { ...state, [productKey]: false };
+  const hasOtherProducts = PRODUCT_KEYS.some((key) => key !== productKey && nextState[key] === true);
+  if (hasOtherProducts) {
+    writeInstalledState(nextState);
+    return {
+      ok: true,
+      productKey,
+      message: `${SUPPORTED_PRODUCTS[productKey].label} module removed. Shared app kept for other installed modules.`,
+    };
+  }
+
+  if (!isBaseAgentInstalled()) {
+    markProductUninstalled(productKey);
+    return {
+      ok: true,
+      productKey,
+      message: `${SUPPORTED_PRODUCTS[productKey].label} module removed.`,
+    };
+  }
+
+  try {
+    await uninstallBaseAgent();
+    markProductUninstalled(productKey);
+    return {
+      ok: true,
+      productKey,
+      message: `${SUPPORTED_PRODUCTS[productKey].label} uninstalled from this computer.`,
+    };
+  } catch (error) {
+    throw new Error(error?.message || "Uninstall failed.");
+  }
 });
 
 if (!gotSingleInstanceLock) {

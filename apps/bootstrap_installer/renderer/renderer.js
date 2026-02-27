@@ -49,19 +49,34 @@ function createCard(product, onInstall) {
   const subtitle = document.createElement("p");
   if (!product.available) {
     subtitle.textContent = "Not available for this platform in current config.";
+  } else if (product.description) {
+    subtitle.textContent = product.description;
   } else if (product.installed) {
     subtitle.textContent = "Installed in this computer. If needed, reinstall again.";
   } else {
     subtitle.textContent = "Download latest installer and run setup.";
   }
   const button = document.createElement("button");
-  button.textContent = product.installed ? "Installed (Reinstall)" : "Download & Install";
+  button.className = "btn-install";
+  button.textContent = product.installed ? "Install Again" : "Install";
   if (!product.available) {
     button.dataset.unavailable = "1";
   }
   button.disabled = !product.available || installing;
   button.addEventListener("click", () => onInstall(product.key));
-  card.append(title, subtitle, button);
+
+  const uninstallButton = document.createElement("button");
+  uninstallButton.className = "btn-uninstall";
+  uninstallButton.textContent = "Uninstall";
+  uninstallButton.dataset.productKey = product.key;
+  uninstallButton.disabled = !product.installed || installing;
+  uninstallButton.addEventListener("click", () => handleUninstall(product.key));
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+  actions.append(button, uninstallButton);
+
+  card.append(title, subtitle, actions);
   return card;
 }
 
@@ -75,7 +90,15 @@ function renderProducts(products, onInstall) {
 
 function setButtonsDisabled(disabled) {
   Array.from(cardsEl.querySelectorAll("button")).forEach((button) => {
-    button.disabled = disabled || button.dataset.unavailable === "1";
+    const isUnavailableInstall = button.classList.contains("btn-install") && button.dataset.unavailable === "1";
+    const isUninstallButton = button.classList.contains("btn-uninstall");
+    if (isUninstallButton) {
+      const key = button.dataset.productKey;
+      const product = productState.find((item) => item.key === key);
+      button.disabled = disabled || !product?.installed;
+      return;
+    }
+    button.disabled = disabled || isUnavailableInstall;
   });
 }
 
@@ -110,7 +133,11 @@ async function handleInstall(productKey) {
   try {
     const result = await window.bootstrapApi.installProduct(productKey);
     setProgress(1, 1);
-    setStatus(`Installer opened: ${result.filename || result.path}. Complete setup wizard, then launch app from Start Menu/Applications.`);
+    const activationNote = result?.firstLaunch?.activationRequired
+      ? " First launch will ask License Code, validate via SaaS, and register this device."
+      : "";
+    const modeLabel = result?.installMode === "silent" ? "Installed silently" : "Installer opened";
+    setStatus(`${modeLabel}: ${result.filename || result.path}.${activationNote}`);
     setTimeout(() => {
       refreshInstalledState();
       setStatus("Ready.");
@@ -119,6 +146,29 @@ async function handleInstall(productKey) {
   } catch (error) {
     setStatus(error?.message || "Install failed.");
     setProgress(0, 1);
+  } finally {
+    installing = false;
+    activeProduct = "";
+    setButtonsDisabled(false);
+  }
+}
+
+async function handleUninstall(productKey) {
+  if (installing) return;
+  installing = true;
+  activeProduct = productKey;
+  setButtonsDisabled(true);
+  setStatus("Uninstalling selected module...");
+  setProgress(0, 0);
+  try {
+    const result = await window.bootstrapApi.uninstallProduct(productKey);
+    setStatus(result?.message || "Uninstall completed.");
+    await refreshInstalledState();
+    setTimeout(() => {
+      setStatus("Ready.");
+    }, 1500);
+  } catch (error) {
+    setStatus(error?.message || "Uninstall failed.");
   } finally {
     installing = false;
     activeProduct = "";

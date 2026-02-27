@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "apps.backend.media_library.apps.MediaLibraryConfig",
     "apps.backend.storage.apps.StorageConfig",
     "apps.backend.business_autopilot.apps.BusinessAutopilotConfig",
+    "apps.backend.imposition.apps.ImpositionConfig",
     "apps.backend.modules.whatsapp_automation.apps.WhatsappAutomationConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",

@@ -8,6 +8,8 @@ from . import views
 urlpatterns = [
     path("", views.home_view, name="website_home"),
     path("pricing/", views.pricing_view, name="website_pricing"),
+    path("imposition-software-pricing.html", views.imposition_pricing_view, name="website_imposition_pricing"),
+    path("imposition-software.html", views.imposition_software_view, name="website_imposition_software"),
     path("worksuite/", RedirectView.as_view(url="/products/worksuite/", permanent=True), name="worksuite_landing"),
     path("ai-chatbot/", RedirectView.as_view(url="/products/ai-chatbot/", permanent=False), name="ai_chatbot_landing"),
     path("contact/", views.contact_view, name="website_contact"),
@@ -32,7 +34,13 @@ urlpatterns = [
     path("my-account/profile/", views.profile_view, name="account_profile"),
     path("downloads/windows-agent/", views.download_windows_agent, name="download_windows_agent"),
     path("downloads/windows-product-agent/", views.download_windows_product_agent, name="download_windows_product_agent"),
+    path("downloads/windows-monitor-product-agent/", views.download_windows_monitor_product_agent, name="download_windows_monitor_product_agent"),
+    path("downloads/windows-storage-product-agent/", views.download_windows_storage_product_agent, name="download_windows_storage_product_agent"),
+    path("downloads/windows-imposition-product-agent/", views.download_windows_imposition_product_agent, name="download_windows_imposition_product_agent"),
     path("downloads/mac-agent/", views.download_mac_agent, name="download_mac_agent"),
     path("downloads/mac-product-agent/", views.download_mac_product_agent, name="download_mac_product_agent"),
+    path("downloads/mac-monitor-product-agent/", views.download_mac_monitor_product_agent, name="download_mac_monitor_product_agent"),
+    path("downloads/mac-storage-product-agent/", views.download_mac_storage_product_agent, name="download_mac_storage_product_agent"),
+    path("downloads/mac-imposition-product-agent/", views.download_mac_imposition_product_agent, name="download_mac_imposition_product_agent"),
     path("downloads/bootstrap-products.json", views.bootstrap_products_config, name="bootstrap_products_config"),
 ]

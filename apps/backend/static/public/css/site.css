@@ -228,6 +228,10 @@ img {
   text-transform: none;
 }
 
+.header-actions .my-account-btn {
+  padding: 8px 14px;
+}
+
 .header-actions .header-get-start-btn {
   box-shadow: none;
   border-color: transparent;
@@ -820,6 +824,11 @@ img {
 
 .plan-card h3 {
   font-family: var(--font-display);
+}
+
+.plan-card > p:first-of-type {
+  min-height: 120px;
+  margin-bottom: 0;
 }
 
 .plan-card .best-discount {
@@ -1645,6 +1654,9 @@ img {
 }
 
 @media (max-width: 720px) {
+  .plan-card > p:first-of-type {
+    min-height: 0;
+  }
   .hero {
     padding: 36px 24px;
   }

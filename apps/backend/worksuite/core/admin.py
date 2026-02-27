@@ -45,7 +45,9 @@ class PlanFilter(SimpleListFilter):
 class PlanAdmin(admin.ModelAdmin):
     exclude = ("price", "duration_months")
     change_form_template = "admin/core/plan/change_form.html"
-    list_display = ("name", "monthly_price", "yearly_price", "usd_monthly_price", "usd_yearly_price", "addon_monthly_price", "addon_yearly_price", "addon_usd_monthly_price", "addon_usd_yearly_price", "employee_limit", "retention_days", "screenshot_min_minutes", "allow_addons", "allow_app_usage", "allow_gaming_ott_usage", "allow_hr_view")
+    list_display = ("name", "product", "monthly_price", "yearly_price", "usd_monthly_price", "usd_yearly_price", "addon_monthly_price", "addon_yearly_price", "addon_usd_monthly_price", "addon_usd_yearly_price", "employee_limit", "device_limit", "retention_days", "screenshot_min_minutes", "allow_addons", "allow_app_usage", "allow_gaming_ott_usage", "allow_hr_view")
+    list_filter = ("product", "allow_addons", "allow_app_usage", "allow_hr_view")
+    search_fields = ("name", "product__name", "product__slug")
 
     def log_addition(self, request, object, message):
         return

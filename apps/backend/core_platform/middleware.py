@@ -17,9 +17,16 @@ class LegacyMonitorRedirectMiddleware:
         query = request.META.get("QUERY_STRING", "")
         suffix_query = f"?{query}" if query else ""
 
+        if path in {"/app", "/app/"}:
+            return HttpResponsePermanentRedirect(f"/app/work-suite/{suffix_query}")
+
         if path.startswith("/app/monitor"):
             suffix = path[len("/app/monitor"):]
-            return HttpResponsePermanentRedirect(f"/app/worksuite{suffix}{suffix_query}")
+            return HttpResponsePermanentRedirect(f"/app/work-suite{suffix}{suffix_query}")
+
+        if path.startswith("/app/worksuite"):
+            suffix = path[len("/app/worksuite"):]
+            return HttpResponsePermanentRedirect(f"/app/work-suite{suffix}{suffix_query}")
 
         if path.startswith("/products/monitor"):
             suffix = path[len("/products/monitor"):]

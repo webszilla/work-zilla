@@ -83,7 +83,7 @@
 
       <div class="header-actions">
         {% if request.user.is_authenticated or user.is_authenticated or is_logged_in %}
-          <a class="btn btn-outline" href="/my-account/">My Account</a>
+          <a class="btn btn-outline my-account-btn" href="/my-account/">My Account</a>
         {% else %}
           <a class="btn btn-primary header-get-start-btn" href="/auth/signup/">Get Start</a>
           <a class="btn btn-outline" href="/auth/login/">Login</a>

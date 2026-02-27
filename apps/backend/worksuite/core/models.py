@@ -1242,7 +1242,7 @@ def _infer_admin_activity_product_slug(request=None):
         return "storage"
     if "/app/whatsapp-automation" in source:
         return "whatsapp-automation"
-    if "/app/worksuite" in source or "/app/monitor" in source:
+    if "/app/work-suite" in source or "/app/worksuite" in source or "/app/monitor" in source:
         return "worksuite"
     return ""
 

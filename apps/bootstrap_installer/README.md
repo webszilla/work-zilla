@@ -19,6 +19,16 @@ Lightweight launcher installer for WorkZilla products.
 ### Product Installers (separate artifacts)
 - WorkZilla Monitor installer (`.exe` / `.dmg` / `.pkg`)
 - Online Storage installer (`.exe` / `.dmg` / `.pkg`)
+- Imposition Software installer (`imposition-win.pkg` / `imposition-mac.pkg` or platform equivalent)
+
+### Modular Product Folder Model
+
+```text
+/products
+  /monitor
+  /storage
+  /imposition
+```
 
 ## Folder Structure
 
@@ -48,6 +58,10 @@ Host JSON in GitHub raw URL or CDN:
   "storage": {
     "windows": "https://server.com/storage.exe",
     "mac": "https://server.com/storage.dmg"
+  },
+  "imposition": {
+    "windows": "https://server.com/imposition-win.pkg",
+    "mac": "https://server.com/imposition-mac.pkg"
   }
 }
 ```
@@ -56,9 +70,13 @@ Host JSON in GitHub raw URL or CDN:
 
 1. User opens bootstrap installer.
 2. Launcher fetches remote JSON config (`WORKZILLA_BOOTSTRAP_CONFIG_URL`).
-3. User selects `WorkZilla Monitor` or `Online Storage`.
+3. User selects product card (`Work Suite`, `Online Storage`, `Imposition Software`).
 4. Bootstrap downloads platform package with progress bar.
-5. On completion it auto-launches downloaded installer (`shell.openPath`).
+5. Installer attempts silent install on supported package types, else opens installer interactively.
+6. For Imposition first launch, app requests License Code and validates with:
+   - `POST /api/imposition/license/validate`
+   - `POST /api/imposition/device/register`
+   - `POST /api/imposition/device/check`
 
 ## Build
 

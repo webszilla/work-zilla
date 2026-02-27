@@ -29,8 +29,8 @@ export default function ProductAccessSection({
     return key;
   };
   const productRouteMap = {
-    "monitor": "/app/worksuite",
-    "worksuite": "/app/worksuite",
+    "monitor": "/app/work-suite",
+    "worksuite": "/app/work-suite",
     "ai-chatbot": "/app/ai-chatbot",
     "storage": "/app/storage",
     "online-storage": "/app/storage",

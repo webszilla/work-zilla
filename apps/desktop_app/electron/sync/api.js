@@ -33,6 +33,18 @@ function mapUploadTransportError(error, fallbackCode = "upload_failed") {
   return mapped;
 }
 
+async function parseJsonResponse(response) {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function buildUrl(endpoint) {
   const settings = loadSettings();
   if (!settings.serverUrl) {
@@ -487,6 +499,160 @@ export async function recordMonitorStop({ companyKey, deviceId, employeeId, reas
     throw err;
   }
   return data;
+}
+
+export async function validateImpositionLicense(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/license/validate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "license_validation_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function registerImpositionDevice(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/device/register"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "device_register_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function checkImpositionDevice(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/device/check"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "device_check_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function getImpositionPolicy() {
+  const response = await getFetch()(buildUrl("/api/imposition/policy"), { method: "GET" });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "imposition_policy_unavailable";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function generateImpositionQrBarcode(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/qr-barcode/generate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "imposition_qr_barcode_generate_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function uploadImpositionBulkImport({
+  filePath,
+  importType = "id_card",
+  fieldMapping = {},
+  qrBarcode = {}
+} = {}) {
+  if (!filePath) {
+    const err = new Error("file_required");
+    err.code = "file_required";
+    throw err;
+  }
+  const form = new FormData();
+  form.append("file", fs.createReadStream(filePath), path.basename(filePath));
+  form.append("import_type", String(importType || "id_card"));
+  form.append("field_mapping", JSON.stringify(fieldMapping || {}));
+  form.append("qr_barcode", JSON.stringify(qrBarcode || {}));
+  const headers = await getFormHeaders(form);
+  let response;
+  try {
+    response = await getFetch()(buildUrl("/api/imposition/bulk-import/upload"), {
+      method: "POST",
+      body: form,
+      headers
+    });
+  } catch (error) {
+    throw mapUploadTransportError(error, "bulk_import_upload_failed");
+  }
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "bulk_import_upload_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function generateImpositionBulkLayout(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/bulk-layout/generate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "imposition_bulk_layout_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
+}
+
+export async function exportImpositionBulk(payload = {}) {
+  const response = await getFetch()(buildUrl("/api/imposition/bulk-export"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    const code = data?.detail || data?.error || "imposition_bulk_export_failed";
+    const err = new Error(code);
+    err.code = code;
+    err.status = response.status;
+    throw err;
+  }
+  return data || {};
 }
 
 function normalizeServerUrl(input) {

@@ -32,6 +32,8 @@ def _public_product_slug(value):
 def _public_product_name(value, slug):
     if slug == "monitor":
         return "Work Suite"
+    if slug == "imposition-software":
+        return "Imposition Software"
     if slug == "whatsapp-automation":
         return "WhatsApp Automation"
     return value
@@ -226,6 +228,7 @@ def public_plans(request):
 
     response_plans = []
     response_addons = []
+    trial_plan_id = None
     for plan in plans:
         if normalized_slug == "storage":
             if hasattr(plan, "monthly_price_inr"):
@@ -284,6 +287,22 @@ def public_plans(request):
                 })
             continue
         limits = plan.limits or {}
+        if normalized_slug == "imposition-software":
+            plan_features = dict(plan.features or {})
+            if plan_features.get("is_trial"):
+                trial_plan_id = plan.id
+            if plan_features.get("hidden_public") and not plan_features.get("is_trial"):
+                continue
+            limits = {
+                "device_limit": limits.get("device_limit", plan.device_limit),
+                "user_limit": limits.get("user_limit", limits.get("included_users", plan.employee_limit or 1)),
+                "included_users": limits.get("included_users", limits.get("user_limit", plan.employee_limit or 1)),
+                "custom_sheet_size": bool(limits.get("custom_sheet_size", False)),
+                "additional_user_price_inr_month": limits.get("additional_user_price_inr_month", plan.addon_monthly_price or 0),
+                "additional_user_price_usd_month": limits.get("additional_user_price_usd_month", plan.addon_usd_monthly_price or 0),
+                "additional_user_price_inr_year": limits.get("additional_user_price_inr_year", plan.addon_yearly_price or 0),
+                "additional_user_price_usd_year": limits.get("additional_user_price_usd_year", plan.addon_usd_yearly_price or 0),
+            }
         if normalized_slug == "ai-chatbot":
             limits = {
                 "widgets": limits.get("widgets"),
@@ -426,6 +445,7 @@ def public_plans(request):
         "product": {"slug": response_product_slug, "name": response_product_name},
         "trial_days": 7,
         "free_eligible": free_eligible,
+        "trial_plan_id": trial_plan_id,
         "plans": response_plans,
         "addons": response_addons,
     })

@@ -21,7 +21,7 @@ import {
   addUserActivity,
   listUserActivity
 } from "./sync/db.js";
-import { getStorageStatus, pingApi, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, createFolder as createStorageFolder, renameFolder as renameStorageFolder, deleteFolder as deleteStorageFolder, uploadFile as uploadStorageFile, downloadStorage, downloadBulkSelection, sendMonitorHeartbeat, getMonitorSettings } from "./sync/api.js";
+import { getStorageStatus, pingApi, recordMonitorStop, listRoot, listFolder, getOrgUsers, getOrgDevices, createOrgUser, createFolder as createStorageFolder, renameFolder as renameStorageFolder, deleteFolder as deleteStorageFolder, uploadFile as uploadStorageFile, downloadStorage, downloadBulkSelection, sendMonitorHeartbeat, getMonitorSettings, validateImpositionLicense, registerImpositionDevice, checkImpositionDevice, getImpositionPolicy, generateImpositionQrBarcode, uploadImpositionBulkImport, generateImpositionBulkLayout, exportImpositionBulk } from "./sync/api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -957,6 +957,49 @@ ipcMain.handle("storage:org:devices", async (_event, payload) => {
 
 ipcMain.handle("storage:org:users:create", async (_event, payload) => {
   return createOrgUser(payload);
+});
+
+ipcMain.handle("imposition:license:validate", async (_event, payload) => {
+  return validateImpositionLicense(payload || {});
+});
+
+ipcMain.handle("imposition:device:register", async (_event, payload) => {
+  const device = ensureDeviceIdentity();
+  return registerImpositionDevice({
+    license_code: payload?.license_code || payload?.licenseCode || "",
+    device_id: device.device_id,
+    device_name: device.device_name,
+    os: device.os_info,
+    app_version: device.app_version,
+  });
+});
+
+ipcMain.handle("imposition:device:check", async (_event, payload) => {
+  const device = ensureDeviceIdentity();
+  return checkImpositionDevice({
+    license_code: payload?.license_code || payload?.licenseCode || "",
+    device_id: device.device_id,
+  });
+});
+
+ipcMain.handle("imposition:policy", async () => {
+  return getImpositionPolicy();
+});
+
+ipcMain.handle("imposition:qr-barcode:generate", async (_event, payload) => {
+  return generateImpositionQrBarcode(payload || {});
+});
+
+ipcMain.handle("imposition:bulk-import:upload", async (_event, payload) => {
+  return uploadImpositionBulkImport(payload || {});
+});
+
+ipcMain.handle("imposition:bulk-layout:generate", async (_event, payload) => {
+  return generateImpositionBulkLayout(payload || {});
+});
+
+ipcMain.handle("imposition:bulk-export", async (_event, payload) => {
+  return exportImpositionBulk(payload || {});
 });
 
 async function saveDownloadResponse(response, filenameOverride) {

@@ -69,7 +69,11 @@ class OrganizationRequiredMiddleware:
             path = request.path
             if path == "/app" or path == "/app/":
                 return redirect("/app/ai-chatbot/")
-            if path.startswith("/app/worksuite") or path.startswith("/app/monitor"):
+            if (
+                path.startswith("/app/work-suite")
+                or path.startswith("/app/worksuite")
+                or path.startswith("/app/monitor")
+            ):
                 return redirect("/app/ai-chatbot/")
             if (
                 path.startswith("/api/dashboard/")

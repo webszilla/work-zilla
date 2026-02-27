@@ -19,7 +19,9 @@
     <div class="form-field">
       <label>Phone *</label>
       <div class="phone-input-group">
-        <input type="text" name="phone_country" class="form-control" list="phone-country-options" data-phone-country placeholder="+91" value="{{ billing_phone_country|default:'' }}" required>
+        <select name="phone_country" class="form-control" data-phone-country required>
+          {% include "partials/phone_country_options.html" %}
+        </select>
         <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="{{ billing_phone_number|default:'' }}" required>
       </div>
     </div>
@@ -52,9 +54,6 @@
       <input type="text" name="gstin" value="{{ billing_profile.gstin|default:'' }}">
     </div>
   </div>
-  <datalist id="phone-country-options">
-    {% include "partials/phone_country_options.html" %}
-  </datalist>
   <datalist id="billing-country-options"></datalist>
   <datalist id="billing-state-options"></datalist>
   <button class="btn btn-outline mt-3" type="submit">{{ submit_label|default:"Save Billing Details" }}</button>

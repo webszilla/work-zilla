@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   fetchOrgInbox,
   markOrgInboxRead,
@@ -28,7 +29,19 @@ function truncate(value, length = 120) {
   return text.length <= length ? text : `${text.slice(0, length).trim()}...`;
 }
 
+function resolveCurrentProductSlug(pathname) {
+  const rawPath = String(pathname || "").toLowerCase();
+  if (rawPath.includes("/storage")) return "storage";
+  if (rawPath.includes("/business-autopilot")) return "business-autopilot-erp";
+  if (rawPath.includes("/whatsapp-automation")) return "whatsapp-automation";
+  if (rawPath.includes("/ai-chatbot")) return "ai-chatbot";
+  if (rawPath.includes("/digital-card")) return "digital-card";
+  if (rawPath.includes("/ai-chat-widget")) return "ai-chat-widget";
+  return "monitor";
+}
+
 export default function OrgInboxPage() {
+  const location = useLocation();
   const [state, setState] = useState(emptyState);
   const [selectedId, setSelectedId] = useState(null);
   const [page, setPage] = useState(1);
@@ -38,6 +51,10 @@ export default function OrgInboxPage() {
   const [composeState, setComposeState] = useState({ sending: false, error: "", success: "" });
   const confirm = useConfirm();
   const PAGE_SIZE = 20;
+  const currentProductSlug = useMemo(
+    () => resolveCurrentProductSlug(location.pathname),
+    [location.pathname]
+  );
 
   const items = state.data?.results || [];
   const totalPages = state.data?.total_pages || 1;
@@ -46,7 +63,7 @@ export default function OrgInboxPage() {
   async function loadInbox({ keepSelection = false } = {}) {
     setState((prev) => ({ ...prev, loading: true, error: "" }));
     try {
-      const data = await fetchOrgInbox({ page, pageSize: PAGE_SIZE });
+      const data = await fetchOrgInbox({ page, pageSize: PAGE_SIZE, productSlug: currentProductSlug });
       setState({ loading: false, error: "", data });
       if (!keepSelection) {
         setSelectedId(data?.results?.[0]?.id || null);
@@ -63,14 +80,14 @@ export default function OrgInboxPage() {
   useEffect(() => {
     loadInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [currentProductSlug, page]);
 
   useEffect(() => {
     if (!autoRefresh) return;
     const handle = setInterval(() => loadInbox({ keepSelection: true }), 30000);
     return () => clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh, page]);
+  }, [autoRefresh, currentProductSlug, page]);
 
   useEffect(() => {
     if (!items.length) {
@@ -157,6 +174,7 @@ export default function OrgInboxPage() {
         title,
         message,
         channel: composeForm.channel || "email",
+        product_slug: currentProductSlug,
       });
       setComposeForm({ title: "", message: "", channel: "email" });
       setComposeState({ sending: false, error: "", success: "Message sent to all users inbox." });

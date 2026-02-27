@@ -73,6 +73,17 @@ def _normalize_text(value):
     return " ".join(str(value or "").strip().split())
 
 
+def _normalize_product_slug(value, default=""):
+    slug = str(value or "").strip().lower()
+    if not slug:
+        return default
+    if slug == "worksuite":
+        return "monitor"
+    if slug in ("online-storage",):
+        return "storage"
+    return slug
+
+
 def _validate_gstin(value):
     if not value:
         return False
@@ -220,12 +231,15 @@ def org_inbox_list(request):
         page_size = 20
     page_size = min(max(page_size, 5), 100)
 
+    requested_product = _normalize_product_slug(request.GET.get("product"), default="")
     queryset = (
         AdminNotification.objects
         .select_related("organization")
         .filter(is_deleted=False, audience="org_admin", organization=org)
         .order_by("-created_at", "-id")
     )
+    if requested_product:
+        queryset = queryset.filter(product_slug=requested_product)
     total = queryset.count()
     start = (page - 1) * page_size
     end = start + page_size
@@ -311,6 +325,7 @@ def org_inbox_compose(request):
     title = _normalize_text(data.get("title") or data.get("subject") or "")
     message = str(data.get("message") or "").strip()
     channel = _normalize_text(data.get("channel") or "email").lower() or "email"
+    product_slug = _normalize_product_slug(data.get("product_slug"), default="monitor")
     if channel not in {"email", "system", "whatsapp"}:
         channel = "email"
 
@@ -324,7 +339,7 @@ def org_inbox_compose(request):
         message=message,
         organization=org,
         event_type="system",
-        product_slug="business-autopilot-erp",
+        product_slug=product_slug,
         channel=channel,
     )
     if not item:

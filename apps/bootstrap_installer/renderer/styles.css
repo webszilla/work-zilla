@@ -72,7 +72,26 @@ body {
   cursor: pointer;
 }
 
-.card button:hover:enabled {
+.card-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.card-actions button {
+  flex: 1;
+  margin-top: 0;
+}
+
+.card button.btn-uninstall {
+  border-color: #d84b4b;
+}
+
+.card button.btn-uninstall:hover:enabled {
+  background: rgba(216, 75, 75, 0.14);
+}
+
+.card button.btn-install:hover:enabled {
   background: rgba(242, 170, 31, 0.14);
 }
 

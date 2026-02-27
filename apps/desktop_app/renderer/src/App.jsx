@@ -10,6 +10,7 @@ import UserActivityScreen from "./screens/UserActivityScreen.jsx";
 import ErrorsScreen from "./screens/ErrorsScreen.jsx";
 import SettingsScreen from "./screens/SettingsScreen.jsx";
 const MonitorScreen = lazy(() => import("./screens/MonitorScreen.jsx"));
+const ImpositionScreen = lazy(() => import("./screens/ImpositionScreen.jsx"));
 const ChooseFoldersScreen = lazy(() => import("./screens/ChooseFoldersScreen.jsx"));
 const StorageFilesScreen = lazy(() => import("./screens/StorageFilesScreen.jsx"));
 const AddDeviceFoldersScreen = lazy(() => import("./screens/AddDeviceFoldersScreen.jsx"));
@@ -48,6 +49,10 @@ export default function App() {
     () => new Set(auth?.enabled_products || []).has("storage"),
     [auth?.enabled_products]
   );
+  const hasImpositionAccess = useMemo(() => {
+    const enabled = new Set(auth?.enabled_products || []);
+    return enabled.has("imposition-software") || enabled.has("imposition");
+  }, [auth?.enabled_products]);
 
   const visibleScreens = useMemo(
     () => storageScreens.filter((item) => !item.adminOnly || isAdmin),
@@ -156,6 +161,17 @@ export default function App() {
     setPendingModule(null);
   }, [activeModule, auth.authenticated, hasStorageAccess]);
 
+  useEffect(() => {
+    if (activeModule !== "imposition") {
+      return;
+    }
+    if (!auth.authenticated || hasImpositionAccess) {
+      return;
+    }
+    setActiveModule("launcher");
+    setPendingModule(null);
+  }, [activeModule, auth.authenticated, hasImpositionAccess]);
+
   if (auth.loading) {
     return (
       <>
@@ -182,7 +198,10 @@ export default function App() {
               const enabled = new Set(next?.enabled_products || []);
               const nextHasStorage = new Set(next?.enabled_products || []).has("storage");
               const nextHasMonitor = enabled.has("monitor") || enabled.has("worksuite");
+              const nextHasImposition = enabled.has("imposition-software") || enabled.has("imposition");
               if (pendingModule === "storage" && !nextHasStorage) {
+                setActiveModule("launcher");
+              } else if (pendingModule === "imposition" && !nextHasImposition) {
                 setActiveModule("launcher");
               } else if (pendingModule === "monitor" && enabled.size > 0 && !nextHasMonitor) {
                 setActiveModule("launcher");
@@ -216,15 +235,18 @@ export default function App() {
               setActiveModule("login");
               return;
             }
-            if (!connection.online && (product === "storage" || product === "monitor")) {
+            if (!connection.online && (product === "storage" || product === "monitor" || product === "imposition")) {
               return;
             }
-            if ((product === "storage" || product === "monitor") && !auth.authenticated) {
+            if ((product === "storage" || product === "monitor" || product === "imposition") && !auth.authenticated) {
               setPendingModule(product);
               setActiveModule("login");
               return;
             }
             if (product === "storage" && auth.authenticated && !hasStorageAccess) {
+              return;
+            }
+            if (product === "imposition" && auth.authenticated && !hasImpositionAccess) {
               return;
             }
             setActiveModule(product);
@@ -243,6 +265,21 @@ export default function App() {
       <>
         <Suspense fallback={<div className="panel">Loading module...</div>}>
           <MonitorScreen
+            onBack={() => {
+              setActiveModule("launcher");
+            }}
+          />
+        </Suspense>
+        <ThemeToggle />
+      </>
+    );
+  }
+
+  if (activeModule === "imposition") {
+    return (
+      <>
+        <Suspense fallback={<div className="panel">Loading module...</div>}>
+          <ImpositionScreen
             onBack={() => {
               setActiveModule("launcher");
             }}

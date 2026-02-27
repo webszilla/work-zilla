@@ -1,9 +1,12 @@
 import { apiFetch } from "../lib/api.js";
 
-export async function fetchOrgInbox({ page = 1, pageSize = 20 } = {}) {
+export async function fetchOrgInbox({ page = 1, pageSize = 20, productSlug = "" } = {}) {
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
+  if (productSlug) {
+    params.set("product", String(productSlug));
+  }
   return apiFetch(`/api/dashboard/inbox?${params.toString()}`);
 }
 

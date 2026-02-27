@@ -1,0 +1,161 @@
+{% extends "public/base.html" %}
+{% load static %}
+{% block meta_title %}Imposition Software | ID Card & Business Card Print Layout{% endblock %}
+{% block meta_description %}Lightweight imposition software for ID card and business card printing with SaaS license, trial, and device-based control.{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="site-container hero-grid">
+    <div>
+      <span class="eyebrow">Imposition Software</span>
+      <h1>Fast Card Imposition for Print Teams</h1>
+      <p>
+        Build ID Card and Business Card print-ready layouts in minutes.
+        License-based desktop activation with centralized SaaS plan and device management.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/imposition-software-pricing.html">View Pricing</a>
+        <a class="btn btn-outline" href="/downloads/windows-imposition-product-agent/">Download Windows</a>
+        <a class="btn btn-outline" href="/downloads/mac-imposition-product-agent/">Download Mac</a>
+      </div>
+      <div class="hero-meta">7-day free trial • 1 device trial limit • watermark export on trial</div>
+    </div>
+    <div class="hero-visual">
+      <div class="visual-card">
+        <div class="visual-title">Supported Layouts</div>
+        <div class="stat-row"><span>ID Card</span><strong>54 x 86 mm</strong></div>
+        <div class="stat-row"><span>Business Card</span><strong>90 x 54 mm</strong></div>
+      </div>
+      <div class="visual-card">
+        <div class="visual-title">Sheet Options</div>
+        <div class="stat-row"><span>Standard</span><strong>A4 / A3</strong></div>
+        <div class="stat-row"><span>Advanced</span><strong>Custom Sheet</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Product Overview</h2>
+    <p class="section-lead">Built for print studios and in-house design teams that need repeatable card imposition output with clean marks and bleed.</p>
+    <div class="feature-grid">
+      <div class="card"><h3>License Code Activation</h3><p>Install desktop app, enter license code, validate, register device, and start production.</p></div>
+      <div class="card"><h3>Device Based Licensing</h3><p>Plan-based device limits from SaaS admin. Track OS, device name, and last active status.</p></div>
+      <div class="card"><h3>Export Ready</h3><p>Generate print PDF and high-resolution output with bleed, crop marks, and margins.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Features</h2>
+    <div class="feature-grid">
+      <div class="card"><h3>ID Card Imposition</h3><p>54x86 mm card setup, multi-up sheet grid, spacing and trim-safe controls.</p></div>
+      <div class="card"><h3>Business Card Imposition</h3><p>90x54 mm layout, smart grid distribution, print mark support.</p></div>
+      <div class="card"><h3>Excel Data Import</h3><p>Business and Enterprise plans can map columns and generate cards in batches.</p></div>
+      <div class="card"><h3>Serial Number Generator</h3><p>Auto sequence with prefix formats like EMP-0001, EMP-0002.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Pricing Snapshot</h2>
+    <p class="section-lead">Starter, Pro, Business, and Enterprise plans with INR and USD billing.</p>
+    <div class="feature-grid">
+      <div class="card"><h3>Starter</h3><p>₹999 / $12 monthly • 1 device</p></div>
+      <div class="card"><h3>Pro</h3><p>₹1,999 / $24 monthly • 3 devices</p></div>
+      <div class="card"><h3>Business</h3><p>₹3,999 / $48 monthly • 5 devices</p></div>
+      <div class="card"><h3>Enterprise</h3><p>₹6,999 / $84 monthly • 10 devices</p></div>
+    </div>
+    <div class="hero-actions" style="margin-top:20px;">
+      <a class="btn btn-primary" href="/imposition-software-pricing.html">Open Full Pricing</a>
+      <button class="btn btn-outline" type="button" id="imposition-trial-btn" data-trial-plan-id="{{ imposition_trial_plan_id|default:'' }}">Start 7-Day Free Trial</button>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">Download Software</h2>
+    <div class="feature-grid">
+      <div class="card">
+        <h3>Windows Installer</h3>
+        <p>Use license code activation after install.</p>
+        <a class="btn btn-primary" href="/downloads/windows-imposition-product-agent/">Download .exe</a>
+      </div>
+      <div class="card">
+        <h3>Mac Installer</h3>
+        <p>Signed build recommended for smooth install flow.</p>
+        <a class="btn btn-primary" href="/downloads/mac-imposition-product-agent/">Download .dmg/.pkg</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <h2 class="section-title">FAQ</h2>
+    <div class="feature-grid">
+      <div class="card"><h3>Can I use one license on multiple machines?</h3><p>Yes, based on your plan device limit (1/3/5/10).</p></div>
+      <div class="card"><h3>Do trial users get all features?</h3><p>Trial has 1 device, watermark export, and limited templates.</p></div>
+      <div class="card"><h3>Can extra users manage jobs from SaaS?</h3><p>Yes. Additional user add-on gives SaaS dashboard access and sync controls.</p></div>
+      <div class="card"><h3>Is internet required always?</h3><p>License validation runs every 24h with offline grace support.</p></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  function getCookie(name) {
+    const cookies = document.cookie ? document.cookie.split(";") : [];
+    for (const cookie of cookies) {
+      const trimmed = cookie.trim();
+      if (trimmed.startsWith(`${name}=`)) {
+        return decodeURIComponent(trimmed.substring(name.length + 1));
+      }
+    }
+    return "";
+  }
+
+  const trialButton = document.getElementById("imposition-trial-btn");
+  if (!trialButton) return;
+
+  trialButton.addEventListener("click", () => {
+    const planId = String(trialButton.dataset.trialPlanId || "").trim();
+    if (!planId) {
+      window.location.href = "/imposition-software-pricing.html";
+      return;
+    }
+    fetch("/api/subscription/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken")
+      },
+      body: JSON.stringify({
+        product: "imposition-software",
+        plan_id: Number(planId),
+        interval: "monthly"
+      })
+    }).then(async (response) => {
+      if (response.status === 401) {
+        window.location.href = "/auth/login/?next=/imposition-software.html";
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        window.alert(data.detail || "Trial not available.");
+        return;
+      }
+      window.location.href = data.redirect || "/app/imposition/";
+    }).catch(() => {
+      window.alert("Unable to start trial now.");
+    });
+  });
+})();
+</script>
+{% endblock %}

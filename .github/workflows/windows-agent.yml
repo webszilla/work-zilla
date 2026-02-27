@@ -42,6 +42,16 @@ jobs:
           name: windows-agent
           path: artifacts/WorkZillaAgentSetup.exe
 
+      - name: Enforce GitHub file size guard
+        shell: pwsh
+        run: |
+          $maxBytes = 95MB
+          $artifact = "artifacts/WorkZillaAgentSetup.exe"
+          $size = (Get-Item $artifact).Length
+          if ($size -gt $maxBytes) {
+            throw "Binary too large for repo policy: $artifact ($([math]::Round($size / 1MB, 2)) MB)."
+          }
+
       - name: Commit artifact to repo
         shell: pwsh
         run: |

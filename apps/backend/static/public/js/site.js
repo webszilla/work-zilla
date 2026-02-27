@@ -35,7 +35,7 @@
         link.classList.add("active");
       }
     });
-    if (productsDropdown && productsTrigger && path.startsWith("/products/")) {
+    if (productsDropdown && productsTrigger && (path.startsWith("/products/") || path.startsWith("/imposition-software"))) {
       productsTrigger.classList.add("active");
       if (window.innerWidth <= 980) {
         productsDropdown.classList.add("open");

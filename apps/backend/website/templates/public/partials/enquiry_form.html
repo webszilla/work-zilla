@@ -9,7 +9,7 @@
     {% endfor %}
   {% endif %}
 
-  <form method="post" action="{% url 'enquiry_submit' %}">
+  <form method="post" action="{% url 'enquiry_submit' %}" data-account-form data-enquiry-form>
     {% csrf_token %}
     <input type="hidden" name="source_page" value="{{ request.path }}">
     <input type="hidden" name="next" value="{{ request.path }}">
@@ -24,7 +24,25 @@
 
     <div class="mb-3">
       <label class="form-label">Mobile Number</label>
-      {{ enquiry_form.mobile_number }}
+      <input
+        type="hidden"
+        name="mobile_number"
+        data-phone-hidden
+        value="{{ enquiry_form.mobile_number.value|default:'' }}"
+      >
+      <div class="phone-input-group">
+        <select name="phone_country" class="form-control" data-phone-country required>
+          {% include "partials/phone_country_options.html" %}
+        </select>
+        <input
+          type="text"
+          name="phone_number_input"
+          class="form-control"
+          data-phone-number
+          placeholder="Phone number"
+          required
+        >
+      </div>
       {% if enquiry_form.mobile_number.errors %}
         <div class="text-danger small">{{ enquiry_form.mobile_number.errors|striptags }}</div>
       {% endif %}

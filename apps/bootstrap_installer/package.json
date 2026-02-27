@@ -1,6 +1,6 @@
 {
   "name": "work-zilla-bootstrap-installer",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",
@@ -10,6 +10,7 @@
     "dist:win": "electron-builder --win --x64"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.0",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3"
   },
@@ -34,15 +35,17 @@
     "asar": true,
     "compression": "maximum",
     "afterPack": "electron/afterPack.cjs",
+    "afterSign": "electron/notarize.cjs",
     "artifactName": "${productName}-${os}-${arch}-${version}.${ext}",
     "mac": {
       "target": [
         "dmg"
       ],
       "category": "public.app-category.utilities",
-      "identity": "-",
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "hardenedRuntime": true,
+      "gatekeeperAssess": true,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist"
     },
     "win": {
       "target": [

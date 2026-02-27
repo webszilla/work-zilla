@@ -714,4 +714,28 @@ def auth_subscriptions(request):
     except Exception:
         pass
 
+    try:
+        from apps.backend.imposition.models import ImpositionOrgSubscription
+        imposition_sub = (
+            ImpositionOrgSubscription.objects
+            .filter(organization=org, status__in=("active", "trialing"))
+            .select_related("plan")
+            .order_by("-updated_at")
+            .first()
+        )
+        if imposition_sub and imposition_sub.plan:
+            payload.append({
+                "product_slug": "imposition-software",
+                "product_name": "Imposition Software",
+                "status": imposition_sub.status or "active",
+                "plan_id": imposition_sub.plan_id,
+                "plan_name": imposition_sub.plan.name or "",
+                "plan_is_free": False,
+                "starts_at": imposition_sub.starts_at.isoformat() if imposition_sub.starts_at else "",
+                "ends_at": imposition_sub.ends_at.isoformat() if imposition_sub.ends_at else "",
+                "trial_end": imposition_sub.ends_at.isoformat() if imposition_sub.status == "trialing" and imposition_sub.ends_at else "",
+            })
+    except Exception:
+        pass
+
     return JsonResponse({"authenticated": True, "subscriptions": payload})

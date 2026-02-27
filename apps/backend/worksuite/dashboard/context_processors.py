@@ -75,6 +75,7 @@ def site_nav_context(request):
         saas_products = []
 
     product_links = []
+    seen_slugs = set()
     for row in saas_products:
         slug = (row.get("slug") or "").strip().lower()
         if not slug:
@@ -83,27 +84,40 @@ def site_nav_context(request):
             slug = "worksuite"
         elif slug == "online-storage":
             slug = "storage"
+        elif slug in {"imposition", "imposition software"}:
+            slug = "imposition-software"
         if slug in {"ai-chat-widget", "digital-card"}:
             continue
         public_slug = "worksuite" if slug == "monitor" else slug
+        if public_slug in seen_slugs:
+            continue
+        seen_slugs.add(public_slug)
         product_links.append({
             "slug": public_slug,
             "name": row.get("name") or public_slug.replace("-", " ").title(),
             "href": f"/products/{public_slug}/",
         })
 
+    # Ensure Imposition Software is present in public products dropdown.
+    if "imposition-software" not in seen_slugs:
+        product_links.append({
+            "slug": "imposition-software",
+            "name": "Imposition Software",
+            "href": "/products/imposition-software/",
+        })
+
     if not request.user.is_authenticated:
         return {"site_nav": {"is_authenticated": False, "product_links": product_links}}
     profile = UserProfile.objects.filter(user=request.user).first()
     dashboard_label = "Dashboard"
-    dashboard_url = "/app/"
+    dashboard_url = "/app/work-suite/"
     if profile:
         if profile.role == "dealer":
             dashboard_label = "Dealer Dashboard"
             dashboard_url = "/app/dealer-dashboard"
         elif profile.role == "hr_view":
             dashboard_label = "HR Dashboard"
-            dashboard_url = "/app/"
+            dashboard_url = "/app/work-suite/"
         elif profile.role in ("superadmin", "super_admin"):
             dashboard_label = "Admin Dashboard"
             dashboard_url = "/admin/"

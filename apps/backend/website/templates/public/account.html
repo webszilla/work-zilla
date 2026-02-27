@@ -94,7 +94,7 @@
                         {% endif %}
                         <td>
                           {% if is_agent %}
-                            <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                            <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}">Dashboard</a>
                           {% elif sub.status == "active" or sub.status == "trialing" %}
                             <div class="d-flex flex-wrap gap-2">
                               <button
@@ -117,7 +117,7 @@
                                 <i class="bi bi-eye" aria-hidden="true"></i>
                                 <span class="visually-hidden">View</span>
                               </button>
-                              <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                              <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}">Dashboard</a>
                               {% if sub.plan and sub.plan.allow_addons %}
                                 <a class="btn btn-outline btn-sm" href="/my-account/billing/addons/?product={{ slug }}">Manage Add-ons</a>
                               {% endif %}

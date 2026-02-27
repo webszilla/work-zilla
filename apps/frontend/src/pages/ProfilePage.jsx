@@ -151,7 +151,7 @@ export default function ProfilePage() {
       ? "business-autopilot-erp"
       : rawPath.includes("/whatsapp-automation")
       ? "whatsapp-automation"
-      : rawPath.includes("/worksuite") || rawPath.includes("/monitor")
+      : rawPath.includes("/work-suite") || rawPath.includes("/worksuite") || rawPath.includes("/monitor")
       ? "worksuite"
       : "");
 

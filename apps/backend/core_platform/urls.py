@@ -78,6 +78,8 @@ urlpatterns = [
     path("api/storage/files/", include("apps.backend.storage.api_urls")),
     path("api/storage/explorer/", include("apps.backend.storage.api_explorer_urls")),
     path("api/business-autopilot/", include("apps.backend.business_autopilot.api_urls")),
+    path("api/imposition/", include("apps.backend.imposition.api_urls")),
+    path("api/product/", include("apps.backend.imposition.product_api_urls")),
     path("api/whatsapp-automation/", include("apps.backend.modules.whatsapp_automation.api_urls")),
     path("api/activity/upload", monitor_core_views.upload_activity),
     path("api/org/settings", monitor_core_views.org_settings),

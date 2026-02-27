@@ -1,0 +1,252 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Imposition Software Pricing{% endblock %}
+{% block meta_description %}Compare Imposition Software plans for ID card and business card imposition. Monthly/yearly and INR/USD pricing.{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="site-container hero-grid">
+    <div>
+      <span class="eyebrow">Imposition Software Pricing</span>
+      <h1>Choose a Plan for Your Print Workflow</h1>
+      <p>Free trial + paid tiers with device-based licensing and add-on SaaS users.</p>
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="trial-start-btn" data-trial-plan-id="{{ imposition_trial_plan_id|default:'' }}">Start Free Trial</button>
+        <a class="btn btn-outline" href="/imposition-software.html">Product Overview</a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="visual-card">
+        <div class="visual-title">Add-on User</div>
+        <div class="stat-row"><span>INR</span><strong>₹300 / month</strong></div>
+        <div class="stat-row"><span>USD</span><strong>$4 / month</strong></div>
+      </div>
+      <div class="visual-card">
+        <div class="visual-title">Trial</div>
+        <div class="stat-row"><span>Duration</span><strong>7 Days</strong></div>
+        <div class="stat-row"><span>Limits</span><strong>1 Device</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container">
+    <div class="pricing-header">
+      <div>
+        <h2 class="section-title">Plan Comparison</h2>
+        <p class="section-lead">Toggle currency and billing cycle to preview pricing.</p>
+      </div>
+      <div class="pricing-controls">
+        <div class="currency-toggle" role="tablist" aria-label="Currency">
+          <button type="button" class="active" data-currency="inr">INR</button>
+          <button type="button" data-currency="usd">USD</button>
+        </div>
+        <div class="currency-toggle" role="tablist" aria-label="Billing">
+          <button type="button" class="active" data-billing="monthly">Monthly</button>
+          <button type="button" data-billing="yearly">Yearly</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-grid" id="imposition-plan-grid"></div>
+
+    <div class="card" style="margin-top:24px;">
+      <h3>Feature Matrix</h3>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Free Trial</th>
+              <th>Pro</th>
+              <th>Business</th>
+              <th>Enterprise</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>ID Card Layout + Business Card Layout</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Batch Processing</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Print Marks / HD Export / Custom Sheet</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Excel Data Import + Card Data Update</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Serial Number Generator</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Team Users + Priority + API Ready</td><td>2 Users Included</td><td>No</td><td>No</td><td>Yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const planIdMap = {{ imposition_plan_id_map_json|default:"{}"|safe }};
+  const plans = [
+    {
+      slug: "free trial",
+      name: "Free Trial",
+      devices: 2,
+      inr: { monthly: 0, yearly: 0 },
+      usd: { monthly: 0, yearly: 0 },
+      features: [
+        "7 Days Free Trial",
+        "All Imposition Features Enabled",
+        "ID Card + Business Card Layout",
+        "Excel Data Import + Bulk Generation",
+        "Serial Number Generator",
+        "2 Users Included"
+      ]
+    },
+    {
+      slug: "pro",
+      name: "Pro",
+      devices: 3,
+      inr: { monthly: 1999, yearly: 19999 },
+      usd: { monthly: 24, yearly: 240 },
+      features: [
+        "Advanced Imposition",
+        "Batch Processing",
+        "Print Marks",
+        "Export HD Print Files",
+        "Custom Sheet Size"
+      ]
+    },
+    {
+      slug: "business",
+      name: "Business",
+      devices: 5,
+      inr: { monthly: 3999, yearly: 39999 },
+      usd: { monthly: 48, yearly: 480 },
+      features: [
+        "Everything in Pro",
+        "Excel Data Import",
+        "ID Card Data Update",
+        "Business Card Data Update",
+        "Bulk Card Generation",
+        "Layout Templates",
+        "Serial Number Generator"
+      ]
+    },
+    {
+      slug: "enterprise",
+      name: "Enterprise",
+      devices: 10,
+      inr: { monthly: 6999, yearly: 69999 },
+      usd: { monthly: 84, yearly: 840 },
+      features: [
+        "Everything in Business",
+        "Team Users",
+        "Priority Processing",
+        "Advanced Layout Presets",
+        "Bulk Export Engine",
+        "API Integration Ready"
+      ]
+    }
+  ];
+
+  const state = { currency: "inr", billing: "monthly" };
+
+  function formatPrice(plan) {
+    const symbol = state.currency === "usd" ? "$" : "₹";
+    const amount = plan[state.currency][state.billing];
+    const suffix = state.billing === "monthly" ? "/month" : "/year";
+    return `${symbol}${amount} ${suffix}`;
+  }
+
+  function renderPlans() {
+    const grid = document.getElementById("imposition-plan-grid");
+    if (!grid) return;
+    grid.innerHTML = plans.map((plan) => `
+      <div class="plan-card card">
+        <h3 class="plan-title">${plan.name}</h3>
+        <p class="plan-price"><strong>${formatPrice(plan)}</strong></p>
+        <p>Devices: ${plan.devices}</p>
+        <ul class="plan-features">
+          ${plan.features.map((item) => `<li>${item}</li>`).join("")}
+        </ul>
+        <form method="post" action="/checkout/select/">
+          <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+          <input type="hidden" name="plan_id" value="${findPlanId(plan.slug)}">
+          <input type="hidden" name="product_slug" value="imposition-software">
+          <input type="hidden" name="currency" value="${state.currency}">
+          <input type="hidden" name="billing" value="${state.billing}">
+          <button type="submit" class="btn btn-outline">Buy Now</button>
+        </form>
+      </div>
+    `).join("");
+  }
+
+  function findPlanId(slug) {
+    return planIdMap[slug] || "";
+  }
+
+  document.querySelectorAll("[data-currency]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-currency]").forEach((el) => el.classList.remove("active"));
+      button.classList.add("active");
+      state.currency = button.dataset.currency;
+      renderPlans();
+    });
+  });
+
+  document.querySelectorAll("[data-billing]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-billing]").forEach((el) => el.classList.remove("active"));
+      button.classList.add("active");
+      state.billing = button.dataset.billing;
+      renderPlans();
+    });
+  });
+
+  function getCookie(name) {
+    const cookies = document.cookie ? document.cookie.split(";") : [];
+    for (const cookie of cookies) {
+      const trimmed = cookie.trim();
+      if (trimmed.startsWith(`${name}=`)) {
+        return decodeURIComponent(trimmed.substring(name.length + 1));
+      }
+    }
+    return "";
+  }
+
+  const trialBtn = document.getElementById("trial-start-btn");
+  if (trialBtn) {
+    trialBtn.addEventListener("click", () => {
+      const trialPlanId = String(trialBtn.dataset.trialPlanId || "").trim();
+      if (!trialPlanId) {
+        window.alert("Trial plan is not configured in admin.");
+        return;
+      }
+      fetch("/api/subscription/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken")
+        },
+        body: JSON.stringify({
+          product: "imposition-software",
+          plan_id: Number(trialPlanId),
+          interval: "monthly"
+        })
+      }).then(async (response) => {
+        if (response.status === 401) {
+          window.location.href = "/auth/login/?next=/imposition-software-pricing.html";
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          window.alert(data.detail || "Unable to start trial.");
+          return;
+        }
+        window.location.href = data.redirect || "/app/imposition/";
+      }).catch(() => {
+        window.alert("Unable to start trial now.");
+      });
+    });
+  }
+
+  renderPlans();
+})();
+</script>
+{% endblock %}
