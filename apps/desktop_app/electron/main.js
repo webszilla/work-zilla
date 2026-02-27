@@ -571,8 +571,24 @@ app.on("browser-window-focus", () => {
 });
 
 ipcMain.handle("auth:login", async (_event, payload) => {
-  const device = ensureDeviceIdentity();
-  await login({ ...payload, ...device });
+  let device = ensureDeviceIdentity();
+  try {
+    await login({ ...payload, ...device });
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (!message.includes("device_org_mismatch")) {
+      throw error;
+    }
+    // Device may be linked to a different organization in server records; re-register with a fresh ID.
+    const prev = loadSettings();
+    saveSettings({
+      ...prev,
+      deviceId: "",
+      employeeId: null,
+    });
+    device = ensureDeviceIdentity();
+    await login({ ...payload, ...device });
+  }
   await runConnectivityCheck();
   const status = await checkAuth();
   persistAuthProfile(status);
