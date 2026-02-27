@@ -55,9 +55,7 @@ def api_login(request):
             if device.org_id != org.id:
                 return Response({"error": "device_org_mismatch"}, status=403)
             if device.user_id != user.id:
-                is_admin = user.is_superuser or (profile and profile.role in ("company_admin", "superadmin", "super_admin"))
-                if not is_admin:
-                    return Response({"error": "device_org_mismatch"}, status=403)
+                # Same organization login should be able to rebind this device to the current authenticated user.
                 device.user = user
             if not device.is_active:
                 device.is_active = True

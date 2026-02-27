@@ -179,8 +179,12 @@ export default function App() {
             const next = await window.storageApi.login(payload);
             setAuth(next);
             if (pendingModule) {
+              const enabled = new Set(next?.enabled_products || []);
               const nextHasStorage = new Set(next?.enabled_products || []).has("storage");
+              const nextHasMonitor = enabled.has("monitor") || enabled.has("worksuite");
               if (pendingModule === "storage" && !nextHasStorage) {
+                setActiveModule("launcher");
+              } else if (pendingModule === "monitor" && enabled.size > 0 && !nextHasMonitor) {
                 setActiveModule("launcher");
               } else {
                 setActiveModule(pendingModule);
@@ -207,10 +211,15 @@ export default function App() {
             setAuth({ ...defaultAuth, loading: false });
           }}
           onSelect={(product) => {
+            if (product === "login") {
+              setPendingModule(null);
+              setActiveModule("login");
+              return;
+            }
             if (!connection.online && (product === "storage" || product === "monitor")) {
               return;
             }
-            if (product === "storage" && !auth.authenticated) {
+            if ((product === "storage" || product === "monitor") && !auth.authenticated) {
               setPendingModule(product);
               setActiveModule("login");
               return;

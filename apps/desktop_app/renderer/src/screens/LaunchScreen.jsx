@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   const isAuthed = Boolean(auth?.authenticated);
   const isOnline = connection?.online !== false;
+  const enabledProducts = new Set(auth?.enabled_products || []);
+  const canUseMonitor = enabledProducts.has("monitor") || enabledProducts.has("worksuite");
+  const canUseStorage = enabledProducts.has("storage");
   const [agentVersion, setAgentVersion] = useState("");
 
   useEffect(() => {
@@ -41,35 +44,43 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
             <button className="btn btn-secondary" type="button" onClick={onLogout}>
               Logout
             </button>
-          ) : null}
+          ) : (
+            <button className="btn btn-secondary" type="button" onClick={() => onSelect("login")}>
+              Login
+            </button>
+          )}
         </div>
 
         <div className="launch-grid">
-          <button
-            type="button"
-            className="launch-tile"
-            onClick={() => handleClick("monitor")}
-            disabled={!isOnline}
-          >
-            <div className="tile-title">Work Suite</div>
-            <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
-            {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
-          </button>
+          {!isAuthed || canUseMonitor ? (
+            <button
+              type="button"
+              className="launch-tile"
+              onClick={() => handleClick("monitor")}
+              disabled={!isOnline}
+            >
+              <div className="tile-title">Work Suite</div>
+              <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
+              {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
+            </button>
+          ) : null}
 
-          <button
-            type="button"
-            className="launch-tile"
-            onClick={() => handleClick("storage")}
-            disabled={!isOnline || (isAuthed && !new Set(auth?.enabled_products || []).has("storage"))}
-          >
-            <div className="tile-title">Online Storage</div>
-            <div className="tile-desc">Secure storage sync and file backup.</div>
-            {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
-            {isOnline && isAuthed && !new Set(auth?.enabled_products || []).has("storage") ? (
-              <div className="tile-note">Not enabled for this account.</div>
-            ) : null}
-          </button>
+          {!isAuthed || canUseStorage ? (
+            <button
+              type="button"
+              className="launch-tile"
+              onClick={() => handleClick("storage")}
+              disabled={!isOnline}
+            >
+              <div className="tile-title">Online Storage</div>
+              <div className="tile-desc">Secure storage sync and file backup.</div>
+              {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
+            </button>
+          ) : null}
         </div>
+        {isAuthed && !canUseMonitor && !canUseStorage ? (
+          <div className="launch-version">No active product enabled for this account.</div>
+        ) : null}
         {agentVersion ? (
           <div className="launch-version">Windows Agent Version: {agentVersion}</div>
         ) : null}
