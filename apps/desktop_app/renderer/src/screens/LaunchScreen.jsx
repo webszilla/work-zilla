@@ -65,7 +65,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
             </button>
           ) : null}
 
-          {!isAuthed || canUseStorage ? (
+          {isAuthed && canUseStorage ? (
             <button
               type="button"
               className="launch-tile"
