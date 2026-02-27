@@ -364,6 +364,46 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleUiThemeSubmit(event) {
+    event.preventDefault();
+    setNotice("");
+    try {
+      await apiFetch("/api/dashboard/profile/email", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          phone_country: phoneCountry,
+          phone_number: phoneNumber,
+          org_timezone: orgTimezone,
+          theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+          theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+          sidebar_menu_style: sidebarMenuStyle === "compact" ? "compact" : "default",
+        })
+      });
+      applyOrgTimezone(orgTimezone || "UTC");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+      }
+      applyOrgThemePreview({
+        primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+        secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("wz:sidebar-menu-style-change", {
+            detail: { style: sidebarMenuStyle === "compact" ? "compact" : "default" }
+          })
+        );
+      }
+      setNotice("UI theme settings updated successfully.");
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to update UI theme."
+      }));
+    }
+  }
+
   async function handlePasswordSubmit(event) {
     event.preventDefault();
     setNotice("");
@@ -568,6 +608,27 @@ export default function ProfilePage() {
         </button>
         <button
           type="button"
+          className={`btn btn-sm ${profileTopTab === "uiTheme" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("uiTheme")}
+        >
+          UI Theme
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${profileTopTab === "backup" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("backup")}
+        >
+          Backup
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${profileTopTab === "referral" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("referral")}
+        >
+          Referral Program
+        </button>
+        <button
+          type="button"
           className={`btn btn-sm ${profileTopTab === "whatsappApi" ? "btn-primary" : "btn-outline-light"}`}
           onClick={() => setProfileTopTab("whatsappApi")}
         >
@@ -638,88 +699,6 @@ export default function ProfilePage() {
                 </select>
                 </div>
               ) : null}
-              {showTimezone ? (
-                <div className="mt-3 pt-2 border-top">
-                  <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
-                    <label className="form-label mb-0">UI Theme Colors (All Products)</label>
-                    <button
-                      type="button"
-                      className="btn btn-outline-light btn-sm"
-                      onClick={() => {
-                        setThemePrimary(themeDefaults.primary);
-                        setThemeSecondary(themeDefaults.secondary);
-                      }}
-                    >
-                      Use Defaults
-                    </button>
-                  </div>
-                  <div className="row g-2">
-                    <div className="col-12 col-md-6">
-                      <label className="form-label small mb-1">Primary Color</label>
-                      <div className="input-group">
-                        <input
-                          type="color"
-                          className="form-control form-control-color"
-                          value={normalizeHexColor(themePrimary, themeDefaults.primary)}
-                          onChange={(event) => setThemePrimary(event.target.value)}
-                          title="Primary color"
-                        />
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={themePrimary}
-                          onChange={(event) => setThemePrimary(event.target.value)}
-                          placeholder="#e11d48"
-                        />
-                      </div>
-                    </div>
-                    <div className="col-12 col-md-6">
-                      <label className="form-label small mb-1">Secondary Color</label>
-                      <div className="input-group">
-                        <input
-                          type="color"
-                          className="form-control form-control-color"
-                          value={normalizeHexColor(themeSecondary, themeDefaults.secondary)}
-                          onChange={(event) => setThemeSecondary(event.target.value)}
-                          title="Secondary color"
-                        />
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={themeSecondary}
-                          onChange={(event) => setThemeSecondary(event.target.value)}
-                          placeholder="#f59e0b"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="form-text text-secondary mt-2">
-                    Org admin-selected colors apply globally across your organization dashboards in all products.
-                  </div>
-                  <div className="mt-3 pt-2 border-top">
-                    <label className="form-label mb-2">React UI Side Menu Style</label>
-                    <div className="d-flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className={`btn btn-sm ${sidebarMenuStyle === "default" ? "btn-primary" : "btn-outline-light"}`}
-                        onClick={() => setSidebarMenuStyle("default")}
-                      >
-                        Default Menu
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn btn-sm ${sidebarMenuStyle === "compact" ? "btn-primary" : "btn-outline-light"}`}
-                        onClick={() => setSidebarMenuStyle("compact")}
-                      >
-                        Compact Center Menu
-                      </button>
-                    </div>
-                    <div className="form-text text-secondary mt-2 mb-3">
-                      Option 2 uses reduced sidebar width, bigger centered icons/text, and icon-only light/dark toggle buttons.
-                    </div>
-                  </div>
-                </div>
-              ) : null}
               <button className="btn btn-primary btn-sm">Update Details</button>
             </form>
           </div>
@@ -762,6 +741,96 @@ export default function ProfilePage() {
               <button className="btn btn-warning btn-sm">Update Password</button>
             </form>
           </div>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "uiTheme" ? (
+      <div className="mt-3">
+        <div className="card p-3">
+          <h5 className="mb-2">UI Theme</h5>
+          <p className="text-secondary mb-3">Manage theme colors and sidebar menu selection globally for your organization.</p>
+          <form onSubmit={handleUiThemeSubmit}>
+            <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+              <label className="form-label mb-0">UI Theme Colors (All Products)</label>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={() => {
+                  setThemePrimary(themeDefaults.primary);
+                  setThemeSecondary(themeDefaults.secondary);
+                }}
+              >
+                Use Defaults
+              </button>
+            </div>
+            <div className="row g-2">
+              <div className="col-12 col-md-6">
+                <label className="form-label small mb-1">Primary Color</label>
+                <div className="input-group">
+                  <input
+                    type="color"
+                    className="form-control form-control-color"
+                    value={normalizeHexColor(themePrimary, themeDefaults.primary)}
+                    onChange={(event) => setThemePrimary(event.target.value)}
+                    title="Primary color"
+                  />
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={themePrimary}
+                    onChange={(event) => setThemePrimary(event.target.value)}
+                    placeholder="#e11d48"
+                  />
+                </div>
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label small mb-1">Secondary Color</label>
+                <div className="input-group">
+                  <input
+                    type="color"
+                    className="form-control form-control-color"
+                    value={normalizeHexColor(themeSecondary, themeDefaults.secondary)}
+                    onChange={(event) => setThemeSecondary(event.target.value)}
+                    title="Secondary color"
+                  />
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={themeSecondary}
+                    onChange={(event) => setThemeSecondary(event.target.value)}
+                    placeholder="#f59e0b"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="form-text text-secondary mt-2">
+              Org admin-selected colors apply globally across your organization dashboards in all products.
+            </div>
+            <div className="mt-3 pt-2 border-top">
+              <label className="form-label mb-2">React UI Side Menu Style</label>
+              <div className="d-flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${sidebarMenuStyle === "default" ? "btn-primary" : "btn-outline-light"}`}
+                  onClick={() => setSidebarMenuStyle("default")}
+                >
+                  Default Menu
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${sidebarMenuStyle === "compact" ? "btn-primary" : "btn-outline-light"}`}
+                  onClick={() => setSidebarMenuStyle("compact")}
+                >
+                  Compact Center Menu
+                </button>
+              </div>
+              <div className="form-text text-secondary mt-2 mb-3">
+                Option 2 uses reduced sidebar width, bigger centered icons/text, and icon-only light/dark toggle buttons.
+              </div>
+            </div>
+            <button className="btn btn-primary btn-sm" type="submit">Save UI Theme</button>
+          </form>
         </div>
       </div>
       ) : null}
@@ -1023,7 +1092,7 @@ export default function ProfilePage() {
       </div>
       ) : null}
 
-      {profileTopTab === "profile" ? (
+      {profileTopTab === "backup" ? (
       <div className="mt-3">
         <h5>Downloads & Backups</h5>
         <p className="text-secondary">
@@ -1115,7 +1184,7 @@ export default function ProfilePage() {
       </div>
       ) : null}
 
-      {profileTopTab === "profile" ? (
+      {profileTopTab === "referral" ? (
       <div className="mt-3">
         <h5>Referral Program</h5>
         <p>
@@ -1149,7 +1218,7 @@ export default function ProfilePage() {
       </div>
       ) : null}
 
-      {profileTopTab === "profile" ? (
+      {profileTopTab === "referral" ? (
       <div className="mt-3">
         <h5>Referral Income</h5>
         <div className="table-responsive">

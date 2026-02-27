@@ -640,7 +640,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       <aside className="sidebar">
         <div className="brand">
           <span>Work Zilla</span>
-          <span>{productLabel}</span>
+          {sidebarMenuStyle !== "compact" ? <span>{productLabel}</span> : null}
         </div>
         <button
           type="button"

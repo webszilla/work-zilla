@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
-from django.db import transaction
+from django.db import DatabaseError, OperationalError, transaction
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -74,19 +74,49 @@ def _can_manage_users(user: User):
 
 def _ensure_default_module_catalog():
     # Keeps local/stale DBs usable even if seed migrations were not applied yet.
-    for row in DEFAULT_ERP_MODULES:
-        Module.objects.update_or_create(
-            slug=row["slug"],
-            defaults={
-                "name": row["name"],
-                "is_active": True,
-                "sort_order": row["sort_order"],
-            },
-        )
+    # Avoid frequent write-lock contention on sqlite by doing minimal writes.
+    defaults_by_slug = {row["slug"]: row for row in DEFAULT_ERP_MODULES}
+    existing = {row.slug: row for row in Module.objects.filter(slug__in=defaults_by_slug.keys())}
+
+    to_create = []
+    to_update = []
+    for slug, cfg in defaults_by_slug.items():
+        row = existing.get(slug)
+        if not row:
+            to_create.append(
+                Module(
+                    slug=slug,
+                    name=cfg["name"],
+                    is_active=True,
+                    sort_order=cfg["sort_order"],
+                )
+            )
+            continue
+        changed = False
+        if row.name != cfg["name"]:
+            row.name = cfg["name"]
+            changed = True
+        if row.sort_order != cfg["sort_order"]:
+            row.sort_order = cfg["sort_order"]
+            changed = True
+        if not row.is_active:
+            row.is_active = True
+            changed = True
+        if changed:
+            to_update.append(row)
+
+    if to_create:
+        Module.objects.bulk_create(to_create, ignore_conflicts=True)
+    if to_update:
+        Module.objects.bulk_update(to_update, ["name", "is_active", "sort_order"])
 
 
 def _ensure_org_modules(org):
-    _ensure_default_module_catalog()
+    try:
+        _ensure_default_module_catalog()
+    except (OperationalError, DatabaseError):
+        # If sqlite is temporarily locked, proceed with existing module catalog.
+        pass
     active_modules = list(Module.objects.filter(is_active=True).order_by("sort_order", "name"))
     if not active_modules:
         return []
@@ -116,6 +146,31 @@ def _default_plan_module_slugs(plan_name):
     return list(ERP_MODULE_SLUG_SET)
 
 
+def _is_free_plan(plan):
+    if not plan:
+        return False
+    prices = [
+        plan.monthly_price or 0,
+        plan.yearly_price or 0,
+        plan.usd_monthly_price or 0,
+        plan.usd_yearly_price or 0,
+    ]
+    return all(price <= 0 for price in prices)
+
+
+def _trial_tier_module_slugs(trial_tier):
+    tier = str(trial_tier or "").strip().lower()
+    if tier in {"pro", "all", "full"}:
+        return set(ERP_MODULE_SLUG_SET)
+    if tier == "growth":
+        return set(_default_plan_module_slugs("growth"))
+    if tier == "starter":
+        return set(_default_plan_module_slugs("starter"))
+    if tier == "free":
+        return set(_default_plan_module_slugs("free"))
+    return None
+
+
 def _get_active_erp_subscription(org):
     if not org:
         return None
@@ -136,10 +191,29 @@ def _get_active_erp_subscription(org):
     return None
 
 
-def _get_plan_erp_module_slugs(plan):
+def _get_plan_erp_module_slugs(plan, subscription=None):
     if not plan:
         return set(ERP_MODULE_SLUG_SET)
     features = plan.features or {}
+    limits = plan.limits or {}
+
+    # Free trial plans can expose higher-tier modules for evaluation.
+    trial_tier = (
+        features.get("trial_features")
+        or features.get("trial_features_tier")
+        or limits.get("trial_features")
+        or limits.get("trial_features_tier")
+    )
+    if _is_free_plan(plan):
+        trial_modules = _trial_tier_module_slugs(trial_tier)
+        if trial_modules:
+            return trial_modules
+
+    if str(getattr(subscription, "status", "") or "").strip().lower() == "trialing":
+        trial_modules = _trial_tier_module_slugs(trial_tier)
+        if trial_modules:
+            return trial_modules
+
     configured = features.get("erp_enabled_modules")
     if isinstance(configured, list):
         normalized = {
@@ -195,7 +269,10 @@ def _serialize_org_users(org):
 
 def _serialize_modules(org):
     subscription = _get_active_erp_subscription(org)
-    allowed_slugs = _get_plan_erp_module_slugs(subscription.plan if subscription and subscription.plan else None)
+    allowed_slugs = _get_plan_erp_module_slugs(
+        subscription.plan if subscription and subscription.plan else None,
+        subscription=subscription,
+    )
     rows = (
         OrganizationModule.objects
         .filter(organization=org, module__is_active=True)
@@ -312,7 +389,10 @@ def org_enabled_modules(request):
         if not module:
             return JsonResponse({"detail": "module_not_found"}, status=404)
         active_sub = _get_active_erp_subscription(org)
-        allowed_slugs = _get_plan_erp_module_slugs(active_sub.plan if active_sub and active_sub.plan else None)
+        allowed_slugs = _get_plan_erp_module_slugs(
+            active_sub.plan if active_sub and active_sub.plan else None,
+            subscription=active_sub,
+        )
         if enabled and module_slug not in allowed_slugs:
             return JsonResponse({"detail": "module_not_allowed_for_plan"}, status=400)
         org_module, _ = OrganizationModule.objects.get_or_create(

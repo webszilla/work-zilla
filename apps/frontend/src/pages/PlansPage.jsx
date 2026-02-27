@@ -212,87 +212,160 @@ function getErpPerUserPrice(plan, cycle, currency) {
 }
 
 function getErpPlanFeatures(plan) {
-  const configuredModules = Array.isArray(plan?.features?.erp_enabled_modules)
-    ? plan.features.erp_enabled_modules
-        .map((item) => String(item || "").trim().toLowerCase())
-        .filter(Boolean)
-    : [];
-  const moduleLabelMap = {
-    crm: "CRM Module",
-    hrm: "HR Management",
-    projects: "Projects",
-    accounts: "Accounts / ERP",
-    ticketing: "Ticketing",
-    stocks: "Stocks",
+  const features = plan?.features || {};
+  const flags = plan?.flags || {};
+  const limits = plan?.limits || {};
+  const planKey = String(plan?.name || "").trim().toLowerCase();
+  const tier = planKey.includes("starter")
+    ? "starter"
+    : planKey.includes("growth")
+      ? "growth"
+      : planKey.includes("pro")
+        ? "pro"
+        : "free";
+  const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
+
+  const defaultsByTier = {
+    free: { crm: true, hrm: true, projects: true, accounts: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+    starter: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+    growth: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
+    pro: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
   };
-  const configuredModuleLabels = configuredModules
-    .map((slug) => moduleLabelMap[slug])
-    .filter(Boolean);
-  const roleBasedAccessEnabled = plan?.features?.role_based_access !== false;
-  const name = String(plan?.name || "").toLowerCase();
-  if (name.includes("starter")) {
-    const features = [
-      "Basic Accounting",
-      "Invoice & Billing",
-      "Expense Tracking",
-      "GST Ready (India)",
-      "Basic Reports",
-      "1 Organization",
-    ];
-    if (roleBasedAccessEnabled) {
-      features.push("Role Based Access");
+  const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
+
+  const configuredModules = Array.isArray(features.erp_enabled_modules)
+    ? features.erp_enabled_modules.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+    : null;
+  const hasModule = (slug, fallback) => (configuredModules ? configuredModules.includes(slug) : fallback);
+  const boolFrom = (keys, fallback) => {
+    for (const key of keys) {
+      if (typeof features[key] === "boolean") return features[key];
+      if (typeof flags[key] === "boolean") return flags[key];
+      if (typeof limits[key] === "boolean") return limits[key];
     }
-    if (configuredModuleLabels.length) {
-      features.push(...configuredModuleLabels);
-    }
-    return features;
+    return fallback;
+  };
+
+  const rows = [
+    { text: "CRM Module", ok: hasModule("crm", defaults.crm) },
+    { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
+    { text: "Project Management", ok: hasModule("projects", defaults.projects) },
+    { text: "Accounts / ERP", ok: hasModule("accounts", defaults.accounts) },
+    { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
+    { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
+    { text: "Invoice & Billing", ok: boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
+    { text: "Expense Tracking", ok: boolFrom(["expense_tracking"], defaults.expense) },
+    { text: "GST Ready (India)", ok: boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
+    { text: "Reports", ok: boolFrom(["reports", "basic_reports", "advanced_reports"], defaults.reports) },
+    { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
+    { text: "Purchase Orders", ok: boolFrom(["purchase_orders"], defaults.purchase) },
+    { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
+    { text: "API Access", ok: boolFrom(["api_access"], defaults.api) },
+    { text: "Custom Dashboards", ok: boolFrom(["custom_dashboards"], defaults.dashboards) },
+    { text: "Audit Logs", ok: boolFrom(["audit_logs"], defaults.audit) },
+    { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+  ];
+  if (trialPro) {
+    rows.push({ text: "2 Add-on Users Included (Trial)" });
   }
-  if (name.includes("growth")) {
-    const features = [
-      "Everything in Starter",
-      "Inventory Management",
-      "Purchase Orders",
-      "Vendor Management",
-      "Project Accounting",
-      "CRM + HR Modules",
-    ];
-    if (roleBasedAccessEnabled) {
-      features.push("Role Based Access");
+  return rows;
+}
+
+function getMonitorPlanFeatures(plan) {
+  const limits = plan?.limits || {};
+  const flags = plan?.flags || {};
+  const features = plan?.features || {};
+  const planName = String(plan?.name || "").trim().toLowerCase();
+  const legacyMatrix = {
+    free: { live: true, app: true, hr: true, ott: true },
+    basic: { live: true, app: false, hr: true, ott: false },
+    plus: { live: true, app: true, hr: false, ott: false },
+    professional: { live: true, app: true, hr: true, ott: true },
+  };
+  const legacy = legacyMatrix[planName] || {};
+  const resolveFlag = (flagKey, featureKey, fallbackKey, defaultValue) => {
+    if (typeof flags[flagKey] === "boolean") return flags[flagKey];
+    if (typeof features[featureKey] === "boolean") return features[featureKey];
+    if (typeof legacy[fallbackKey] === "boolean") return legacy[fallbackKey];
+    return defaultValue;
+  };
+  const employeeLimit = limits.employee_limit;
+  const employeeLabel = !Number.isFinite(Number(employeeLimit)) || Number(employeeLimit) === 0
+    ? "Unlimited*"
+    : employeeLimit;
+  return [
+    { text: `Employee limit: ${employeeLabel}` },
+    { text: `Retention: ${limits.retention_days ?? "-"} days` },
+    { text: `Screenshot interval: ${limits.screenshot_min_minutes ?? "-"} mins` },
+    { text: "Live activity report", ok: resolveFlag("allow_live_activity", "allow_live_activity", "live", true) },
+    { text: "App usage tracking", ok: resolveFlag("allow_app_usage", "allow_app_usage", "app", false) },
+    { text: "HR view", ok: resolveFlag("allow_hr_view", "allow_hr_view", "hr", false) },
+    { text: "OTT/Gaming usage", ok: resolveFlag("allow_gaming_ott_usage", "allow_gaming_ott_usage", "ott", false) },
+  ];
+}
+
+function getStoragePlanFeatures(plan) {
+  const limits = plan?.limits || {};
+  const planKey = String(plan?.name || "").trim().toLowerCase();
+  const usersNumber = Number(limits.max_users);
+  const usersLabel = !Number.isFinite(usersNumber) || usersNumber <= 0 ? "Unlimited Users" : `${usersNumber} Users`;
+  const storageLabel = formatStorageLimit(limits.storage_gb);
+  const bandwidthLabel = isBandwidthLimited(plan)
+    ? `Up to ${formatBandwidthLimit(limits.bandwidth_limit_gb_monthly, true)} monthly download bandwidth`
+    : "Unlimited monthly download bandwidth";
+  const deviceLabel = formatDeviceLimit(limits.device_limit_per_user);
+  const isBasic = planKey === "basic";
+  const isStandard = planKey === "standard";
+  const isPro = planKey === "pro";
+  return [
+    { text: usersLabel },
+    { text: `${storageLabel} Storage` },
+    { text: bandwidthLabel },
+    { text: deviceLabel },
+    { text: "Real-time smart sync included", ok: true },
+    { text: "Online Access", ok: isBasic || (!isStandard && !isPro) },
+    { text: "Admin Controls", ok: isStandard || isPro },
+    { text: "Full Admin Visibility", ok: isPro },
+    { text: "Free System Sync", ok: true },
+  ];
+}
+
+function getWhatsappAutomationPlanFeatures(plan) {
+  const features = plan?.features || {};
+  const flags = plan?.flags || {};
+  const limits = plan?.limits || {};
+  const planKey = String(plan?.name || "").trim().toLowerCase();
+  const tier = (planKey.includes("starter") || planKey.includes("basic"))
+    ? "starter"
+    : (planKey.includes("growth") || planKey.includes("plus"))
+      ? "growth"
+      : planKey.includes("pro")
+        ? "pro"
+        : "free";
+  const defaultsByTier = {
+    free: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: false, addons: false, priority: false },
+    starter: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: true, addons: false, priority: false },
+    growth: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: false },
+    pro: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: true },
+  };
+  const defaults = defaultsByTier[tier] || defaultsByTier.free;
+  const boolFrom = (keys, fallback) => {
+    for (const key of keys) {
+      if (typeof features[key] === "boolean") return features[key];
+      if (typeof flags[key] === "boolean") return flags[key];
+      if (typeof limits[key] === "boolean") return limits[key];
     }
-    if (configuredModuleLabels.length) {
-      features.push(...configuredModuleLabels);
-    }
-    return features;
-  }
-  if (name.includes("pro")) {
-    const features = [
-      "Everything in Growth",
-      "Advanced Role Permissions",
-      "Automation Workflows",
-      "Custom Dashboards",
-      "Audit Logs",
-      "Priority Support",
-    ];
-    if (roleBasedAccessEnabled && !features.includes("Role Based Access")) {
-      features.push("Role Based Access");
-    }
-    if (configuredModuleLabels.length) {
-      features.push(...configuredModuleLabels);
-    }
-    return features;
-  }
-  const fallback = configuredModuleLabels.length
-    ? configuredModuleLabels
-    : [
-    "CRM Module",
-    "HR Management",
-    "Projects",
-    "Accounts / ERP",
-    ];
-  if (roleBasedAccessEnabled) {
-    fallback.push("Role Based Access");
-  }
-  return Array.from(new Set(fallback));
+    return fallback;
+  };
+  return [
+    { text: "Company Digital Card", ok: boolFrom(["digital_card", "digital_card_enabled"], defaults.card) },
+    { text: "WhatsApp Catalogue", ok: boolFrom(["catalogue", "catalogue_enabled"], defaults.catalogue) },
+    { text: "Basic Automation", ok: boolFrom(["basic_automation", "automation"], defaults.basicAuto) },
+    { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
+    { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },
+    { text: "Advanced Automation Flows", ok: boolFrom(["advanced_automation", "automation_flows"], defaults.advancedAuto) },
+    { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+  ];
 }
 
 function getBusinessAutopilotPlanDisplayName(planName) {
@@ -371,6 +444,7 @@ export default function PlansPage() {
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
+  const isWhatsappAutomation = resolvedSlug === "whatsapp-automation";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -1045,27 +1119,29 @@ export default function PlansPage() {
                   ) : isStorage ? (
                     <>
                       <div className="plan-feature-list">
-                        <div className="plan-metric">
-                          Storage limit:{" "}
-                          <span className={storageDiff ? "highlight-text" : ""}>
-                            {formatStorageLimit(getStorageLimitGb(plan))}
-                          </span>
-                        </div>
-                        <div className="plan-metric">
-                          Bandwidth limit:{" "}
-                          <span className={bandwidthDiff ? "highlight-text" : ""}>
-                            {formatBandwidthLimit(getBandwidthLimitGb(plan), isBandwidthLimited(plan))}
-                          </span>
-                        </div>
-                        <div className="plan-metric">
-                          Device limit:{" "}
-                          <span className={deviceDiff ? "highlight-text" : ""}>
-                            {formatDeviceLimit(getDeviceLimitPerUser(plan))}
-                          </span>
-                        </div>
-                        <div className="plan-metric">
-                          Users allowed: {formatUserLimit(getMaxUsers(plan))}
-                        </div>
+                        {getStoragePlanFeatures(plan).map((feature) => {
+                          const hasFlag = typeof feature?.ok === "boolean";
+                          const isOk = Boolean(feature?.ok);
+                          const text = String(feature?.text || "-");
+                          const highlight = text.toLowerCase().includes("storage")
+                            ? storageDiff
+                            : text.toLowerCase().includes("bandwidth")
+                              ? bandwidthDiff
+                              : text.toLowerCase().includes("device")
+                                ? deviceDiff
+                                : false;
+                          return (
+                            <div className="plan-feature" key={`${plan.id}-storage-${text}`}>
+                              {hasFlag ? (
+                                <i
+                                  className={`bi ${isOk ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              <span className={highlight ? "highlight-text" : ""}>{text}</span>
+                            </div>
+                          );
+                        })}
                         {plan.allow_addons ? (
                           <>
                             <div className="plan-metric">
@@ -1107,20 +1183,35 @@ export default function PlansPage() {
                           <div className="plan-metric">Add-ons disabled</div>
                         )}
                         <div className="plan-feature-divider" />
-                        {getErpPlanFeatures(plan).map((feature) => (
-                          <div className="plan-feature" key={`${plan.id}-${feature}`}>
-                            <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
-                            <span>{feature}</span>
-                          </div>
-                        ))}
+                        {getErpPlanFeatures(plan).map((feature) => {
+                          const hasFlag = typeof feature?.ok === "boolean";
+                          const isOk = Boolean(feature?.ok);
+                          return (
+                            <div className="plan-feature" key={`${plan.id}-${feature?.text || "feature"}`}>
+                              {hasFlag ? (
+                                <i
+                                  className={`bi ${isOk ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              <span>{feature?.text || "-"}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </>
-                  ) : (
+                  ) : isWhatsappAutomation ? (
                     <>
                       <div className="plan-feature-list">
-                        <div className="plan-metric">
-                          Employees allowed: {plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}
-                        </div>
+                        {getWhatsappAutomationPlanFeatures(plan).map((feature) => (
+                          <div className="plan-feature" key={`${plan.id}-wa-${feature.text}`}>
+                            <i
+                              className={`bi ${feature.ok ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                              aria-hidden="true"
+                            />
+                            <span>{feature.text}</span>
+                          </div>
+                        ))}
                         {plan.allow_addons ? (
                           <>
                             <div className="plan-metric">
@@ -1133,28 +1224,38 @@ export default function PlansPage() {
                         ) : (
                           <div className="plan-metric">Add-ons disabled</div>
                         )}
-                        <div className="plan-feature-divider" />
-                        <div className="plan-feature">
-                          <i
-                            className={`bi ${plan.allow_app_usage ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
-                            aria-hidden="true"
-                          />
-                          <span>App usage tracking</span>
-                        </div>
-                        <div className="plan-feature">
-                          <i
-                            className={`bi ${plan.allow_gaming_ott_usage ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
-                            aria-hidden="true"
-                          />
-                          <span>OTT/Gaming usage</span>
-                        </div>
-                        <div className="plan-feature">
-                          <i
-                            className={`bi ${plan.allow_hr_view ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
-                            aria-hidden="true"
-                          />
-                          <span>HR view</span>
-                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="plan-feature-list">
+                        {getMonitorPlanFeatures(plan).map((feature) => {
+                          const hasFlag = typeof feature?.ok === "boolean";
+                          const isOk = Boolean(feature?.ok);
+                          return (
+                            <div className="plan-feature" key={`${plan.id}-monitor-${feature.text}`}>
+                              {hasFlag ? (
+                                <i
+                                  className={`bi ${isOk ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              <span>{feature.text}</span>
+                            </div>
+                          );
+                        })}
+                        {plan.allow_addons ? (
+                          <>
+                            <div className="plan-metric">
+                              Add-on Monthly: {formatCurrencyLabel(currency)} {addonMonthly || "-"}
+                            </div>
+                            <div className="plan-metric">
+                              Add-on Yearly: {formatCurrencyLabel(currency)} {addonYearly || "-"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="plan-metric">Add-ons disabled</div>
+                        )}
                       </div>
                     </>
                   )}

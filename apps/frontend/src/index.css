@@ -237,6 +237,37 @@ a{
 .app-shell.sidebar-style-compact .theme-btn i{
   font-size:16px;
 }
+/* Keep collapse behavior identical for both menu styles */
+.app-shell.sidebar-style-compact.sidebar-collapsed .sidebar{
+  width:72px;
+  padding:24px 6px;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .brand{
+  font-size:16px;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .org{
+  display:none;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .nav-link{
+  min-height:unset;
+  justify-content:center;
+  padding:10px 8px;
+  gap:0;
+  flex-direction:row;
+  text-align:initial;
+  align-items:center;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .nav-link span{
+  display:none;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .nav-icon{
+  width:auto;
+  font-size:18px;
+  line-height:1;
+}
+.app-shell.sidebar-style-compact.sidebar-collapsed .theme-toggle{
+  display:none;
+}
 .brand{
   font-size:22px;
   font-weight:700;
@@ -413,7 +444,7 @@ html[data-theme="light"] .form-control[type="file"]:focus::-webkit-file-upload-b
   padding:32px 32px 52px;
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:16px;
 }
 html[data-theme="light"] .main{
   background:#ffffff;
