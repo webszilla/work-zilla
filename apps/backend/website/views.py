@@ -47,6 +47,16 @@ def _resolve_download_path(*candidates):
             return file_path, filename
     raise Http404("Installer not found.")
 
+def _has_download_artifact(*candidates):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    downloads_dir = os.path.join(base_dir, "static", "downloads")
+    for filename in candidates:
+        if not filename:
+            continue
+        if os.path.exists(os.path.join(downloads_dir, filename)):
+            return True
+    return False
+
 def _prefer_arm64_mac(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     if any(token in user_agent for token in ("intel", "x86_64", "x64")):
@@ -72,6 +82,25 @@ def download_windows_agent(request):
 
 def download_windows_product_agent(request):
     file_path, filename = _resolve_download_path(
+        "Work Zilla Agent Setup 0.2.0.exe",
+        "WorkZillaInstallerSetup.exe",
+        "WorkZillaAgentSetup.exe",
+    )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+def download_windows_monitor_product_agent(request):
+    file_path, filename = _resolve_download_path(
+        "Work Zilla Agent Setup 0.2.0.exe",
+        "WorkZillaInstallerSetup.exe",
+        "WorkZillaAgentSetup.exe",
+    )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+def download_windows_storage_product_agent(request):
+    file_path, filename = _resolve_download_path(
+        "Work Zilla Storage Setup 0.2.0.exe",
+        "Work Zilla Storage Agent Setup 0.2.0.exe",
+        "Work Zilla Storage Setup.exe",
         "Work Zilla Agent Setup 0.2.0.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
@@ -140,20 +169,120 @@ def download_mac_product_agent(request):
         )
     return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
+def download_mac_monitor_product_agent(request):
+    prefer_arm = _prefer_arm64_mac(request)
+    if prefer_arm:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Agent-0.2.0-arm64.dmg",
+            "Work Zilla Agent-0.2.0-arm64.pkg",
+            "Work Zilla Agent-0.2.0-arm64-mac.zip",
+            "Work Zilla Agent-0.2.0.dmg",
+            "Work Zilla Agent-0.2.0.pkg",
+            "Work Zilla Agent-0.2.0-mac.zip",
+        )
+    else:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Agent-0.2.0.dmg",
+            "Work Zilla Agent-0.2.0.pkg",
+            "Work Zilla Agent-0.2.0-mac.zip",
+            "Work Zilla Agent-0.2.0-arm64.dmg",
+            "Work Zilla Agent-0.2.0-arm64.pkg",
+            "Work Zilla Agent-0.2.0-arm64-mac.zip",
+        )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
+def download_mac_storage_product_agent(request):
+    prefer_arm = _prefer_arm64_mac(request)
+    if prefer_arm:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Storage-0.2.0-arm64.dmg",
+            "Work Zilla Storage-0.2.0-arm64.pkg",
+            "Work Zilla Storage-0.2.0-arm64-mac.zip",
+            "Work Zilla Storage-0.2.0.dmg",
+            "Work Zilla Storage-0.2.0.pkg",
+            "Work Zilla Storage-0.2.0-mac.zip",
+            "Work Zilla Agent-0.2.0-arm64.dmg",
+            "Work Zilla Agent-0.2.0-arm64.pkg",
+            "Work Zilla Agent-0.2.0-arm64-mac.zip",
+            "Work Zilla Agent-0.2.0.dmg",
+            "Work Zilla Agent-0.2.0.pkg",
+            "Work Zilla Agent-0.2.0-mac.zip",
+        )
+    else:
+        file_path, filename = _resolve_download_path(
+            "Work Zilla Storage-0.2.0.dmg",
+            "Work Zilla Storage-0.2.0.pkg",
+            "Work Zilla Storage-0.2.0-mac.zip",
+            "Work Zilla Storage-0.2.0-arm64.dmg",
+            "Work Zilla Storage-0.2.0-arm64.pkg",
+            "Work Zilla Storage-0.2.0-arm64-mac.zip",
+            "Work Zilla Agent-0.2.0.dmg",
+            "Work Zilla Agent-0.2.0.pkg",
+            "Work Zilla Agent-0.2.0-mac.zip",
+            "Work Zilla Agent-0.2.0-arm64.dmg",
+            "Work Zilla Agent-0.2.0-arm64.pkg",
+            "Work Zilla Agent-0.2.0-arm64-mac.zip",
+        )
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+
 
 def bootstrap_products_config(request):
-    windows_url = request.build_absolute_uri("/static/downloads/Work%20Zilla%20Agent%20Setup%200.2.0.exe")
-    mac_url = request.build_absolute_uri("/downloads/mac-product-agent/")
+    monitor_windows_candidates = (
+        "Work Zilla Agent Setup 0.2.0.exe",
+        "WorkZillaInstallerSetup.exe",
+        "WorkZillaAgentSetup.exe",
+    )
+    monitor_mac_candidates = (
+        "Work Zilla Agent-0.2.0-arm64.dmg",
+        "Work Zilla Agent-0.2.0-arm64.pkg",
+        "Work Zilla Agent-0.2.0-arm64-mac.zip",
+        "Work Zilla Agent-0.2.0.dmg",
+        "Work Zilla Agent-0.2.0.pkg",
+        "Work Zilla Agent-0.2.0-mac.zip",
+    )
+    storage_windows_candidates = (
+        "Work Zilla Storage Setup 0.2.0.exe",
+        "Work Zilla Storage Agent Setup 0.2.0.exe",
+        "Work Zilla Storage Setup.exe",
+        "Work Zilla Agent Setup 0.2.0.exe",
+        "WorkZillaInstallerSetup.exe",
+        "WorkZillaAgentSetup.exe",
+    )
+    storage_mac_candidates = (
+        "Work Zilla Storage-0.2.0-arm64.dmg",
+        "Work Zilla Storage-0.2.0-arm64.pkg",
+        "Work Zilla Storage-0.2.0-arm64-mac.zip",
+        "Work Zilla Storage-0.2.0.dmg",
+        "Work Zilla Storage-0.2.0.pkg",
+        "Work Zilla Storage-0.2.0-mac.zip",
+        "Work Zilla Agent-0.2.0-arm64.dmg",
+        "Work Zilla Agent-0.2.0-arm64.pkg",
+        "Work Zilla Agent-0.2.0-arm64-mac.zip",
+        "Work Zilla Agent-0.2.0.dmg",
+        "Work Zilla Agent-0.2.0.pkg",
+        "Work Zilla Agent-0.2.0-mac.zip",
+    )
+    monitor_windows_url = request.build_absolute_uri("/downloads/windows-monitor-product-agent/")
+    monitor_mac_url = request.build_absolute_uri("/downloads/mac-monitor-product-agent/")
+    storage_windows_url = request.build_absolute_uri("/downloads/windows-storage-product-agent/")
+    storage_mac_url = request.build_absolute_uri("/downloads/mac-storage-product-agent/")
+
+    monitor_entry = {}
+    if _has_download_artifact(*monitor_windows_candidates):
+        monitor_entry["windows"] = monitor_windows_url
+    if _has_download_artifact(*monitor_mac_candidates):
+        monitor_entry["mac"] = monitor_mac_url
+
+    storage_entry = {}
+    if _has_download_artifact(*storage_windows_candidates):
+        storage_entry["windows"] = storage_windows_url
+    if _has_download_artifact(*storage_mac_candidates):
+        storage_entry["mac"] = storage_mac_url
+
     return JsonResponse(
         {
-            "monitor": {
-                "windows": windows_url,
-                "mac": mac_url,
-            },
-            "storage": {
-                "windows": windows_url,
-                "mac": mac_url,
-            },
+            "monitor": monitor_entry,
+            "storage": storage_entry,
         }
     )
 
