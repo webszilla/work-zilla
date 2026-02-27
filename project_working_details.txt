@@ -145,9 +145,9 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-02-27 07:29:16 UTC
-  - Local commit SHA: 427a71d
-  - GitHub main SHA: 427a71d
+  - Published at (UTC): 2026-02-27 08:03:38 UTC
+  - Local commit SHA: 0bb419c
+  - GitHub main SHA: 0bb419c
   - Server live SHA (git metadata): 541c972 (code synced by rsync-fallback)
   - Deploy method: rsync-fallback
   - Gunicorn status: yes (listening on :8000)
@@ -155,11 +155,11 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
     - /downloads/windows-agent/ (200)
     - /downloads/mac-agent/ (200)
     - /downloads/bootstrap-products.json (200)
-    - / (200)
+    - /downloads/mac-storage-product-agent/ (200)
   - Notes / rollback point:
-    - Purpose: Desktop auth fix for same-org device rebind (`device_org_mismatch`) + product-gated launcher visibility in Work Zilla Agent
-    - Incident handled: post-restart `502` fixed by restarting `openpanel` and rebinding gunicorn on :8000
-    - Rollback to previous GitHub main: 6f45221
+    - Purpose: Online Storage installer availability fix + rebuilt mac bootstrap/agent binaries + desktop auto-retry on `device_org_mismatch`
+    - Incident handled: post-sync `502` fixed by rebinding gunicorn on :8000
+    - Rollback to previous GitHub main: dba3feb
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
