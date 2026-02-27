@@ -145,9 +145,9 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-02-27 07:24:40 UTC
-  - Local commit SHA: 86e7f02
-  - GitHub main SHA: 86e7f02
+  - Published at (UTC): 2026-02-27 07:29:16 UTC
+  - Local commit SHA: 427a71d
+  - GitHub main SHA: 427a71d
   - Server live SHA (git metadata): 541c972 (code synced by rsync-fallback)
   - Deploy method: rsync-fallback
   - Gunicorn status: yes (listening on :8000)
