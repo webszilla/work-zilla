@@ -11,20 +11,20 @@ import {
 } from "../lib/impositionEngine.js";
 
 const MENU_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: "DB" },
-  { id: "imposition", label: "Imposition", icon: "IM" },
-  { id: "book", label: "Book UPS", icon: "BK" },
-  { id: "business-card", label: "Business Card UPS", icon: "BC" },
-  { id: "sticker", label: "Sticker UPS", icon: "ST" },
-  { id: "label", label: "Label UPS", icon: "LB" },
-  { id: "sheet", label: "Sheet Setup", icon: "SH" },
-  { id: "templates", label: "Templates", icon: "TP" },
-  { id: "data-import", label: "Data Import", icon: "DI" },
-  { id: "qr", label: "QR / Barcode", icon: "QR" },
-  { id: "serial", label: "Serial Generator", icon: "SR" },
-  { id: "hot-folder", label: "Hot Folder", icon: "HF" },
-  { id: "history", label: "Print History", icon: "PH" },
-  { id: "settings", label: "Settings", icon: "SE" },
+  { id: "dashboard", label: "Dashboard", icon: "⌂" },
+  { id: "imposition", label: "Imposition", icon: "▦" },
+  { id: "book", label: "Book UPS", icon: "▤" },
+  { id: "business-card", label: "Business Card UPS", icon: "▥" },
+  { id: "sticker", label: "Sticker UPS", icon: "◫" },
+  { id: "label", label: "Label UPS", icon: "▧" },
+  { id: "sheet", label: "Sheet Setup", icon: "▭" },
+  { id: "templates", label: "Templates", icon: "◩" },
+  { id: "data-import", label: "Data Import", icon: "⇪" },
+  { id: "qr", label: "QR / Barcode", icon: "⌘" },
+  { id: "serial", label: "Serial Generator", icon: "#" },
+  { id: "hot-folder", label: "Hot Folder", icon: "↓" },
+  { id: "history", label: "Print History", icon: "◷" },
+  { id: "settings", label: "Settings", icon: "⚙" },
 ];
 
 const SHEET_OPTIONS = Object.keys(getSheetPresets());
