@@ -1,671 +1,1011 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  buildBookImposition,
+  buildExportPlan,
+  buildHotFolderRecipe,
+  buildQrBarcodePreview,
+  buildSerialPreview,
+  getSheetPresets,
+  optimizeSheetLayout,
+  resolveSheet,
+} from "../lib/impositionEngine.js";
 
-const DEFAULT_MAPPING = {
-  ID: "employee_id",
-  Name: "employee_name",
-  Department: "department",
-  Photo: "photo",
-  Designation: "designation",
+const MENU_ITEMS = [
+  { id: "dashboard", label: "Dashboard", icon: "DB" },
+  { id: "imposition", label: "Imposition", icon: "IM" },
+  { id: "book", label: "Book UPS", icon: "BK" },
+  { id: "business-card", label: "Business Card UPS", icon: "BC" },
+  { id: "sticker", label: "Sticker UPS", icon: "ST" },
+  { id: "label", label: "Label UPS", icon: "LB" },
+  { id: "sheet", label: "Sheet Setup", icon: "SH" },
+  { id: "templates", label: "Templates", icon: "TP" },
+  { id: "data-import", label: "Data Import", icon: "DI" },
+  { id: "qr", label: "QR / Barcode", icon: "QR" },
+  { id: "serial", label: "Serial Generator", icon: "SR" },
+  { id: "hot-folder", label: "Hot Folder", icon: "HF" },
+  { id: "history", label: "Print History", icon: "PH" },
+  { id: "settings", label: "Settings", icon: "SE" },
+];
+
+const SHEET_OPTIONS = Object.keys(getSheetPresets());
+const ZOOM_OPTIONS = [25, 50, 100, 140];
+const DEFAULT_EXPORT = {
+  format: "pdf",
+  dpi: 300,
+  cropMarks: true,
+  bleedMarks: true,
+  registrationMarks: false,
 };
 
+const DEFAULT_SHEET_SETUP = {
+  sheetKey: "A3",
+  customWidthMm: 330,
+  customHeightMm: 483,
+  marginMm: 6,
+  bleedMm: 2,
+  gapMm: 3,
+};
+
+const DEFAULT_BUSINESS_CARD = {
+  designName: "Premium Business Card",
+  widthMm: 90,
+  heightMm: 54,
+  quantity: 5000,
+  allowRotation: true,
+};
+
+const DEFAULT_STICKER = {
+  designName: "Square Sticker",
+  widthMm: 50,
+  heightMm: 50,
+  quantity: 2000,
+  allowRotation: true,
+};
+
+const DEFAULT_LABEL = {
+  designName: "Shipping Label",
+  widthMm: 100,
+  heightMm: 35,
+  quantity: 3200,
+  allowRotation: true,
+};
+
+const DEFAULT_BOOK = {
+  title: "Product Catalogue",
+  pageWidthMm: 148,
+  pageHeightMm: 210,
+  totalPages: 16,
+  bindingType: "center-staple",
+  signatureSize: 16,
+};
+
+const TEMPLATE_LIBRARY = [
+  { name: "A4 Business Card Gang Run", type: "Business Card UPS", sheet: "A4", output: "10 up" },
+  { name: "A3 Sticker Sheet", type: "Sticker UPS", sheet: "A3", output: "49 up" },
+  { name: "SRA3 Booklet 16pp", type: "Book UPS", sheet: "SRA3", output: "4 spreads" },
+  { name: "12x18 Product Label Grid", type: "Label UPS", sheet: "12x18", output: "18 up" },
+];
+
+const IMPORT_FIELDS = [
+  { field: "job_name", mappedTo: "Job Name" },
+  { field: "sku", mappedTo: "SKU" },
+  { field: "design_path", mappedTo: "Artwork Path" },
+  { field: "quantity", mappedTo: "Quantity" },
+  { field: "finish", mappedTo: "Finish" },
+];
+
+const HISTORY_ROWS = [
+  { job: "Business Cards - Sai Creatives", type: "Business Card UPS", sheets: 500, output: "PDF", status: "Completed" },
+  { job: "Festival Labels", type: "Label UPS", sheets: 146, output: "TIFF", status: "Completed" },
+  { job: "Sticker Promo Pack", type: "Sticker UPS", sheets: 82, output: "PNG", status: "Queued" },
+  { job: "16 Page Product Booklet", type: "Book UPS", sheets: 12, output: "PDF", status: "Ready" },
+];
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function MetricCard({ label, value, caption }) {
+  return (
+    <article className="imposition-metric-card">
+      <div className="imposition-metric-label">{label}</div>
+      <div className="imposition-metric-value">{value}</div>
+      <div className="imposition-metric-caption">{caption}</div>
+    </article>
+  );
+}
+
+function SidebarButton({ item, activeId, onSelect }) {
+  return (
+    <button
+      type="button"
+      title={item.label}
+      className={`imposition-sidebar-button ${activeId === item.id ? "active" : ""}`}
+      onClick={() => onSelect(item.id)}
+    >
+      <span className="imposition-sidebar-icon">{item.icon}</span>
+      <span className="imposition-sidebar-tooltip">{item.label}</span>
+    </button>
+  );
+}
+
+function CanvasPreview({ layout, bookPlan, zoom }) {
+  if (!layout?.sheet) {
+    return (
+      <div className="imposition-canvas-empty">
+        Load a sheet and product size to preview the UPS layout.
+      </div>
+    );
+  }
+
+  const sheetWidth = layout.sheet.widthMm;
+  const sheetHeight = layout.sheet.heightMm;
+  const scale = zoom / 100;
+  const previewWidth = Math.max(420, sheetWidth * 1.55 * scale);
+  const previewHeight = Math.max(320, sheetHeight * 1.2 * scale);
+  const isBook = Boolean(bookPlan);
+
+  return (
+    <div className="imposition-canvas-stage">
+      <svg
+        className="imposition-canvas"
+        width={previewWidth}
+        height={previewHeight}
+        viewBox={`0 0 ${sheetWidth + 24} ${sheetHeight + 24}`}
+        role="img"
+        aria-label="Sheet layout preview"
+      >
+        <rect x="12" y="12" width={sheetWidth} height={sheetHeight} rx="8" className="sheet-outline" />
+        <rect
+          x={12 + layout.settings.marginMm}
+          y={12 + layout.settings.marginMm}
+          width={Math.max(0, sheetWidth - layout.settings.marginMm * 2)}
+          height={Math.max(0, sheetHeight - layout.settings.marginMm * 2)}
+          className="sheet-safe-area"
+        />
+        {layout.placements.map((placement) => (
+          <g key={`${placement.index}-${placement.x}-${placement.y}`}>
+            <rect
+              x={12 + placement.x}
+              y={12 + placement.y}
+              width={placement.widthMm + placement.bleedMm * 2}
+              height={placement.heightMm + placement.bleedMm * 2}
+              className="sheet-bleed-box"
+            />
+            <rect
+              x={12 + placement.x + placement.bleedMm}
+              y={12 + placement.y + placement.bleedMm}
+              width={placement.widthMm}
+              height={placement.heightMm}
+              className="sheet-item-box"
+            />
+            <text
+              x={12 + placement.x + placement.bleedMm + placement.widthMm / 2}
+              y={12 + placement.y + placement.bleedMm + placement.heightMm / 2}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              className="sheet-item-label"
+            >
+              {isBook && bookPlan?.sections?.[0]?.spreads?.[0]
+                ? `${bookPlan.sections[0].spreads[0].front.left}-${bookPlan.sections[0].spreads[0].front.right}`
+                : placement.index}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function ResultSummary({ title, layout, suffix }) {
+  return (
+    <section className="imposition-panel">
+      <div className="imposition-panel-heading">
+        <h3>{title}</h3>
+        <span>{suffix}</span>
+      </div>
+      <div className="imposition-stats-grid">
+        <MetricCard label="UPS" value={layout.summary.itemCount} caption={`${layout.summary.columns} cols x ${layout.summary.rows} rows`} />
+        <MetricCard label="Sheets" value={layout.summary.sheetCount} caption="For current quantity" />
+        <MetricCard label="Efficiency" value={`${layout.summary.efficiency}%`} caption="Usable sheet coverage" />
+        <MetricCard label="Orientation" value={layout.summary.rotated ? "Rotated" : "Standard"} caption="Best auto-fit result" />
+      </div>
+    </section>
+  );
+}
+
+function TextInput({ label, value, onChange, type = "text", min, step, placeholder }) {
+  return (
+    <label className="imposition-field">
+      <span>{label}</span>
+      <input
+        type={type}
+        value={value}
+        min={min}
+        step={step}
+        placeholder={placeholder}
+        onChange={(event) => onChange(type === "number" ? Number(event.target.value) : event.target.value)}
+      />
+    </label>
+  );
+}
+
+function SelectInput({ label, value, onChange, options }) {
+  return (
+    <label className="imposition-field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export default function ImpositionScreen({ onBack }) {
+  const [activeMenu, setActiveMenu] = useState("business-card");
+  const [zoom, setZoom] = useState(100);
+  const [sheetSetup, setSheetSetup] = useState(DEFAULT_SHEET_SETUP);
+  const [businessCard, setBusinessCard] = useState(DEFAULT_BUSINESS_CARD);
+  const [sticker, setSticker] = useState(DEFAULT_STICKER);
+  const [label, setLabel] = useState(DEFAULT_LABEL);
+  const [book, setBook] = useState(DEFAULT_BOOK);
+  const [exportOptions, setExportOptions] = useState(DEFAULT_EXPORT);
+  const [hotFolderPath, setHotFolderPath] = useState("/hotfolder/cards");
   const [licenseCode, setLicenseCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [licenseBusy, setLicenseBusy] = useState(false);
+  const [licenseError, setLicenseError] = useState("");
+  const [licenseMessage, setLicenseMessage] = useState("");
   const [policy, setPolicy] = useState(null);
-
-  const [qrForm, setQrForm] = useState({
-    sourceType: "id_number",
-    idNumber: "",
-    url: "",
-    customText: "",
-    barcodeType: "qr_code",
-    qrSize: 80,
-    qrPosition: "bottom_right",
-    margin: 4,
-  });
-  const [qrBusy, setQrBusy] = useState(false);
-  const [qrResult, setQrResult] = useState(null);
-  const [qrError, setQrError] = useState("");
-
-  const [bulkForm, setBulkForm] = useState({
-    importType: "id_card",
-    sheetSize: "A4",
-    cardWidthMm: 54,
-    cardHeightMm: 86,
-    marginMm: 5,
-    gapMm: 2,
-  });
-  const [fieldMapping, setFieldMapping] = useState(DEFAULT_MAPPING);
-  const [bulkFilePath, setBulkFilePath] = useState("");
-  const [bulkFileName, setBulkFileName] = useState("");
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkError, setBulkError] = useState("");
-  const [bulkImportResult, setBulkImportResult] = useState(null);
-  const [bulkLayoutResult, setBulkLayoutResult] = useState(null);
-  const [bulkExportLinks, setBulkExportLinks] = useState({});
+  const [exportQueue, setExportQueue] = useState([]);
 
   useEffect(() => {
-    let active = true;
+    let mounted = true;
     async function loadPolicy() {
       try {
         const response = await window.storageApi.getImpositionPolicy?.();
-        if (!active) {
-          return;
+        if (mounted) {
+          setPolicy(response?.policy || null);
         }
-        setPolicy(response?.policy || null);
-      } catch {
-        if (active) {
+      } catch (_error) {
+        if (mounted) {
           setPolicy(null);
         }
       }
     }
     loadPolicy();
     return () => {
-      active = false;
+      mounted = false;
     };
   }, []);
 
-  const features = policy?.plan?.feature_flags || {};
+  const activeSheet = useMemo(
+    () => resolveSheet(sheetSetup.sheetKey, sheetSetup.customWidthMm, sheetSetup.customHeightMm),
+    [sheetSetup]
+  );
 
-  const higherPlanEnabled = useMemo(() => {
-    return Boolean(
-      features.excel_data_import ||
-      features.id_card_data_update ||
-      features.business_card_data_update ||
-      features.bulk_card_generation
-    );
-  }, [features]);
+  const businessCardLayout = useMemo(
+    () =>
+      optimizeSheetLayout({
+        sheetKey: sheetSetup.sheetKey,
+        customSheetWidthMm: sheetSetup.customWidthMm,
+        customSheetHeightMm: sheetSetup.customHeightMm,
+        itemWidthMm: businessCard.widthMm,
+        itemHeightMm: businessCard.heightMm,
+        marginMm: sheetSetup.marginMm,
+        bleedMm: sheetSetup.bleedMm,
+        gapMm: sheetSetup.gapMm,
+        allowRotation: businessCard.allowRotation,
+        quantity: businessCard.quantity,
+      }),
+    [businessCard, sheetSetup]
+  );
 
-  function mapErrorCode(rawCode, fallback = "Request failed.") {
-    const code = String(rawCode || "").trim();
-    if (!code) {
-      return fallback;
+  const stickerLayout = useMemo(
+    () =>
+      optimizeSheetLayout({
+        sheetKey: sheetSetup.sheetKey,
+        customSheetWidthMm: sheetSetup.customWidthMm,
+        customSheetHeightMm: sheetSetup.customHeightMm,
+        itemWidthMm: sticker.widthMm,
+        itemHeightMm: sticker.heightMm,
+        marginMm: sheetSetup.marginMm,
+        bleedMm: sheetSetup.bleedMm,
+        gapMm: sheetSetup.gapMm,
+        allowRotation: sticker.allowRotation,
+        quantity: sticker.quantity,
+      }),
+    [sheetSetup, sticker]
+  );
+
+  const labelLayout = useMemo(
+    () =>
+      optimizeSheetLayout({
+        sheetKey: sheetSetup.sheetKey,
+        customSheetWidthMm: sheetSetup.customWidthMm,
+        customSheetHeightMm: sheetSetup.customHeightMm,
+        itemWidthMm: label.widthMm,
+        itemHeightMm: label.heightMm,
+        marginMm: sheetSetup.marginMm,
+        bleedMm: sheetSetup.bleedMm,
+        gapMm: sheetSetup.gapMm,
+        allowRotation: label.allowRotation,
+        quantity: label.quantity,
+      }),
+    [label, sheetSetup]
+  );
+
+  const bookPlan = useMemo(
+    () =>
+      buildBookImposition({
+        totalPages: book.totalPages,
+        bindingType: book.bindingType,
+        signatureSize: book.signatureSize,
+        pageWidthMm: book.pageWidthMm,
+        pageHeightMm: book.pageHeightMm,
+        sheetKey: sheetSetup.sheetKey,
+        customSheetWidthMm: sheetSetup.customWidthMm,
+        customSheetHeightMm: sheetSetup.customHeightMm,
+      }),
+    [book, sheetSetup]
+  );
+
+  const currentLayout = useMemo(() => {
+    if (activeMenu === "book") {
+      return bookPlan.layout;
     }
-    if (code === "plan_feature_locked") {
-      return "This feature is available only in Business and Enterprise plans.";
+    if (activeMenu === "sticker") {
+      return stickerLayout;
     }
-    if (code === "plan_feature_locked_qr_barcode") {
-      return "QR & Barcode Generator is available only in Business and Enterprise plans.";
+    if (activeMenu === "label") {
+      return labelLayout;
     }
-    if (code === "unsupported_file_type") {
-      return "Only .xlsx and .csv files are supported.";
+    return businessCardLayout;
+  }, [activeMenu, bookPlan, businessCardLayout, labelLayout, stickerLayout]);
+
+  const currentJobName = useMemo(() => {
+    if (activeMenu === "book") {
+      return book.title;
     }
-    if (code === "file_required") {
-      return "Choose an Excel/CSV file first.";
+    if (activeMenu === "sticker") {
+      return sticker.designName;
     }
-    if (code === "import_id_required") {
-      return "Upload data before generating layout.";
+    if (activeMenu === "label") {
+      return label.designName;
     }
-    if (code === "job_id_required") {
-      return "Generate bulk layout before export.";
-    }
-    if (code === "device_limit_exceeded") {
-      return "Device limit exceeded for this plan.";
-    }
-    if (code === "license_invalid") {
-      return "Invalid or inactive license code.";
-    }
-    return code;
+    return businessCard.designName;
+  }, [activeMenu, book.title, businessCard.designName, label.designName, sticker.designName]);
+
+  const currentModuleLabel = useMemo(
+    () => MENU_ITEMS.find((item) => item.id === activeMenu)?.label || "Imposition",
+    [activeMenu]
+  );
+
+  const licenseProfile = {
+    userName: policy?.device?.user_name || "Press Operator",
+    organization: policy?.organization_name || "Sai Creatives",
+    plan: policy?.plan?.name || "Business",
+    devicesUsed: policy?.device?.used_count || 2,
+    devicesAllowed: policy?.plan?.device_limit || 5,
+    status: policy ? "ACTIVE" : "NOT ACTIVATED",
+  };
+
+  const optimizationHighlights = [
+    `Sheet: ${activeSheet.label} (${activeSheet.widthMm} x ${activeSheet.heightMm} mm)`,
+    `Margins ${sheetSetup.marginMm} mm / Bleed ${sheetSetup.bleedMm} mm / Gap ${sheetSetup.gapMm} mm`,
+    `Auto layout returns ${currentLayout.summary.itemCount} items per sheet with ${currentLayout.summary.efficiency}% efficiency`,
+  ];
+
+  const hotFolderRecipe = useMemo(
+    () =>
+      buildHotFolderRecipe({
+        folderPath: hotFolderPath,
+        moduleName: currentModuleLabel,
+        format: exportOptions.format.toUpperCase(),
+        dpi: exportOptions.dpi,
+        layout: currentLayout,
+      }),
+    [currentLayout, currentModuleLabel, exportOptions.dpi, exportOptions.format, hotFolderPath]
+  );
+
+  function updateSheet(field, value) {
+    setSheetSetup((current) => ({ ...current, [field]: value }));
   }
 
-  async function activateDevice() {
-    setError("");
-    setMessage("");
-    const code = String(licenseCode || "").trim();
-    if (!code) {
-      setError("License code is required.");
-      return;
-    }
-    setBusy(true);
+  function updateBusinessCard(field, value) {
+    setBusinessCard((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateSticker(field, value) {
+    setSticker((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateLabel(field, value) {
+    setLabel((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateBook(field, value) {
+    setBook((current) => ({ ...current, [field]: value }));
+  }
+
+  async function activateLicense() {
+    setLicenseBusy(true);
+    setLicenseError("");
+    setLicenseMessage("");
     try {
-      await window.storageApi.validateImpositionLicense({ license_code: code });
-      const registerResp = await window.storageApi.registerImpositionDevice({ license_code: code });
-      setPolicy(registerResp?.policy || null);
-      setMessage("Device registered successfully.");
-    } catch (e) {
-      const codeOrMsg = String(e?.code || e?.message || "activation_failed");
-      setError(mapErrorCode(codeOrMsg, "Activation failed."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function checkDevice() {
-    setError("");
-    setMessage("");
-    const code = String(licenseCode || policy?.license_code || "").trim();
-    if (!code) {
-      setError("Enter license code first.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const resp = await window.storageApi.checkImpositionDevice({ license_code: code });
-      setPolicy(resp?.policy || policy);
-      setMessage("Device is active for this license.");
-    } catch (e) {
-      setError(mapErrorCode(String(e?.code || e?.message || "device_check_failed"), "Check failed."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function generateQrBarcode() {
-    setQrError("");
-    setQrResult(null);
-    setQrBusy(true);
-    try {
-      const payload = {
-        source_type: qrForm.sourceType,
-        id_number: qrForm.idNumber,
-        url: qrForm.url,
-        custom_text: qrForm.customText,
-        barcode_type: qrForm.barcodeType,
-        qr_size: Number(qrForm.qrSize || 80),
-        qr_position: qrForm.qrPosition,
-        margin: Number(qrForm.margin || 4),
-      };
-      const resp = await window.storageApi.generateImpositionQrBarcode(payload);
-      setQrResult(resp?.artifact || null);
-    } catch (e) {
-      const code = String(e?.code || e?.message || "imposition_qr_barcode_generate_failed");
-      setQrError(mapErrorCode(code, "QR/Barcode generation failed."));
-    } finally {
-      setQrBusy(false);
-    }
-  }
-
-  function onPickBulkFile(event) {
-    const file = event?.target?.files?.[0];
-    if (!file) {
-      setBulkFilePath("");
-      setBulkFileName("");
-      return;
-    }
-    const pathValue = String(file.path || "");
-    setBulkFilePath(pathValue);
-    setBulkFileName(file.name || pathValue.split(/[\\/]/).pop() || "");
-  }
-
-  async function uploadBulkData() {
-    setBulkError("");
-    setBulkLayoutResult(null);
-    setBulkExportLinks({});
-    if (!bulkFilePath) {
-      setBulkError("Choose an Excel/CSV file first.");
-      return;
-    }
-    setBulkBusy(true);
-    try {
-      const response = await window.storageApi.uploadImpositionBulkImport({
-        filePath: bulkFilePath,
-        importType: bulkForm.importType,
-        fieldMapping,
-        qrBarcode: {
-          enabled: true,
-          source_type: "id_number",
-          barcode_type: "qr_code",
-          qr_size: Number(qrForm.qrSize || 80),
-          qr_position: qrForm.qrPosition,
-          margin: Number(qrForm.margin || 4),
-        },
-      });
-      setBulkImportResult(response || null);
-      setMessage(`Bulk import uploaded. Records: ${response?.row_count || 0}`);
-    } catch (e) {
-      const code = String(e?.code || e?.message || "bulk_import_upload_failed");
-      setBulkError(mapErrorCode(code, "Bulk import failed."));
-    } finally {
-      setBulkBusy(false);
-    }
-  }
-
-  async function generateBulkLayout() {
-    setBulkError("");
-    setBulkExportLinks({});
-    const importId = bulkImportResult?.import_id;
-    if (!importId) {
-      setBulkError("Upload data before generating layout.");
-      return;
-    }
-    setBulkBusy(true);
-    try {
-      const response = await window.storageApi.generateImpositionBulkLayout({
-        import_id: importId,
-        sheet_size: bulkForm.sheetSize,
-        card_width_mm: Number(bulkForm.cardWidthMm || 54),
-        card_height_mm: Number(bulkForm.cardHeightMm || 86),
-        margin_mm: Number(bulkForm.marginMm || 5),
-        gap_mm: Number(bulkForm.gapMm || 2),
-      });
-      setBulkLayoutResult(response || null);
-      setMessage(response?.example || "Bulk layout generated.");
-    } catch (e) {
-      const code = String(e?.code || e?.message || "imposition_bulk_layout_failed");
-      setBulkError(mapErrorCode(code, "Bulk layout generation failed."));
-    } finally {
-      setBulkBusy(false);
-    }
-  }
-
-  async function exportBulk(format) {
-    setBulkError("");
-    const jobId = bulkLayoutResult?.job_id;
-    if (!jobId) {
-      setBulkError("Generate bulk layout before export.");
-      return;
-    }
-    setBulkBusy(true);
-    try {
-      const response = await window.storageApi.exportImpositionBulk({ job_id: jobId, format });
-      const url = String(response?.download_url || "");
-      if (url) {
-        setBulkExportLinks((prev) => ({ ...prev, [format]: url }));
+      const code = String(licenseCode || "").trim();
+      if (!code) {
+        throw new Error("License code is required.");
       }
-      setMessage(`Export ready: ${format.toUpperCase()}`);
-    } catch (e) {
-      const code = String(e?.code || e?.message || "imposition_bulk_export_failed");
-      setBulkError(mapErrorCode(code, "Bulk export failed."));
+      await window.storageApi.validateImpositionLicense?.({ license_code: code });
+      const response = await window.storageApi.registerImpositionDevice?.({ license_code: code });
+      setPolicy(response?.policy || null);
+      setLicenseMessage("License activated for this workstation.");
+    } catch (error) {
+      setLicenseError(String(error?.message || error?.code || "Activation failed."));
     } finally {
-      setBulkBusy(false);
+      setLicenseBusy(false);
     }
+  }
+
+  function queueExport() {
+    const plan = buildExportPlan({
+      jobName: currentJobName,
+      moduleName: currentModuleLabel,
+      format: exportOptions.format,
+      dpi: exportOptions.dpi,
+      includeCropMarks: exportOptions.cropMarks,
+      includeBleedMarks: exportOptions.bleedMarks,
+      includeRegistrationMarks: exportOptions.registrationMarks,
+      layout: currentLayout,
+    });
+    setExportQueue((current) => [plan, ...current].slice(0, 8));
+    downloadJson(`${plan.outputName}.plan.json`, plan);
+  }
+
+  function renderDashboard() {
+    return (
+      <div className="imposition-dashboard-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Production Overview</h3>
+            <span>Digital Printing Press UPS</span>
+          </div>
+          <div className="imposition-stats-grid">
+            <MetricCard label="Booklet Jobs" value="18" caption="Center staple and perfect binding" />
+            <MetricCard label="Card Jobs" value="43" caption="Auto UPS batches this week" />
+            <MetricCard label="Queued Exports" value={exportQueue.length} caption="PDF / PNG / TIFF output" />
+            <MetricCard label="Hot Folder" value="Live" caption={hotFolderRecipe.folderPath} />
+          </div>
+        </section>
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Optimization Engine</h3>
+            <span>Current press profile</span>
+          </div>
+          <ul className="imposition-bullet-list">
+            {optimizationHighlights.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+        <ResultSummary title="Business Card UPS" layout={businessCardLayout} suffix="90 x 54 mm auto fit" />
+        <ResultSummary title="Sticker UPS" layout={stickerLayout} suffix="Grid optimization" />
+      </div>
+    );
+  }
+
+  function renderSheetSetup() {
+    return (
+      <div className="imposition-settings-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Sheet Setup</h3>
+            <span>Press stock and margins</span>
+          </div>
+          <div className="imposition-form-grid">
+            <SelectInput
+              label="Sheet Size"
+              value={sheetSetup.sheetKey}
+              onChange={(value) => updateSheet("sheetKey", value)}
+              options={SHEET_OPTIONS.map((item) => ({ value: item, label: item }))}
+            />
+            <TextInput label="Sheet Width (mm)" type="number" value={sheetSetup.customWidthMm} onChange={(value) => updateSheet("customWidthMm", value)} min={50} />
+            <TextInput label="Sheet Height (mm)" type="number" value={sheetSetup.customHeightMm} onChange={(value) => updateSheet("customHeightMm", value)} min={50} />
+            <TextInput label="Margins (mm)" type="number" value={sheetSetup.marginMm} onChange={(value) => updateSheet("marginMm", value)} min={0} step={0.5} />
+            <TextInput label="Bleed (mm)" type="number" value={sheetSetup.bleedMm} onChange={(value) => updateSheet("bleedMm", value)} min={0} step={0.5} />
+            <TextInput label="Gap (mm)" type="number" value={sheetSetup.gapMm} onChange={(value) => updateSheet("gapMm", value)} min={0} step={0.5} />
+          </div>
+        </section>
+        <ResultSummary title="Auto Sheet Optimization" layout={currentLayout} suffix={`${activeSheet.widthMm} x ${activeSheet.heightMm} mm`} />
+      </div>
+    );
+  }
+
+  function renderBusinessCard() {
+    return (
+      <div className="imposition-settings-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Business Card UPS</h3>
+            <span>Auto fit for gang run cards</span>
+          </div>
+          <div className="imposition-form-grid">
+            <TextInput label="Design Name" value={businessCard.designName} onChange={(value) => updateBusinessCard("designName", value)} />
+            <TextInput label="Card Width (mm)" type="number" value={businessCard.widthMm} onChange={(value) => updateBusinessCard("widthMm", value)} min={10} step={0.5} />
+            <TextInput label="Card Height (mm)" type="number" value={businessCard.heightMm} onChange={(value) => updateBusinessCard("heightMm", value)} min={10} step={0.5} />
+            <TextInput label="Quantity" type="number" value={businessCard.quantity} onChange={(value) => updateBusinessCard("quantity", value)} min={1} step={100} />
+            <label className="imposition-check">
+              <input
+                type="checkbox"
+                checked={businessCard.allowRotation}
+                onChange={(event) => updateBusinessCard("allowRotation", event.target.checked)}
+              />
+              <span>Allow rotation for better UPS</span>
+            </label>
+          </div>
+        </section>
+        <ResultSummary title="Business Card Result" layout={businessCardLayout} suffix="Example: 90 x 54 mm card" />
+      </div>
+    );
+  }
+
+  function renderSticker() {
+    return (
+      <div className="imposition-settings-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Sticker UPS</h3>
+            <span>Square and die-cut grid generation</span>
+          </div>
+          <div className="imposition-form-grid">
+            <TextInput label="Design Name" value={sticker.designName} onChange={(value) => updateSticker("designName", value)} />
+            <TextInput label="Sticker Width (mm)" type="number" value={sticker.widthMm} onChange={(value) => updateSticker("widthMm", value)} min={10} step={0.5} />
+            <TextInput label="Sticker Height (mm)" type="number" value={sticker.heightMm} onChange={(value) => updateSticker("heightMm", value)} min={10} step={0.5} />
+            <TextInput label="Quantity" type="number" value={sticker.quantity} onChange={(value) => updateSticker("quantity", value)} min={1} step={100} />
+            <label className="imposition-check">
+              <input
+                type="checkbox"
+                checked={sticker.allowRotation}
+                onChange={(event) => updateSticker("allowRotation", event.target.checked)}
+              />
+              <span>Allow rotation</span>
+            </label>
+          </div>
+        </section>
+        <ResultSummary title="Sticker Grid" layout={stickerLayout} suffix="Auto generated grid layout" />
+      </div>
+    );
+  }
+
+  function renderLabel() {
+    return (
+      <div className="imposition-settings-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Label UPS</h3>
+            <span>Roll label or sheet label layout</span>
+          </div>
+          <div className="imposition-form-grid">
+            <TextInput label="Design Name" value={label.designName} onChange={(value) => updateLabel("designName", value)} />
+            <TextInput label="Label Width (mm)" type="number" value={label.widthMm} onChange={(value) => updateLabel("widthMm", value)} min={10} step={0.5} />
+            <TextInput label="Label Height (mm)" type="number" value={label.heightMm} onChange={(value) => updateLabel("heightMm", value)} min={10} step={0.5} />
+            <TextInput label="Quantity" type="number" value={label.quantity} onChange={(value) => updateLabel("quantity", value)} min={1} step={100} />
+            <label className="imposition-check">
+              <input
+                type="checkbox"
+                checked={label.allowRotation}
+                onChange={(event) => updateLabel("allowRotation", event.target.checked)}
+              />
+              <span>Allow rotation</span>
+            </label>
+          </div>
+        </section>
+        <ResultSummary title="Label Layout" layout={labelLayout} suffix="Roll label optimization" />
+      </div>
+    );
+  }
+
+  function renderBook() {
+    return (
+      <div className="imposition-settings-grid">
+        <section className="imposition-panel">
+          <div className="imposition-panel-heading">
+            <h3>Book UPS</h3>
+            <span>Most important booklet imposition module</span>
+          </div>
+          <div className="imposition-form-grid">
+            <TextInput label="Book Title" value={book.title} onChange={(value) => updateBook("title", value)} />
+            <TextInput label="Page Width (mm)" type="number" value={book.pageWidthMm} onChange={(value) => updateBook("pageWidthMm", value)} min={20} step={0.5} />
+            <TextInput label="Page Height (mm)" type="number" value={book.pageHeightMm} onChange={(value) => updateBook("pageHeightMm", value)} min={20} step={0.5} />
+            <TextInput label="Total Pages" type="number" value={book.totalPages} onChange={(value) => updateBook("totalPages", value)} min={4} step={4} />
+            <SelectInput
+              label="Binding Type"
+              value={book.bindingType}
+              onChange={(value) => updateBook("bindingType", value)}
+              options={[
+                { value: "center-staple", label: "Center Staple" },
+                { value: "perfect-binding", label: "Perfect Binding" },
+              ]}
+            />
+            <TextInput label="Signature Size" type="number" value={book.signatureSize} onChange={(value) => updateBook("signatureSize", value)} min={4} step={4} />
+          </div>
+          <div className="imposition-book-grid">
+            {bookPlan.sections.map((section) => (
+              <article key={`${section.label}-${section.startPage}`} className="imposition-book-card">
+                <strong>{section.label}</strong>
+                <span>
+                  Pages {section.startPage} - {section.endPage}
+                </span>
+                {section.spreads.slice(0, 3).map((spread, index) => (
+                  <div key={`${section.label}-${index}`} className="imposition-book-spread">
+                    <span>Front {spread.front.left} / {spread.front.right}</span>
+                    <span>Back {spread.back.left} / {spread.back.right}</span>
+                  </div>
+                ))}
+              </article>
+            ))}
+          </div>
+        </section>
+        <ResultSummary title="Booklet Sheet Result" layout={bookPlan.layout} suffix={`${bookPlan.paddedPages} imposed pages`} />
+      </div>
+    );
+  }
+
+  function renderTemplates() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Templates</h3>
+          <span>Reusable press presets</span>
+        </div>
+        <div className="imposition-template-grid">
+          {TEMPLATE_LIBRARY.map((template) => (
+            <article key={template.name} className="imposition-template-card">
+              <strong>{template.name}</strong>
+              <span>{template.type}</span>
+              <span>{template.sheet}</span>
+              <span>{template.output}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function renderDataImport() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Data Import</h3>
+          <span>Excel and CSV mapping</span>
+        </div>
+        <div className="imposition-import-grid">
+          {IMPORT_FIELDS.map((row) => (
+            <div key={row.field} className="imposition-import-row">
+              <span>{row.field}</span>
+              <span>{row.mappedTo}</span>
+            </div>
+          ))}
+        </div>
+        <p className="imposition-muted-copy">
+          Current structure supports QR generator and Excel import, but UPS generation is now the primary output path.
+        </p>
+      </section>
+    );
+  }
+
+  function renderQr() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>QR / Barcode</h3>
+          <span>Variable data marks for print jobs</span>
+        </div>
+        <div className="imposition-template-grid">
+          {buildQrBarcodePreview().map((item) => (
+            <article key={item.label} className="imposition-template-card">
+              <strong>{item.label}</strong>
+              <span>{item.usage}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function renderSerialGenerator() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Serial Generator</h3>
+          <span>Variable sheet and carton tracking</span>
+        </div>
+        <div className="imposition-serial-grid">
+          {buildSerialPreview("PRESS").map((item) => (
+            <span key={item} className="imposition-serial-pill">{item}</span>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function renderHotFolder() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Hot Folder Automation</h3>
+          <span>Watch -&gt; impose -&gt; export</span>
+        </div>
+        <div className="imposition-form-grid">
+          <TextInput label="Folder Path" value={hotFolderPath} onChange={setHotFolderPath} />
+          <TextInput label="Output Pattern" value={hotFolderRecipe.outputPattern} onChange={() => {}} />
+        </div>
+        <div className="imposition-code-block">
+          <pre>{JSON.stringify(hotFolderRecipe, null, 2)}</pre>
+        </div>
+      </section>
+    );
+  }
+
+  function renderHistory() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Print History</h3>
+          <span>Recent batch jobs</span>
+        </div>
+        <div className="imposition-history-table">
+          <div className="imposition-history-head">
+            <span>Job</span>
+            <span>Module</span>
+            <span>Sheets</span>
+            <span>Output</span>
+            <span>Status</span>
+          </div>
+          {HISTORY_ROWS.map((row) => (
+            <div key={`${row.job}-${row.status}`} className="imposition-history-row">
+              <span>{row.job}</span>
+              <span>{row.type}</span>
+              <span>{row.sheets}</span>
+              <span>{row.output}</span>
+              <span>{row.status}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function renderSettings() {
+    return (
+      <section className="imposition-panel">
+        <div className="imposition-panel-heading">
+          <h3>Settings</h3>
+          <span>License, export, press defaults</span>
+        </div>
+        <div className="imposition-form-grid">
+          <TextInput label="License Code" value={licenseCode} onChange={setLicenseCode} placeholder="IMP-XXXXX-XXXXX" />
+          <SelectInput
+            label="Default Export"
+            value={exportOptions.format}
+            onChange={(value) => setExportOptions((current) => ({ ...current, format: value }))}
+            options={[
+              { value: "pdf", label: "PDF (Print Ready)" },
+              { value: "png", label: "PNG" },
+              { value: "tiff", label: "TIFF" },
+            ]}
+          />
+          <SelectInput
+            label="DPI"
+            value={String(exportOptions.dpi)}
+            onChange={(value) => setExportOptions((current) => ({ ...current, dpi: Number(value) }))}
+            options={[
+              { value: "300", label: "300 DPI" },
+              { value: "600", label: "600 DPI" },
+            ]}
+          />
+        </div>
+        <div className="button-row">
+          <button type="button" className="btn btn-primary" disabled={licenseBusy} onClick={activateLicense}>
+            {licenseBusy ? "Activating..." : "Activate License"}
+          </button>
+        </div>
+        {licenseMessage ? <div className="alert alert-info">{licenseMessage}</div> : null}
+        {licenseError ? <div className="alert alert-danger">{licenseError}</div> : null}
+      </section>
+    );
+  }
+
+  function renderPrimaryPanel() {
+    if (activeMenu === "dashboard" || activeMenu === "imposition") {
+      return renderDashboard();
+    }
+    if (activeMenu === "sheet") {
+      return renderSheetSetup();
+    }
+    if (activeMenu === "business-card") {
+      return renderBusinessCard();
+    }
+    if (activeMenu === "sticker") {
+      return renderSticker();
+    }
+    if (activeMenu === "label") {
+      return renderLabel();
+    }
+    if (activeMenu === "book") {
+      return renderBook();
+    }
+    if (activeMenu === "templates") {
+      return renderTemplates();
+    }
+    if (activeMenu === "data-import") {
+      return renderDataImport();
+    }
+    if (activeMenu === "qr") {
+      return renderQr();
+    }
+    if (activeMenu === "serial") {
+      return renderSerialGenerator();
+    }
+    if (activeMenu === "hot-folder") {
+      return renderHotFolder();
+    }
+    if (activeMenu === "history") {
+      return renderHistory();
+    }
+    return renderSettings();
   }
 
   return (
-    <div className="module-shell">
-      <div className="module-header">
-        <div>
-          <h1>Imposition Software</h1>
-          <p>License based activation for ID Card and Business Card imposition.</p>
+    <div className="imposition-app-shell">
+      <aside className="imposition-sidebar">
+        <div className="imposition-sidebar-brand">
+          <span className="imposition-sidebar-brand-mark">IP</span>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={onBack}>
-          Back
-        </button>
-      </div>
-
-      <section className="card">
-        <h2 className="card-title">License Activation</h2>
-        <div className="monitor-input-row">
-          <label>
-            License Code
-            <input
-              type="text"
-              value={licenseCode}
-              onChange={(event) => setLicenseCode(event.target.value)}
-              placeholder="IMP-XXXXX-XXXXX-XXXXX"
-              autoComplete="off"
-            />
-          </label>
-          <div className="button-row">
-            <button className="btn btn-primary" type="button" onClick={activateDevice} disabled={busy}>
-              {busy ? "Please wait..." : "Validate & Register"}
+        <nav className="imposition-sidebar-nav" aria-label="Imposition navigation">
+          {MENU_ITEMS.map((item) => (
+            <SidebarButton key={item.id} item={item} activeId={activeMenu} onSelect={setActiveMenu} />
+          ))}
+        </nav>
+        <div className="imposition-license-card">
+          <div className="imposition-license-title">User Profile</div>
+          <div className="imposition-license-line">
+            <span>Licensed to</span>
+            <strong>{licenseProfile.organization}</strong>
+          </div>
+          <div className="imposition-license-line">
+            <span>Plan</span>
+            <strong>{licenseProfile.plan}</strong>
+          </div>
+          <div className="imposition-license-line">
+            <span>Devices</span>
+            <strong>{licenseProfile.devicesUsed} / {licenseProfile.devicesAllowed}</strong>
+          </div>
+          <div className="imposition-license-line">
+            <span>Status</span>
+            <strong className={policy ? "is-active" : "is-inactive"}>{licenseProfile.status}</strong>
+          </div>
+          <div className="imposition-license-user">{licenseProfile.userName}</div>
+          {!policy ? (
+            <button type="button" className="btn btn-primary imposition-license-button" onClick={() => setActiveMenu("settings")}>
+              Activate License
             </button>
-            <button className="btn btn-secondary" type="button" onClick={checkDevice} disabled={busy}>
-              Check Device
-            </button>
-          </div>
-        </div>
-        {error ? <div className="alert alert-danger">{error}</div> : null}
-        {message ? <div className="alert alert-info">{message}</div> : null}
-      </section>
-
-      <section className="card">
-        <h2 className="card-title">Plan Policy</h2>
-        {policy ? (
-          <div className="card-grid">
-            <div>
-              <div className="card-muted">Plan</div>
-              <div className="card-value">{policy.plan?.name || "-"}</div>
-            </div>
-            <div>
-              <div className="card-muted">Device Limit</div>
-              <div className="card-value">{policy.plan?.device_limit ?? 0}</div>
-            </div>
-            <div>
-              <div className="card-muted">Offline Grace</div>
-              <div className="card-value">{policy.offline_grace_days ?? 0} days</div>
-            </div>
-            <div>
-              <div className="card-muted">Verify Every</div>
-              <div className="card-value">{policy.verify_every_hours ?? 24} hours</div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-muted">Activate a valid license to load policy.</p>
-        )}
-      </section>
-
-      <section className="card">
-        <h2 className="card-title">Feature Flags</h2>
-        {!policy ? (
-          <p className="text-muted">No plan loaded.</p>
-        ) : (
-          <div className="card-grid">
-            {Object.entries(features).map(([key, enabled]) => (
-              <div key={key} className="row">
-                <span>{key.replace(/_/g, " ")}</span>
-                <strong>{enabled ? "Enabled" : "Disabled"}</strong>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="card">
-        <h2 className="card-title">QR & Barcode Generator</h2>
-        <p className="text-muted">Generate QR/Barcode for ID number, URL, or custom text and place it in card layout.</p>
-        <div className="monitor-input-row">
-          <label>
-            Source
-            <select
-              value={qrForm.sourceType}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, sourceType: event.target.value }))}
-            >
-              <option value="id_number">ID Number</option>
-              <option value="url">URL</option>
-              <option value="custom_text">Custom Text</option>
-            </select>
-          </label>
-          <label>
-            Barcode Type
-            <select
-              value={qrForm.barcodeType}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, barcodeType: event.target.value }))}
-            >
-              <option value="qr_code">QR Code</option>
-              <option value="code128">Code128</option>
-              <option value="ean13">EAN13</option>
-            </select>
-          </label>
-          <label>
-            QR Size
-            <input
-              type="number"
-              min="24"
-              max="400"
-              value={qrForm.qrSize}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, qrSize: event.target.value }))}
-            />
-          </label>
-          <label>
-            QR Position
-            <select
-              value={qrForm.qrPosition}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, qrPosition: event.target.value }))}
-            >
-              <option value="top_left">Top Left</option>
-              <option value="top_right">Top Right</option>
-              <option value="middle_center">Middle Center</option>
-              <option value="bottom_left">Bottom Left</option>
-              <option value="bottom_right">Bottom Right</option>
-            </select>
-          </label>
-          <label>
-            Margin
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={qrForm.margin}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, margin: event.target.value }))}
-            />
-          </label>
-        </div>
-        <div className="monitor-input-row">
-          <label>
-            ID Number
-            <input
-              type="text"
-              value={qrForm.idNumber}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, idNumber: event.target.value }))}
-              placeholder="1001"
-            />
-          </label>
-          <label>
-            URL
-            <input
-              type="text"
-              value={qrForm.url}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, url: event.target.value }))}
-              placeholder="https://company.com/id/1001"
-            />
-          </label>
-          <label>
-            Custom Text
-            <input
-              type="text"
-              value={qrForm.customText}
-              onChange={(event) => setQrForm((prev) => ({ ...prev, customText: event.target.value }))}
-              placeholder="EMP-1001"
-            />
-          </label>
-        </div>
-        <div className="button-row">
-          <button className="btn btn-primary" type="button" onClick={generateQrBarcode} disabled={qrBusy}>
-            {qrBusy ? "Generating..." : "Generate QR / Barcode"}
+          ) : null}
+          <button type="button" className="btn btn-secondary imposition-license-button" onClick={onBack}>
+            Home
           </button>
         </div>
-        {qrError ? <div className="alert alert-danger">{qrError}</div> : null}
-        {qrResult ? (
-          <div className="card-grid">
-            <div>
-              <div className="card-muted">Type</div>
-              <div className="card-value">{qrResult.barcode_type}</div>
-            </div>
-            <div>
-              <div className="card-muted">Content</div>
-              <div className="card-value">{qrResult.content}</div>
-            </div>
-            <div>
-              <div className="card-muted">Preview URL</div>
-              <div className="card-value">
-                <a href={qrResult.render_url} target="_blank" rel="noreferrer">{qrResult.render_url}</a>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </section>
+      </aside>
 
-      <section className="card">
-        <h2 className="card-title">Excel Bulk Data Import</h2>
-        <p className="text-muted">Upload .xlsx/.csv, map fields, auto build imposition sheets, and export PDF/PNG/TIFF.</p>
-        {!higherPlanEnabled ? (
-          <div className="alert alert-danger">Available only in Business and Enterprise plans.</div>
-        ) : null}
-
-        <div className="monitor-input-row">
-          <label>
-            Import Type
-            <select
-              value={bulkForm.importType}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, importType: event.target.value }))}
-            >
-              <option value="id_card">ID Card</option>
-              <option value="business_card">Business Card</option>
-            </select>
-          </label>
-          <label>
-            Excel/CSV File
-            <input type="file" accept=".xlsx,.csv" onChange={onPickBulkFile} />
-          </label>
+      <section className="imposition-workspace">
+        <header className="imposition-topbar">
           <div>
-            <div className="card-muted">Selected File</div>
-            <div className="card-value">{bulkFileName || "No file selected"}</div>
+            <div className="imposition-topbar-eyebrow">Digital Printing Press Imposition Software</div>
+            <h1>{currentModuleLabel}</h1>
           </div>
-        </div>
-
-        <div className="monitor-input-row">
-          <label>
-            Excel ID Field
-            <input
-              type="text"
-              value={fieldMapping.ID || ""}
-              onChange={(event) => setFieldMapping((prev) => ({ ...prev, ID: event.target.value }))}
-              placeholder="employee_id"
-            />
-          </label>
-          <label>
-            Excel Name Field
-            <input
-              type="text"
-              value={fieldMapping.Name || ""}
-              onChange={(event) => setFieldMapping((prev) => ({ ...prev, Name: event.target.value }))}
-              placeholder="employee_name"
-            />
-          </label>
-          <label>
-            Excel Department Field
-            <input
-              type="text"
-              value={fieldMapping.Department || ""}
-              onChange={(event) => setFieldMapping((prev) => ({ ...prev, Department: event.target.value }))}
-              placeholder="department"
-            />
-          </label>
-          <label>
-            Excel Photo Field
-            <input
-              type="text"
-              value={fieldMapping.Photo || ""}
-              onChange={(event) => setFieldMapping((prev) => ({ ...prev, Photo: event.target.value }))}
-              placeholder="photo"
-            />
-          </label>
-          <label>
-            Excel Designation Field
-            <input
-              type="text"
-              value={fieldMapping.Designation || ""}
-              onChange={(event) => setFieldMapping((prev) => ({ ...prev, Designation: event.target.value }))}
-              placeholder="designation"
-            />
-          </label>
-        </div>
-
-        <div className="button-row">
-          <button className="btn btn-primary" type="button" onClick={uploadBulkData} disabled={bulkBusy || !higherPlanEnabled}>
-            {bulkBusy ? "Processing..." : "Upload & Map Data"}
-          </button>
-        </div>
-
-        <div className="monitor-input-row">
-          <label>
-            Sheet Size
-            <select
-              value={bulkForm.sheetSize}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, sheetSize: event.target.value }))}
-            >
-              <option value="A4">A4</option>
-              <option value="A3">A3</option>
-            </select>
-          </label>
-          <label>
-            Card Width (mm)
-            <input
-              type="number"
-              min="20"
-              max="200"
-              value={bulkForm.cardWidthMm}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, cardWidthMm: event.target.value }))}
-            />
-          </label>
-          <label>
-            Card Height (mm)
-            <input
-              type="number"
-              min="20"
-              max="200"
-              value={bulkForm.cardHeightMm}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, cardHeightMm: event.target.value }))}
-            />
-          </label>
-          <label>
-            Margin (mm)
-            <input
-              type="number"
-              min="0"
-              max="50"
-              value={bulkForm.marginMm}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, marginMm: event.target.value }))}
-            />
-          </label>
-          <label>
-            Gap (mm)
-            <input
-              type="number"
-              min="0"
-              max="20"
-              value={bulkForm.gapMm}
-              onChange={(event) => setBulkForm((prev) => ({ ...prev, gapMm: event.target.value }))}
-            />
-          </label>
-        </div>
-
-        <div className="button-row">
-          <button className="btn btn-secondary" type="button" onClick={generateBulkLayout} disabled={bulkBusy || !bulkImportResult}>
-            Generate Bulk Imposition Layout
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => exportBulk("pdf")} disabled={bulkBusy || !bulkLayoutResult}>
-            Export PDF
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => exportBulk("png")} disabled={bulkBusy || !bulkLayoutResult}>
-            Export PNG
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => exportBulk("tiff")} disabled={bulkBusy || !bulkLayoutResult}>
-            Export TIFF
-          </button>
-        </div>
-
-        {bulkError ? <div className="alert alert-danger">{bulkError}</div> : null}
-
-        {bulkImportResult ? (
-          <div className="card-grid">
-            <div>
-              <div className="card-muted">Records Imported</div>
-              <div className="card-value">{bulkImportResult.row_count}</div>
+          <div className="imposition-toolbar-actions">
+            <div className="imposition-zoom-group">
+              {ZOOM_OPTIONS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`imposition-toolbar-chip ${zoom === value ? "active" : ""}`}
+                  onClick={() => setZoom(value)}
+                >
+                  {value === 140 ? "Fit" : `${value}%`}
+                </button>
+              ))}
             </div>
-            <div>
-              <div className="card-muted">Import ID</div>
-              <div className="card-value">{bulkImportResult.import_id}</div>
-            </div>
-            <div>
-              <div className="card-muted">Preview Rows</div>
-              <div className="card-value">{Array.isArray(bulkImportResult.preview) ? bulkImportResult.preview.length : 0}</div>
+            <SelectInput
+              label="Format"
+              value={exportOptions.format}
+              onChange={(value) => setExportOptions((current) => ({ ...current, format: value }))}
+              options={[
+                { value: "pdf", label: "PDF" },
+                { value: "png", label: "PNG" },
+                { value: "tiff", label: "TIFF" },
+              ]}
+            />
+            <SelectInput
+              label="DPI"
+              value={String(exportOptions.dpi)}
+              onChange={(value) => setExportOptions((current) => ({ ...current, dpi: Number(value) }))}
+              options={[
+                { value: "300", label: "300 DPI" },
+                { value: "600", label: "600 DPI" },
+              ]}
+            />
+            <button type="button" className="btn btn-primary" onClick={queueExport}>
+              Export {exportOptions.format.toUpperCase()}
+            </button>
+          </div>
+        </header>
+
+        <div className="imposition-main-grid">
+          <div className="imposition-canvas-column">
+            <CanvasPreview layout={currentLayout} bookPlan={activeMenu === "book" ? bookPlan : null} zoom={zoom} />
+            <div className="imposition-canvas-footer">
+              <span>Sheet Preview</span>
+              <span>{activeSheet.label} | {currentLayout.summary.itemCount} up | {currentLayout.summary.sheetCount} sheets</span>
             </div>
           </div>
-        ) : null}
-
-        {bulkLayoutResult?.layout ? (
-          <div className="card-grid">
-            <div>
-              <div className="card-muted">Cards / Sheet</div>
-              <div className="card-value">{bulkLayoutResult.layout.cards_per_sheet}</div>
-            </div>
-            <div>
-              <div className="card-muted">Total Sheets</div>
-              <div className="card-value">{bulkLayoutResult.layout.total_sheets}</div>
-            </div>
-            <div>
-              <div className="card-muted">Total Records</div>
-              <div className="card-value">{bulkLayoutResult.layout.total_records}</div>
-            </div>
-          </div>
-        ) : null}
-
-        {Object.keys(bulkExportLinks).length ? (
-          <div className="card-grid">
-            {Object.entries(bulkExportLinks).map(([fmt, link]) => (
-              <div key={fmt}>
-                <div className="card-muted">{fmt.toUpperCase()} Download</div>
-                <div className="card-value">
-                  <a href={link} target="_blank" rel="noreferrer">{link}</a>
-                </div>
+          <div className="imposition-inspector-column">
+            {renderPrimaryPanel()}
+            <section className="imposition-panel">
+              <div className="imposition-panel-heading">
+                <h3>Export Engine</h3>
+                <span>PDF / PNG / TIFF</span>
               </div>
-            ))}
+              <label className="imposition-check">
+                <input
+                  type="checkbox"
+                  checked={exportOptions.cropMarks}
+                  onChange={(event) => setExportOptions((current) => ({ ...current, cropMarks: event.target.checked }))}
+                />
+                <span>Crop marks</span>
+              </label>
+              <label className="imposition-check">
+                <input
+                  type="checkbox"
+                  checked={exportOptions.bleedMarks}
+                  onChange={(event) => setExportOptions((current) => ({ ...current, bleedMarks: event.target.checked }))}
+                />
+                <span>Bleed marks</span>
+              </label>
+              <label className="imposition-check">
+                <input
+                  type="checkbox"
+                  checked={exportOptions.registrationMarks}
+                  onChange={(event) => setExportOptions((current) => ({ ...current, registrationMarks: event.target.checked }))}
+                />
+                <span>Registration marks</span>
+              </label>
+              <div className="imposition-export-queue">
+                {exportQueue.length === 0 ? (
+                  <div className="imposition-muted-copy">No export jobs queued yet.</div>
+                ) : (
+                  exportQueue.map((job) => (
+                    <article key={job.id} className="imposition-export-card">
+                      <strong>{job.jobName}</strong>
+                      <span>{job.format} | {job.dpi} DPI</span>
+                      <span>{job.sheetCount} sheets | est. {job.estimatedMb} MB</span>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
           </div>
-        ) : null}
+        </div>
       </section>
     </div>
   );
