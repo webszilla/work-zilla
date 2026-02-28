@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   relaunchApp: () => ipcRenderer.invoke("app:relaunch"),
   openExternal: (url) => ipcRenderer.invoke("app:open-external", { url }),
   getWindowsAgentVersion: () => ipcRenderer.invoke("app:windows-agent-version"),
+  getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
   onMonitorPermissionsUpdated: (handler) => {
     const listener = (_event, perms) => handler(perms);
     ipcRenderer.on("monitor:permissions-updated", listener);

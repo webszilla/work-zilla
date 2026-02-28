@@ -51,4 +51,37 @@
       });
     }
   }
+
+  const downloadModal = document.getElementById("download-agent-modal");
+  const downloadTriggers = document.querySelectorAll("[data-download-modal-trigger]");
+  if (downloadModal && downloadTriggers.length) {
+    const closeEls = downloadModal.querySelectorAll("[data-download-close]");
+
+    function openDownloadModal() {
+      downloadModal.classList.add("show");
+      downloadModal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeDownloadModal() {
+      downloadModal.classList.remove("show");
+      downloadModal.setAttribute("aria-hidden", "true");
+    }
+
+    downloadTriggers.forEach((trigger) => {
+      trigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        openDownloadModal();
+      });
+    });
+
+    closeEls.forEach((el) => {
+      el.addEventListener("click", closeDownloadModal);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeDownloadModal();
+      }
+    });
+  }
 })();

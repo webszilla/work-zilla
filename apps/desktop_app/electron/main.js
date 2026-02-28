@@ -56,6 +56,7 @@ const connectivityState = {
   reconnecting: true,
   checked_at: null
 };
+const SHARED_LAUNCH_PREF_PATH = path.join(os.homedir(), ".workzilla-product-launch.json");
 
 process.on("uncaughtException", (error) => {
   const code = error?.code || error?.cause?.code || "";
@@ -72,6 +73,22 @@ function getConnectionStatusSnapshot() {
       ? "Online"
       : "WorkZilla requires internet connection. Please connect to internet to continue."
   };
+}
+
+function getSharedLaunchPreference() {
+  try {
+    if (!fs.existsSync(SHARED_LAUNCH_PREF_PATH)) {
+      return { preferredProduct: "" };
+    }
+    const raw = JSON.parse(fs.readFileSync(SHARED_LAUNCH_PREF_PATH, "utf8"));
+    const preferredProduct = String(raw?.preferredProduct || "").trim().toLowerCase();
+    if (!["monitor", "storage", "imposition"].includes(preferredProduct)) {
+      return { preferredProduct: "" };
+    }
+    return { preferredProduct };
+  } catch {
+    return { preferredProduct: "" };
+  }
 }
 
 function broadcastConnectionStatus() {
@@ -1210,6 +1227,8 @@ ipcMain.handle("app:windows-agent-version", () => {
     return { ok: false, error: error?.message || "read_failed" };
   }
 });
+
+ipcMain.handle("app:launch-preference", () => getSharedLaunchPreference());
 
 function ensureDeviceIdentity() {
   const settings = loadSettings();

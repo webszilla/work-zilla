@@ -2,6 +2,7 @@
   <a href="/my-account/" class="account-tab {% if account_section == 'products' %}active{% endif %}">My Products</a>
   {% if not is_agent %}
     <a href="/my-account/billing/" class="account-tab {% if account_section == 'billing' %}active{% endif %}">Billing</a>
+    <a href="#" class="account-tab" data-download-modal-trigger>Download</a>
   {% endif %}
   <a href="/my-account/profile/" class="account-tab {% if account_section == 'profile' %}active{% endif %}">Profile</a>
   <a href="/auth/logout/" class="account-tab">Signout</a>

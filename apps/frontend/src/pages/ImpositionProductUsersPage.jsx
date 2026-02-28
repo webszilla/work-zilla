@@ -5,7 +5,6 @@ const initialForm = {
   user_name: "",
   email: "",
   password: "",
-  role: "org_user",
 };
 
 export default function ImpositionProductUsersPage() {
@@ -21,6 +20,14 @@ export default function ImpositionProductUsersPage() {
   });
   const [form, setForm] = useState(initialForm);
   const [saving, setSaving] = useState(false);
+  const [viewUser, setViewUser] = useState(null);
+  const [editModal, setEditModal] = useState({
+    open: false,
+    saving: false,
+    user_id: "",
+    user_name: "",
+    email: "",
+  });
 
   async function loadUsers() {
     setLoading(true);
@@ -57,7 +64,7 @@ export default function ImpositionProductUsersPage() {
     try {
       await apiFetch("/api/product/users", {
         method: "POST",
-        body: JSON.stringify({ action: "add", ...form }),
+        body: JSON.stringify({ action: "add", ...form, role: "org_user" }),
       });
       setForm(initialForm);
       setNotice("User added.");
@@ -86,32 +93,45 @@ export default function ImpositionProductUsersPage() {
     }
   }
 
-  async function handleEdit(user) {
-    const userName = window.prompt("User Name", user.user_name || "");
-    if (!userName) {
-      return;
-    }
-    const email = window.prompt("Email", user.email || "");
-    if (!email) {
+  function handleEdit(user) {
+    setEditModal({
+      open: true,
+      saving: false,
+      user_id: user?.user_id || "",
+      user_name: user?.user_name || "",
+      email: user?.email || "",
+    });
+  }
+
+  async function submitEditUser(event) {
+    event.preventDefault();
+    if (!editModal.user_id) {
       return;
     }
     setNotice("");
+    setEditModal((prev) => ({ ...prev, saving: true }));
     try {
       await apiFetch("/api/product/users", {
         method: "POST",
         body: JSON.stringify({
           action: "edit",
-          user_id: user.user_id,
-          user_name: userName.trim(),
-          email: email.trim(),
-          role: user.role || "org_user",
+          user_id: editModal.user_id,
+          user_name: String(editModal.user_name || "").trim(),
+          email: String(editModal.email || "").trim(),
+          role: "org_user",
         }),
       });
+      setEditModal((prev) => ({ ...prev, open: false, saving: false }));
       await loadUsers();
       setNotice("User updated.");
     } catch (err) {
+      setEditModal((prev) => ({ ...prev, saving: false }));
       setNotice(err?.message || "Unable to update user.");
     }
+  }
+
+  function handleView(user) {
+    setViewUser(user || null);
   }
 
   return (
@@ -154,7 +174,7 @@ export default function ImpositionProductUsersPage() {
               required
             />
           </div>
-          <div className="col-12 col-md-3">
+          <div className="col-12 col-md-4">
             <label className="form-label">Password</label>
             <input
               type="password"
@@ -164,18 +184,7 @@ export default function ImpositionProductUsersPage() {
               required
             />
           </div>
-          <div className="col-12 col-md-2">
-            <label className="form-label">Role</label>
-            <select
-              className="form-select"
-              value={form.role}
-              onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value }))}
-            >
-              <option value="org_user">Org User</option>
-              <option value="company_admin">Company Admin</option>
-            </select>
-          </div>
-          <div className="col-12 col-md-1 d-flex align-items-end">
+          <div className="col-12 col-md-2 d-flex align-items-end">
             <button type="submit" className="btn btn-primary w-100" disabled={saving || !state.can_add_user}>
               {saving ? "..." : "Add"}
             </button>
@@ -190,26 +199,30 @@ export default function ImpositionProductUsersPage() {
               <tr>
                 <th>User Name</th>
                 <th>Email</th>
-                <th>Role</th>
                 <th>License Code</th>
-                <th>Status</th>
-                <th>Last Login</th>
-                <th>Actions</th>
+                <th style={{ width: "110px", whiteSpace: "nowrap" }}>Status</th>
+                <th style={{ width: "280px", whiteSpace: "nowrap" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="7">Loading...</td></tr>
+                <tr><td colSpan="5">Loading...</td></tr>
               ) : state.items.length ? (
                 state.items.map((row) => (
                   <tr key={row.id}>
                     <td>{row.user_name || "-"}</td>
                     <td>{row.email || "-"}</td>
-                    <td>{row.role || "org_user"}</td>
                     <td>{row.license_code || "-"}</td>
-                    <td>{row.status || "-"}</td>
-                    <td>{row.last_login || "-"}</td>
-                    <td className="d-flex gap-2">
+                    <td style={{ width: "110px" }}>
+                      <span className="d-inline-block text-truncate" style={{ maxWidth: "100px" }} title={row.status || "-"}>
+                        {row.status || "-"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="d-flex flex-wrap gap-2" style={{ minWidth: "200px" }}>
+                      <button type="button" className="btn btn-outline-info btn-sm" onClick={() => handleView(row)}>
+                        View
+                      </button>
                       <button type="button" className="btn btn-outline-light btn-sm" onClick={() => handleEdit(row)}>
                         Edit
                       </button>
@@ -225,16 +238,101 @@ export default function ImpositionProductUsersPage() {
                       <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => runAction("delete", row)}>
                         Delete
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))
               ) : (
-                <tr><td colSpan="7">No users found.</td></tr>
+                <tr><td colSpan="5">No users found.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {viewUser ? (
+        <div className="modal-overlay" onClick={() => setViewUser(null)}>
+          <div className="modal-panel" style={{ width: "min(640px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <h5 className="mb-3">User Details</h5>
+            <div className="modal-form-grid">
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">User Name</label>
+                <div>{viewUser.user_name || "-"}</div>
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">Email</label>
+                <div>{viewUser.email || "-"}</div>
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">Status</label>
+                <div>{viewUser.status || "-"}</div>
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">License Code</label>
+                <div className="text-break">{viewUser.license_code || "-"}</div>
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">Last Login</label>
+                <div>{viewUser.last_login || "-"}</div>
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label small text-secondary mb-1">User ID</label>
+                <div>{viewUser.user_id || "-"}</div>
+              </div>
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-outline-light" onClick={() => setViewUser(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editModal.open ? (
+        <div className="modal-overlay" onClick={() => setEditModal((prev) => ({ ...prev, open: false }))}>
+          <div className="modal-panel" style={{ width: "min(640px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <h5 className="mb-3">Edit User</h5>
+            <form onSubmit={submitEditUser}>
+              <div className="modal-form-grid">
+                <div className="modal-form-field">
+                  <label className="form-label small text-secondary mb-1">User Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editModal.user_name}
+                    onChange={(event) => setEditModal((prev) => ({ ...prev, user_name: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <label className="form-label small text-secondary mb-1">Email</label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    value={editModal.email}
+                    onChange={(event) => setEditModal((prev) => ({ ...prev, email: event.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="d-flex justify-content-end gap-2 mt-3">
+                <button
+                  type="button"
+                  className="btn btn-outline-light"
+                  disabled={editModal.saving}
+                  onClick={() => setEditModal((prev) => ({ ...prev, open: false }))}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={editModal.saving}>
+                  {editModal.saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

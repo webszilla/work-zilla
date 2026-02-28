@@ -60,9 +60,6 @@ import StorageUsersPage from "./pages/StorageUsersPage.jsx";
 import StorageDashboardPage from "./pages/StorageDashboardPage.jsx";
 import ImpositionProductDashboardPage from "./pages/ImpositionProductDashboardPage.jsx";
 import ImpositionProductUsersPage from "./pages/ImpositionProductUsersPage.jsx";
-import ImpositionProductBillingPage from "./pages/ImpositionProductBillingPage.jsx";
-import ImpositionProductPlanPage from "./pages/ImpositionProductPlanPage.jsx";
-import ImpositionProductProfilePage from "./pages/ImpositionProductProfilePage.jsx";
 import BusinessAutopilotUsersPage from "./pages/BusinessAutopilotUsersPage.jsx";
 import AiChatbotInboxPage from "./pages/AiChatbotInboxPage.jsx";
 import AiChatbotWidgetsPage from "./pages/AiChatbotWidgetsPage.jsx";
@@ -1060,7 +1057,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/billing"
             element={
               isAdmin && !isHrView
-                ? (isImpositionProduct ? <ImpositionProductBillingPage /> : <BillingPage />)
+                ? <BillingPage />
                 : <Navigate to={withBase("/")} replace />
             }
           />
@@ -1068,7 +1065,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/plans"
             element={
               isAdmin && !isHrView
-                ? (isImpositionProduct ? <ImpositionProductPlanPage /> : <PlansPage />)
+                ? <PlansPage />
                 : <Navigate to={withBase("/")} replace />
             }
           />
@@ -1076,7 +1073,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/profile"
             element={
               isAdmin && !isHrView
-                ? (isImpositionProduct ? <ImpositionProductProfilePage /> : <ProfilePage />)
+                ? <ProfilePage />
                 : <Navigate to={withBase("/")} replace />
             }
           />

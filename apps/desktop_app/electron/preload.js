@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   exportImpositionBulk: (payload) => ipcRenderer.invoke("imposition:bulk-export", payload),
   downloadFile: (payload) => ipcRenderer.invoke("storage:download", payload),
   downloadBulk: (payload) => ipcRenderer.invoke("storage:download-bulk", payload),
+  getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
   startMonitor: () => ipcRenderer.invoke("monitor:start"),
   stopMonitor: () => ipcRenderer.invoke("monitor:stop"),
   getMonitorStatus: () => ipcRenderer.invoke("monitor:status"),

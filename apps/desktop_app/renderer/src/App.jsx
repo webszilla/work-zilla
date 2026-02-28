@@ -32,6 +32,24 @@ const storageScreens = [
 const defaultAuth = { loading: true, authenticated: false, user: null, enabled_products: [] };
 const defaultConnection = { online: true, reconnecting: false, internet: true, api: true, message: "" };
 
+function normalizeLaunchProduct(value) {
+  const rawValue = typeof value === "object" && value !== null ? value.preferredProduct : value;
+  if (!rawValue) {
+    return null;
+  }
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (["monitor", "worksuite", "work-suite", "work_suite"].includes(normalized)) {
+    return "monitor";
+  }
+  if (["imposition", "imposition-software", "imposition_software"].includes(normalized)) {
+    return "imposition";
+  }
+  if (["storage", "online-storage", "online_storage"].includes(normalized)) {
+    return "storage";
+  }
+  return null;
+}
+
 export default function App() {
   const [auth, setAuth] = useState(defaultAuth);
   const [activeModule, setActiveModule] = useState("launcher");
@@ -67,6 +85,9 @@ export default function App() {
       const network = window.storageApi.getConnectionStatus
         ? await window.storageApi.getConnectionStatus()
         : defaultConnection;
+      const preferredProduct = window.storageApi.getLaunchPreference
+        ? normalizeLaunchProduct(await window.storageApi.getLaunchPreference())
+        : null;
       const os = window.storageApi.getPlatform ? window.storageApi.getPlatform() : "unknown";
       if (!active) {
         return;
@@ -75,6 +96,11 @@ export default function App() {
       setTheme(settings.theme || "system");
       setPlatform(os);
       setConnection(network || defaultConnection);
+      if (preferredProduct === "monitor" || preferredProduct === "imposition") {
+        setActiveModule(preferredProduct);
+      } else if (preferredProduct === "storage" && state?.authenticated) {
+        setActiveModule("storage");
+      }
     }
     load();
     return () => {
@@ -238,7 +264,7 @@ export default function App() {
             if (!connection.online && (product === "storage" || product === "monitor" || product === "imposition")) {
               return;
             }
-            if ((product === "storage" || product === "monitor" || product === "imposition") && !auth.authenticated) {
+            if (product === "storage" && !auth.authenticated) {
               setPendingModule(product);
               setActiveModule("login");
               return;

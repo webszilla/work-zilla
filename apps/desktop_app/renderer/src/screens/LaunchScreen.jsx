@@ -79,7 +79,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
             </button>
           ) : null}
 
-          {isAuthed && canUseImposition ? (
+          {!isAuthed || canUseImposition ? (
             <button
               type="button"
               className="launch-tile"
@@ -87,7 +87,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
               disabled={!isOnline}
             >
               <div className="tile-title">Imposition Software</div>
-              <div className="tile-desc">ID card and business card print layout imposition.</div>
+              <div className="tile-desc">Imposition Tool for Digital Printing Press.</div>
               {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
             </button>
           ) : null}

@@ -4,11 +4,13 @@ const path = require("path");
 const https = require("https");
 const http = require("http");
 const os = require("os");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const { URL } = require("url");
 
 const CONFIG_URLS = [
   process.env.WORKZILLA_BOOTSTRAP_CONFIG_URL,
+  "http://127.0.0.1:8000/downloads/bootstrap-products.json",
+  "http://localhost:8000/downloads/bootstrap-products.json",
   "https://getworkzilla.com/downloads/bootstrap-products.json",
   "https://getworkzilla.com/static/downloads/bootstrap-products.json",
 ].filter(Boolean);
@@ -26,7 +28,7 @@ const SUPPORTED_PRODUCTS = {
   },
   imposition: {
     label: "Imposition Software",
-    description: "ID Card and Business Card Imposition Tool",
+    description: "Imposition Tool for Digital Printing Press",
     packageBasename: { windows: "imposition-win", mac: "imposition-mac" },
   },
 };
@@ -37,6 +39,7 @@ const PRODUCT_CONFIG_ALIASES = {
   storage: ["storage"],
   imposition: ["imposition", "imposition-software"],
 };
+const SHARED_LAUNCH_PREF_PATH = path.join(os.homedir(), ".workzilla-product-launch.json");
 
 function getPlatformKey() {
   if (process.platform === "win32") return "windows";
@@ -59,6 +62,18 @@ function createWindow() {
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
+}
+
+function savePreferredProduct(productKey) {
+  try {
+    fs.writeFileSync(
+      SHARED_LAUNCH_PREF_PATH,
+      `${JSON.stringify({ preferredProduct: productKey, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      "utf8",
+    );
+  } catch (_err) {
+    // no-op
+  }
 }
 
 function fetchJson(urlText) {
@@ -86,7 +101,8 @@ function fetchJson(urlText) {
       });
     });
     req.on("error", () => reject(new Error("Unable to fetch bootstrap config.")));
-    req.setTimeout(15000, () => {
+    const timeoutMs = ["127.0.0.1", "localhost"].includes(urlObj.hostname) ? 1200 : 15000;
+    req.setTimeout(timeoutMs, () => {
       req.destroy(new Error("Bootstrap config request timeout."));
     });
   });
@@ -102,17 +118,37 @@ function loadBundledConfig() {
   }
 }
 
+function mergeBootstrapConfig(remoteConfig, bundledConfig) {
+  const merged = { ...(bundledConfig || {}), ...(remoteConfig || {}) };
+  for (const key of Object.keys(bundledConfig || {})) {
+    const bundledSection = bundledConfig?.[key];
+    const remoteSection = remoteConfig?.[key];
+    if (
+      bundledSection
+      && typeof bundledSection === "object"
+      && !Array.isArray(bundledSection)
+      && remoteSection
+      && typeof remoteSection === "object"
+      && !Array.isArray(remoteSection)
+    ) {
+      merged[key] = { ...bundledSection, ...remoteSection };
+    }
+  }
+  return merged;
+}
+
 async function fetchConfigWithFallback() {
   let lastError = null;
+  const bundled = loadBundledConfig();
   for (const url of CONFIG_URLS) {
     try {
-      const config = await fetchJson(url);
+      const remoteConfig = await fetchJson(url);
+      const config = mergeBootstrapConfig(remoteConfig, bundled);
       return { config, source: url };
     } catch (error) {
       lastError = error;
     }
   }
-  const bundled = loadBundledConfig();
   if (bundled) {
     return { config: bundled, source: "bundled" };
   }
@@ -125,7 +161,7 @@ function sanitizeFilename(name) {
 
 function detectInstallerName(productKey, downloadUrl) {
   const platform = getPlatformKey();
-  const defaultSuffix = platform === "windows" ? ".exe" : ".pkg";
+  const defaultSuffix = platform === "windows" ? ".exe" : ".dmg";
   try {
     const parsed = new URL(downloadUrl);
     const base = path.basename(parsed.pathname) || "";
@@ -146,25 +182,85 @@ function detectInstallerName(productKey, downloadUrl) {
 
 function ensureHttpsDownload(urlText) {
   const parsed = new URL(urlText);
-  if (!["https:", "http:"].includes(parsed.protocol)) {
+  if (!["https:", "http:", "file:"].includes(parsed.protocol)) {
     throw new Error("Unsupported download URL protocol.");
   }
 }
 
-function downloadFile({ urlText, destination, progressCb }) {
+function copyLocalFileWithProgress({ urlText, destination, progressCb }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const sourcePath = decodeURIComponent(new URL(urlText).pathname);
+      const total = fs.statSync(sourcePath).size;
+      let downloaded = 0;
+      const readStream = fs.createReadStream(sourcePath);
+      const writeStream = fs.createWriteStream(destination);
+      readStream.on("data", (chunk) => {
+        downloaded += chunk.length;
+        progressCb({ downloaded, total });
+      });
+      readStream.on("error", reject);
+      writeStream.on("error", reject);
+      writeStream.on("finish", () => resolve(destination));
+      readStream.pipe(writeStream);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function fetchRemoteFileSize(urlText) {
+  return new Promise((resolve) => {
+    try {
+      const urlObj = new URL(urlText);
+      const client = urlObj.protocol === "http:" ? http : https;
+      const req = client.request(urlObj, { method: "HEAD" }, (res) => {
+        const contentLength = Number(res.headers["content-length"] || 0);
+        resolve(contentLength > 0 ? contentLength : 0);
+        res.resume();
+      });
+      req.on("error", () => resolve(0));
+      req.setTimeout(15000, () => {
+        req.destroy();
+        resolve(0);
+      });
+      req.end();
+    } catch (_err) {
+      resolve(0);
+    }
+  });
+}
+
+function resolveDownloadTotal(res, offset) {
+  const contentRange = String(res.headers["content-range"] || "");
+  const rangeMatch = contentRange.match(/bytes\s+\d+-\d+\/(\d+)/i);
+  if (rangeMatch) {
+    return Number(rangeMatch[1] || 0);
+  }
+  const contentLength = Number(res.headers["content-length"] || 0);
+  if (res.statusCode === 206 && contentLength > 0) {
+    return offset + contentLength;
+  }
+  return contentLength;
+}
+
+function downloadFile({ urlText, destination, progressCb, offset = 0 }) {
   return new Promise((resolve, reject) => {
     ensureHttpsDownload(urlText);
     const urlObj = new URL(urlText);
     const client = urlObj.protocol === "http:" ? http : https;
-
-    const req = client.get(urlObj, (res) => {
+    const headers = {};
+    if (offset > 0) {
+      headers.Range = `bytes=${offset}-`;
+    }
+    const req = client.get(urlObj, { headers }, (res) => {
       if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         let redirectUrl = res.headers.location;
         if (redirectUrl.startsWith("/")) {
           redirectUrl = `${urlObj.protocol}//${urlObj.host}${redirectUrl}`;
         }
         res.resume();
-        downloadFile({ urlText: redirectUrl, destination, progressCb })
+        downloadFile({ urlText: redirectUrl, destination, progressCb, offset })
           .then(resolve)
           .catch(reject);
         return;
@@ -175,9 +271,14 @@ function downloadFile({ urlText, destination, progressCb }) {
         return;
       }
 
-      const total = Number(res.headers["content-length"] || 0);
-      let downloaded = 0;
-      const out = fs.createWriteStream(destination);
+      const supportsResume = res.statusCode === 206;
+      const startingOffset = supportsResume ? offset : 0;
+      if (offset > 0 && !supportsResume && fs.existsSync(destination)) {
+        fs.unlinkSync(destination);
+      }
+      const total = resolveDownloadTotal(res, startingOffset);
+      let downloaded = startingOffset;
+      const out = fs.createWriteStream(destination, { flags: startingOffset > 0 ? "a" : "w" });
       res.on("data", (chunk) => {
         downloaded += chunk.length;
         progressCb({ downloaded, total });
@@ -199,15 +300,25 @@ function downloadFile({ urlText, destination, progressCb }) {
 }
 
 async function downloadFileWithRetry({ urlText, destination, progressCb, retries = 3 }) {
+  if (new URL(urlText).protocol === "file:") {
+    if (fs.existsSync(destination)) {
+      fs.unlinkSync(destination);
+    }
+    return copyLocalFileWithProgress({ urlText, destination, progressCb });
+  }
+  if (process.platform === "darwin") {
+    return downloadFileWithCurl({ urlText, destination, progressCb });
+  }
   let attempt = 0;
   let lastError = null;
   while (attempt < retries) {
     attempt += 1;
     try {
-      if (fs.existsSync(destination)) {
-        fs.unlinkSync(destination);
+      const offset = fs.existsSync(destination) ? fs.statSync(destination).size : 0;
+      if (offset > 0) {
+        progressCb({ downloaded: offset, total: 0 });
       }
-      return await downloadFile({ urlText, destination, progressCb });
+      return await downloadFile({ urlText, destination, progressCb, offset });
     } catch (error) {
       lastError = error;
       const message = String(error?.message || "").toLowerCase();
@@ -224,6 +335,84 @@ async function downloadFileWithRetry({ urlText, destination, progressCb, retries
     }
   }
   throw lastError || new Error("Download failed.");
+}
+
+function downloadFileWithCurl({ urlText, destination, progressCb, allowResume = true }) {
+  return new Promise(async (resolve, reject) => {
+    ensureHttpsDownload(urlText);
+    const total = await fetchRemoteFileSize(urlText);
+    let stderr = "";
+    let settled = false;
+    const reportProgress = () => {
+      try {
+        const downloaded = fs.existsSync(destination) ? fs.statSync(destination).size : 0;
+        progressCb({ downloaded, total });
+      } catch (_err) {
+        progressCb({ downloaded: 0, total });
+      }
+    };
+    reportProgress();
+    const timer = setInterval(reportProgress, 500);
+    const curlArgs = [
+      "--location",
+      "--fail",
+      "--http1.1",
+      "--retry", "8",
+      "--retry-all-errors",
+      "--retry-delay", "2",
+      "--connect-timeout", "30",
+      "--speed-time", "30",
+      "--speed-limit", "1024",
+      "--output", destination,
+      urlText,
+    ];
+    if (allowResume) {
+      curlArgs.splice(curlArgs.length - 2, 0, "--continue-at", "-");
+    }
+    const curl = spawn("/usr/bin/curl", curlArgs, {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+
+    curl.stderr.on("data", (chunk) => {
+      stderr += String(chunk || "");
+    });
+
+    curl.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      reject(error);
+    });
+
+    curl.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      reportProgress();
+      if (code === 0) {
+        resolve(destination);
+        return;
+      }
+      const normalizedError = (stderr || `curl exited with code ${code}`).trim();
+      const cannotResume = normalizedError.includes("curl: (33)")
+        || normalizedError.toLowerCase().includes("cannot resume")
+        || normalizedError.toLowerCase().includes("doesn't seem to support byte ranges");
+      if (allowResume && cannotResume) {
+        try {
+          if (fs.existsSync(destination)) {
+            fs.unlinkSync(destination);
+          }
+        } catch (_err) {
+          // no-op
+        }
+        downloadFileWithCurl({ urlText, destination, progressCb, allowResume: false })
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+      reject(new Error(cannotResume ? "Download resume not supported by server. Restarted download failed." : normalizedError));
+    });
+  });
 }
 
 async function openInstaller(installerPath) {
@@ -267,7 +456,27 @@ function validateProductConfig(config, productKey, platformKey) {
   if (!normalized.length) {
     throw new Error(`No package URL for ${platformKey} in ${productKey}`);
   }
-  return normalized;
+  if (productKey !== "imposition") {
+    return normalized;
+  }
+
+  const fallbacks = [];
+  for (const item of normalized) {
+    try {
+      const parsed = new URL(item);
+      const fallbackPath = platformKey === "mac" ? "/downloads/mac-agent/" : "/downloads/windows-agent/";
+      fallbacks.push(`${parsed.protocol}//${parsed.host}${fallbackPath}`);
+    } catch (_err) {
+      // no-op
+    }
+  }
+  const deduped = [];
+  for (const item of [...normalized, ...fallbacks]) {
+    if (!deduped.includes(item)) {
+      deduped.push(item);
+    }
+  }
+  return deduped;
 }
 
 async function downloadFromUrls({ urls, destination, progressCb }) {
@@ -488,12 +697,13 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   const downloadUrls = validateProductConfig(config, productKey, platform);
   const downloadsDir = path.join(app.getPath("downloads"), "WorkZillaInstallers");
   fs.mkdirSync(downloadsDir, { recursive: true });
-  const filename = `${Date.now()}-${detectInstallerName(productKey, downloadUrls[0])}`;
+  const filename = detectInstallerName(productKey, downloadUrls[0]);
   const destination = path.join(downloadsDir, filename);
+  const tempDestination = `${destination}.part`;
 
   const usedUrl = await downloadFromUrls({
     urls: downloadUrls,
-    destination,
+    destination: tempDestination,
     progressCb: (progress) => {
       event.sender.send("bootstrap:download-progress", {
         productKey,
@@ -508,9 +718,14 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     total: 1,
     done: true,
   });
+  if (fs.existsSync(destination)) {
+    fs.unlinkSync(destination);
+  }
+  fs.renameSync(tempDestination, destination);
 
   let installMode = "interactive";
   try {
+    savePreferredProduct(productKey);
     const silentlyInstalled = await runSilentInstall(destination);
     if (!silentlyInstalled) {
       await openInstaller(destination);
