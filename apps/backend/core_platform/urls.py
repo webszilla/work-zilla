@@ -91,6 +91,5 @@ urlpatterns = [
     re_path(r"^app/(?P<path>.*)$", spa_serve, name="spa"),
 ]
 
-if settings.DEBUG:
-    urlpatterns += staticfiles_urlpatterns()
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns += staticfiles_urlpatterns()
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
