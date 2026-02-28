@@ -111,7 +111,7 @@ export default function SaasAdminProfilePage() {
   const user = state.data?.user || {};
 
   return (
-    <>
+    <div className="wz-profile-workspace">
       <h2 className="page-title">Profile</h2>
       <hr className="section-divider" />
 
@@ -205,6 +205,6 @@ export default function SaasAdminProfilePage() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

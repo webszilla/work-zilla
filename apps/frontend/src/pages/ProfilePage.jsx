@@ -595,7 +595,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <>
+    <div className="wz-profile-workspace">
       <h2 className="page-title">Profile</h2>
       <hr className="section-divider" />
       <div className="d-flex flex-wrap gap-2 mb-3">
@@ -1404,6 +1404,6 @@ export default function ProfilePage() {
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

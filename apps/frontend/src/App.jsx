@@ -155,6 +155,43 @@ function applyThemeColors(theme) {
   }
 }
 
+function formatWorkspaceText(value, fallback = "Workspace") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized
+    .split(/[_-\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getInitials(value) {
+  const parts = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (!parts.length) {
+    return "WZ";
+  }
+  return parts.map((part) => part.charAt(0).toUpperCase()).join("");
+}
+
+function formatPathLabel(pathname, basePath = "") {
+  const normalized = basePath && pathname.startsWith(basePath)
+    ? pathname.slice(basePath.length)
+    : pathname;
+  const cleaned = String(normalized || "/")
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter(Boolean)
+    .map((part) => formatWorkspaceText(part, part))
+    .join(" / ");
+  return cleaned || "Dashboard Overview";
+}
+
 const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "storage" },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "imposition-software" },
@@ -671,217 +708,310 @@ function AppShell({ state, productPrefix, productSlug }) {
   const archivedBillingPath = isSaasAdmin
     ? "/saas-admin/billing"
     : "/billing";
+  const userDisplayName =
+    state.user?.first_name ||
+    state.user?.username ||
+    state.user?.email ||
+    "Work Zilla User";
+  const roleDisplayName = formatWorkspaceText(
+    isHrView ? "hr_view" : state.profile?.role || (isSaasAdmin ? "super_admin" : "member"),
+    "Member"
+  );
+  const planLabel = formatWorkspaceText(
+    currentProductSubscription?.plan_name ||
+      currentProductSubscription?.plan ||
+      currentProductSubscription?.plan_slug ||
+      "active workspace",
+    "Active Workspace"
+  );
+  const statusLabel = currentSubscriptionStatus
+    ? formatWorkspaceText(currentSubscriptionStatus, "active")
+    : "Active";
+  const statusTone = ["active", "trialing"].includes(currentSubscriptionStatus)
+    ? "wz-status-pill"
+    : "wz-status-pill wz-status-pill--muted";
+  const workspaceTrail = formatPathLabel(location.pathname, basePath);
+  const orgNameForUi = orgDisplayName || "Organization";
+  const userInitials = getInitials(userDisplayName);
 
   return (
     <div
-      className={`app-shell ${isSaasAdminRoute ? "saas-admin" : ""} ${
+      className={`app-shell wz-admin-shell ${isSaasAdminRoute ? "saas-admin" : ""} ${
         sidebarCollapsed ? "sidebar-collapsed" : ""
       } ${sidebarMenuStyle === "compact" ? "sidebar-style-compact" : "sidebar-style-default"}`}
     >
-      <aside className="sidebar">
-        <div className="brand">
-          <span>Work Zilla</span>
-          {sidebarMenuStyle !== "compact" ? <span>{productLabel}</span> : null}
-        </div>
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={() => setSidebarCollapsed((prev) => !prev)}
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <i className={`bi ${sidebarCollapsed ? "bi-chevron-right" : "bi-chevron-left"}`} aria-hidden="true" />
-          <span className="visually-hidden">
-            {sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          </span>
-        </button>
-        <div className="org">{orgDisplayName || "Organization"}</div>
-        <nav className="nav">
-          {isDealer
-            ? dealerNavItems.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={navPath(item.path)}
-                  end={item.path === "/dealer-dashboard"}
-                  title={item.label}
-                  onClick={handleSidebarNavClick}
-                  className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
-                >
-                  {item.icon ? (
-                    <i className={`bi ${item.icon} nav-icon`} aria-hidden="true" />
-                  ) : null}
-                  <span>{item.label}</span>
-                </NavLink>
-              ))
-            : isSaasAdminRoute
-            ? saasAdminPages.map((item) => {
-                const href = item.hash ? `${item.path}${item.hash}` : item.path;
-                let isActive = false;
-                if (item.key === "overview") {
-                  isActive = isOverviewSection;
-                } else if (item.key === "inbox") {
-                  isActive = isInboxSection;
-                } else if (item.key === "observability") {
-                  isActive = isObservabilitySection;
-                } else if (item.key === "products") {
-                  isActive = isProductsSection;
-                } else if (item.key === "organizations") {
-                  isActive = isOrganizationsSection;
-                } else if (item.key === "server-monitoring") {
-                  isActive = isServerMonitoringSection;
-                } else if (item.key === "retention-policy") {
-                  isActive = isRetentionSection;
-                } else if (item.key === "billing") {
-                  isActive = isBillingSection;
-                } else if (item.key === "referrals") {
-                  isActive = isReferralsSection;
-                } else if (item.key === "profile") {
-                  isActive = isProfileSection;
-                }
-                if (item.external) {
-                  return (
-                    <a
-                      key={item.key}
-                      href={item.path}
-                      className="nav-link"
-                      title={item.label}
-                      onClick={handleSidebarNavClick}
-                    >
-                      {item.icon ? (
-                        <i className={`bi ${item.icon} nav-icon`} aria-hidden="true" />
-                      ) : null}
-                      <span>{item.label}</span>
-                    </a>
-                  );
-                }
-                return (
+      <aside className="sidebar wz-sidebar">
+        <div className="wz-sidebar__inner">
+          <div className="wz-brand-card">
+            <div className="wz-brand-mark" aria-hidden="true">WZ</div>
+            <div className="wz-brand-copy">
+              <h2>Work Zilla</h2>
+              <p>{productLabel}</p>
+            </div>
+          </div>
+
+          <div className="wz-sidebar__controls">
+            <div className="wz-sidebar__label">React Admin</div>
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setSidebarCollapsed((prev) => !prev)}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              <i className={`bi ${sidebarCollapsed ? "bi-layout-sidebar-inset-reverse" : "bi-layout-sidebar-inset"}`} aria-hidden="true" />
+              <span className="visually-hidden">
+                {sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              </span>
+            </button>
+          </div>
+
+          <div className="wz-sidebar__meta">
+            <div>
+              <p className="wz-sidebar__meta-title">{orgNameForUi}</p>
+              <p className="wz-sidebar__meta-subtitle">{roleDisplayName}</p>
+            </div>
+            <div className="d-flex flex-wrap gap-2">
+              <span className={statusTone}>{statusLabel}</span>
+              <span className="wz-status-pill wz-status-pill--secondary">{planLabel}</span>
+            </div>
+          </div>
+
+          <nav className="nav">
+            {isDealer
+              ? dealerNavItems.map((item) => (
                   <NavLink
-                    key={item.key}
-                    to={navPath(href)}
+                    key={item.path}
+                    to={navPath(item.path)}
+                    end={item.path === "/dealer-dashboard"}
                     title={item.label}
-                    onClick={() => {
-                      handleSidebarNavClick();
-                      if (item.moduleKey === "ticketing") {
-                        window.dispatchEvent(new Event("wz:ticketing-menu-click"));
-                      }
-                    }}
-                    className={() => `nav-link ${isActive ? "active" : ""}`}
+                    onClick={handleSidebarNavClick}
+                    className={({ isActive }) => `nav-link wz-nav-link ${isActive ? "active" : ""}`}
                   >
                     {item.icon ? (
-                      <i className={`bi ${item.icon} nav-icon`} aria-hidden="true" />
+                      <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
                     ) : null}
-                    <span>{item.label}</span>
+                    <span className="wz-nav-copy">{item.label}</span>
                   </NavLink>
-                );
-              })
-            : orderedNavItems.map((item) => (
-                item.kind === "section" ? (
-                  <div key={`section-${item.label}`} className="nav-section-label">
-                    <span>{item.label}</span>
-                  </div>
-                ) : (
-                <NavLink
-                  key={item.path}
-                  to={navPath(item.path)}
-                  end={item.path === "/"}
-                  onClick={(event) => {
-                    handleSidebarNavClick();
-                    if (item.moduleKey === "ticketing") {
-                      window.dispatchEvent(new Event("wz:ticketing-menu-click"));
-                    }
-                    if (item.requiresAppUsage && !allowAppUsage) {
-                      event.preventDefault();
-                      setUpgradeAlertMessage("Upgrade to next plan to access App Usage.");
-                      return;
-                    }
-                    if (item.requiresGamingOttUsage && !allowGamingOttUsage) {
-                      event.preventDefault();
-                      setUpgradeAlertMessage("Upgrade to next plan to access Gaming / OTT Usage.");
-                    }
-                  }}
-                  title={item.label}
-                  className={({ isActive }) =>
-                    `nav-link ${isActive ? "active" : ""} ${
-                      (item.requiresAppUsage && !allowAppUsage) ||
-                      (item.requiresGamingOttUsage && !allowGamingOttUsage)
-                        ? "disabled"
-                        : ""
-                    }`
+                ))
+              : isSaasAdminRoute
+              ? saasAdminPages.map((item) => {
+                  const href = item.hash ? `${item.path}${item.hash}` : item.path;
+                  let isActive = false;
+                  if (item.key === "overview") {
+                    isActive = isOverviewSection;
+                  } else if (item.key === "inbox") {
+                    isActive = isInboxSection;
+                  } else if (item.key === "observability") {
+                    isActive = isObservabilitySection;
+                  } else if (item.key === "products") {
+                    isActive = isProductsSection;
+                  } else if (item.key === "organizations") {
+                    isActive = isOrganizationsSection;
+                  } else if (item.key === "server-monitoring") {
+                    isActive = isServerMonitoringSection;
+                  } else if (item.key === "retention-policy") {
+                    isActive = isRetentionSection;
+                  } else if (item.key === "billing") {
+                    isActive = isBillingSection;
+                  } else if (item.key === "referrals") {
+                    isActive = isReferralsSection;
+                  } else if (item.key === "profile") {
+                    isActive = isProfileSection;
                   }
-                  aria-disabled={
-                    (item.requiresAppUsage && !allowAppUsage) ||
-                    (item.requiresGamingOttUsage && !allowGamingOttUsage)
-                      ? "true"
-                      : "false"
+                  if (item.external) {
+                    return (
+                      <a
+                        key={item.key}
+                        href={item.path}
+                        className="nav-link wz-nav-link"
+                        title={item.label}
+                        onClick={handleSidebarNavClick}
+                      >
+                        {item.icon ? (
+                          <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
+                        ) : null}
+                        <span className="wz-nav-copy">{item.label}</span>
+                      </a>
+                    );
                   }
-                >
-                  {item.icon ? (
-                    <i className={`bi ${item.icon} nav-icon`} aria-hidden="true" />
-                  ) : null}
-                    <span>{item.label}</span>
-                  </NavLink>
-                )
-              ))}
-          <a className="nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} title="Logout">
-            <i className="bi bi-box-arrow-right nav-icon" aria-hidden="true" />
-            <span>Logout</span>
-          </a>
-          <div className="theme-toggle theme-toggle-inline">
-            <button
-              type="button"
-              className={`theme-btn theme-btn-light ${
-                theme === "light" ? "active" : ""
-              }`}
-              onClick={() => setTheme("light")}
-            >
-              <i className="bi bi-sun" aria-hidden="true" />
-              <span>Light</span>
-            </button>
-            <button
-              type="button"
-              className={`theme-btn theme-btn-dark ${
-                theme === "dark" ? "active" : ""
-              }`}
-              onClick={() => setTheme("dark")}
-            >
-              <i className="bi bi-moon-stars" aria-hidden="true" />
-              <span>Dark</span>
-            </button>
+                  return (
+                    <NavLink
+                      key={item.key}
+                      to={navPath(href)}
+                      title={item.label}
+                      onClick={() => {
+                        handleSidebarNavClick();
+                        if (item.moduleKey === "ticketing") {
+                          window.dispatchEvent(new Event("wz:ticketing-menu-click"));
+                        }
+                      }}
+                      className={() => `nav-link wz-nav-link ${isActive ? "active" : ""}`}
+                    >
+                      {item.icon ? (
+                        <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
+                      ) : null}
+                      <span className="wz-nav-copy">{item.label}</span>
+                    </NavLink>
+                  );
+                })
+              : orderedNavItems.map((item) => (
+                  item.kind === "section" ? (
+                    <div key={`section-${item.label}`} className="nav-section-label">
+                      <span>{item.label}</span>
+                    </div>
+                  ) : (
+                    <NavLink
+                      key={item.path}
+                      to={navPath(item.path)}
+                      end={item.path === "/"}
+                      onClick={(event) => {
+                        handleSidebarNavClick();
+                        if (item.moduleKey === "ticketing") {
+                          window.dispatchEvent(new Event("wz:ticketing-menu-click"));
+                        }
+                        if (item.requiresAppUsage && !allowAppUsage) {
+                          event.preventDefault();
+                          setUpgradeAlertMessage("Upgrade to next plan to access App Usage.");
+                          return;
+                        }
+                        if (item.requiresGamingOttUsage && !allowGamingOttUsage) {
+                          event.preventDefault();
+                          setUpgradeAlertMessage("Upgrade to next plan to access Gaming / OTT Usage.");
+                        }
+                      }}
+                      title={item.label}
+                      className={({ isActive }) =>
+                        `nav-link wz-nav-link ${isActive ? "active" : ""} ${
+                          (item.requiresAppUsage && !allowAppUsage) ||
+                          (item.requiresGamingOttUsage && !allowGamingOttUsage)
+                            ? "disabled"
+                            : ""
+                        }`
+                      }
+                      aria-disabled={
+                        (item.requiresAppUsage && !allowAppUsage) ||
+                        (item.requiresGamingOttUsage && !allowGamingOttUsage)
+                          ? "true"
+                          : "false"
+                      }
+                    >
+                      {item.icon ? (
+                        <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
+                      ) : null}
+                      <span className="wz-nav-copy">{item.label}</span>
+                    </NavLink>
+                  )
+                ))}
+            <a className="nav-link wz-nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} title="Logout">
+              <i className="bi bi-box-arrow-right nav-icon wz-nav-icon" aria-hidden="true" />
+              <span className="wz-nav-copy">Logout</span>
+            </a>
+          </nav>
+
+          <div className="wz-sidebar__footer">
+            <div className="theme-toggle theme-toggle-inline">
+              <button
+                type="button"
+                className={`theme-btn theme-btn-light ${
+                  theme === "light" ? "active" : ""
+                }`}
+                onClick={() => setTheme("light")}
+              >
+                <i className="bi bi-sun" aria-hidden="true" />
+                <span>Light</span>
+              </button>
+              <button
+                type="button"
+                className={`theme-btn theme-btn-dark ${
+                  theme === "dark" ? "active" : ""
+                }`}
+                onClick={() => setTheme("dark")}
+              >
+                <i className="bi bi-moon-stars" aria-hidden="true" />
+                <span>Dark</span>
+              </button>
+            </div>
           </div>
-        </nav>
+        </div>
       </aside>
 
-      <main className="main">
-        {state.archived ? (
-          <div className="alert alert-danger d-flex align-items-center justify-content-between">
-            <div>
-              Account archived. Renew to restore access.
-            </div>
-            <a className="btn btn-outline-light btn-sm" href={`/app${archivedBillingPath}`}>
-              Renew Now
-            </a>
-          </div>
-        ) : null}
-        {productSlug === "ai-chatbot" && aiChatbotTrial ? (
-          <div className="alert alert-warning d-flex align-items-center justify-content-between">
-            <div>
-              Trial ends on <strong>{trialEndText || "soon"}</strong>. Upgrade to keep access.
-            </div>
-            <a className="btn btn-outline-light btn-sm" href="/pricing/">
-              Upgrade
-            </a>
-          </div>
-        ) : null}
-        {upgradeAlertMessage ? (
-          <div className="alert alert-warning alert-dismissible fade show">
-            {upgradeAlertMessage}
+      <div className="wz-workspace">
+        <header className="wz-topbar">
+          <div className="wz-topbar__intro">
             <button
               type="button"
-              className="btn-close"
-              onClick={() => setUpgradeAlertMessage("")}
-            />
+              className="sidebar-toggle"
+              onClick={() => setSidebarCollapsed((prev) => !prev)}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              <i className={`bi ${sidebarCollapsed ? "bi-text-indent-left" : "bi-text-indent-right"}`} aria-hidden="true" />
+            </button>
+            <div>
+              <h1 className="wz-topbar__title">{productLabel}</h1>
+            </div>
           </div>
-        ) : null}
-        <Routes location={normalizedLocation}>
+
+          <div className="wz-topbar__actions">
+            <div className="wz-topbar__panel">
+              <i className="bi bi-buildings" aria-hidden="true" />
+              <div className="wz-topbar__panel-copy">
+                <strong>{orgNameForUi}</strong>
+                <span>{roleDisplayName}</span>
+              </div>
+            </div>
+            <div className="wz-topbar__panel">
+              <i className="bi bi-palette2" aria-hidden="true" />
+              <div className="wz-topbar__panel-copy">
+                <strong>{planLabel}</strong>
+                <span>{statusLabel} theme linked to admin branding</span>
+              </div>
+            </div>
+            <div className="wz-profile-chip">
+              <div className="wz-profile-chip__avatar">{userInitials}</div>
+              <div>
+                <strong>{userDisplayName}</strong>
+                <span>{productLabel}</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="main wz-main-stage">
+          <div className="wz-alert-stack">
+            {state.archived ? (
+              <div className="alert alert-danger d-flex align-items-center justify-content-between">
+                <div>
+                  Account archived. Renew to restore access.
+                </div>
+                <a className="btn btn-outline-light btn-sm" href={`/app${archivedBillingPath}`}>
+                  Renew Now
+                </a>
+              </div>
+            ) : null}
+            {productSlug === "ai-chatbot" && aiChatbotTrial ? (
+              <div className="alert alert-warning d-flex align-items-center justify-content-between">
+                <div>
+                  Trial ends on <strong>{trialEndText || "soon"}</strong>. Upgrade to keep access.
+                </div>
+                <a className="btn btn-outline-light btn-sm" href="/pricing/">
+                  Upgrade
+                </a>
+              </div>
+            ) : null}
+            {upgradeAlertMessage ? (
+              <div className="alert alert-warning alert-dismissible fade show">
+                {upgradeAlertMessage}
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => setUpgradeAlertMessage("")}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="wz-route-surface">
+            <Routes location={normalizedLocation}>
           <Route
             path="/"
             element={
@@ -1277,9 +1407,11 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/bank-transfer/:transferId"
             element={isAdmin ? <BankTransferPage /> : <Navigate to={withBase("/")} replace />}
           />
-          <Route path="*" element={<Navigate to={withBase("/")} replace />} />
-        </Routes>
-      </main>
+              <Route path="*" element={<Navigate to={withBase("/")} replace />} />
+            </Routes>
+          </div>
+        </main>
+      </div>
 
       {showFreePlanModal ? (
         <div className="modal-overlay" onClick={() => setShowFreePlanModal(false)}>

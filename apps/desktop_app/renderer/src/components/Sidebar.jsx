@@ -4,8 +4,11 @@ export default function Sidebar({ items, activeId, onSelect, onLogout, onBack, c
   return (
     <aside className="app-sidebar">
       <div className="brand">
-        <div className="brand-title">Work Zilla</div>
-        <div className="brand-subtitle">Online Storage</div>
+        <div className="brand-mark">WZ</div>
+        <div className="brand-copy">
+          <div className="brand-title">Work Zilla</div>
+          <div className="brand-subtitle">System Application</div>
+        </div>
       </div>
       <nav className="nav-list">
         {items.map((item) => (

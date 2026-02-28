@@ -1,0 +1,149 @@
+:root {
+  --shared-ui-radius-sm: 10px;
+  --shared-ui-radius-md: 14px;
+  --shared-ui-radius-lg: 18px;
+  --shared-ui-radius-xl: 24px;
+  --shared-ui-primary: var(--color-primary, var(--primary, #22c55e));
+  --shared-ui-accent: var(--color-accent, var(--accent, #38bdf8));
+  --shared-ui-secondary: var(--color-secondary, var(--secondary, #0f172a));
+  --shared-ui-text: var(--color-text, var(--text, #edf3ff));
+  --shared-ui-muted: var(--color-text-muted, var(--muted, #94a3b8));
+  --shared-ui-border: color-mix(in srgb, var(--shared-ui-primary) 18%, rgba(148, 163, 184, 0.18));
+  --shared-ui-border-strong: color-mix(in srgb, var(--shared-ui-primary) 30%, rgba(148, 163, 184, 0.24));
+  --shared-ui-surface: color-mix(in srgb, var(--color-card, var(--bg-card, #0b1728)) 92%, white 8%);
+  --shared-ui-surface-soft: color-mix(in srgb, var(--color-panel, var(--bg-panel, #0f172a)) 94%, white 6%);
+  --shared-ui-shadow-soft: 0 20px 48px rgba(2, 6, 23, 0.18);
+  --shared-ui-shadow-strong: 0 30px 80px rgba(2, 6, 23, 0.24);
+  --shared-ui-green-rgb: 34, 197, 94;
+  --shared-ui-primary-rgb: var(--color-primary-rgb, 79, 70, 229);
+  --shared-ui-accent-rgb: var(--color-accent-rgb, 56, 189, 248);
+}
+
+html[data-theme="light"] {
+  --shared-ui-shadow-soft: 0 16px 40px rgba(15, 23, 42, 0.08);
+  --shared-ui-shadow-strong: 0 26px 64px rgba(15, 23, 42, 0.12);
+}
+
+body {
+  accent-color: var(--shared-ui-primary);
+}
+
+.btn,
+.theme-toggle-btn,
+.theme-btn,
+.card button {
+  border-radius: var(--shared-ui-radius-md);
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.btn:hover,
+.theme-toggle-btn:hover,
+.theme-btn:hover,
+.card button:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary,
+.btn-success,
+.theme-toggle-btn.active,
+.theme-btn.active,
+.card button.btn-install {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--shared-ui-primary) 86%, white 14%),
+    color-mix(in srgb, var(--shared-ui-primary) 60%, var(--shared-ui-accent) 40%)
+  ) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--shared-ui-primary) 24%, transparent) !important;
+}
+
+.btn-outline-light,
+.btn-secondary,
+.theme-toggle-btn:not(.active),
+.theme-btn:not(.active),
+.card button.btn-uninstall {
+  border-color: var(--shared-ui-border) !important;
+  background: color-mix(in srgb, var(--shared-ui-surface-soft) 92%, transparent) !important;
+}
+
+.btn-outline-light:hover,
+.btn-secondary:hover,
+.theme-toggle-btn:not(.active):hover,
+.theme-btn:not(.active):hover {
+  border-color: var(--shared-ui-border-strong) !important;
+  background: color-mix(in srgb, var(--shared-ui-primary) 10%, var(--shared-ui-surface-soft)) !important;
+}
+
+.btn-outline-danger,
+.card button.btn-uninstall {
+  color: #ef4444 !important;
+  border-color: rgba(239, 68, 68, 0.32) !important;
+}
+
+.btn-outline-danger:hover,
+.card button.btn-uninstall:hover {
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.card,
+.panel,
+.status,
+.launch-card,
+.login-card,
+.wz-route-surface,
+.wz-topbar,
+.wz-sidebar__inner,
+.app-sidebar {
+  border-color: var(--shared-ui-border) !important;
+  box-shadow: var(--shared-ui-shadow-soft);
+}
+
+.app-shell .table thead,
+.table-ui thead,
+.wz-profile-workspace .table thead {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--shared-ui-primary) 18%, transparent),
+      color-mix(in srgb, var(--shared-ui-accent) 10%, transparent)
+    ) !important;
+}
+
+.app-shell .table thead th,
+.table-ui thead th,
+.wz-profile-workspace .table thead th {
+  background: transparent !important;
+}
+
+.app-shell .table.table-striped > tbody > tr:nth-of-type(odd) > *,
+.table-ui tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, var(--shared-ui-primary) 6%, transparent) !important;
+}
+
+.app-shell .table.table-striped > tbody > tr:nth-of-type(even) > *,
+.table-ui tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--shared-ui-accent) 5%, transparent) !important;
+}
+
+.app-shell .table.table-hover > tbody > tr:hover > *,
+.table-ui tbody tr:hover {
+  background: color-mix(in srgb, var(--shared-ui-primary) 10%, transparent) !important;
+}
+
+input,
+select,
+textarea,
+.form-control,
+.form-select {
+  border-color: var(--shared-ui-border) !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--shared-ui-border-strong) !important;
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--shared-ui-primary) 16%, transparent) !important;
+}

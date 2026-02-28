@@ -3,10 +3,41 @@ const statusTextEl = document.getElementById("statusText");
 const progressBarEl = document.getElementById("progressBar");
 const platformPillEl = document.getElementById("platformPill");
 const sizeTextEl = document.getElementById("sizeText");
+const themeLightBtn = document.getElementById("themeLightBtn");
+const themeDarkBtn = document.getElementById("themeDarkBtn");
+const SHARED_UI_VERSION = "20260228-1";
+const SHARED_UI_URL = `https://getworkzilla.com/static/public/css/shared-ui.css?v=${SHARED_UI_VERSION}`;
 
 let installing = false;
 let activeProduct = "";
 let productState = [];
+let theme = "dark";
+
+function loadRemoteSharedUiCss() {
+  if (document.head.querySelector("link[data-shared-ui-remote='1']")) {
+    return;
+  }
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = SHARED_UI_URL;
+  link.dataset.sharedUiRemote = "1";
+  link.onload = () => {
+    document.documentElement.dataset.sharedUi = "remote";
+  };
+  link.onerror = () => {
+    link.remove();
+    document.documentElement.dataset.sharedUi = "local";
+  };
+  document.head.appendChild(link);
+}
+
+function applyTheme(nextTheme) {
+  theme = nextTheme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  window.localStorage.setItem("wz-installer-theme", theme);
+  themeLightBtn?.classList.toggle("active", theme === "light");
+  themeDarkBtn?.classList.toggle("active", theme === "dark");
+}
 
 function setStatus(text) {
   statusTextEl.textContent = text;
@@ -103,6 +134,11 @@ function setButtonsDisabled(disabled) {
 }
 
 async function boot() {
+  applyTheme(window.localStorage.getItem("wz-installer-theme") || "dark");
+  loadRemoteSharedUiCss();
+  themeLightBtn?.addEventListener("click", () => applyTheme("light"));
+  themeDarkBtn?.addEventListener("click", () => applyTheme("dark"));
+
   const unsubscribe = window.bootstrapApi.onDownloadProgress((payload) => {
     if (!payload || payload.productKey !== activeProduct) return;
     setProgress(payload.downloaded || 0, payload.total || 0);
