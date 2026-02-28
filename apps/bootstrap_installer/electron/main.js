@@ -363,11 +363,11 @@ function downloadFileWithCurl({ urlText, destination, progressCb, allowResume = 
       "--connect-timeout", "30",
       "--speed-time", "30",
       "--speed-limit", "1024",
-      "--output", destination,
+      `--output=${destination}`,
       urlText,
     ];
     if (allowResume) {
-      curlArgs.splice(curlArgs.length - 2, 0, "--continue-at", "-");
+      curlArgs.splice(curlArgs.length - 1, 0, "--continue-at=-");
     }
     const curl = spawn("/usr/bin/curl", curlArgs, {
       stdio: ["ignore", "ignore", "pipe"],

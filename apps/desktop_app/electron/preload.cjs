@@ -50,6 +50,9 @@ contextBridge.exposeInMainWorld("storageApi", {
   openExternal: (url) => ipcRenderer.invoke("app:open-external", { url }),
   getWindowsAgentVersion: () => ipcRenderer.invoke("app:windows-agent-version"),
   getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
+  closeWindow: () => ipcRenderer.invoke("window:close"),
   onMonitorPermissionsUpdated: (handler) => {
     const listener = (_event, perms) => handler(perms);
     ipcRenderer.on("monitor:permissions-updated", listener);

@@ -141,6 +141,22 @@ export default function App() {
     await window.storageApi.updateSettings({ theme: nextTheme });
   }
 
+  function WindowControls() {
+    return (
+      <div className="window-controls-floating" aria-label="Window controls">
+        <button type="button" className="window-control-btn" onClick={() => window.storageApi.minimizeWindow?.()}>
+          -
+        </button>
+        <button type="button" className="window-control-btn" onClick={() => window.storageApi.toggleMaximizeWindow?.()}>
+          []
+        </button>
+        <button type="button" className="window-control-btn is-danger" onClick={() => window.storageApi.closeWindow?.()}>
+          x
+        </button>
+      </div>
+    );
+  }
+
   function ThemeToggle() {
     return (
       <div className="theme-toggle-floating">
@@ -204,6 +220,7 @@ export default function App() {
         <div className="app-loading">
           <div className="panel">Loading...</div>
         </div>
+        <WindowControls />
         <ThemeToggle />
       </>
     );
@@ -212,6 +229,7 @@ export default function App() {
   if (activeModule === "login") {
     return (
       <>
+        <WindowControls />
         <LoginScreen
           onBack={() => {
             setActiveModule("launcher");
@@ -248,6 +266,7 @@ export default function App() {
   if (activeModule === "launcher") {
     return (
       <>
+        <WindowControls />
         <LaunchScreen
           auth={auth}
           connection={connection}
@@ -289,6 +308,7 @@ export default function App() {
   if (activeModule === "monitor") {
     return (
       <>
+        <WindowControls />
         <Suspense fallback={<div className="panel">Loading module...</div>}>
           <MonitorScreen
             onBack={() => {
@@ -304,6 +324,7 @@ export default function App() {
   if (activeModule === "imposition") {
     return (
       <>
+        <WindowControls />
         <Suspense fallback={<div className="panel">Loading module...</div>}>
           <ImpositionScreen
             onBack={() => {
@@ -318,6 +339,7 @@ export default function App() {
 
   return (
     <>
+      <WindowControls />
       {!connection.online ? (
         <div className="connection-banner">
           {connection.reconnecting ? "Reconnecting..." : "Offline"}
