@@ -13,23 +13,48 @@
           <div class="hero-brand">
             <div class="hero-brand-mark">WZ</div>
             <div>
-              <div class="hero-badge">Bootstrap Installer</div>
+              <div class="hero-badge">Unified React Theme</div>
               <h1>Work Zilla Installer</h1>
-              <p>Select a product to download and install.</p>
+              <p>Latest workspace styling with direct product install and repair actions.</p>
             </div>
           </div>
-          <div class="theme-toggle" aria-label="Theme switcher">
-            <button id="themeLightBtn" type="button" class="theme-btn">Light</button>
-            <button id="themeDarkBtn" type="button" class="theme-btn">Dark</button>
+          <div class="hero-actions">
+            <div class="hero-panel">
+              <span class="hero-panel__label">Workspace UI</span>
+              <strong>Tailwind Admin Shell</strong>
+            </div>
+            <div class="hero-panel">
+              <span class="hero-panel__label">Delivery Mode</span>
+              <strong>Direct Install / Repair</strong>
+            </div>
+            <div class="theme-toggle" aria-label="Theme switcher">
+              <button id="themeLightBtn" type="button" class="theme-btn">Light</button>
+              <button id="themeDarkBtn" type="button" class="theme-btn">Dark</button>
+            </div>
           </div>
         </div>
       </header>
+
+      <section class="section-head">
+        <div>
+          <h2>Available Modules</h2>
+          <p>Install only the selected product. Already installed products support reinstall and uninstall.</p>
+        </div>
+        <div class="workflow-pills" aria-label="Installer workflow">
+          <span class="workflow-pill active">Pick Module</span>
+          <span class="workflow-pill active">Download</span>
+          <span class="workflow-pill">Install</span>
+        </div>
+      </section>
 
       <section id="cards" class="cards"></section>
 
       <section class="status">
         <div class="status-row">
-          <span id="statusText">Ready.</span>
+          <div>
+            <div class="status-kicker">Installer Status</div>
+            <span id="statusText">Ready.</span>
+          </div>
           <span id="platformPill" class="pill"></span>
         </div>
         <div id="sizeText" class="size-text">Downloaded: 0 B / Total: -</div>

@@ -75,8 +75,22 @@ function setProgress(downloaded, total) {
 function createCard(product, onInstall) {
   const card = document.createElement("article");
   card.className = "card";
+  const header = document.createElement("div");
+  header.className = "card-header";
   const title = document.createElement("h2");
   title.textContent = product.label;
+  const chip = document.createElement("span");
+  chip.className = "card-chip";
+  if (!product.available) {
+    chip.textContent = "Unavailable";
+    chip.dataset.state = "unavailable";
+  } else if (product.installed) {
+    chip.textContent = "Installed";
+    chip.dataset.state = "installed";
+  } else {
+    chip.textContent = "Ready";
+    chip.dataset.state = "ready";
+  }
   const subtitle = document.createElement("p");
   if (!product.available) {
     subtitle.textContent = "Not available for this platform in current config.";
@@ -103,11 +117,18 @@ function createCard(product, onInstall) {
   uninstallButton.disabled = !product.installed || installing;
   uninstallButton.addEventListener("click", () => handleUninstall(product.key));
 
+  const footnote = document.createElement("div");
+  footnote.className = "card-footnote";
+  footnote.textContent = product.installed
+    ? "This module is already available on this device."
+    : "Only the selected product installer will be downloaded.";
+
   const actions = document.createElement("div");
   actions.className = "card-actions";
   actions.append(button, uninstallButton);
 
-  card.append(title, subtitle, actions);
+  header.append(title, chip);
+  card.append(header, subtitle, footnote, actions);
   return card;
 }
 

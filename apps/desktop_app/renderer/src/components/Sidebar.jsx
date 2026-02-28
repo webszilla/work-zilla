@@ -1,3 +1,8 @@
+function getItemBadge(label) {
+  const words = String(label || "").split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
 export default function Sidebar({ items, activeId, onSelect, onLogout, onBack, connection }) {
   const isOnline = connection?.online !== false;
   const label = isOnline ? "Online" : "Reconnecting";
@@ -23,7 +28,8 @@ export default function Sidebar({ items, activeId, onSelect, onLogout, onBack, c
               className={`nav-item ${activeId === item.id ? "active" : ""}`}
               onClick={() => onSelect(item.id)}
             >
-              {item.label}
+              <span className="nav-item-badge">{getItemBadge(item.label)}</span>
+              <span>{item.label}</span>
             </button>
           )
         ))}

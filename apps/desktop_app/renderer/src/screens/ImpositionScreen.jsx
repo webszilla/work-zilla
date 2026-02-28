@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildBookImposition,
   buildExportPlan,
@@ -101,6 +101,8 @@ const HISTORY_ROWS = [
   { job: "16 Page Product Booklet", type: "Book UPS", sheets: 12, output: "PDF", status: "Ready" },
 ];
 
+const ACCEPTED_ARTWORK = ".pdf,.ai,.psd,.png,.jpg,.jpeg";
+
 function downloadJson(filename, payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -136,6 +138,17 @@ function SidebarButton({ item, activeId, onSelect }) {
 }
 
 function CanvasPreview({ layout, bookPlan, zoom }) {
+  const svgRef = useRef(null);
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [itemTransforms, setItemTransforms] = useState({});
+  const [dragState, setDragState] = useState(null);
+
+  useEffect(() => {
+    setSelectedKey(null);
+    setItemTransforms({});
+    setDragState(null);
+  }, [layout, bookPlan]);
+
   if (!layout?.sheet) {
     return (
       <div className="imposition-canvas-empty">
@@ -151,15 +164,87 @@ function CanvasPreview({ layout, bookPlan, zoom }) {
   const previewHeight = Math.max(320, sheetHeight * 1.2 * scale);
   const isBook = Boolean(bookPlan);
 
+  function toSvgPoint(clientX, clientY) {
+    const svg = svgRef.current;
+    if (!svg) {
+      return { x: 0, y: 0 };
+    }
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) {
+      return { x: 0, y: 0 };
+    }
+    const transformed = point.matrixTransform(matrix.inverse());
+    return { x: transformed.x, y: transformed.y };
+  }
+
+  function startDrag(event, placementKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    const point = toSvgPoint(event.clientX, event.clientY);
+    const currentTransform = itemTransforms[placementKey] || { dx: 0, dy: 0, rotated: false };
+    setSelectedKey(placementKey);
+    setDragState({
+      key: placementKey,
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      originDx: currentTransform.dx,
+      originDy: currentTransform.dy,
+    });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveDrag(event) {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    const point = toSvgPoint(event.clientX, event.clientY);
+    setItemTransforms((current) => ({
+      ...current,
+      [dragState.key]: {
+        ...(current[dragState.key] || { rotated: false }),
+        dx: dragState.originDx + (point.x - dragState.startX),
+        dy: dragState.originDy + (point.y - dragState.startY),
+      },
+    }));
+  }
+
+  function endDrag(event) {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDragState(null);
+  }
+
+  function rotatePlacement(placementKey) {
+    setSelectedKey(placementKey);
+    setItemTransforms((current) => ({
+      ...current,
+      [placementKey]: {
+        ...(current[placementKey] || { dx: 0, dy: 0 }),
+        rotated: !(current[placementKey]?.rotated),
+      },
+    }));
+  }
+
   return (
     <div className="imposition-canvas-stage">
       <svg
+        ref={svgRef}
         className="imposition-canvas"
         width={previewWidth}
         height={previewHeight}
         viewBox={`0 0 ${sheetWidth + 24} ${sheetHeight + 24}`}
         role="img"
         aria-label="Sheet layout preview"
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={endDrag}
       >
         <rect x="12" y="12" width={sheetWidth} height={sheetHeight} rx="8" className="sheet-outline" />
         <rect
@@ -169,21 +254,36 @@ function CanvasPreview({ layout, bookPlan, zoom }) {
           height={Math.max(0, sheetHeight - layout.settings.marginMm * 2)}
           className="sheet-safe-area"
         />
-        {layout.placements.map((placement) => (
-          <g key={`${placement.index}-${placement.x}-${placement.y}`}>
+        {layout.placements.map((placement) => {
+          const placementKey = `${placement.index}-${placement.x}-${placement.y}`;
+          const transformState = itemTransforms[placementKey] || { dx: 0, dy: 0, rotated: false };
+          const bleedWidth = placement.widthMm + placement.bleedMm * 2;
+          const bleedHeight = placement.heightMm + placement.bleedMm * 2;
+          const centerX = 12 + placement.x + bleedWidth / 2;
+          const centerY = 12 + placement.y + bleedHeight / 2;
+          const rotation = transformState.rotated ? 90 : 0;
+          const isSelected = selectedKey === placementKey;
+          return (
+          <g
+            key={placementKey}
+            transform={`translate(${transformState.dx || 0} ${transformState.dy || 0}) rotate(${rotation} ${centerX} ${centerY})`}
+            className={isSelected ? "imposition-canvas-item is-selected" : "imposition-canvas-item"}
+            onPointerDown={(event) => startDrag(event, placementKey)}
+            onClick={() => setSelectedKey(placementKey)}
+          >
             <rect
               x={12 + placement.x}
               y={12 + placement.y}
-              width={placement.widthMm + placement.bleedMm * 2}
-              height={placement.heightMm + placement.bleedMm * 2}
-              className="sheet-bleed-box"
+              width={bleedWidth}
+              height={bleedHeight}
+              className={isSelected ? "sheet-bleed-box is-selected" : "sheet-bleed-box"}
             />
             <rect
               x={12 + placement.x + placement.bleedMm}
               y={12 + placement.y + placement.bleedMm}
               width={placement.widthMm}
               height={placement.heightMm}
-              className="sheet-item-box"
+              className={isSelected ? "sheet-item-box is-selected" : "sheet-item-box"}
             />
             <text
               x={12 + placement.x + placement.bleedMm + placement.widthMm / 2}
@@ -196,8 +296,28 @@ function CanvasPreview({ layout, bookPlan, zoom }) {
                 ? `${bookPlan.sections[0].spreads[0].front.left}-${bookPlan.sections[0].spreads[0].front.right}`
                 : placement.index}
             </text>
+            {isSelected ? (
+              <g
+                className="sheet-rotate-control"
+                transform={`rotate(${-rotation} ${centerX} ${centerY})`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  rotatePlacement(placementKey);
+                }}
+              >
+                <circle cx={centerX} cy={12 + placement.y - 10} r="8" />
+                <text x={centerX} y={12 + placement.y - 10} textAnchor="middle" dominantBaseline="middle">
+                  ↻
+                </text>
+              </g>
+            ) : null}
           </g>
-        ))}
+          );
+        })}
       </svg>
     </div>
   );
@@ -251,6 +371,10 @@ function SelectInput({ label, value, onChange, options }) {
   );
 }
 
+function SectionNote({ children }) {
+  return <p className="imposition-section-note">{children}</p>;
+}
+
 export default function ImpositionScreen({ onBack }) {
   const [activeMenu, setActiveMenu] = useState("business-card");
   const [zoom, setZoom] = useState(100);
@@ -267,6 +391,7 @@ export default function ImpositionScreen({ onBack }) {
   const [licenseMessage, setLicenseMessage] = useState("");
   const [policy, setPolicy] = useState(null);
   const [exportQueue, setExportQueue] = useState([]);
+  const [designFile, setDesignFile] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -390,6 +515,35 @@ export default function ImpositionScreen({ onBack }) {
     [activeMenu]
   );
 
+  const currentModuleMeta = useMemo(() => {
+    if (activeMenu === "book") {
+      return {
+        title: "Book UPS Workspace",
+        subtitle: "Center staple and perfect binding imposition with live spread preview.",
+        itemLabel: "Book Page",
+      };
+    }
+    if (activeMenu === "sticker") {
+      return {
+        title: "Sticker UPS Workspace",
+        subtitle: "Auto grid arrangement for sticker sheets with gap, bleed, and rotation control.",
+        itemLabel: "Sticker",
+      };
+    }
+    if (activeMenu === "label") {
+      return {
+        title: "Label UPS Workspace",
+        subtitle: "Roll label or sheet label optimization with compact production settings.",
+        itemLabel: "Label",
+      };
+    }
+    return {
+      title: "Card UPS Workspace",
+      subtitle: "Import business card artwork, set sheet, and auto calculate the highest UPS fit.",
+      itemLabel: "Card",
+    };
+  }, [activeMenu]);
+
   const licenseProfile = {
     userName: policy?.device?.user_name || "Press Operator",
     organization: policy?.organization_name || "Sai Creatives",
@@ -404,6 +558,10 @@ export default function ImpositionScreen({ onBack }) {
     `Margins ${sheetSetup.marginMm} mm / Bleed ${sheetSetup.bleedMm} mm / Gap ${sheetSetup.gapMm} mm`,
     `Auto layout returns ${currentLayout.summary.itemCount} items per sheet with ${currentLayout.summary.efficiency}% efficiency`,
   ];
+
+  const designSummary = designFile
+    ? `${designFile.name} • ${(designFile.size / 1024 / 1024).toFixed(2)} MB`
+    : "Load PDF / AI / PSD / PNG / JPG artwork to start the UPS job.";
 
   const hotFolderRecipe = useMemo(
     () =>
@@ -472,6 +630,11 @@ export default function ImpositionScreen({ onBack }) {
     downloadJson(`${plan.outputName}.plan.json`, plan);
   }
 
+  function handleDesignFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    setDesignFile(file);
+  }
+
   function renderDashboard() {
     return (
       <div className="imposition-dashboard-grid">
@@ -506,158 +669,133 @@ export default function ImpositionScreen({ onBack }) {
 
   function renderSheetSetup() {
     return (
-      <div className="imposition-settings-grid">
-        <section className="imposition-panel">
-          <div className="imposition-panel-heading">
-            <h3>Sheet Setup</h3>
-            <span>Press stock and margins</span>
-          </div>
-          <div className="imposition-form-grid">
-            <SelectInput
-              label="Sheet Size"
-              value={sheetSetup.sheetKey}
-              onChange={(value) => updateSheet("sheetKey", value)}
-              options={SHEET_OPTIONS.map((item) => ({ value: item, label: item }))}
-            />
-            <TextInput label="Sheet Width (mm)" type="number" value={sheetSetup.customWidthMm} onChange={(value) => updateSheet("customWidthMm", value)} min={50} />
-            <TextInput label="Sheet Height (mm)" type="number" value={sheetSetup.customHeightMm} onChange={(value) => updateSheet("customHeightMm", value)} min={50} />
-            <TextInput label="Margins (mm)" type="number" value={sheetSetup.marginMm} onChange={(value) => updateSheet("marginMm", value)} min={0} step={0.5} />
-            <TextInput label="Bleed (mm)" type="number" value={sheetSetup.bleedMm} onChange={(value) => updateSheet("bleedMm", value)} min={0} step={0.5} />
-            <TextInput label="Gap (mm)" type="number" value={sheetSetup.gapMm} onChange={(value) => updateSheet("gapMm", value)} min={0} step={0.5} />
-          </div>
-        </section>
-        <ResultSummary title="Auto Sheet Optimization" layout={currentLayout} suffix={`${activeSheet.widthMm} x ${activeSheet.heightMm} mm`} />
-      </div>
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>Sheet Setup</h3>
+          <span>{activeSheet.label}</span>
+        </div>
+        <div className="imposition-form-grid imposition-form-grid-tight">
+          <SelectInput
+            label="Sheet"
+            value={sheetSetup.sheetKey}
+            onChange={(value) => updateSheet("sheetKey", value)}
+            options={SHEET_OPTIONS.map((item) => ({ value: item, label: item }))}
+          />
+          <TextInput label="Width (mm)" type="number" value={sheetSetup.customWidthMm} onChange={(value) => updateSheet("customWidthMm", value)} min={50} />
+          <TextInput label="Height (mm)" type="number" value={sheetSetup.customHeightMm} onChange={(value) => updateSheet("customHeightMm", value)} min={50} />
+          <TextInput label="Margin" type="number" value={sheetSetup.marginMm} onChange={(value) => updateSheet("marginMm", value)} min={0} step={0.5} />
+          <TextInput label="Bleed" type="number" value={sheetSetup.bleedMm} onChange={(value) => updateSheet("bleedMm", value)} min={0} step={0.5} />
+          <TextInput label="Gap" type="number" value={sheetSetup.gapMm} onChange={(value) => updateSheet("gapMm", value)} min={0} step={0.5} />
+        </div>
+      </section>
     );
   }
 
   function renderBusinessCard() {
     return (
-      <div className="imposition-settings-grid">
-        <section className="imposition-panel">
-          <div className="imposition-panel-heading">
-            <h3>Business Card UPS</h3>
-            <span>Auto fit for gang run cards</span>
-          </div>
-          <div className="imposition-form-grid">
-            <TextInput label="Design Name" value={businessCard.designName} onChange={(value) => updateBusinessCard("designName", value)} />
-            <TextInput label="Card Width (mm)" type="number" value={businessCard.widthMm} onChange={(value) => updateBusinessCard("widthMm", value)} min={10} step={0.5} />
-            <TextInput label="Card Height (mm)" type="number" value={businessCard.heightMm} onChange={(value) => updateBusinessCard("heightMm", value)} min={10} step={0.5} />
-            <TextInput label="Quantity" type="number" value={businessCard.quantity} onChange={(value) => updateBusinessCard("quantity", value)} min={1} step={100} />
-            <label className="imposition-check">
-              <input
-                type="checkbox"
-                checked={businessCard.allowRotation}
-                onChange={(event) => updateBusinessCard("allowRotation", event.target.checked)}
-              />
-              <span>Allow rotation for better UPS</span>
-            </label>
-          </div>
-        </section>
-        <ResultSummary title="Business Card Result" layout={businessCardLayout} suffix="Example: 90 x 54 mm card" />
-      </div>
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>Card Size</h3>
+          <span>Auto UPS calculator</span>
+        </div>
+        <div className="imposition-form-grid imposition-form-grid-tight">
+          <TextInput label="Job Name" value={businessCard.designName} onChange={(value) => updateBusinessCard("designName", value)} />
+          <TextInput label="Quantity" type="number" value={businessCard.quantity} onChange={(value) => updateBusinessCard("quantity", value)} min={1} step={100} />
+          <TextInput label="Width (mm)" type="number" value={businessCard.widthMm} onChange={(value) => updateBusinessCard("widthMm", value)} min={10} step={0.5} />
+          <TextInput label="Height (mm)" type="number" value={businessCard.heightMm} onChange={(value) => updateBusinessCard("heightMm", value)} min={10} step={0.5} />
+        </div>
+        <label className="imposition-check">
+          <input
+            type="checkbox"
+            checked={businessCard.allowRotation}
+            onChange={(event) => updateBusinessCard("allowRotation", event.target.checked)}
+          />
+          <span>Allow rotation for better fit</span>
+        </label>
+      </section>
     );
   }
 
   function renderSticker() {
     return (
-      <div className="imposition-settings-grid">
-        <section className="imposition-panel">
-          <div className="imposition-panel-heading">
-            <h3>Sticker UPS</h3>
-            <span>Square and die-cut grid generation</span>
-          </div>
-          <div className="imposition-form-grid">
-            <TextInput label="Design Name" value={sticker.designName} onChange={(value) => updateSticker("designName", value)} />
-            <TextInput label="Sticker Width (mm)" type="number" value={sticker.widthMm} onChange={(value) => updateSticker("widthMm", value)} min={10} step={0.5} />
-            <TextInput label="Sticker Height (mm)" type="number" value={sticker.heightMm} onChange={(value) => updateSticker("heightMm", value)} min={10} step={0.5} />
-            <TextInput label="Quantity" type="number" value={sticker.quantity} onChange={(value) => updateSticker("quantity", value)} min={1} step={100} />
-            <label className="imposition-check">
-              <input
-                type="checkbox"
-                checked={sticker.allowRotation}
-                onChange={(event) => updateSticker("allowRotation", event.target.checked)}
-              />
-              <span>Allow rotation</span>
-            </label>
-          </div>
-        </section>
-        <ResultSummary title="Sticker Grid" layout={stickerLayout} suffix="Auto generated grid layout" />
-      </div>
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>Sticker Size</h3>
+          <span>Grid layout</span>
+        </div>
+        <div className="imposition-form-grid imposition-form-grid-tight">
+          <TextInput label="Job Name" value={sticker.designName} onChange={(value) => updateSticker("designName", value)} />
+          <TextInput label="Quantity" type="number" value={sticker.quantity} onChange={(value) => updateSticker("quantity", value)} min={1} step={100} />
+          <TextInput label="Width (mm)" type="number" value={sticker.widthMm} onChange={(value) => updateSticker("widthMm", value)} min={10} step={0.5} />
+          <TextInput label="Height (mm)" type="number" value={sticker.heightMm} onChange={(value) => updateSticker("heightMm", value)} min={10} step={0.5} />
+        </div>
+        <label className="imposition-check">
+          <input type="checkbox" checked={sticker.allowRotation} onChange={(event) => updateSticker("allowRotation", event.target.checked)} />
+          <span>Allow rotation</span>
+        </label>
+      </section>
     );
   }
 
   function renderLabel() {
     return (
-      <div className="imposition-settings-grid">
-        <section className="imposition-panel">
-          <div className="imposition-panel-heading">
-            <h3>Label UPS</h3>
-            <span>Roll label or sheet label layout</span>
-          </div>
-          <div className="imposition-form-grid">
-            <TextInput label="Design Name" value={label.designName} onChange={(value) => updateLabel("designName", value)} />
-            <TextInput label="Label Width (mm)" type="number" value={label.widthMm} onChange={(value) => updateLabel("widthMm", value)} min={10} step={0.5} />
-            <TextInput label="Label Height (mm)" type="number" value={label.heightMm} onChange={(value) => updateLabel("heightMm", value)} min={10} step={0.5} />
-            <TextInput label="Quantity" type="number" value={label.quantity} onChange={(value) => updateLabel("quantity", value)} min={1} step={100} />
-            <label className="imposition-check">
-              <input
-                type="checkbox"
-                checked={label.allowRotation}
-                onChange={(event) => updateLabel("allowRotation", event.target.checked)}
-              />
-              <span>Allow rotation</span>
-            </label>
-          </div>
-        </section>
-        <ResultSummary title="Label Layout" layout={labelLayout} suffix="Roll label optimization" />
-      </div>
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>Label Size</h3>
+          <span>Roll / sheet</span>
+        </div>
+        <div className="imposition-form-grid imposition-form-grid-tight">
+          <TextInput label="Job Name" value={label.designName} onChange={(value) => updateLabel("designName", value)} />
+          <TextInput label="Quantity" type="number" value={label.quantity} onChange={(value) => updateLabel("quantity", value)} min={1} step={100} />
+          <TextInput label="Width (mm)" type="number" value={label.widthMm} onChange={(value) => updateLabel("widthMm", value)} min={10} step={0.5} />
+          <TextInput label="Height (mm)" type="number" value={label.heightMm} onChange={(value) => updateLabel("heightMm", value)} min={10} step={0.5} />
+        </div>
+        <label className="imposition-check">
+          <input type="checkbox" checked={label.allowRotation} onChange={(event) => updateLabel("allowRotation", event.target.checked)} />
+          <span>Allow rotation</span>
+        </label>
+      </section>
     );
   }
 
   function renderBook() {
     return (
-      <div className="imposition-settings-grid">
-        <section className="imposition-panel">
-          <div className="imposition-panel-heading">
-            <h3>Book UPS</h3>
-            <span>Most important booklet imposition module</span>
-          </div>
-          <div className="imposition-form-grid">
-            <TextInput label="Book Title" value={book.title} onChange={(value) => updateBook("title", value)} />
-            <TextInput label="Page Width (mm)" type="number" value={book.pageWidthMm} onChange={(value) => updateBook("pageWidthMm", value)} min={20} step={0.5} />
-            <TextInput label="Page Height (mm)" type="number" value={book.pageHeightMm} onChange={(value) => updateBook("pageHeightMm", value)} min={20} step={0.5} />
-            <TextInput label="Total Pages" type="number" value={book.totalPages} onChange={(value) => updateBook("totalPages", value)} min={4} step={4} />
-            <SelectInput
-              label="Binding Type"
-              value={book.bindingType}
-              onChange={(value) => updateBook("bindingType", value)}
-              options={[
-                { value: "center-staple", label: "Center Staple" },
-                { value: "perfect-binding", label: "Perfect Binding" },
-              ]}
-            />
-            <TextInput label="Signature Size" type="number" value={book.signatureSize} onChange={(value) => updateBook("signatureSize", value)} min={4} step={4} />
-          </div>
-          <div className="imposition-book-grid">
-            {bookPlan.sections.map((section) => (
-              <article key={`${section.label}-${section.startPage}`} className="imposition-book-card">
-                <strong>{section.label}</strong>
-                <span>
-                  Pages {section.startPage} - {section.endPage}
-                </span>
-                {section.spreads.slice(0, 3).map((spread, index) => (
-                  <div key={`${section.label}-${index}`} className="imposition-book-spread">
-                    <span>Front {spread.front.left} / {spread.front.right}</span>
-                    <span>Back {spread.back.left} / {spread.back.right}</span>
-                  </div>
-                ))}
-              </article>
-            ))}
-          </div>
-        </section>
-        <ResultSummary title="Booklet Sheet Result" layout={bookPlan.layout} suffix={`${bookPlan.paddedPages} imposed pages`} />
-      </div>
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>Book Setup</h3>
+          <span>{bookPlan.paddedPages} pages imposed</span>
+        </div>
+        <div className="imposition-form-grid imposition-form-grid-tight">
+          <TextInput label="Book Title" value={book.title} onChange={(value) => updateBook("title", value)} />
+          <TextInput label="Total Pages" type="number" value={book.totalPages} onChange={(value) => updateBook("totalPages", value)} min={4} step={4} />
+          <TextInput label="Page Width (mm)" type="number" value={book.pageWidthMm} onChange={(value) => updateBook("pageWidthMm", value)} min={20} step={0.5} />
+          <TextInput label="Page Height (mm)" type="number" value={book.pageHeightMm} onChange={(value) => updateBook("pageHeightMm", value)} min={20} step={0.5} />
+          <SelectInput
+            label="Binding"
+            value={book.bindingType}
+            onChange={(value) => updateBook("bindingType", value)}
+            options={[
+              { value: "center-staple", label: "Center Staple" },
+              { value: "perfect-binding", label: "Perfect Binding" },
+            ]}
+          />
+          <TextInput label="Signature Size" type="number" value={book.signatureSize} onChange={(value) => updateBook("signatureSize", value)} min={4} step={4} />
+        </div>
+        <div className="imposition-book-grid">
+          {bookPlan.sections.slice(0, 2).map((section) => (
+            <article key={`${section.label}-${section.startPage}`} className="imposition-book-card">
+              <strong>{section.label}</strong>
+              <span>Pages {section.startPage} - {section.endPage}</span>
+              {section.spreads.slice(0, 2).map((spread, index) => (
+                <div key={`${section.label}-${index}`} className="imposition-book-spread">
+                  <span>Front {spread.front.left} / {spread.front.right}</span>
+                  <span>Back {spread.back.left} / {spread.back.right}</span>
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      </section>
     );
   }
 
@@ -826,15 +964,25 @@ export default function ImpositionScreen({ onBack }) {
     );
   }
 
-  function renderPrimaryPanel() {
-    if (activeMenu === "dashboard" || activeMenu === "imposition") {
-      return renderDashboard();
-    }
-    if (activeMenu === "sheet") {
-      return renderSheetSetup();
-    }
-    if (activeMenu === "business-card") {
-      return renderBusinessCard();
+  function renderArtworkPanel() {
+    return (
+      <section className="imposition-panel imposition-panel-compact">
+        <div className="imposition-panel-heading">
+          <h3>1. Import Design</h3>
+          <span>PDF / AI / PSD / PNG / JPG</span>
+        </div>
+        <label className="imposition-upload-field">
+          <input type="file" accept={ACCEPTED_ARTWORK} onChange={handleDesignFileChange} />
+          <span>{designFile ? "Replace Artwork" : "Choose Artwork"}</span>
+        </label>
+        <SectionNote>{designSummary}</SectionNote>
+      </section>
+    );
+  }
+
+  function renderActiveSettingsPanel() {
+    if (activeMenu === "book") {
+      return renderBook();
     }
     if (activeMenu === "sticker") {
       return renderSticker();
@@ -842,8 +990,12 @@ export default function ImpositionScreen({ onBack }) {
     if (activeMenu === "label") {
       return renderLabel();
     }
-    if (activeMenu === "book") {
-      return renderBook();
+    return renderBusinessCard();
+  }
+
+  function renderUtilityPanel() {
+    if (activeMenu === "dashboard" || activeMenu === "imposition") {
+      return renderDashboard();
     }
     if (activeMenu === "templates") {
       return renderTemplates();
@@ -863,7 +1015,36 @@ export default function ImpositionScreen({ onBack }) {
     if (activeMenu === "history") {
       return renderHistory();
     }
-    return renderSettings();
+    if (activeMenu === "settings") {
+      return renderSettings();
+    }
+    return null;
+  }
+
+  function renderCanvasSummary() {
+    return (
+      <div className="imposition-canvas-summary">
+        <div className="imposition-canvas-summary-head">
+          <div>
+            <div className="imposition-topbar-eyebrow">Auto UPS Workflow</div>
+            <h2>{currentModuleMeta.title}</h2>
+            <p>{currentModuleMeta.subtitle}</p>
+          </div>
+          <div className="imposition-step-strip" aria-label="UPS workflow">
+            <span className="active">Import</span>
+            <span className="active">Sheet</span>
+            <span className="active">UPS</span>
+            <span>Export</span>
+          </div>
+        </div>
+        <div className="imposition-kpi-strip">
+          <MetricCard label="UPS" value={currentLayout.summary.itemCount} caption={`${currentLayout.summary.columns} x ${currentLayout.summary.rows} grid`} />
+          <MetricCard label="Sheet" value={activeSheet.label} caption={`${activeSheet.widthMm} x ${activeSheet.heightMm} mm`} />
+          <MetricCard label="Qty" value={activeMenu === "book" ? book.totalPages : currentLayout.summary.sheetCount} caption={activeMenu === "book" ? "Total pages" : "Sheets required"} />
+          <MetricCard label="Efficiency" value={`${currentLayout.summary.efficiency}%`} caption="Auto sheet optimization" />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -911,7 +1092,8 @@ export default function ImpositionScreen({ onBack }) {
         <header className="imposition-topbar">
           <div>
             <div className="imposition-topbar-eyebrow">Digital Printing Press Imposition Software</div>
-            <h1>{currentModuleLabel}</h1>
+            <h1>{currentModuleMeta.title}</h1>
+            <SectionNote>{currentModuleMeta.subtitle}</SectionNote>
           </div>
           <div className="imposition-toolbar-actions">
             <div className="imposition-zoom-group">
@@ -953,17 +1135,26 @@ export default function ImpositionScreen({ onBack }) {
 
         <div className="imposition-main-grid">
           <div className="imposition-canvas-column">
+            {renderCanvasSummary()}
             <CanvasPreview layout={currentLayout} bookPlan={activeMenu === "book" ? bookPlan : null} zoom={zoom} />
             <div className="imposition-canvas-footer">
-              <span>Sheet Preview</span>
-              <span>{activeSheet.label} | {currentLayout.summary.itemCount} up | {currentLayout.summary.sheetCount} sheets</span>
+              <span>Sheet Preview + Auto Arranged Items Grid</span>
+              <span>{activeSheet.label} | {currentLayout.summary.itemCount} UPS | {currentLayout.summary.sheetCount} sheets</span>
             </div>
           </div>
           <div className="imposition-inspector-column">
-            {renderPrimaryPanel()}
+            {renderArtworkPanel()}
+            {renderSheetSetup()}
+            {renderActiveSettingsPanel()}
+            <ResultSummary
+              title="2. Auto UPS Result"
+              layout={currentLayout}
+              suffix={`${currentModuleMeta.itemLabel} fit on ${activeSheet.label}`}
+            />
+            {renderUtilityPanel()}
             <section className="imposition-panel">
               <div className="imposition-panel-heading">
-                <h3>Export Engine</h3>
+                <h3>3. Export</h3>
                 <span>PDF / PNG / TIFF</span>
               </div>
               <label className="imposition-check">

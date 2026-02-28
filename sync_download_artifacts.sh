@@ -29,12 +29,16 @@ BOOTSTRAP_MAC_ARM64="$BOOTSTRAP_DIST/Work Zilla Installer-mac-arm64-0.1.8.dmg"
 BOOTSTRAP_MAC_X64="$BOOTSTRAP_DIST/Work Zilla Installer-mac-x64-0.1.8.dmg"
 AGENT_MAC_ARM64="$AGENT_DIST/Work Zilla Agent-0.2.0-arm64.dmg"
 AGENT_MAC_X64="$AGENT_DIST/Work Zilla Agent-0.2.0.dmg"
+BOOTSTRAP_WIN_X64="$BOOTSTRAP_DIST/Work Zilla Installer-win-x64-0.1.8.exe"
+AGENT_WIN_X64="$AGENT_DIST/Work Zilla Agent Setup 0.2.0.exe"
 
 for required in \
   "$BOOTSTRAP_MAC_ARM64" \
   "$BOOTSTRAP_MAC_X64" \
   "$AGENT_MAC_ARM64" \
-  "$AGENT_MAC_X64"
+  "$AGENT_MAC_X64" \
+  "$BOOTSTRAP_WIN_X64" \
+  "$AGENT_WIN_X64"
 do
   if [ ! -f "$required" ]; then
     echo "Missing required artifact: $required" >&2
@@ -46,11 +50,15 @@ BOOTSTRAP_MAC_ARM64_TARGET="$(copy_latest "$BOOTSTRAP_MAC_ARM64")"
 BOOTSTRAP_MAC_X64_TARGET="$(copy_latest "$BOOTSTRAP_MAC_X64")"
 AGENT_MAC_ARM64_TARGET="$(copy_latest "$AGENT_MAC_ARM64")"
 AGENT_MAC_X64_TARGET="$(copy_latest "$AGENT_MAC_X64")"
+BOOTSTRAP_WIN_X64_TARGET="$(copy_latest "$BOOTSTRAP_WIN_X64")"
+AGENT_WIN_X64_TARGET="$(copy_latest "$AGENT_WIN_X64")"
 
 cleanup_pattern 'Work Zilla Installer-mac-arm64-*.dmg' "$BOOTSTRAP_MAC_ARM64_TARGET"
 cleanup_pattern 'Work Zilla Installer-mac-x64-*.dmg' "$BOOTSTRAP_MAC_X64_TARGET"
 cleanup_pattern 'Work Zilla Agent-*-arm64.dmg' "$AGENT_MAC_ARM64_TARGET"
 cleanup_pattern 'Work Zilla Agent-0.2.0.dmg' "$AGENT_MAC_X64_TARGET"
+cleanup_pattern 'Work Zilla Installer-win-x64-*.exe' "$BOOTSTRAP_WIN_X64_TARGET"
+cleanup_pattern 'Work Zilla Agent Setup *.exe' "$AGENT_WIN_X64_TARGET"
 
 find "$DOWNLOADS_DIR" -maxdepth 1 -type f \( -name '*.part' -o -name '*.download' \) -delete
 
