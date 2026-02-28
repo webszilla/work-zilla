@@ -7,6 +7,7 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import path, include, re_path
 from django.views.generic import RedirectView
+from django.views.static import serve as static_serve
 
 # Temporary compatibility for legacy worksuite imports (e.g. "from dashboard ...").
 WORKSUITE_ROOT = Path(settings.BASE_DIR) / "worksuite"
@@ -34,7 +35,17 @@ def health_check(request):
     return JsonResponse({"status": "ok", "service": "backend"})
 
 
+def serve_static_asset(request, path):
+    return static_serve(request, path, document_root=str(settings.STATIC_ROOT))
+
+
+def serve_media_asset(request, path):
+    return static_serve(request, path, document_root=str(settings.MEDIA_ROOT))
+
+
 urlpatterns = [
+    re_path(r"^static/(?P<path>.*)$", serve_static_asset, name="static_asset"),
+    re_path(r"^media/(?P<path>.*)$", serve_media_asset, name="media_asset"),
     path("", include(website_urls)),
     path("theme.css", brand_views.theme_css, name="theme_css"),
     path("auth/", include("apps.backend.common_auth.urls")),
@@ -89,6 +100,3 @@ urlpatterns = [
     path("", include("apps.backend.modules.whatsapp_automation.urls")),
     re_path(r"^app/(?P<path>.*)$", spa_serve, name="spa"),
 ]
-
-urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
