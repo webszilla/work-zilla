@@ -108,6 +108,15 @@ function buildEmptyWhatsappRule(adminName = "") {
 
 const phoneCountries = PHONE_COUNTRIES;
 export default function ProfilePage() {
+  const initialProfileTab = (() => {
+    if (typeof window === "undefined") {
+      return "profile";
+    }
+    const params = new URLSearchParams(window.location.search);
+    const requestedTab = String(params.get("tab") || "").trim();
+    const allowedTabs = new Set(["profile", "uiTheme", "backup", "referral", "whatsappApi"]);
+    return allowedTabs.has(requestedTab) ? requestedTab : "profile";
+  })();
   const [state, setState] = useState(emptyState);
   const [notice, setNotice] = useState("");
   const [adminPage, setAdminPage] = useState(1);
@@ -125,7 +134,7 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [profileTopTab, setProfileTopTab] = useState("profile");
+  const [profileTopTab, setProfileTopTab] = useState(initialProfileTab);
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState("");
   const [backupItems, setBackupItems] = useState([]);

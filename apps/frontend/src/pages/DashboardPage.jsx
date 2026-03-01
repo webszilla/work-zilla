@@ -246,12 +246,12 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
       <div className="row g-3">
         {statCards.map((card) => (
           <div className="col-12 col-md-6 col-xl-3" key={card.label}>
-            <div className="card p-3 text-center h-100">
-              <div className="stat-icon" style={{ color: card.color }}>
+            <div className="card p-3 h-100 stat-card">
+              <div className="stat-icon stat-icon-primary">
                 <i className={`bi ${card.icon}`} aria-hidden="true" />
               </div>
-              <h5>{card.label}</h5>
-              <div className="stat-value" style={{ color: card.color }}>
+              <h6>{card.label}</h6>
+              <div className="stat-value">
                 {card.value}
               </div>
             </div>

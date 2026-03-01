@@ -59,68 +59,56 @@ export default function DealerDashboardPage() {
 
       <div className="row g-3">
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-cash-stack" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">My Total Earnings</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-cash-stack" aria-hidden="true" />
             </div>
+            <h6>My Total Earnings</h6>
             <div className="stat-value">{referralAmounts.total ?? 0}</div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-calendar-check" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">This Month Earnings</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-calendar-check" aria-hidden="true" />
             </div>
+            <h6>This Month Earnings</h6>
             <div className="stat-value">{referralAmounts.month_total ?? 0}</div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-building" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">Total ORG Refered</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-building" aria-hidden="true" />
             </div>
+            <h6>Total ORG Refered</h6>
             <div className="stat-value">{referralAmounts.org_count ?? 0}</div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-people" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">Total Agent Refered</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-people" aria-hidden="true" />
             </div>
+            <h6>Total Agent Refered</h6>
             <div className="stat-value">{referralAmounts.dealer_count ?? 0}</div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-calendar-event" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">My Plan Expire Date</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-calendar-event" aria-hidden="true" />
             </div>
+            <h6>My Plan Expire Date</h6>
             <div className="stat-value">{dealer.subscription_end || "-"}</div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-lg-4 col-xl-2">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <div className="stat-icon stat-icon-primary">
-                <i className="bi bi-boxes" aria-hidden="true" />
-              </div>
-              <h6 className="mb-0">Work Zilla Products</h6>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
+              <i className="bi bi-boxes" aria-hidden="true" />
             </div>
+            <h6>Work Zilla Products</h6>
             <div className="stat-value">{productsCount}</div>
           </div>
         </div>

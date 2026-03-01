@@ -33,6 +33,7 @@ export default function ProductAccessSection({
     "worksuite": "/app/work-suite",
     "ai-chatbot": "/app/ai-chatbot",
     "storage": "/app/storage",
+    "imposition-software": "/app/imposition",
     "online-storage": "/app/storage",
     "business-autopilot-erp": "/app/business-autopilot",
     "whatsapp-automation": "/app/whatsapp-automation",
@@ -58,6 +59,12 @@ export default function ProductAccessSection({
       icon: "bi-cloud",
       description: "Secure online cloud file storage with org-based controls.",
       features: ["Online Access", "Admin Controls", "Free System Sync"]
+    },
+    "imposition-software": {
+      name: "Imposition Software",
+      icon: "bi-grid-1x2",
+      description: "Licensed imposition workflow with devices, users, and print-ready operations.",
+      features: ["License", "Devices", "Users", "Plans"]
     },
     "business-autopilot-erp": {
       name: "Business Autopilot ERP",
@@ -113,6 +120,7 @@ export default function ProductAccessSection({
     if (!raw.length) {
       const fallbackOrder = [
         "monitor",
+        "imposition-software",
         "ai-chatbot",
         "storage",
         "business-autopilot-erp",
@@ -179,8 +187,15 @@ export default function ProductAccessSection({
   }
 
   return (
-    <div className="mt-4">
-      <h4>Products</h4>
+    <section className="product-access-section mt-4">
+      <div className="product-access-section__head">
+        <div>
+          <h4 className="product-access-section__title">Products</h4>
+          <p className="product-access-section__subtitle mb-0">
+            Switch between product workspaces with the same org theme and access state.
+          </p>
+        </div>
+      </div>
       <div className="row g-3 mt-1">
         {normalizedProducts.map((product) => {
           const isCurrentProduct = product.key === normalizedCurrentProductKey;
@@ -189,60 +204,47 @@ export default function ProductAccessSection({
           const dashboardHref = productRouteMap[product.key] || `/app/${product.key}`;
           const actionLabel = isCurrentProduct
             ? "Current"
-            : (hasAccess ? "Open Dashboard" : "Take a Plan");
+            : (hasAccess ? "Dashboard" : "Take a Plan");
           const actionHref = isCurrentProduct
             ? ""
             : (isActive ? (hasAccess ? dashboardHref : `/pricing/?product=${product.key}`) : "");
           return (
             <div className="col-12 col-md-6 col-lg-4 col-xl-2" key={product.key}>
-              <div className="card p-3 h-100 d-flex flex-column text-center">
-                <div className="d-flex flex-column align-items-center mb-2">
-                  <div
-                    className="stat-icon stat-icon-primary"
-                    style={{
-                      marginTop: "5px",
-                      marginBottom: "8px",
-                      width: "32px",
-                      height: "32px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      lineHeight: 1,
-                      fontSize: "25px",
-                    }}
-                  >
-                    <i
-                      className={`bi ${product.icon}`}
-                      aria-hidden="true"
-                      style={{ fontSize: "25px", lineHeight: 1 }}
-                    />
+              <article className={`product-access-card h-100 ${isCurrentProduct ? "product-access-card--current" : ""}`}>
+                <div className="product-access-card__top">
+                  <div className="product-access-card__icon" aria-hidden="true">
+                    <i className={`bi ${product.icon}`} />
                   </div>
-                  <h5 className="mb-0 lh-sm">{product.name}</h5>
                 </div>
-                <p className="text-secondary small mb-2">
+                <h5 className="product-access-card__title">{product.name}</h5>
+                <p className="product-access-card__description">
                   {product.description || "Product details coming soon."}
                 </p>
                 {product.features.length ? (
-                  <div className="text-secondary small mb-3">
-                    {product.features.join(" / ")}
+                  <div className="product-access-card__features">
+                    {product.features.map((feature) => (
+                      <span key={`${product.key}-${feature}`} className="product-access-card__feature-chip">
+                        {feature}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
                 {isCurrentProduct ? (
-                  <button type="button" className="btn btn-outline-light btn-sm mt-auto w-100" disabled>
+                  <button type="button" className="btn btn-outline-light btn-sm mt-auto w-100 product-access-card__action" disabled>
                     {actionLabel}
                   </button>
                 ) : actionHref ? (
-                  <a href={actionHref} className="btn btn-primary btn-sm mt-auto w-100">
+                  <a href={actionHref} className="btn btn-primary btn-sm mt-auto w-100 product-access-card__action">
                     {actionLabel}
                   </a>
                 ) : (
                   <span className="badge-coming-soon mt-auto align-self-center">Coming soon</span>
                 )}
-              </div>
+              </article>
             </div>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }

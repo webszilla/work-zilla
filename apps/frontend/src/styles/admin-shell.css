@@ -332,10 +332,15 @@ html[data-theme="light"] .wz-topbar {
 }
 
 .wz-topbar__panel-copy span,
+.wz-topbar__panel-copy a,
 .wz-profile-chip span {
   display: block;
   color: var(--color-text-muted, #9ca3af);
   font-size: 0.78rem;
+}
+
+.wz-topbar__panel-copy a:hover {
+  color: var(--color-text, #e5e7eb);
 }
 
 .wz-profile-chip__avatar {

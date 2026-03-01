@@ -471,24 +471,20 @@ export default function BusinessAutopilotDashboardPage({
       <div className="row g-3 mb-3">
         {statCards.map((card) => (
           <div className="col-12 col-md-6 col-xl-2" key={card.key}>
-            <div className="card p-3 h-100">
-              <div className="d-flex flex-column align-items-center justify-content-center text-center h-100">
-                <div className="stat-icon stat-icon-primary mb-2">
-                  <i className={`bi ${card.icon}`} aria-hidden="true" />
-                </div>
-                <div className="min-w-0">
-                  {card.href === "#" ? (
-                    <a href="#" className="fw-semibold text-decoration-none d-inline-block">
-                      {card.label}
-                    </a>
-                  ) : (
-                    <Link to={card.href} className="fw-semibold text-decoration-none d-inline-block">
-                      {card.label}
-                    </Link>
-                  )}
-                  <div className="h5 mb-0 mt-1">{card.value}</div>
-                </div>
+            <div className="card p-3 h-100 stat-card">
+              <div className="stat-icon stat-icon-primary">
+                <i className={`bi ${card.icon}`} aria-hidden="true" />
               </div>
+              {card.href === "#" ? (
+                <a href="#" className="fw-semibold text-decoration-none d-inline-block">
+                  {card.label}
+                </a>
+              ) : (
+                <Link to={card.href} className="fw-semibold text-decoration-none d-inline-block">
+                  {card.label}
+                </Link>
+              )}
+              <div className="h5 mb-0 mt-1">{card.value}</div>
             </div>
           </div>
         ))}

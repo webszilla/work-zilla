@@ -733,6 +733,11 @@ function AppShell({ state, productPrefix, productSlug }) {
   const workspaceTrail = formatPathLabel(location.pathname, basePath);
   const orgNameForUi = orgDisplayName || "Organization";
   const userInitials = getInitials(userDisplayName);
+  const sidebarRoleLabel = isDealer
+    ? "Dealer"
+    : isSaasAdmin || isAdmin
+      ? "ORG Admin"
+      : "ORG User";
 
   return (
     <div
@@ -751,7 +756,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           </div>
 
           <div className="wz-sidebar__controls">
-            <div className="wz-sidebar__label">React Admin</div>
+            <div className="wz-sidebar__label">{sidebarRoleLabel}</div>
             <button
               type="button"
               className="sidebar-toggle"
@@ -963,7 +968,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               <i className="bi bi-palette2" aria-hidden="true" />
               <div className="wz-topbar__panel-copy">
                 <strong>{planLabel}</strong>
-                <span>{statusLabel} theme linked to admin branding</span>
+                <Link to={withBase("/profile?tab=uiTheme")}>{statusLabel} theme linked to admin branding</Link>
               </div>
             </div>
             <div className="wz-profile-chip">
@@ -1024,7 +1029,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 : productSlug === "ai-chatbot"
                 ? <AiChatbotDashboardPage subscriptions={state.subscriptions} />
                 : productSlug === "imposition-software"
-                ? <ImpositionProductDashboardPage isAdmin={isAdmin} />
+                ? <ImpositionProductDashboardPage isAdmin={isAdmin} subscriptions={state.subscriptions} />
                 : productSlug === "business-autopilot-erp"
                 ? (
                   <Suspense fallback={<div className="card p-3">Loading modules...</div>}>

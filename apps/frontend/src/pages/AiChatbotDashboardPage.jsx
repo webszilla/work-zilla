@@ -89,45 +89,45 @@ export default function AiChatbotDashboardPage({ subscriptions = [] }) {
 
       <div className="row g-3">
         <div className="col-12 col-md-6 col-xl-3">
-          <div className="card p-3 text-center h-100">
-            <div className="stat-icon" style={{ color: "#4dabff" }}>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
               <i className="bi bi-people" aria-hidden="true" />
             </div>
-            <h5>Agents Total</h5>
-            <div className="stat-value" style={{ color: "#4dabff" }}>
+            <h6>Agents Total</h6>
+            <div className="stat-value">
               {data.agents_total ?? 0}
             </div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-xl-3">
-          <div className="card p-3 text-center h-100">
-            <div className="stat-icon" style={{ color: "#3ef58a" }}>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
               <i className="bi bi-check2-circle" aria-hidden="true" />
             </div>
-            <h5>Agents Included</h5>
-            <div className="stat-value" style={{ color: "#3ef58a" }}>
+            <h6>Agents Included</h6>
+            <div className="stat-value">
               {data.agents_included ?? 0}
             </div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-xl-3">
-          <div className="card p-3 text-center h-100">
-            <div className="stat-icon" style={{ color: "#ffdd57" }}>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
               <i className="bi bi-plus-circle" aria-hidden="true" />
             </div>
-            <h5>Extra Agents</h5>
-            <div className="stat-value" style={{ color: "#ffdd57" }}>
+            <h6>Extra Agents</h6>
+            <div className="stat-value">
               {data.agents_extra ?? 0}
             </div>
           </div>
         </div>
         <div className="col-12 col-md-6 col-xl-3">
-          <div className="card p-3 text-center h-100">
-            <div className="stat-icon" style={{ color: "#ff6b6b" }}>
+          <div className="card p-3 h-100 stat-card">
+            <div className="stat-icon stat-icon-primary">
               <i className="bi bi-robot" aria-hidden="true" />
             </div>
-            <h5>AI Replies Used</h5>
-            <div className="stat-value" style={{ color: "#ff6b6b" }}>
+            <h6>AI Replies Used</h6>
+            <div className="stat-value">
               {data.ai_replies_used_this_month ?? 0}
             </div>
           </div>

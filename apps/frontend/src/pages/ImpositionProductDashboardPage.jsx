@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import ProductAccessSection from "../components/ProductAccessSection.jsx";
 
 const emptyState = {
   loading: true,
@@ -15,7 +16,7 @@ function valueOrDash(value) {
   return value || "-";
 }
 
-export default function ImpositionProductDashboardPage({ isAdmin = false }) {
+export default function ImpositionProductDashboardPage({ isAdmin = false, subscriptions = [] }) {
   const [state, setState] = useState(emptyState);
   const [message, setMessage] = useState("");
 
@@ -99,47 +100,86 @@ export default function ImpositionProductDashboardPage({ isAdmin = false }) {
     const activeDevices = state.devices.filter((item) => item.status === "active").length;
     const activeUsers = state.users.filter((item) => item.status === "active").length;
     return [
-      { label: "Active Plan", value: valueOrDash(plan.plan_name) },
-      { label: "License Code", value: valueOrDash(license.license_code) },
-      { label: "Registered Devices", value: String(activeDevices) },
-      { label: "Device Limit", value: String(plan.device_limit ?? 0) },
-      { label: "Active Users", value: isAdmin ? String(activeUsers) : "-" },
-      { label: "Trial Days Remaining", value: String(plan.trial_days_remaining ?? 0) },
+      {
+        label: "Active Plan",
+        value: valueOrDash(plan.plan_name),
+        icon: "bi-stars",
+        meta: "Current subscription tier",
+      },
+      {
+        label: "License Code",
+        value: valueOrDash(license.license_code),
+        icon: "bi-patch-check",
+        meta: "Activation key for installs",
+      },
+      {
+        label: "Registered Devices",
+        value: String(activeDevices),
+        icon: "bi-pc-display",
+        meta: `${state.devices.length} total linked`,
+      },
+      {
+        label: "Device Limit",
+        value: String(plan.device_limit ?? 0),
+        icon: "bi-diagram-3",
+        meta: "Max allowed under plan",
+      },
+      {
+        label: "Active Users",
+        value: isAdmin ? String(activeUsers) : "-",
+        icon: "bi-people-fill",
+        meta: isAdmin ? `${state.users.length} total users` : "Admin access required",
+      },
+      {
+        label: "Trial Days Remaining",
+        value: String(plan.trial_days_remaining ?? 0),
+        icon: "bi-hourglass-split",
+        meta: "Upgrade before trial closes",
+      },
     ];
   }, [state.devices, state.license, state.plan, state.users, isAdmin]);
 
   return (
-    <div className="container-fluid">
-      <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div className="container-fluid imposition-dashboard">
+      <div className="imposition-dashboard__hero d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
         <div>
           <h2 className="page-title mb-1">Imposition Dashboard</h2>
-          <div className="text-secondary">Product overview, device status, and recent activity.</div>
+          <div className="text-secondary">Product overview, device health, license details, and recent activity.</div>
         </div>
-        <button type="button" className="btn btn-outline-light btn-sm" onClick={loadAll}>
-          Refresh
+        <button type="button" className="btn btn-outline-light btn-sm imposition-dashboard__refresh" onClick={loadAll}>
+          <i className="bi bi-arrow-clockwise" aria-hidden="true" />
+          <span>Refresh</span>
         </button>
       </div>
 
       {message ? <div className="alert alert-info">{message}</div> : null}
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
 
-      <div className="row g-3 mb-3">
+      <div className="row g-3 mb-4">
         {widgets.map((item) => (
-          <div className="col-12 col-md-6 col-xl-4" key={item.label}>
-            <div className="card p-3 h-100">
-              <div className="text-secondary small">{item.label}</div>
-              <div className="fs-5 fw-semibold">{item.value}</div>
-            </div>
+          <div className="col-12 col-md-6 col-lg-4 col-xl-2" key={item.label}>
+            <article className="imposition-stat-card h-100">
+              <div className="imposition-stat-card__icon" aria-hidden="true">
+                <i className={`bi ${item.icon}`} />
+              </div>
+              <div className="imposition-stat-card__label">{item.label}</div>
+              <div className="imposition-stat-card__value" title={item.value}>{item.value}</div>
+              <div className="imposition-stat-card__meta">{item.meta}</div>
+            </article>
           </div>
         ))}
       </div>
 
-      <div className="card p-3 mb-3">
-        <div className="d-flex align-items-center justify-content-between mb-2">
-          <h5 className="mb-0">Registered Devices</h5>
+      <section className="imposition-dashboard__section mb-4">
+        <div className="imposition-dashboard__section-head">
+          <div>
+            <h5 className="mb-1">Registered Devices</h5>
+            <p className="mb-0 text-secondary">Connected imposition systems and their latest status.</p>
+          </div>
+          <span className="imposition-dashboard__section-badge">{state.devices.length} total</span>
         </div>
-        <div className="table-responsive">
-          <table className="table table-dark table-striped align-middle">
+        <div className="wz-data-table-wrap imposition-dashboard__table-wrap">
+          <table className="table wz-data-table imposition-dashboard__table align-middle mb-0">
             <thead>
               <tr>
                 <th>Device Name</th>
@@ -160,24 +200,34 @@ export default function ImpositionProductDashboardPage({ isAdmin = false }) {
                     <td>{device.device_id}</td>
                     <td>{valueOrDash(device.os)}</td>
                     <td>{valueOrDash(device.last_active)}</td>
-                    <td>{device.status === "active" ? "Active" : "Inactive"}</td>
-                    <td className="d-flex gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-outline-light btn-sm"
-                        disabled={!isAdmin}
-                        onClick={() => renameDevice(device)}
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger btn-sm"
-                        disabled={!isAdmin || device.status !== "active"}
-                        onClick={() => deactivateDevice(device)}
-                      >
-                        Deactivate
-                      </button>
+                    <td>
+                      <span className={`imposition-dashboard__status-chip ${
+                        device.status === "active"
+                          ? "imposition-dashboard__status-chip--active"
+                          : "imposition-dashboard__status-chip--inactive"
+                      }`}>
+                        {device.status === "active" ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="table-actions">
+                      <div className="d-flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          disabled={!isAdmin}
+                          onClick={() => renameDevice(device)}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          disabled={!isAdmin || device.status !== "active"}
+                          onClick={() => deactivateDevice(device)}
+                        >
+                          Deactivate
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -187,12 +237,18 @@ export default function ImpositionProductDashboardPage({ isAdmin = false }) {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
-      <div className="card p-3">
-        <h5 className="mb-2">Recent Activity</h5>
-        <div className="table-responsive">
-          <table className="table table-dark table-striped align-middle">
+      <section className="imposition-dashboard__section mb-4">
+        <div className="imposition-dashboard__section-head">
+          <div>
+            <h5 className="mb-1">Recent Activity</h5>
+            <p className="mb-0 text-secondary">Latest user and device-side actions from this product.</p>
+          </div>
+          <span className="imposition-dashboard__section-badge">{state.activity.length} entries</span>
+        </div>
+        <div className="wz-data-table-wrap imposition-dashboard__table-wrap">
+          <table className="table wz-data-table imposition-dashboard__table align-middle mb-0">
             <thead>
               <tr>
                 <th>Event</th>
@@ -219,6 +275,13 @@ export default function ImpositionProductDashboardPage({ isAdmin = false }) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <div className="imposition-dashboard__products">
+        <ProductAccessSection
+          subscriptions={subscriptions}
+          currentProductKey="imposition-software"
+        />
       </div>
     </div>
   );

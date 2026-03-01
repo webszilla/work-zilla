@@ -404,7 +404,7 @@ export default function SaasAdminPage() {
 
           <div className="row g-3 mt-4">
             <div className="col-12 col-xl-6">
-              <div className="p-4 h-100">
+              <section className="saas-admin-section h-100">
                 <h4>Operations</h4>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">
@@ -550,11 +550,11 @@ export default function SaasAdminPage() {
                       </div>
                   </div>
                 </div>
-              </div>
+              </section>
             </div>
 
             <div className="col-12 col-xl-6">
-              <div className="p-4 h-100">
+              <section className="saas-admin-section h-100">
                 <h4>Org Admin Common Features</h4>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">
@@ -622,20 +622,20 @@ export default function SaasAdminPage() {
                       </Link>
                   </div>
                 </div>
-              </div>
+              </section>
             </div>
           </div>
         </>
       ) : null}
 
-      <div className={`card p-4 ${showProductsOnly ? "" : "mt-4"}`} id="products">
+      <section className={`${showProductsOnly ? "" : "mt-4"} saas-admin-products`} id="products">
         {showProductsOnly ? null : <h4>Products</h4>}
         <div className="row g-3 mt-1">
           {products.map((product) => (
             <div className="col-12 col-md-6 col-xl-3" key={product.id}>
-              <div className="card p-3 h-100">
+              <article className="card p-3 h-100 admin-feature-card saas-admin-product-card">
                 <div className="d-flex align-items-center gap-2 mb-2">
-                  <div className="stat-icon stat-icon-primary">
+                  <div className="stat-icon stat-icon-primary saas-admin-product-card__icon">
                     <i className={`bi ${product.icon || "bi-grid"}`} aria-hidden="true" />
                   </div>
                   <h5 className="mb-0">{product.name}</h5>
@@ -644,23 +644,23 @@ export default function SaasAdminPage() {
                 <div className="text-secondary mb-3">
                   Active Orgs: {product.active_orgs ?? 0}
                 </div>
-                <div className="d-flex justify-content-between align-items-center">
+                <div className="d-flex justify-content-between align-items-center gap-2 mt-auto">
                   {product.status === "active" ? (
-                    <span className="badge bg-success">Active</span>
+                    <span className="saas-admin-product-card__status saas-admin-product-card__status--active">Active</span>
                   ) : product.status === "disabled" ? (
-                    <span className="badge bg-secondary">Disabled</span>
+                    <span className="saas-admin-product-card__status saas-admin-product-card__status--disabled">Disabled</span>
                   ) : (
-                    <span className="badge bg-warning text-dark">Coming soon</span>
+                    <span className="saas-admin-product-card__status saas-admin-product-card__status--coming">Coming soon</span>
                   )}
                   <Link to={`/saas-admin/products/${product.slug}`} className="btn btn-primary btn-sm">
                     Open
                   </Link>
                 </div>
-              </div>
+              </article>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
     </>
   );
