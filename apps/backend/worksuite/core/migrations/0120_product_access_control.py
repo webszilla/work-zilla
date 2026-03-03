@@ -72,7 +72,7 @@ class Migration(migrations.Migration):
         ("products", "0010_seed_imposition_software"),
         ("storage", "0018_update_free_device_limit"),
         ("imposition", "0005_imposition_addon_catalog"),
-        ("core", "0119_alter_chatwidget_public_chat_code"),
+        ("core", "0118_alter_chatwidget_public_chat_code"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
