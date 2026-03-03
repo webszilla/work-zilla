@@ -210,6 +210,7 @@ CODEX SHORT INSTRUCTION
 - Prefer `./scripts/deploy_server_code.sh` for live deploys.
 - If fallback sync is used, always run `collectstatic` before restarting gunicorn.
 - After deploy, verify `/static/public/css/site.css`, `/static/common/css/public.css`, and `/downloads/bootstrap-products.json`.
+- Screenshot/media fix rule: keep screenshot API path same, but when object storage/B2 is enabled let the authenticated endpoint redirect to the storage URL instead of streaming large image bytes through Django.
 
 INCIDENT NOTE (2026-02-19)
 - Cause found: rsync fallback used without sqlite excludes, so server `apps/backend/db.sqlite3` was overwritten by local test DB.

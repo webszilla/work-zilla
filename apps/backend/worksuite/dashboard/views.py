@@ -31,6 +31,7 @@ from datetime import timedelta
 import datetime
 from collections import defaultdict
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 
 GAMING_OTT_URL_KEYWORDS = [
@@ -122,6 +123,14 @@ def _can_view_screenshot(request, screenshot):
 def _serve_screenshot_file(screenshot):
     if not screenshot.image:
         raise Http404
+    try:
+        direct_url = screenshot.image.url
+    except Exception:
+        direct_url = ""
+    if direct_url:
+        parsed_url = urlsplit(direct_url)
+        if parsed_url.scheme or parsed_url.netloc:
+            return redirect(direct_url)
     try:
         image_file = screenshot.image.open("rb")
     except OSError:
