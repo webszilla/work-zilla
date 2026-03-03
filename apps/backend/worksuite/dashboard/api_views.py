@@ -1324,7 +1324,10 @@ def employees_detail(request, emp_id):
             {
                 "id": shot.id,
                 "captured_at": _format_display_datetime(shot.captured_at),
-                "image_url": reverse("api_screenshot_image", args=[shot.id]),
+                "image_url": (
+                    dashboard_views._resolve_screenshot_direct_url(shot)
+                    or reverse("api_screenshot_image", args=[shot.id])
+                ),
             }
             for shot in shots
         ],
@@ -1802,7 +1805,10 @@ def screenshots_list(request):
                 timezone.localtime(upload_time).isoformat()
                 if upload_time else ""
             ),
-            "image_url": reverse("api_screenshot_image", args=[shot.id]),
+            "image_url": (
+                dashboard_views._resolve_screenshot_direct_url(shot)
+                or reverse("api_screenshot_image", args=[shot.id])
+            ),
         })
 
     return JsonResponse({

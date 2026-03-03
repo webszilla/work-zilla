@@ -123,20 +123,28 @@ def _can_view_screenshot(request, screenshot):
 def _serve_screenshot_file(screenshot):
     if not screenshot.image:
         raise Http404
-    try:
-        direct_url = screenshot.image.url
-    except Exception:
-        direct_url = ""
+    direct_url = _resolve_screenshot_direct_url(screenshot)
     if direct_url:
-        parsed_url = urlsplit(direct_url)
-        if parsed_url.scheme or parsed_url.netloc:
-            return redirect(direct_url)
+        return redirect(direct_url)
     try:
         image_file = screenshot.image.open("rb")
     except OSError:
         raise Http404
     content_type, _ = mimetypes.guess_type(screenshot.image.name or "")
     return FileResponse(image_file, content_type=content_type or "application/octet-stream")
+
+
+def _resolve_screenshot_direct_url(screenshot):
+    if not screenshot.image:
+        return ""
+    try:
+        direct_url = screenshot.image.url
+    except Exception:
+        return ""
+    parsed_url = urlsplit(direct_url)
+    if parsed_url.scheme or parsed_url.netloc:
+        return direct_url
+    return ""
 
 
 # =====================================================
