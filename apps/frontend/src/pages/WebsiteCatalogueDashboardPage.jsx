@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
+import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
 
 const emptyForm = {
   id: null,
@@ -282,37 +283,49 @@ export default function WebsiteCatalogueDashboardPage() {
       {notice ? <div className="alert alert-info mb-0">{notice}</div> : null}
 
       {activeTab === "website" ? (
-        <div className="card p-4">
+        <section className="wa-flat-section">
           <div className="d-flex align-items-center justify-content-between mb-3">
             <h4 className="mb-0">Website Sections</h4>
             <button type="button" className="btn btn-outline-light btn-sm" onClick={saveCataloguePageSettings} disabled={saving}>
               {saving ? "Saving..." : "Save Website"}
             </button>
           </div>
-          <div className="row g-3">
-            <div className="col-12 col-md-4">
-              <label className="form-label">About Section Title</label>
-              <input className="form-control" value={cataloguePageForm.about_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, about_title: e.target.value }))} />
+          <div className="row g-3 wa-catalogue-website-grid">
+            <div className="col-12 col-xl-4">
+              <div className="wa-catalogue-website-column">
+                <label className="form-label">About Section Title</label>
+                <input className="form-control" value={cataloguePageForm.about_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, about_title: e.target.value }))} />
+                <TinyHtmlEditor
+                  label="About Content"
+                  value={cataloguePageForm.about_content}
+                  onChange={(next) => setCataloguePageForm((p) => ({ ...p, about_content: next }))}
+                  placeholder="Write about your business..."
+                />
+              </div>
             </div>
-            <div className="col-12 col-md-4">
-              <label className="form-label">Services Section Title</label>
-              <input className="form-control" value={cataloguePageForm.services_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, services_title: e.target.value }))} />
+            <div className="col-12 col-xl-4">
+              <div className="wa-catalogue-website-column">
+                <label className="form-label">Services Section Title</label>
+                <input className="form-control" value={cataloguePageForm.services_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, services_title: e.target.value }))} />
+                <TinyHtmlEditor
+                  label="Services Content"
+                  value={cataloguePageForm.services_content}
+                  onChange={(next) => setCataloguePageForm((p) => ({ ...p, services_content: next }))}
+                  placeholder="Add your services, highlights, and bullet points."
+                />
+              </div>
             </div>
-            <div className="col-12 col-md-4">
-              <label className="form-label">Contact Section Title</label>
-              <input className="form-control" value={cataloguePageForm.contact_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, contact_title: e.target.value }))} />
-            </div>
-            <div className="col-12">
-              <label className="form-label">About Content</label>
-              <textarea className="form-control" rows="4" value={cataloguePageForm.about_content} onChange={(e) => setCataloguePageForm((p) => ({ ...p, about_content: e.target.value }))} placeholder="Write about your business..." />
-            </div>
-            <div className="col-12">
-              <label className="form-label">Services Content</label>
-              <textarea className="form-control" rows="4" value={cataloguePageForm.services_content} onChange={(e) => setCataloguePageForm((p) => ({ ...p, services_content: e.target.value }))} placeholder={"Website Design\nWhatsApp Marketing\nSupport Services"} />
-            </div>
-            <div className="col-12">
-              <label className="form-label">Contact Intro / Note</label>
-              <textarea className="form-control" rows="3" value={cataloguePageForm.contact_note} onChange={(e) => setCataloguePageForm((p) => ({ ...p, contact_note: e.target.value }))} placeholder="Contact information below is auto-loaded from Company Profile." />
+            <div className="col-12 col-xl-4">
+              <div className="wa-catalogue-website-column">
+                <label className="form-label">Contact Section Title</label>
+                <input className="form-control" value={cataloguePageForm.contact_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, contact_title: e.target.value }))} />
+                <TinyHtmlEditor
+                  label="Contact Intro / Note"
+                  value={cataloguePageForm.contact_note}
+                  onChange={(next) => setCataloguePageForm((p) => ({ ...p, contact_note: next }))}
+                  placeholder="Add a short contact introduction or note."
+                />
+              </div>
             </div>
             <div className="col-12">
               <div className="small text-secondary">
@@ -322,10 +335,10 @@ export default function WebsiteCatalogueDashboardPage() {
               </div>
             </div>
           </div>
-        </div>
+        </section>
       ) : (
         <div className="d-flex flex-column gap-3">
-          <div className="card p-4">
+          <section className="wa-flat-section">
             <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3">
               <div>
                 <h4 className="mb-1">Catalogue Categories</h4>
@@ -374,9 +387,9 @@ export default function WebsiteCatalogueDashboardPage() {
                 <div className="text-secondary">No categories yet. Create your first category to start adding catalogue items.</div>
               )}
             </div>
-          </div>
+          </section>
 
-          <div className="card p-4">
+          <section className="wa-flat-section">
             <div className="d-flex align-items-center justify-content-between mb-3 gap-3 flex-wrap">
               <div>
                 <h4 className="mb-1">{form.id ? `Edit ${currentItemLabel}` : `Add ${currentItemLabel}`}</h4>
@@ -432,9 +445,9 @@ export default function WebsiteCatalogueDashboardPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="card p-4">
+          <section className="wa-flat-section">
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
               <h4 className="mb-0">Catalogue Items</h4>
               <label className="table-search mb-0" htmlFor="wa-catalogue-search">
@@ -510,7 +523,7 @@ export default function WebsiteCatalogueDashboardPage() {
                 <button type="button" className="btn btn-outline-light btn-sm" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>Next</button>
               </div>
             </div>
-          </div>
+          </section>
         </div>
       )}
     </div>

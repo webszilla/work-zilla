@@ -742,7 +742,9 @@ export default function DigitalBusinessCardDashboardPage() {
                 <tr key={row.id}>
                   <td>{row.card_title || "-"}</td>
                   <td>{row.person_name || "-"}</td>
-                  <td><code>{row.public_slug}</code></td>
+                  <td>
+                    <code className="digital-card-table__slug">{row.public_slug}</code>
+                  </td>
                   <td>{(row.template_style || "design1").replace("design", "Design ")}</td>
                   <td>
                     {row.custom_url ? (
@@ -781,14 +783,14 @@ export default function DigitalBusinessCardDashboardPage() {
                     </span>
                   </td>
                   <td className="table-actions">
-                    <div className="d-flex flex-wrap gap-1">
-                      <a className="btn btn-outline-light btn-sm" href={row.public_url} target="_blank" rel="noreferrer">View</a>
-                      {row.public_url ? <a className="btn btn-outline-warning btn-sm" href={qrPngUrl(row.public_url, 480)} target="_blank" rel="noreferrer">QR</a> : null}
-                      {row.custom_url ? <a className="btn btn-outline-success btn-sm" href={row.custom_url} target="_blank" rel="noreferrer">URL</a> : null}
-                      <button type="button" className="btn btn-outline-info btn-sm" onClick={() => onEdit(row)}>Edit</button>
+                    <div className="digital-card-table__actions">
+                      <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--neutral" href={row.public_url} target="_blank" rel="noreferrer">View</a>
+                      {row.public_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--qr" href={qrPngUrl(row.public_url, 480)} target="_blank" rel="noreferrer">QR</a> : null}
+                      {row.custom_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--success" href={row.custom_url} target="_blank" rel="noreferrer">URL</a> : null}
+                      <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--info" onClick={() => onEdit(row)}>Edit</button>
                       <button
                         type="button"
-                        className="btn btn-outline-danger btn-sm"
+                        className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--danger"
                         disabled={deletingId === row.id}
                         onClick={() => onDelete(row)}
                       >

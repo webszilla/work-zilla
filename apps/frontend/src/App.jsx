@@ -56,6 +56,7 @@ import SaasAdminServerMonitoringDetailPage from "./pages/SaasAdminServerMonitori
 import SaasAdminServerMonitoringSettingsPage from "./pages/SaasAdminServerMonitoringSettingsPage.jsx";
 import SaasAdminServerMonitoringAlertsPage from "./pages/SaasAdminServerMonitoringAlertsPage.jsx";
 import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
+import OrgMediaLibraryPage from "./pages/OrgMediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
 import StorageUsersPage from "./pages/StorageUsersPage.jsx";
 import StorageDashboardPage from "./pages/StorageDashboardPage.jsx";
@@ -71,6 +72,7 @@ import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
 import WhatsappAutomationCompanyProfilePage from "./pages/WhatsappAutomationCompanyProfilePage.jsx";
 import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboardPage.jsx";
+import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPage.jsx";
 import WebsiteCatalogueDashboardPage from "./pages/WebsiteCatalogueDashboardPage.jsx";
 import DigitalBusinessCardDashboardPage from "./pages/DigitalBusinessCardDashboardPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
@@ -225,6 +227,7 @@ const reactPages = [
   { label: "Whatsapp Automation", path: "/dashboard/whatsapp-automation", icon: "bi-whatsapp", productOnly: "whatsapp-automation" },
   { label: "Website & Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
+  { label: "Media Library", path: "/media-library", icon: "bi-images", adminOnly: true },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
   { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
   { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
@@ -1051,6 +1054,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                     />
                   </Suspense>
                 )
+                : productSlug === "whatsapp-automation"
+                ? <WhatsappAutomationOverviewPage subscriptions={state.subscriptions} />
                 : <DashboardPage productSlug={productSlug} subscriptions={state.subscriptions} />
             }
           />
@@ -1215,6 +1220,14 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               isAdmin && !isHrView
                 ? <ProfilePage />
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/media-library"
+            element={
+              isAdmin && !isHrView && !isDealer && !isSaasAdminRoute
+                ? <OrgMediaLibraryPage />
                 : <Navigate to={withBase("/")} replace />
             }
           />
@@ -1711,9 +1724,6 @@ export default function App() {
     }
     const productSlug = match ? match.slug : "worksuite";
     const prefix = match ? match.prefix : "";
-      if (productSlug === "whatsapp-automation" && (location.pathname === prefix || location.pathname === `${prefix}/`)) {
-        return <Navigate to={`${prefix}/dashboard/whatsapp-automation`} replace />;
-      }
       const entry = getSubscriptionEntry(productSlug);
       const status = getSubscriptionStatus(productSlug);
 

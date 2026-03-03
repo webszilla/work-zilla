@@ -63,7 +63,8 @@ def public_digital_card(request, public_slug):
         "card_owner_org": org,
         "catalogue_page": catalogue_page,
         "wa_settings": wa_settings,
-        "highlights": (company_profile.product_highlights if company_profile else []) or [],
+        "highlights": ((company_profile.product_highlights if company_profile else []) or []) if isinstance((company_profile.product_highlights if company_profile else []), list) else [],
+        "highlights_html": (company_profile.product_highlights if company_profile and isinstance(company_profile.product_highlights, str) else "") or "",
         "theme_color": (
             (card_entry.theme_color if card_entry else "")
             or (digital_card.theme_color if digital_card else "")
@@ -90,9 +91,6 @@ def public_catalogue(request, public_slug):
         .order_by("sort_order", "name", "id")
     )
     digital_card = DigitalCard.objects.filter(company_profile=company_profile).first()
-    services_list = []
-    if catalogue_page and catalogue_page.services_content:
-        services_list = [line.strip(" -\t") for line in (catalogue_page.services_content or "").splitlines() if line.strip()]
     grouped_items = []
     used_category_names = set()
     for category in categories:
@@ -117,7 +115,6 @@ def public_catalogue(request, public_slug):
         "digital_card": digital_card,
         "items": items,
         "grouped_items": grouped_items,
-        "services_list": services_list,
         "theme_color": (company_profile.theme_color if company_profile else "#22c55e"),
     }
     return render(request, "whatsapp_automation/public_catalogue.html", context)

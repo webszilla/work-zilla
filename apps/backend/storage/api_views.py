@@ -86,6 +86,14 @@ def _safe_filename(value, fallback="download"):
     return name.replace("/", "-").replace("\\", "-")
 
 
+def _is_inline_previewable(item):
+    content_type = (item.content_type or "").lower()
+    if content_type.startswith("image/"):
+        return True
+    filename = (item.original_filename or "").lower()
+    return filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"))
+
+
 def _resolve_root_folder_name(folder):
     if not folder:
         return "sync"
@@ -172,6 +180,41 @@ def _is_descendant(folder, possible_parent):
             return True
         current = current.parent
     return False
+
+
+@login_required
+@require_http_methods(["GET"])
+def org_media_library(request):
+    org, error = _get_org_or_error(request)
+    if error:
+        return error
+    _, sub_error = _require_active_subscription(org, allow_readonly=True)
+    if sub_error:
+        return sub_error
+    if not is_org_admin(request.user):
+        return _json_error("forbidden", status=403)
+
+    items = list(
+        StorageFile.objects
+        .filter(organization=org, is_deleted=False)
+        .select_related("owner")
+        .order_by("-created_at")
+    )
+    return JsonResponse({
+        "items": [
+            {
+                "id": str(item.id),
+                "filename": item.original_filename,
+                "type": item.content_type or mimetypes.guess_type(item.original_filename or "")[0] or "application/octet-stream",
+                "uploaded_at": item.created_at.isoformat(),
+                "is_image": _is_inline_previewable(item),
+                "owner_name": (item.owner.get_full_name() or item.owner.username or "").strip(),
+                "download_url": f"/api/storage/files/{item.id}/download",
+                "view_url": f"/api/storage/files/{item.id}/download?disposition=inline" if _is_inline_previewable(item) else "",
+            }
+            for item in items
+        ]
+    })
 
 
 @login_required
@@ -671,9 +714,12 @@ def download_file(request, file_id):
             "used_bytes": usage.get("used_bytes"),
             "limit_bytes": usage.get("limit_bytes"),
         })
+    disposition = "attachment"
+    if request.GET.get("disposition") == "inline" and _is_inline_previewable(item):
+        disposition = "inline"
     content_type, _ = mimetypes.guess_type(item.original_filename or "")
     response = FileResponse(file_handle, content_type=content_type or "application/octet-stream")
-    response["Content-Disposition"] = f"attachment; filename=\"{item.original_filename}\""
+    response["Content-Disposition"] = f"{disposition}; filename=\"{item.original_filename}\""
     return response
 
 

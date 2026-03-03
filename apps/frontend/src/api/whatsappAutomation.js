@@ -1,6 +1,9 @@
 import { apiFetch } from "../lib/api.js";
 
 export const waApi = {
+  getDashboardSummary() {
+    return apiFetch("/api/whatsapp-automation/dashboard-summary");
+  },
   getCompanyProfile() {
     return apiFetch("/api/whatsapp-automation/company-profile");
   },

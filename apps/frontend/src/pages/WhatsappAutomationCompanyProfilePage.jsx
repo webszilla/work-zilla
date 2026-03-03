@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
+import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
+import { COUNTRY_OPTIONS } from "../lib/countries.js";
+import { getStateOptions } from "../lib/locationOptions.js";
+import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 
 const SOCIAL_ICON_OPTIONS = [
   { value: "instagram", label: "Instagram", bi: "bi-instagram" },
@@ -18,17 +22,46 @@ function socialBootstrapIcon(icon) {
 
 const emptyForm = {
   company_name: "",
-  phone: "",
-  whatsapp_number: "",
+  phone_country: "+91",
+  phone_number: "",
+  whatsapp_country: "+91",
+  whatsapp_local_number: "",
   email: "",
   website: "",
   address: "",
+  country: "India",
+  state: "",
+  postal_code: "",
   description: "",
   theme_color: "#22c55e",
-  product_highlights_text: "",
+  product_highlights_html: "",
   social_links_text: "{}",
   logo_data_url: "",
 };
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function highlightListToHtml(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!Array.isArray(value) || !value.length) {
+    return "";
+  }
+  const items = value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+  return items ? `<ul>${items}</ul>` : "";
+}
 
 function createEmptySocialLink() {
   return {
@@ -60,6 +93,31 @@ function normalizeSocialLinksForUi(company) {
   }));
 }
 
+const SORTED_PHONE_CODES = [...new Set(PHONE_COUNTRIES.map((entry) => entry.code))].sort((a, b) => b.length - a.length);
+
+function splitStoredPhone(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { countryCode: "+91", number: "" };
+  }
+  const compact = raw.replace(/\s+/g, " ").trim();
+  const matched = SORTED_PHONE_CODES.find((code) => compact === code || compact.startsWith(`${code} `) || compact.startsWith(code));
+  if (!matched) {
+    return { countryCode: "+91", number: compact };
+  }
+  const remainder = compact.slice(matched.length).trim();
+  return { countryCode: matched, number: remainder };
+}
+
+function joinPhoneParts(countryCode, number) {
+  const code = String(countryCode || "").trim();
+  const local = String(number || "").trim();
+  if (!local) {
+    return "";
+  }
+  return `${code} ${local}`.trim();
+}
+
 export default function WhatsappAutomationCompanyProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -77,16 +135,23 @@ export default function WhatsappAutomationCompanyProfilePage() {
         const data = await waApi.getCompanyProfile();
         if (!active) return;
         const company = data?.company_profile || {};
+        const phone = splitStoredPhone(company.phone);
+        const whatsapp = splitStoredPhone(company.whatsapp_number);
         setForm({
           company_name: company.company_name || "",
-          phone: company.phone || "",
-          whatsapp_number: company.whatsapp_number || "",
+          phone_country: phone.countryCode,
+          phone_number: phone.number,
+          whatsapp_country: whatsapp.countryCode,
+          whatsapp_local_number: whatsapp.number,
           email: company.email || "",
           website: company.website || "",
           address: company.address || "",
+          country: company.country || "India",
+          state: company.state || "",
+          postal_code: company.postal_code || "",
           description: company.description || "",
           theme_color: company.theme_color || "#22c55e",
-          product_highlights_text: Array.isArray(company.product_highlights) ? company.product_highlights.join("\n") : "",
+          product_highlights_html: highlightListToHtml(company.product_highlights_html || company.product_highlights || ""),
           social_links_text: JSON.stringify(company.social_links || {}, null, 2),
           logo_data_url: "",
         });
@@ -125,15 +190,18 @@ export default function WhatsappAutomationCompanyProfilePage() {
         .filter((row) => row.url);
       const res = await waApi.saveCompanyProfile({
         company_name: form.company_name,
-        phone: form.phone,
-        whatsapp_number: form.whatsapp_number,
+        phone: joinPhoneParts(form.phone_country, form.phone_number),
+        whatsapp_number: joinPhoneParts(form.whatsapp_country, form.whatsapp_local_number),
         email: form.email,
         website: form.website,
         address: form.address,
+        country: form.country,
+        state: form.state,
+        postal_code: form.postal_code,
         description: form.description,
         theme_color: form.theme_color,
         logo_data_url: form.logo_data_url || "",
-        product_highlights: form.product_highlights_text.split("\n").map((v) => v.trim()).filter(Boolean),
+        product_highlights_html: form.product_highlights_html,
         social_links_items,
       });
       const company = res?.company_profile || {};
@@ -153,6 +221,8 @@ export default function WhatsappAutomationCompanyProfilePage() {
   }
 
   if (loading) return <div className="p-4 text-center"><div className="spinner" /><p className="mb-0">Loading company profile...</p></div>;
+
+  const stateOptions = getStateOptions(form.country);
 
   async function onCustomIconChange(id, file) {
     if (!file) return;
@@ -183,8 +253,8 @@ export default function WhatsappAutomationCompanyProfilePage() {
       setError("Company logo supports only JPG, PNG, SVG.");
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      setError("Company logo size must be under 2 MB.");
+    if (file.size > 500 * 1024) {
+      setError("Company logo size must be under 500 KB.");
       return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -202,9 +272,20 @@ export default function WhatsappAutomationCompanyProfilePage() {
     <div className="p-4">
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h3 className="mb-0">Company Profile</h3>
-        <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
-        </button>
+        <div className="d-flex align-items-center gap-3">
+          <div>
+            <label className="form-label small mb-1">Theme Color</label>
+            <input
+              type="color"
+              className="form-control form-control-color"
+              value={form.theme_color}
+              onChange={(e) => setForm((p) => ({ ...p, theme_color: e.target.value }))}
+            />
+          </div>
+          <button type="button" className="btn btn-primary btn-sm mt-3" onClick={onSave} disabled={saving}>
+            {saving ? "Saving..." : "Save Data"}
+          </button>
+        </div>
       </div>
       <p className="text-secondary">Single company master profile used by WhatsApp Automation, Website Catalogue, and Digital Business Card.</p>
       {error ? <div className="alert alert-danger">{error}</div> : null}
@@ -219,19 +300,65 @@ export default function WhatsappAutomationCompanyProfilePage() {
         </div>
       ) : null}
       <div className="row g-3">
-        {[
-          ["company_name", "Company Name"],
-          ["phone", "Phone"],
-          ["whatsapp_number", "WhatsApp Number"],
-          ["email", "Email"],
-          ["website", "Website"],
-        ].map(([key, label]) => (
-          <div className="col-12 col-md-6" key={key}>
-            <label className="form-label">{label}</label>
-            <input className="form-control" value={form[key]} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))} />
+        <div className="col-12 col-lg-4">
+          <label className="form-label">Company Name</label>
+          <input className="form-control" value={form.company_name} onChange={(e) => setForm((p) => ({ ...p, company_name: e.target.value }))} />
+        </div>
+        <div className="col-12 col-lg-4">
+          <label className="form-label">Phone</label>
+          <div className="input-group">
+            <select
+              className="form-select"
+              style={{ maxWidth: 140 }}
+              value={form.phone_country}
+              onChange={(e) => setForm((p) => ({ ...p, phone_country: e.target.value }))}
+            >
+              {PHONE_COUNTRIES.map((entry) => (
+                <option key={`${entry.label}-${entry.code}`} value={entry.code}>
+                  {entry.code} {entry.label}
+                </option>
+              ))}
+            </select>
+            <input
+              className="form-control"
+              value={form.phone_number}
+              onChange={(e) => setForm((p) => ({ ...p, phone_number: e.target.value }))}
+              placeholder="Phone number"
+            />
           </div>
-        ))}
-        <div className="col-12 col-md-6">
+        </div>
+        <div className="col-12 col-lg-4">
+          <label className="form-label">WhatsApp</label>
+          <div className="input-group">
+            <select
+              className="form-select"
+              style={{ maxWidth: 140 }}
+              value={form.whatsapp_country}
+              onChange={(e) => setForm((p) => ({ ...p, whatsapp_country: e.target.value }))}
+            >
+              {PHONE_COUNTRIES.map((entry) => (
+                <option key={`wa-${entry.label}-${entry.code}`} value={entry.code}>
+                  {entry.code} {entry.label}
+                </option>
+              ))}
+            </select>
+            <input
+              className="form-control"
+              value={form.whatsapp_local_number}
+              onChange={(e) => setForm((p) => ({ ...p, whatsapp_local_number: e.target.value }))}
+              placeholder="WhatsApp number"
+            />
+          </div>
+        </div>
+        <div className="col-12 col-lg-4">
+          <label className="form-label">Email</label>
+          <input className="form-control" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
+        </div>
+        <div className="col-12 col-lg-4">
+          <label className="form-label">Website</label>
+          <input className="form-control" value={form.website} onChange={(e) => setForm((p) => ({ ...p, website: e.target.value }))} />
+        </div>
+        <div className="col-12 col-lg-4">
           <label className="form-label">Company Logo (JPG / PNG / SVG)</label>
           <div className="d-flex align-items-center gap-3">
             <div
@@ -251,25 +378,59 @@ export default function WhatsappAutomationCompanyProfilePage() {
                 className="form-control"
                 onChange={(e) => onCompanyLogoChange(e.target.files?.[0])}
               />
-              <div className="small text-secondary mt-1">Supported: JPG, PNG, SVG (max 2 MB)</div>
+              <div className="small text-secondary mt-1">Supported: JPG, PNG, SVG (max 500 KB)</div>
             </div>
           </div>
         </div>
-        <div className="col-12 col-md-6">
-          <label className="form-label">Theme Color</label>
-          <input type="color" className="form-control form-control-color" value={form.theme_color} onChange={(e) => setForm((p) => ({ ...p, theme_color: e.target.value }))} />
-        </div>
-        <div className="col-12">
-          <label className="form-label">Address</label>
-          <textarea className="form-control" rows="2" value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} />
+        <div className="col-12 col-lg-6">
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">Address</label>
+              <textarea className="form-control" rows="3" value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} />
+            </div>
+            <div className="col-12 col-md-4">
+              <label className="form-label">Country</label>
+              <select className="form-select" value={form.country} onChange={(e) => setForm((p) => ({ ...p, country: e.target.value, state: "" }))}>
+                {COUNTRY_OPTIONS.map((country) => (
+                  <option key={country} value={country}>{country}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-12 col-md-4">
+              <label className="form-label">State</label>
+              {stateOptions.length ? (
+                <select className="form-select" value={form.state} onChange={(e) => setForm((p) => ({ ...p, state: e.target.value }))}>
+                  <option value="">Select state</option>
+                  {stateOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              ) : (
+                <input className="form-control" value={form.state} onChange={(e) => setForm((p) => ({ ...p, state: e.target.value }))} />
+              )}
+            </div>
+            <div className="col-12 col-md-4">
+              <label className="form-label">Pincode</label>
+              <input className="form-control" value={form.postal_code} onChange={(e) => setForm((p) => ({ ...p, postal_code: e.target.value }))} />
+            </div>
+          </div>
         </div>
         <div className="col-12 col-lg-6">
-          <label className="form-label">Description</label>
-          <textarea className="form-control" rows="5" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
-        </div>
-        <div className="col-12 col-lg-6">
-          <label className="form-label">Product Highlights (one per line)</label>
-          <textarea className="form-control" rows="5" value={form.product_highlights_text} onChange={(e) => setForm((p) => ({ ...p, product_highlights_text: e.target.value }))} />
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">Description</label>
+              <textarea className="form-control" rows="4" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
+            </div>
+            <div className="col-12">
+              <TinyHtmlEditor
+                label="Product Highlights"
+                value={form.product_highlights_html}
+                onChange={(next) => setForm((p) => ({ ...p, product_highlights_html: next }))}
+                placeholder="Add product highlights with bullets, headings, and links."
+                minHeight={240}
+              />
+            </div>
+          </div>
         </div>
         <div className="col-12">
           <div className="d-flex align-items-center justify-content-between mb-2">

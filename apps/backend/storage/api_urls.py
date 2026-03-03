@@ -5,6 +5,7 @@ from . import api_views
 
 urlpatterns = [
     path("usage", api_views.storage_usage, name="storage_usage"),
+    path("media-library", api_views.org_media_library, name="storage_org_media_library"),
     path("folders", api_views.list_folder, name="storage_folders"),
     path("folders/create", api_views.create_folder, name="storage_folder_create"),
     path("folders/<uuid:folder_id>/rename", api_views.rename_folder, name="storage_folder_rename"),

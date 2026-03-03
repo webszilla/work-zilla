@@ -35,18 +35,18 @@
     {% if catalogue_page.about_content or company.description %}
     <div class="section panel">
       <h2>{{ catalogue_page.about_title|default:"About Us" }}</h2>
-      <p class="muted">{{ catalogue_page.about_content|default:company.description|linebreaksbr }}</p>
+      {% if catalogue_page.about_content %}
+        <div class="muted">{{ catalogue_page.about_content|safe }}</div>
+      {% else %}
+        <p class="muted">{{ company.description|linebreaksbr }}</p>
+      {% endif %}
     </div>
     {% endif %}
 
-    {% if services_list %}
+    {% if catalogue_page.services_content %}
     <div class="section panel">
       <h2>{{ catalogue_page.services_title|default:"Services" }}</h2>
-      <ul class="list">
-        {% for service in services_list %}
-        <li>{{ service }}</li>
-        {% endfor %}
-      </ul>
+      <div class="muted">{{ catalogue_page.services_content|safe }}</div>
     </div>
     {% endif %}
 
@@ -54,7 +54,7 @@
     <div class="section panel">
       <h2>{{ catalogue_page.contact_title|default:"Contact" }}</h2>
       {% if catalogue_page.contact_note %}
-        <p class="muted">{{ catalogue_page.contact_note|linebreaksbr }}</p>
+        <div class="muted">{{ catalogue_page.contact_note|safe }}</div>
       {% endif %}
       <div class="contact-grid">
         {% if company.phone %}

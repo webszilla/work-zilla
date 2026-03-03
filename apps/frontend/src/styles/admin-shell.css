@@ -256,7 +256,7 @@ body {
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  padding: 18px 18px 18px 0;
+  padding: 18px;
 }
 
 .wz-topbar {

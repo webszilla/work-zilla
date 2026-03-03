@@ -5,6 +5,7 @@ from . import api_views
 
 urlpatterns = [
     path("company-profile", api_views.company_profile_settings, name="wa_company_profile_settings"),
+    path("dashboard-summary", api_views.whatsapp_dashboard_summary_api, name="wa_dashboard_summary_api"),
     path("settings", api_views.whatsapp_settings_api, name="wa_settings_api"),
     path("rules", api_views.automation_rules_api, name="wa_rules_api"),
     path("rules/<int:rule_id>", api_views.automation_rule_detail_api, name="wa_rule_detail_api"),

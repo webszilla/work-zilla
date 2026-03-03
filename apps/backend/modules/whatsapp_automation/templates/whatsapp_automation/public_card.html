@@ -85,11 +85,15 @@
         {% endfor %}
       </div>
     {% endif %}
-    {% if highlights %}
+    {% if highlights_html or highlights %}
       <h3>Product Highlights</h3>
-      <ul>
-        {% for item in highlights %}<li>{{ item }}</li>{% endfor %}
-      </ul>
+      {% if highlights_html %}
+        <div>{{ highlights_html|safe }}</div>
+      {% else %}
+        <ul>
+          {% for item in highlights %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+      {% endif %}
     {% endif %}
     {% if wa_settings and wa_settings.welcome_message %}
       <h3>WhatsApp Greeting</h3>

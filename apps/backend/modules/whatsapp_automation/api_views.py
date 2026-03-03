@@ -11,7 +11,8 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
 
 from dashboard import views as dashboard_views
-from core.models import Subscription, UserProfile
+from core.models import AdminNotification, Subscription, UserProfile
+from apps.backend.storage.models import StorageFile
 
 from .models import (
     AutomationRule,
@@ -68,7 +69,7 @@ def _save_company_logo_from_data_url(profile, data_url):
         file_bytes = base64.b64decode(b64_data, validate=True)
     except Exception as exc:
         raise ValueError("invalid_logo_data") from exc
-    if len(file_bytes) > 2 * 1024 * 1024:
+    if len(file_bytes) > 500 * 1024:
         raise ValueError("logo_too_large")
     filename = f"company-logo-{uuid.uuid4().hex[:12]}.{ext}"
     profile.logo.save(filename, ContentFile(file_bytes), save=False)
@@ -132,6 +133,7 @@ def _serialize_social_links(raw):
 def _company_payload(obj):
     digital_card = DigitalCard.objects.filter(company_profile=obj).first()
     catalogue_page = CataloguePage.objects.filter(company_profile=obj).first()
+    product_highlights = obj.product_highlights or []
     return {
         "company_name": obj.company_name or "",
         "logo_url": obj.logo.url if obj.logo else "",
@@ -140,11 +142,15 @@ def _company_payload(obj):
         "email": obj.email or "",
         "website": obj.website or "",
         "address": obj.address or "",
+        "country": obj.country or "",
+        "state": obj.state or "",
+        "postal_code": obj.postal_code or "",
         "description": obj.description or "",
         "social_links": _serialize_social_links(obj.social_links or {}),
         "social_links_items": _normalize_social_links_items(obj.social_links or {}),
         "theme_color": obj.theme_color or "#22c55e",
-        "product_highlights": obj.product_highlights or [],
+        "product_highlights": product_highlights if isinstance(product_highlights, list) else [],
+        "product_highlights_html": product_highlights if isinstance(product_highlights, str) else "",
         "digital_card_slug": digital_card.public_slug if digital_card else "",
         "catalogue_slug": catalogue_page.public_slug if catalogue_page else "",
         "digital_card_url": f"/card/{digital_card.public_slug}/" if digital_card else "",
@@ -265,6 +271,26 @@ def _digital_card_limit_payload(org):
         "used_total": used_total,
         "remaining_cards": max(0, allowed_total - used_total),
         "can_create": used_total < allowed_total,
+    }
+
+
+def _wa_summary_payload(org):
+    sub = _wa_subscription(org)
+    renewal_date = None
+    if sub:
+        renewal_date = getattr(sub, "renewal_date", None) or getattr(sub, "end_date", None)
+
+    inbox_qs = AdminNotification.objects.filter(
+        is_deleted=False,
+        audience="org_admin",
+        organization=org,
+    )
+    return {
+        "digital_card_users": DigitalCardEntry.objects.filter(organization=org).count(),
+        "inbox_notifications": inbox_qs.count(),
+        "unread_inbox_notifications": inbox_qs.filter(is_read=False).count(),
+        "plan_renewal_date": renewal_date.isoformat() if renewal_date else "",
+        "media_library_count": StorageFile.objects.filter(organization=org, is_deleted=False).count(),
     }
 
 
@@ -415,7 +441,19 @@ def company_profile_settings(request):
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "invalid_json"}, status=400)
-    for field in ("company_name", "phone", "whatsapp_number", "email", "website", "address", "description", "theme_color"):
+    for field in (
+        "company_name",
+        "phone",
+        "whatsapp_number",
+        "email",
+        "website",
+        "address",
+        "country",
+        "state",
+        "postal_code",
+        "description",
+        "theme_color",
+    ):
         if field in data:
             setattr(profile, field, str(data.get(field) or "").strip())
     if "logo_data_url" in data:
@@ -439,7 +477,9 @@ def company_profile_settings(request):
             profile.social_links = _serialize_social_links(social_links)
         elif isinstance(social_links, list):
             profile.social_links = {"items": _normalize_social_links_items(social_links)}
-    if "product_highlights" in data and isinstance(data.get("product_highlights"), list):
+    if "product_highlights_html" in data:
+        profile.product_highlights = str(data.get("product_highlights_html") or "").strip()
+    elif "product_highlights" in data and isinstance(data.get("product_highlights"), list):
         profile.product_highlights = [str(item).strip() for item in data.get("product_highlights") if str(item).strip()]
     profile.updated_by = request.user
     profile.save()
@@ -467,6 +507,15 @@ def whatsapp_settings_api(request):
         settings_obj.welcome_message = str(data.get("welcome_message") or "").strip()
     settings_obj.save()
     return JsonResponse({"settings": _settings_payload(settings_obj, company_profile=company_profile)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def whatsapp_dashboard_summary_api(request):
+    org = _get_org(request)
+    if not org:
+        return HttpResponseForbidden("No active organization selected.")
+    return JsonResponse({"summary": _wa_summary_payload(org)})
 
 
 @login_required
