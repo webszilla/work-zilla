@@ -159,7 +159,9 @@ class UserProfile(models.Model):
     ROLE_CHOICES = (
         ("superadmin", "Super Admin"),
         ("company_admin", "Company Admin"),
+        ("org_admin", "ORG Admin"),
         ("org_user", "Org User"),
+        ("employee", "Employee"),
         ("hr_view", "HR View"),
         ("ai_chatbot_agent", "AI Chatbot Agent"),
         ("dealer", "Dealer"),
@@ -186,6 +188,106 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.role}"
+
+    @property
+    def access_role(self):
+        role = str(self.role or "").strip().lower()
+        if role in {"company_admin", "org_admin"}:
+            return "ORG_ADMIN"
+        if role in {"org_user", "employee", "hr_view", "ai_chatbot_agent"}:
+            return "EMPLOYEE"
+        return role.upper() if role else ""
+
+    @property
+    def is_org_admin(self):
+        return self.access_role == "ORG_ADMIN"
+
+    @property
+    def is_employee(self):
+        return self.access_role == "EMPLOYEE"
+
+
+class OrganizationProduct(models.Model):
+    STATUS_CHOICES = (
+        ("active", "Active"),
+        ("trialing", "Trialing"),
+        ("inactive", "Inactive"),
+        ("expired", "Expired"),
+        ("canceled", "Canceled"),
+    )
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="product_subscriptions",
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.CASCADE,
+        related_name="organization_subscriptions",
+    )
+    subscription_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    source = models.CharField(max_length=40, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "org_products"
+        unique_together = ("organization", "product")
+        indexes = [
+            models.Index(fields=["organization", "subscription_status"]),
+            models.Index(fields=["product", "subscription_status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.product_id}:{self.subscription_status}"
+
+    @property
+    def is_active_subscription(self):
+        return self.subscription_status in {"active", "trialing"}
+
+
+class UserProductAccess(models.Model):
+    PERMISSION_VIEW = "view"
+    PERMISSION_EDIT = "edit"
+    PERMISSION_FULL = "full"
+    PERMISSION_CHOICES = (
+        (PERMISSION_VIEW, "View"),
+        (PERMISSION_EDIT, "Edit"),
+        (PERMISSION_FULL, "Full"),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="product_access_entries",
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.CASCADE,
+        related_name="user_access_entries",
+    )
+    permission = models.CharField(max_length=20, choices=PERMISSION_CHOICES, default=PERMISSION_VIEW)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="granted_product_access_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_product_access"
+        unique_together = ("user", "product")
+        indexes = [
+            models.Index(fields=["user", "permission"]),
+            models.Index(fields=["product", "permission"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.product_id}:{self.permission}"
 
 
 class ChatWidget(models.Model):

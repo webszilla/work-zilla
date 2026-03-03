@@ -82,8 +82,7 @@ export default function SaasAdminApplicationDownloadsPage() {
   }
 
   return (
-    <div className="page-shell">
-      <div className="card p-4">
+    <>
         <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap">
           <div>
             <h3 className="mb-1">Application Downloads</h3>
@@ -145,20 +144,32 @@ export default function SaasAdminApplicationDownloadsPage() {
             <tbody>
               {state.items.length ? state.items.map((item) => (
                 <tr key={item.relative_key || item.filename}>
-                  <td>{item.filename}</td>
+                  <td title={item.filename || ""}>
+                    <span
+                      className="d-inline-block text-truncate align-middle"
+                      style={{ maxWidth: "260px" }}
+                    >
+                      {item.filename}
+                    </span>
+                  </td>
                   <td>{item.product || "-"}</td>
                   <td>{item.platform || "-"}</td>
                   <td>{item.arch || "-"}</td>
                   <td>{formatBytes(item.size_bytes)}</td>
                   <td>{item.updated_at || "-"}</td>
                   <td className="text-end">
-                    <div className="d-flex justify-content-end gap-2">
-                      <a className="btn btn-primary btn-sm" href={item.download_url} target="_blank" rel="noreferrer">
+                    <div className="d-flex justify-content-end gap-2 application-downloads__actions">
+                      <a
+                        className="btn btn-primary btn-sm application-downloads__action-btn"
+                        href={item.download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         Download
                       </a>
                       <button
                         type="button"
-                        className="btn btn-outline-danger btn-sm"
+                        className="btn btn-outline-danger btn-sm application-downloads__action-btn"
                         onClick={() => handleRemove(item)}
                         disabled={!state.object_ready || busyKey === item.relative_key}
                       >
@@ -175,7 +186,6 @@ export default function SaasAdminApplicationDownloadsPage() {
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
+    </>
   );
 }

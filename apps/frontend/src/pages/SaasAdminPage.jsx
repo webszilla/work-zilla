@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
-import { useBranding } from "../branding/BrandingContext.jsx";
 
 const emptyState = {
   loading: true,
@@ -39,7 +38,6 @@ export default function SaasAdminPage() {
     payload: null
   });
   const location = useLocation();
-  const { branding } = useBranding();
 
   useEffect(() => {
     let active = true;
@@ -315,13 +313,6 @@ export default function SaasAdminPage() {
     }
   }
 
-  function getProductDescription(product) {
-    if (product?.slug === "monitor") {
-      return branding?.tagline || branding?.description || "Work Zilla Work Suite productivity insights.";
-    }
-    return product?.description || "-";
-  }
-
   function dedupeProducts(list) {
     const byKey = new Map();
     list.forEach((product) => {
@@ -383,13 +374,13 @@ export default function SaasAdminPage() {
 
   return (
     <>
-      <h2 className="page-title" id={showProductsOnly ? "products" : "overview"}>
-        {showProductsOnly ? "Products" : "SaaS Admin"}
-      </h2>
-      <hr className="section-divider" />
+      <section className="saas-admin-overview-panel">
+        <h2 className="page-title" id={showProductsOnly ? "products" : "overview"}>
+          {showProductsOnly ? "Products" : "SaaS Admin"}
+        </h2>
+        <hr className="section-divider" />
 
-      {!showProductsOnly ? (
-        <>
+        {!showProductsOnly ? (
           <div className="saas-admin-kpis">
             {statCards.map((card) => (
               <div className="card p-3 h-100 stat-card" key={card.label}>
@@ -401,11 +392,17 @@ export default function SaasAdminPage() {
               </div>
             ))}
           </div>
+        ) : null}
+      </section>
 
-          <div className="row g-3 mt-4">
+      {!showProductsOnly ? (
+        <div className="row g-3 mt-4">
             <div className="col-12 col-xl-6">
               <section className="saas-admin-section h-100">
-                <h4>Operations</h4>
+                <div className="saas-admin-section__heading">
+                  <h4>Operations</h4>
+                  <hr className="section-divider saas-admin-section__divider" />
+                </div>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
@@ -500,10 +497,7 @@ export default function SaasAdminPage() {
                           onClick={handleSetupDownload}
                           disabled={setupState.downloading}
                         >
-                          <>
-                            <i className="bi bi-download me-1" aria-hidden="true" />
-                            {setupState.downloading ? "Downloading..." : "Download"}
-                          </>
+                          {setupState.downloading ? "Downloading..." : "Download"}
                         </button>
                         <label className="btn btn-outline-light btn-sm mb-0" title="Choose Setup File" aria-label="Choose Setup File">
                           <i className="bi bi-folder2-open" aria-hidden="true" />
@@ -556,9 +550,9 @@ export default function SaasAdminPage() {
                           Configure
                         </Link>
                         {whatsAppState.data?.is_active ? (
-                          <span className="badge bg-success align-self-center">Active</span>
+                          <span className="saas-admin-pill saas-admin-pill--active align-self-center">Active</span>
                         ) : (
-                          <span className="badge bg-secondary align-self-center">Inactive</span>
+                          <span className="saas-admin-pill saas-admin-pill--inactive align-self-center">Inactive</span>
                         )}
                       </div>
                   </div>
@@ -568,7 +562,10 @@ export default function SaasAdminPage() {
 
             <div className="col-12 col-xl-6">
               <section className="saas-admin-section h-100">
-                <h4>Org Admin Common Features</h4>
+                <div className="saas-admin-section__heading">
+                  <h4>Org Admin Common Features</h4>
+                  <hr className="section-divider saas-admin-section__divider" />
+                </div>
                 <div className="saas-admin-feature-grid mt-1">
                   <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
@@ -638,14 +635,13 @@ export default function SaasAdminPage() {
               </section>
             </div>
           </div>
-        </>
       ) : null}
 
-      <section className={`${showProductsOnly ? "" : "mt-4"} saas-admin-products`} id="products">
+      <section className="mt-4 saas-admin-products" id="products">
         {showProductsOnly ? null : <h4>Products</h4>}
         <div className="row g-3 mt-1">
           {products.map((product) => (
-            <div className="col-12 col-md-6 col-xl-3" key={product.id}>
+            <div className="col-12 col-md-6 col-xl-4 col-xxl-2" key={product.id}>
               <article className="card p-3 h-100 admin-feature-card saas-admin-product-card">
                 <div className="d-flex align-items-center gap-2 mb-2">
                   <div className="stat-icon stat-icon-primary saas-admin-product-card__icon">
@@ -653,11 +649,7 @@ export default function SaasAdminPage() {
                   </div>
                   <h5 className="mb-0">{product.name}</h5>
                 </div>
-                <p className="text-secondary mb-2">{getProductDescription(product)}</p>
-                <div className="text-secondary mb-3">
-                  Active Orgs: {product.active_orgs ?? 0}
-                </div>
-                <div className="d-flex justify-content-between align-items-center gap-2 mt-auto">
+                <div className="d-flex align-items-center gap-2 mt-auto saas-admin-product-card__actions">
                   {product.status === "active" ? (
                     <span className="saas-admin-product-card__status saas-admin-product-card__status--active">Active</span>
                   ) : product.status === "disabled" ? (

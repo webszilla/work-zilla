@@ -1,8 +1,10 @@
 import json
 
 from django.http import HttpResponsePermanentRedirect
+from django.shortcuts import redirect
 
 from apps.backend.brand.models import ProductRouteMapping
+from core.access_control import build_login_redirect, check_product_access, get_request_product_slug, is_exempt_product_path
 
 from django.http import HttpResponseForbidden, JsonResponse
 from django.db import connection
@@ -103,3 +105,35 @@ class ProductRouteRedirectMiddleware:
             return HttpResponsePermanentRedirect(f"/products/{route.public_slug}/")
 
         return self.get_response(request)
+
+
+class ProductAuthorizationMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ""
+        product_slug = get_request_product_slug(path)
+        if not product_slug or is_exempt_product_path(path):
+            return self.get_response(request)
+
+        decision = check_product_access(request.user, product_slug)
+        if decision.allowed:
+            request.product_access = decision
+            return self.get_response(request)
+
+        if decision.status_code == 401:
+            if path.startswith("/api/"):
+                return JsonResponse({"detail": decision.detail}, status=401)
+            return redirect(build_login_redirect(path, request.META.get("QUERY_STRING", "")))
+
+        payload = {
+            "detail": decision.detail,
+            "product_slug": decision.product_slug,
+            "role": decision.role,
+        }
+        if decision.permission:
+            payload["permission"] = decision.permission
+        if path.startswith("/api/"):
+            return JsonResponse(payload, status=403)
+        return HttpResponseForbidden(json.dumps(payload), content_type="application/json")

@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404, render
 
-from .models import CataloguePage, CatalogueProduct, DigitalCard, DigitalCardEntry, WhatsappSettings
+from .models import CatalogueCategory, CataloguePage, CatalogueProduct, DigitalCard, DigitalCardEntry, WhatsappSettings
 
 
 def _normalize_social_links_items(raw):
@@ -81,17 +81,42 @@ def public_catalogue(request, public_slug):
         is_active=True,
     )
     company_profile = catalogue_page.company_profile
-    items = CatalogueProduct.objects.filter(organization=company_profile.organization, is_active=True).order_by("sort_order", "id")
+    items = list(
+        CatalogueProduct.objects.filter(organization=company_profile.organization, is_active=True)
+        .order_by("category", "sort_order", "id")
+    )
+    categories = list(
+        CatalogueCategory.objects.filter(organization=company_profile.organization, is_active=True)
+        .order_by("sort_order", "name", "id")
+    )
     digital_card = DigitalCard.objects.filter(company_profile=company_profile).first()
     services_list = []
     if catalogue_page and catalogue_page.services_content:
         services_list = [line.strip(" -\t") for line in (catalogue_page.services_content or "").splitlines() if line.strip()]
+    grouped_items = []
+    used_category_names = set()
+    for category in categories:
+        category_items = [item for item in items if (item.category or "").strip() == category.name]
+        if not category_items:
+            continue
+        grouped_items.append({
+            "name": category.name,
+            "items": category_items,
+        })
+        used_category_names.add(category.name)
+    uncategorized = [item for item in items if not (item.category or "").strip() or (item.category or "").strip() not in used_category_names]
+    if uncategorized:
+        grouped_items.append({
+            "name": "General",
+            "items": uncategorized,
+        })
     context = {
         "public_slug": public_slug,
         "company": company_profile,
         "catalogue_page": catalogue_page,
         "digital_card": digital_card,
         "items": items,
+        "grouped_items": grouped_items,
         "services_list": services_list,
         "theme_color": (company_profile.theme_color if company_profile else "#22c55e"),
     }

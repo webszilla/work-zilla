@@ -372,13 +372,17 @@ html[data-theme="light"] .wz-topbar {
   min-width: 0;
   flex: 1;
   padding: 22px;
-  border: 1px solid var(--wz-border-soft);
-  border-radius: 15px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 18%),
-    var(--wz-surface-3);
-  box-shadow: var(--wz-shadow-soft);
-  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.wz-route-surface--saas-admin {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .wz-route-surface > *:first-child {
@@ -386,9 +390,14 @@ html[data-theme="light"] .wz-topbar {
 }
 
 html[data-theme="light"] .wz-route-surface {
-  box-shadow:
-    0 10px 24px rgba(15, 23, 42, 0.05),
-    0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="light"] .wz-route-surface--saas-admin {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .wz-sidebar .theme-toggle {

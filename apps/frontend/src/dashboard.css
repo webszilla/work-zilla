@@ -1111,6 +1111,7 @@ html[data-theme="light"] .ai-chatbot-usage-bar {
   flex-direction:column;
   align-items:flex-start;
   justify-content:flex-start;
+  min-height: 248px;
   padding: 18px !important;
 }
 
@@ -1122,6 +1123,8 @@ html[data-theme="light"] .ai-chatbot-usage-bar {
 .admin-feature-card p{
   font-size: 0.96rem;
   line-height: 1.55;
+  flex: 1 1 auto;
+  width: 100%;
 }
 
 .admin-feature-card .btn{
@@ -1351,7 +1354,7 @@ html[data-theme="light"] .admin-feature-card{
 }
 .inbox-item-preview{
   font-size:12px;
-  color:#cbd5f5;
+  color: color-mix(in srgb, rgba(var(--color-primary-rgb, 79, 70, 229), 0.78) 28%, #f8fafc);
   margin-top:6px;
 }
 .inbox-detail{
@@ -1391,6 +1394,43 @@ html[data-theme="light"] .admin-feature-card{
   font-size:12px;
   color:#9ca3af;
 }
+.wa-catalogue-page{
+  gap: 16px !important;
+}
+.wa-catalogue-tabs{
+  display: inline-flex;
+  gap: 8px;
+}
+.wa-catalogue-category-form{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.wa-catalogue-category-form .form-control{
+  min-width: 220px;
+}
+.wa-catalogue-category-list{
+  display: grid;
+  gap: 10px;
+}
+.wa-catalogue-category-chip{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.14);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.02);
+}
+.wa-catalogue-category-chip .btn-link{
+  color: var(--color-text, #e5e7eb);
+  font-weight: 700;
+}
+.wa-catalogue-category-chip .btn-outline-danger{
+  margin-left: auto;
+}
 html[data-theme="light"] .inbox-list-header{
   border-bottom-color:#e2e8f0;
 }
@@ -1420,6 +1460,13 @@ html[data-theme="light"] .inbox-item-message{
 html[data-theme="light"] .inbox-detail-body{
   background:#f8fafc;
   border-color:#dbe2ef;
+  color:#0f172a;
+}
+html[data-theme="light"] .wa-catalogue-category-chip{
+  background: rgba(255,255,255,0.92);
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.12);
+}
+html[data-theme="light"] .wa-catalogue-category-chip .btn-link{
   color:#0f172a;
 }
 html[data-theme="light"] .inbox-auto-refresh{
@@ -1472,39 +1519,67 @@ html[data-theme="light"] .inbox-auto-refresh{
   padding: 0;
 }
 
+.saas-admin-overview-panel{
+  display: grid;
+  gap: 0;
+}
+
+.saas-admin-section__heading{
+  margin-bottom: 12px;
+}
+
 .saas-admin-section h4,
 .saas-admin-products h4{
-  margin: 0 0 12px;
+  margin: 0;
+}
+
+.saas-admin-section__divider{
+  margin: 10px 0 0;
 }
 
 .saas-admin-product-card{
   text-align: left;
+  justify-content: space-between;
+}
+
+.saas-admin-product-card__actions{
+  width: 100%;
+}
+
+.saas-admin-product-card__actions .btn{
+  margin-left: auto;
 }
 
 .saas-admin-product-card__icon i{
   color: #ffffff !important;
 }
 
+.saas-admin-pill,
 .saas-admin-product-card__status{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  padding: 0 14px;
-  border-radius: 10px;
-  font-size: 0.88rem;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: var(--bs-btn-border-radius-sm, 0.5rem);
+  font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
   border: 1px solid transparent;
 }
 
+.saas-admin-pill--active,
 .saas-admin-product-card__status--active{
   color: #dcfce7;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.92), rgba(22, 163, 74, 0.9));
-  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.3);
+  box-shadow: none;
 }
 
+.saas-admin-pill--inactive,
 .saas-admin-product-card__status--disabled{
   color: #e2e8f0;
   background: rgba(100, 116, 139, 0.22);
@@ -1518,9 +1593,12 @@ html[data-theme="light"] .inbox-auto-refresh{
 }
 
 html[data-theme="light"] .saas-admin-product-card__status--active{
-  color: #ffffff;
+  color: #166534;
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.24);
 }
 
+html[data-theme="light"] .saas-admin-pill--inactive,
 html[data-theme="light"] .saas-admin-product-card__status--disabled{
   color: #334155;
   background: rgba(148, 163, 184, 0.16);
@@ -1554,6 +1632,161 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   gap:12px;
   margin-top:10px;
   flex-wrap:wrap;
+}
+.saas-org-table{
+  display:grid;
+  gap:10px;
+}
+.saas-org-tabs{
+  margin-bottom:0;
+}
+.saas-org-table .table-controls{
+  align-items:flex-end;
+  margin-bottom:0;
+}
+.saas-org-table__controls-right{
+  justify-content:flex-end;
+  margin-left:auto;
+}
+.saas-org-table .table-responsive{
+  margin-top:0 !important;
+}
+.saas-org-table .table{
+  margin-top:0 !important;
+}
+.saas-org-table .table th:nth-child(4),
+.saas-org-table .table td:nth-child(4){
+  min-width:140px;
+}
+.saas-org-table .table th.table-actions,
+.saas-org-table .table td.table-actions{
+  width:1%;
+  min-width:170px;
+  white-space:nowrap;
+}
+.saas-org-table .table td.table-actions{
+  overflow:visible;
+}
+.application-downloads__actions{
+  align-items: center;
+}
+.application-downloads__action-btn{
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+  text-align: center;
+}
+.digital-card-domain-panel{
+  border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.18);
+  border-radius: 22px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(var(--color-primary-rgb, 79, 70, 229), 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), transparent 22%),
+    rgba(2, 12, 32, 0.78);
+  box-shadow:
+    0 16px 28px rgba(2, 6, 23, 0.22),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.digital-card-domain-panel__header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+.digital-card-domain-panel__title{
+  color: var(--color-text, #e5e7eb);
+  font-size: 1.18rem;
+  font-weight: 700;
+}
+.digital-card-domain-panel__status{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:30px;
+  padding:0 12px;
+  border-radius:999px;
+  font-size:0.78rem;
+  font-weight:800;
+  letter-spacing:0.04em;
+  white-space:nowrap;
+  border:1px solid transparent;
+}
+.digital-card-domain-panel__status.is-active{
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.28);
+}
+.digital-card-domain-panel__status.is-pending{
+  background: rgba(250, 204, 21, 0.16);
+  color: #fde68a;
+  border-color: rgba(250, 204, 21, 0.28);
+}
+.digital-card-domain-panel__meta,
+.digital-card-domain-panel__note,
+.digital-card-domain-panel__url{
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+.digital-card-domain-panel__meta{
+  margin-bottom: 10px;
+}
+.digital-card-domain-panel__url{
+  margin-bottom: 14px;
+}
+.digital-card-domain-panel__url strong{
+  color: var(--color-text, #e5e7eb);
+}
+.digital-card-domain-panel__url a{
+  color: #f472b6;
+  word-break: break-all;
+}
+.digital-card-domain-panel__meta code{
+  color: #f472b6;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.18);
+  border-radius: 10px;
+  padding: 0.18rem 0.45rem;
+}
+.digital-card-domain-panel__table-wrap{
+  margin-bottom: 12px;
+}
+.digital-card-domain-table{
+  table-layout: fixed;
+}
+.digital-card-domain-table th:nth-child(1),
+.digital-card-domain-table td:nth-child(1){
+  width: 110px;
+}
+.digital-card-domain-table th:nth-child(2),
+.digital-card-domain-table td:nth-child(2){
+  width: 140px;
+}
+.digital-card-domain-table code{
+  color: #f472b6;
+  background: transparent;
+  padding: 0;
+  border: none;
+  font-size: 0.94em;
+}
+.digital-card-domain-panel__note{
+  margin-top: 2px;
+}
+html[data-theme="light"] .digital-card-domain-panel{
+  background:
+    radial-gradient(circle at top right, rgba(var(--color-primary-rgb, 29, 78, 216), 0.09), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,255,255,0.92));
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.18);
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255,255,255,0.7);
+}
+html[data-theme="light"] .digital-card-domain-panel__meta code,
+html[data-theme="light"] .digital-card-domain-table code{
+  color: #be185d;
 }
 .activity-table thead th.sortable{
   position:relative;

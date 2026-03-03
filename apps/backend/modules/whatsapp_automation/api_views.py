@@ -15,6 +15,7 @@ from core.models import Subscription, UserProfile
 
 from .models import (
     AutomationRule,
+    CatalogueCategory,
     CataloguePage,
     CatalogueProduct,
     CompanyProfile,
@@ -182,12 +183,24 @@ def _catalogue_payload(obj):
         "id": obj.id,
         "title": obj.title,
         "image_url": obj.image.url if obj.image else "",
+        "item_type": obj.item_type or CatalogueProduct.ITEM_TYPE_PRODUCT,
         "price": obj.price or "",
         "description": obj.description or "",
         "category": obj.category or "",
         "order_button_enabled": bool(obj.order_button_enabled),
         "sort_order": obj.sort_order or 0,
         "is_active": bool(obj.is_active),
+    }
+
+
+def _catalogue_category_payload(obj, *, product_count=0, service_count=0):
+    return {
+        "id": obj.id,
+        "name": obj.name or "",
+        "sort_order": obj.sort_order or 0,
+        "is_active": bool(obj.is_active),
+        "product_count": product_count,
+        "service_count": service_count,
     }
 
 
@@ -582,9 +595,22 @@ def catalogue_products_api(request):
     if not title:
         return JsonResponse({"title": ["required"]}, status=400)
     row.title = title
+    item_type = str(data.get("item_type") or CatalogueProduct.ITEM_TYPE_PRODUCT).strip().lower()
+    if item_type not in {CatalogueProduct.ITEM_TYPE_PRODUCT, CatalogueProduct.ITEM_TYPE_SERVICE}:
+        item_type = CatalogueProduct.ITEM_TYPE_PRODUCT
+    row.item_type = item_type
     row.price = str(data.get("price") or "").strip()
     row.description = str(data.get("description") or "").strip()
-    row.category = str(data.get("category") or "").strip()
+    category_name = str(data.get("category") or "").strip()
+    if category_name:
+        category_obj, _ = CatalogueCategory.objects.get_or_create(
+            organization=org,
+            name=category_name,
+            defaults={"sort_order": CatalogueCategory.objects.filter(organization=org).count()},
+        )
+        row.category = category_obj.name
+    else:
+        row.category = ""
     row.order_button_enabled = bool(data.get("order_button_enabled", True))
     row.sort_order = int(data.get("sort_order") or 0)
     row.is_active = bool(data.get("is_active", True))
@@ -635,6 +661,90 @@ def catalogue_page_settings_api(request):
         catalogue_page.is_active = bool(data.get("is_active"))
     catalogue_page.save()
     return JsonResponse({"catalogue_page": _catalogue_page_payload(catalogue_page, company_profile=company_profile)})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def catalogue_categories_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if request.method == "GET":
+        rows = list(CatalogueCategory.objects.filter(organization=org))
+        products = list(CatalogueProduct.objects.filter(organization=org))
+        counts = {}
+        for row in products:
+            key = (row.category or "").strip().lower()
+            if not key:
+                continue
+            bucket = counts.setdefault(key, {"product_count": 0, "service_count": 0})
+            if row.item_type == CatalogueProduct.ITEM_TYPE_SERVICE:
+                bucket["service_count"] += 1
+            else:
+                bucket["product_count"] += 1
+        return JsonResponse(
+            {
+                "categories": [
+                    _catalogue_category_payload(
+                        row,
+                        product_count=counts.get((row.name or "").strip().lower(), {}).get("product_count", 0),
+                        service_count=counts.get((row.name or "").strip().lower(), {}).get("service_count", 0),
+                    )
+                    for row in rows
+                ]
+            }
+        )
+
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"name": ["required"]}, status=400)
+    row_id = data.get("id")
+    if row_id:
+        row = CatalogueCategory.objects.filter(id=row_id, organization=org).first()
+        if not row:
+            return JsonResponse({"error": "not_found"}, status=404)
+        previous_name = row.name
+    else:
+        row = CatalogueCategory(organization=org)
+        previous_name = ""
+    row.name = name
+    row.sort_order = int(data.get("sort_order") or row.sort_order or 0)
+    row.is_active = bool(data.get("is_active", True))
+    row.save()
+    if previous_name and previous_name != row.name:
+        CatalogueProduct.objects.filter(organization=org, category=previous_name).update(category=row.name)
+    product_count = CatalogueProduct.objects.filter(
+        organization=org,
+        category=row.name,
+        item_type=CatalogueProduct.ITEM_TYPE_PRODUCT,
+    ).count()
+    service_count = CatalogueProduct.objects.filter(
+        organization=org,
+        category=row.name,
+        item_type=CatalogueProduct.ITEM_TYPE_SERVICE,
+    ).count()
+    return JsonResponse({"category": _catalogue_category_payload(row, product_count=product_count, service_count=service_count)})
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def catalogue_category_detail_api(request, category_id):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    row = CatalogueCategory.objects.filter(id=category_id, organization=org).first()
+    if not row:
+        return JsonResponse({"error": "not_found"}, status=404)
+    CatalogueProduct.objects.filter(organization=org, category=row.name).update(category="")
+    row.delete()
+    return JsonResponse({"status": "deleted"})
 
 
 @login_required

@@ -4,7 +4,7 @@ import datetime
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.utils.http import url_has_allowed_host_and_scheme
 
@@ -24,7 +24,9 @@ from core.subscription_utils import (
 )
 from apps.backend.retention.models import RetentionStatus
 from apps.backend.retention.utils.retention import evaluate_tenant_status, get_tenant_status
+from core.access_control import check_product_access, get_access_role, get_user_organization, iter_accessible_product_slugs
 
+User = get_user_model()
 
 def company_signup(request):
     if request.method == "POST":
@@ -355,6 +357,7 @@ def auth_me(request):
     if profile:
         profile_payload = {
             "role": profile.role,
+            "access_role": profile.access_role,
             "phone_number": profile.phone_number or "",
             "organization": org_payload,
         }
@@ -521,6 +524,9 @@ def auth_me(request):
                 "is_superuser": user.is_superuser,
             },
             "profile": profile_payload,
+            "access_role": get_access_role(user, profile),
+            "org_id": org.id if org else None,
+            "accessible_products": list(iter_accessible_product_slugs(user)),
             "dealer": dealer_payload,
             "dealer_onboarding": dealer_onboarding,
             "allow_app_usage": allow_app_usage,
@@ -564,6 +570,8 @@ def auth_subscriptions(request):
     if not org:
         return JsonResponse({"authenticated": True, "subscriptions": []})
 
+    access_role = get_access_role(user, profile)
+
     subs = (
         Subscription.objects
         .filter(organization=org)
@@ -605,12 +613,17 @@ def auth_subscriptions(request):
     payload = []
     seen_slugs = set()
     for slug, (sub, _) in best_by_slug.items():
+        decision = check_product_access(user, slug)
+        if not decision.allowed:
+            continue
         product = sub.plan.product if sub.plan else None
         seen_slugs.add(slug)
         payload.append({
             "product_slug": slug,
             "product_name": product.name if product else "Work Suite",
             "status": sub.status,
+            "access_role": access_role,
+            "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
             "plan_id": sub.plan_id,
             "plan_name": sub.plan.name if sub.plan else "",
             "plan_is_free": is_free_plan(sub.plan),
@@ -633,6 +646,9 @@ def auth_subscriptions(request):
             continue
         latest_by_slug[slug] = row
     for slug, row in latest_by_slug.items():
+        decision = check_product_access(user, slug)
+        if not decision.allowed:
+            continue
         product = row.plan.product if row.plan else None
         end_date = row.end_date
         status = row.status or "active"
@@ -642,6 +658,8 @@ def auth_subscriptions(request):
             "product_slug": slug,
             "product_name": product.name if product else "Work Suite",
             "status": status,
+            "access_role": access_role,
+            "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
             "plan_id": row.plan_id,
             "plan_name": row.plan.name if row.plan else "",
             "plan_is_free": is_free_plan(row.plan),
@@ -666,6 +684,9 @@ def auth_subscriptions(request):
         latest_transfer_by_slug[slug] = transfer
 
     for slug, transfer in latest_transfer_by_slug.items():
+        decision = check_product_access(user, slug)
+        if not decision.allowed:
+            continue
         plan = transfer.plan
         product = plan.product if plan else None
         start_date = transfer.updated_at or transfer.created_at
@@ -678,6 +699,8 @@ def auth_subscriptions(request):
             "product_slug": slug,
             "product_name": product.name if product else "Work Suite",
             "status": status,
+            "access_role": access_role,
+            "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
             "plan_id": plan.id if plan else None,
             "plan_name": plan.name if plan else "",
             "plan_is_free": is_free_plan(plan),
@@ -696,6 +719,9 @@ def auth_subscriptions(request):
             .first()
         )
         if storage_sub:
+            decision = check_product_access(user, "storage")
+            if not decision.allowed:
+                raise StopIteration
             plan = storage_sub.plan
             status = storage_sub.status or "active"
             renewal_date = storage_sub.renewal_date
@@ -704,6 +730,8 @@ def auth_subscriptions(request):
                 "product_slug": "storage",
                 "product_name": storage_sub.product.name if storage_sub.product else "Online Storage",
                 "status": status,
+                "access_role": access_role,
+                "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
                 "plan_id": plan.id if plan else None,
                 "plan_name": plan.name if plan else "",
                 "plan_is_free": bool(plan and (plan.name or "").strip().lower() == "free"),
@@ -711,6 +739,8 @@ def auth_subscriptions(request):
                 "ends_at": renewal_date.isoformat() if renewal_date else "",
                 "trial_end": trial_end,
             })
+    except StopIteration:
+        pass
     except Exception:
         pass
 
@@ -724,10 +754,15 @@ def auth_subscriptions(request):
             .first()
         )
         if imposition_sub and imposition_sub.plan:
+            decision = check_product_access(user, "imposition-software")
+            if not decision.allowed:
+                raise StopIteration
             payload.append({
                 "product_slug": "imposition-software",
                 "product_name": "Imposition Software",
                 "status": imposition_sub.status or "active",
+                "access_role": access_role,
+                "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
                 "plan_id": imposition_sub.plan_id,
                 "plan_name": imposition_sub.plan.name or "",
                 "plan_is_free": False,
@@ -735,6 +770,8 @@ def auth_subscriptions(request):
                 "ends_at": imposition_sub.ends_at.isoformat() if imposition_sub.ends_at else "",
                 "trial_end": imposition_sub.ends_at.isoformat() if imposition_sub.status == "trialing" and imposition_sub.ends_at else "",
             })
+    except StopIteration:
+        pass
     except Exception:
         pass
 

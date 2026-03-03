@@ -214,81 +214,77 @@ export default function SaasAdminObservabilityPage({
 
       <div className="row g-3 mt-3">
         <div className="col-12">
-          <div className="card p-3 h-100">
-            <h5 className="mb-0">Daily Breakdown</h5>
-            <div className="table-responsive mt-3">
-              <table className="table table-dark table-striped table-hover align-middle">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    {KPI_DEFINITIONS.map((item) => (
-                      <th key={item.key}>{item.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableRows.length ? (
-                    tableRows.map((row) => (
-                      <tr key={row.date}>
-                        <td>{row.date}</td>
-                        {KPI_DEFINITIONS.map((item) => (
-                          <td key={`${row.date}-${item.key}`}>
-                            {formatCount(row.counts[item.key] || 0)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={KPI_DEFINITIONS.length + 1}>No metrics found.</td>
+          <h5 className="mb-0">Daily Breakdown</h5>
+          <div className="table-responsive mt-3">
+            <table className="table table-dark table-striped table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  {KPI_DEFINITIONS.map((item) => (
+                    <th key={item.key}>{item.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tableRows.length ? (
+                  tableRows.map((row) => (
+                    <tr key={row.date}>
+                      <td>{row.date}</td>
+                      {KPI_DEFINITIONS.map((item) => (
+                        <td key={`${row.date}-${item.key}`}>
+                          {formatCount(row.counts[item.key] || 0)}
+                        </td>
+                      ))}
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={KPI_DEFINITIONS.length + 1}>No metrics found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
         <div className="col-12">
-          <div className="card p-3 h-100">
-            <div className="d-flex align-items-center justify-content-between">
-              <h5 className="mb-0">Pending Approvals</h5>
-              <span className="badge bg-warning text-dark">
-                {formatCount(pendingTransfers.reduce((sum, row) => sum + (row.count || 0), 0))}
-              </span>
-            </div>
-            <div className="table-responsive mt-3">
-              <table className="table table-dark table-striped table-hover align-middle">
-                <thead>
-                  <tr>
-                    <th>Org</th>
-                    <th>Pending Transfers</th>
-                    <th>Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingTransfers.length ? (
-                    pendingTransfers.map((row) => (
-                      <tr key={row.org_id}>
-                        <td>{row.org_name}</td>
-                        <td>{formatCount(row.count)}</td>
-                        <td>
-                          <Link
-                            className="btn btn-outline-light btn-sm"
-                            to={`/saas-admin/transfers?org_id=${row.org_id}`}
-                          >
-                            View
-                          </Link>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="3">No pending transfers.</td>
+          <div className="d-flex align-items-center justify-content-between">
+            <h5 className="mb-0">Pending Approvals</h5>
+            <span className="badge bg-warning text-dark">
+              {formatCount(pendingTransfers.reduce((sum, row) => sum + (row.count || 0), 0))}
+            </span>
+          </div>
+          <div className="table-responsive mt-3">
+            <table className="table table-dark table-striped table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>Org</th>
+                  <th>Pending Transfers</th>
+                  <th>Link</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingTransfers.length ? (
+                  pendingTransfers.map((row) => (
+                    <tr key={row.org_id}>
+                      <td>{row.org_name}</td>
+                      <td>{formatCount(row.count)}</td>
+                      <td>
+                        <Link
+                          className="btn btn-outline-light btn-sm"
+                          to={`/saas-admin/transfers?org_id=${row.org_id}`}
+                        >
+                          View
+                        </Link>
+                      </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="3">No pending transfers.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

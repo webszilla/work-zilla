@@ -165,10 +165,34 @@ class AutomationRule(models.Model):
         return f"{self.organization_id}:{self.keyword or 'default'}"
 
 
+class CatalogueCategory(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_catalogue_categories")
+    name = models.CharField(max_length=120)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "name", "id")
+        unique_together = ("organization", "name")
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.name}"
+
+
 class CatalogueProduct(models.Model):
+    ITEM_TYPE_PRODUCT = "product"
+    ITEM_TYPE_SERVICE = "service"
+    ITEM_TYPE_CHOICES = (
+        (ITEM_TYPE_PRODUCT, "Product"),
+        (ITEM_TYPE_SERVICE, "Service"),
+    )
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_catalogue_products")
     title = models.CharField(max_length=200)
     image = models.ImageField(upload_to=_catalogue_image_upload_to, null=True, blank=True)
+    item_type = models.CharField(max_length=20, choices=ITEM_TYPE_CHOICES, default=ITEM_TYPE_PRODUCT)
     price = models.CharField(max_length=80, blank=True, default="")
     description = models.TextField(blank=True, default="")
     category = models.CharField(max_length=120, blank=True, default="")

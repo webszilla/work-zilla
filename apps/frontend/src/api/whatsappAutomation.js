@@ -43,11 +43,23 @@ export const waApi = {
   getCataloguePage() {
     return apiFetch("/api/whatsapp-automation/catalogue/page");
   },
+  getCatalogueCategories() {
+    return apiFetch("/api/whatsapp-automation/catalogue/categories");
+  },
   saveCataloguePage(payload) {
     return apiFetch("/api/whatsapp-automation/catalogue/page", {
       method: "PUT",
       body: JSON.stringify(payload),
     });
+  },
+  saveCatalogueCategory(payload) {
+    return apiFetch("/api/whatsapp-automation/catalogue/categories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteCatalogueCategory(id) {
+    return apiFetch(`/api/whatsapp-automation/catalogue/categories/${id}`, { method: "DELETE" });
   },
   saveCatalogueProduct(payload) {
     return apiFetch("/api/whatsapp-automation/catalogue/products", {

@@ -1,4 +1,11 @@
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from apps.backend.products.models import Product
+from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
+
+
+User = get_user_model()
 
 
 class LegacyMonitorRedirectTests(TestCase):
@@ -11,3 +18,88 @@ class LegacyMonitorRedirectTests(TestCase):
         response = self.client.get("/app/monitor/dashboard")
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "/app/work-suite/dashboard")
+
+
+class ProductAuthorizationMiddlewareTests(TestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(name="Acme", company_key="ACMEKEY")
+        self.product, _ = Product.objects.get_or_create(
+            slug="ai-chatbot",
+            defaults={"name": "AI Chatbot"},
+        )
+        self.plan = Plan.objects.create(name="Enterprise", product=self.product)
+
+    def _create_subscription(self):
+        owner = User.objects.create_user(username="owner@example.com", email="owner@example.com", password="pw123456")
+        Subscription.objects.create(
+            user=owner,
+            organization=self.org,
+            plan=self.plan,
+            status="active",
+        )
+        OrganizationProduct.objects.update_or_create(
+            organization=self.org,
+            product=self.product,
+            defaults={"subscription_status": "active", "source": "test"},
+        )
+
+    def test_org_admin_gets_full_access_to_subscribed_product(self):
+        self._create_subscription()
+        user = User.objects.create_user(username="admin@example.com", email="admin@example.com", password="pw123456")
+        UserProfile.objects.create(user=user, organization=self.org, role="org_admin")
+
+        self.client.force_login(user)
+        response = self.client.get("/app/ai-chatbot/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_employee_without_product_access_is_denied(self):
+        self._create_subscription()
+        user = User.objects.create_user(username="employee@example.com", email="employee@example.com", password="pw123456")
+        UserProfile.objects.create(user=user, organization=self.org, role="employee")
+
+        self.client.force_login(user)
+        response = self.client.get("/app/ai-chatbot/")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("product_access_not_granted", response.content.decode("utf-8"))
+
+    def test_employee_with_product_access_is_allowed(self):
+        self._create_subscription()
+        grantor = User.objects.create_user(username="admin2@example.com", email="admin2@example.com", password="pw123456")
+        UserProfile.objects.create(user=grantor, organization=self.org, role="org_admin")
+        user = User.objects.create_user(username="employee2@example.com", email="employee2@example.com", password="pw123456")
+        UserProfile.objects.create(user=user, organization=self.org, role="employee")
+        UserProductAccess.objects.create(
+            user=user,
+            product=self.product,
+            permission=UserProductAccess.PERMISSION_VIEW,
+            granted_by=grantor,
+        )
+
+        self.client.force_login(user)
+        response = self.client.get("/app/ai-chatbot/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_auth_subscriptions_only_returns_employee_grants(self):
+        self._create_subscription()
+        admin_user = User.objects.create_user(username="admin3@example.com", email="admin3@example.com", password="pw123456")
+        UserProfile.objects.create(user=admin_user, organization=self.org, role="org_admin")
+        employee = User.objects.create_user(username="employee3@example.com", email="employee3@example.com", password="pw123456")
+        UserProfile.objects.create(user=employee, organization=self.org, role="employee")
+
+        self.client.force_login(employee)
+        denied_payload = self.client.get("/api/auth/subscriptions").json()
+        self.assertEqual(denied_payload["subscriptions"], [])
+
+        UserProductAccess.objects.create(
+            user=employee,
+            product=self.product,
+            permission=UserProductAccess.PERMISSION_EDIT,
+            granted_by=admin_user,
+        )
+        allowed_payload = self.client.get("/api/auth/subscriptions").json()
+        self.assertEqual(len(allowed_payload["subscriptions"]), 1)
+        self.assertEqual(allowed_payload["subscriptions"][0]["product_slug"], "ai-chatbot")
+        self.assertEqual(allowed_payload["subscriptions"][0]["permission"], "edit")

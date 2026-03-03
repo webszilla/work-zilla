@@ -403,7 +403,7 @@ export default function DigitalBusinessCardDashboardPage() {
       <div className="d-flex align-items-center justify-content-between">
         <div>
           <h3 className="mb-1">Digital Business Card</h3>
-          <p className="text-secondary mb-0">Left side details edit pannunga, right side live preview auto update ஆகும்.</p>
+          <p className="text-secondary mb-0">Edit the details on the left and preview the live card on the right as you update the form.</p>
         </div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-light btn-sm" onClick={onNewCard}>
@@ -424,7 +424,7 @@ export default function DigitalBusinessCardDashboardPage() {
             <div>
               <strong>Digital Card Limit:</strong> {limitInfo.used_total}/{limitInfo.allowed_total} used
               {" "}({limitInfo.included_cards} base + {limitInfo.addon_cards} add-on)
-              {!limitInfo.can_create ? " | Extra user digital card create panna add-on user purchase pannunga." : ""}
+              {!limitInfo.can_create ? " | Purchase additional add-on users to create more digital cards." : ""}
             </div>
             <a className="btn btn-outline-light btn-sm" href="/my-account/billing/">
               Manage Add-ons
@@ -444,7 +444,7 @@ export default function DigitalBusinessCardDashboardPage() {
                 <a className="btn btn-outline-light btn-sm" href="/app/whatsapp-automation/dashboard/company-profile">Company Profile</a>
               </div>
             </div>
-            <p className="text-secondary small">Default values company profile-la irundhu varum. Here modify pannina individual card-ku save ஆகும்.</p>
+            <p className="text-secondary small">Default values are loaded from the Company Profile. Any changes here are saved only for this individual card.</p>
 
             <div className="row g-3">
               {[
@@ -652,25 +652,27 @@ export default function DigitalBusinessCardDashboardPage() {
 
               {form.custom_domain ? (
                 <div className="col-12">
-                  <div className="card p-3">
-                    <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
-                      <h6 className="mb-0">Custom URL Mapping</h6>
-                      <span className={`badge ${form.custom_domain_active ? "bg-success" : "bg-warning text-dark"}`}>
+                  <div className="digital-card-domain-panel">
+                    <div className="digital-card-domain-panel__header">
+                      <div>
+                        <h6 className="digital-card-domain-panel__title mb-0">Custom URL Mapping</h6>
+                      </div>
+                      <span className={`digital-card-domain-panel__status ${form.custom_domain_active ? "is-active" : "is-pending"}`}>
                         {form.custom_domain_active ? "Mapped (App-side active)" : "Pending Activation"}
                       </span>
                     </div>
-                    <div className="small text-secondary mb-2">
+                    <div className="digital-card-domain-panel__meta">
                       Domain: <code>{form.custom_domain}</code>
                       {" "}→ Card Path: <code>/card/{form.public_slug || "<slug>"}/</code>
                     </div>
                     {customUrl ? (
-                      <div className="small mb-3">
+                      <div className="digital-card-domain-panel__url">
                         <strong>Custom URL:</strong>{" "}
                         <a href={customUrl} target="_blank" rel="noreferrer">{customUrl}</a>
                       </div>
                     ) : null}
-                    <div className="table-responsive">
-                      <table className="table table-sm align-middle mb-2">
+                    <div className="table-responsive wz-data-table-wrap digital-card-domain-panel__table-wrap">
+                      <table className="table table-dark table-striped table-hover align-middle mb-0 wz-data-table digital-card-domain-table">
                         <thead>
                           <tr>
                             <th>Type</th>
@@ -691,8 +693,8 @@ export default function DigitalBusinessCardDashboardPage() {
                         </tbody>
                       </table>
                     </div>
-                    <div className="small text-secondary">
-                      DNS set pannitu reverse proxy / SSL configure pannina custom domain-la same digital card view open ஆகும்.
+                    <div className="digital-card-domain-panel__note">
+                      After DNS, reverse proxy, and SSL are configured, this custom domain will open the same digital card view.
                     </div>
                   </div>
                 </div>

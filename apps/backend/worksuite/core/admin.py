@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html
 from django.db import models
 from django.contrib.admin import SimpleListFilter
-from .models import Organization, Employee, Activity, Screenshot, Plan, Device, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, Subscription, SubscriptionHistory, DeletedAccount, AdminNotification, PendingTransfer, UserProfile, BillingProfile, InvoiceSellerProfile, ThemeSettings, ReferralSettings, ReferralEarning, DealerAccount, DealerReferralEarning, EventMetric, AlertRule, ChatWidget, ChatConversation, ChatMessage, ChatLead, ChatEnquiryLead, AiUsageCounter, AiUsageMonthly
+from .models import Organization, Employee, Activity, Screenshot, Plan, Device, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, Subscription, SubscriptionHistory, DeletedAccount, AdminNotification, PendingTransfer, UserProfile, BillingProfile, InvoiceSellerProfile, ThemeSettings, ReferralSettings, ReferralEarning, DealerAccount, DealerReferralEarning, EventMetric, AlertRule, ChatWidget, ChatConversation, ChatMessage, ChatLead, ChatEnquiryLead, AiUsageCounter, AiUsageMonthly, OrganizationProduct, UserProductAccess
 from django.utils import timezone
 from django.db.models import Q
 from decimal import Decimal
@@ -469,6 +469,22 @@ class SupportAccessAuditLogAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         SupportAccessAuditLog.prune_old_logs()
         return super().get_queryset(request)
+
+
+@admin.register(OrganizationProduct)
+class OrganizationProductAdmin(admin.ModelAdmin):
+    list_display = ("organization", "product", "subscription_status", "source", "updated_at")
+    list_filter = ("subscription_status", "product")
+    search_fields = ("organization__name", "organization__company_key", "product__name", "product__slug", "source")
+    autocomplete_fields = ("organization", "product")
+
+
+@admin.register(UserProductAccess)
+class UserProductAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "product", "permission", "granted_by", "updated_at")
+    list_filter = ("permission", "product")
+    search_fields = ("user__username", "user__email", "product__name", "product__slug", "granted_by__username")
+    autocomplete_fields = ("user", "product", "granted_by")
 
 
 @admin.register(PendingTransfer)

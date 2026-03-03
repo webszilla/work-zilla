@@ -223,7 +223,7 @@ const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "whatsapp-automation" },
   { label: "Company Profile", path: "/dashboard/company-profile", icon: "bi-building", productOnly: "whatsapp-automation" },
   { label: "Whatsapp Automation", path: "/dashboard/whatsapp-automation", icon: "bi-whatsapp", productOnly: "whatsapp-automation" },
-  { label: "Website Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
+  { label: "Website & Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
   { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
@@ -1021,7 +1021,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             ) : null}
           </div>
 
-          <div className="wz-route-surface">
+          <div className={isSaasAdminRoute ? "wz-route-surface wz-route-surface--saas-admin" : "wz-route-surface"}>
             <Routes location={normalizedLocation}>
           <Route
             path="/"

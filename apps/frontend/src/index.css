@@ -399,11 +399,16 @@ a{
   border-color: #334155;
 }
 html[data-theme="light"] .theme-btn-dark{
-  color:#dbeafe;
+  color:#0f172a;
+  background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+  border-color:#94a3b8;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 html[data-theme="light"] .theme-btn-dark i{
-  color:#ffffff;
-  text-shadow: 0 0 14px rgba(255, 255, 255, 0.2);
+  color:#0f172a;
+  text-shadow: none;
 }
 html[data-theme="light"] .theme-btn-dark:hover{
   color:#ffffff;
@@ -974,10 +979,15 @@ html[data-theme="light"] .wz-table-footer{
   padding: 0.2rem 0.45rem;
   font-size: 0.78rem;
 }
+.app-shell .table{
+  table-layout: auto;
+  width: 100%;
+}
 .app-shell .table tbody td{
   font-weight: 300 !important;
   font-size: 15px;
   font-style: normal;
+  line-height: 1.2;
   text-transform: none;
 }
 .app-shell .table-responsive{
@@ -997,20 +1007,23 @@ html[data-theme="light"] .wz-table-footer{
   --bs-table-accent-bg: transparent;
 }
 .app-shell .table:not(.table-borderless) > :not(caption) > * > *{
-  padding: 0.95rem 1rem;
+  padding: 0.62rem 1rem;
   border-bottom-width: 1px;
   border-bottom-style: solid;
+  vertical-align: middle;
 }
 .app-shell .table:not(.table-borderless) thead th{
   font-size: 0.84rem;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+  line-height: 1.1;
   white-space: nowrap;
   background: transparent !important;
 }
 .app-shell .table:not(.table-borderless) tbody td{
   border-bottom-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.10);
+  line-height: 1.15;
 }
 .app-shell .table:not(.table-borderless) tbody tr:last-child > td{
   border-bottom-color: transparent;
@@ -1023,6 +1036,22 @@ html[data-theme="light"] .wz-table-footer{
 }
 .app-shell .table tbody tr:hover > td{
   background: rgba(var(--color-accent-rgb, 56, 189, 248), 0.10) !important;
+}
+.app-shell .table td .btn,
+.app-shell .table td .badge,
+.app-shell .table td .wz-status-pill{
+  min-height: 28px;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  line-height: 1;
+  border-radius: 10px;
+}
+.app-shell .table td .btn{
+  font-size: 0.84rem;
+}
+.app-shell .table td .d-flex:not(.flex-column),
+.app-shell .table td .d-inline-flex:not(.flex-column){
+  align-items: center;
 }
 html[data-theme="dark"] .app-shell .table{
   --bs-table-bg: rgba(8, 15, 32, 0.74);

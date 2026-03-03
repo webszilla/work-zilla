@@ -92,6 +92,7 @@ MIDDLEWARE = [
     "apps.backend.core_platform.middleware.ProductRouteRedirectMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.backend.core_platform.middleware.ProductAuthorizationMiddleware",
     "dashboard.middleware.OrganizationTimezoneMiddleware",
     "apps.backend.retention.middleware.RetentionEnforcementMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",

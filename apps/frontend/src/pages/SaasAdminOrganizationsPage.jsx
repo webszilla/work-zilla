@@ -460,10 +460,11 @@ export default function SaasAdminOrganizationsPage() {
   return (
     <>
       <h3 className="page-title">Organizations</h3>
+      <hr className="section-divider saas-admin-section__divider" />
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
 
-      <div className="card p-3 mt-3">
-        <div className="d-flex gap-2 flex-wrap mb-3">
+      <section className="mt-3 saas-org-table">
+        <div className="d-flex gap-2 flex-wrap saas-org-tabs">
           <button
             type="button"
             className={`btn btn-sm ${activeTab === "org" ? "btn-primary" : "btn-outline-light"}`}
@@ -484,7 +485,7 @@ export default function SaasAdminOrganizationsPage() {
           <>
             <div className="table-controls">
               <div className="table-length">Show {PAGE_SIZE} entries</div>
-              <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="d-flex align-items-center gap-2 flex-wrap saas-org-table__controls-right">
                 <label className="table-search" htmlFor="saas-org-search">
                   <span>Search:</span>
                   <input
@@ -516,16 +517,16 @@ export default function SaasAdminOrganizationsPage() {
               </div>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Organization</th>
                     <th>Admin User Name</th>
                     <th>Email ID</th>
-                    <th>Products</th>
+                    <th className="saas-org-table__products">Products</th>
                     <th>Plan</th>
                     <th>Expire Date</th>
-                    <th>Action</th>
+                    <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -542,28 +543,30 @@ export default function SaasAdminOrganizationsPage() {
                         </td>
                         <td>{org.subscription?.plan_name || "-"}</td>
                         <td>{org.subscription?.end_date || "-"}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-outline-light btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/organizations/${org.id}#edit`)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDelete(org)}
-                          >
-                            Delete
-                          </button>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}#edit`)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDelete(org)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -605,7 +608,7 @@ export default function SaasAdminOrganizationsPage() {
               </label>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Dealer</th>
@@ -615,7 +618,7 @@ export default function SaasAdminOrganizationsPage() {
                     <th>Status</th>
                     <th>Start Date</th>
                     <th>End Date</th>
-                        <th>Action</th>
+                        <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -629,28 +632,30 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{titleCase(dealer.subscription_status)}</td>
                         <td>{dealer.subscription_start || "-"}</td>
                         <td>{dealer.subscription_end || "-"}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-outline-light btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/dealers/${dealer.id}`)}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/dealers/${dealer.id}#edit`)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDealerDelete(dealer)}
-                          >
-                            Delete
-                          </button>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/dealers/${dealer.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => navigate(`/saas-admin/dealers/${dealer.id}#edit`)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDealerDelete(dealer)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -677,13 +682,14 @@ export default function SaasAdminOrganizationsPage() {
             </div>
           </>
         )}
-      </div>
+      </section>
 
-      <div className="card p-3 mt-4">
+      <section className="mt-4 saas-org-table">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
           <h4 className="mb-0">Inactive Accounts</h4>
         </div>
-        <div className="d-flex gap-2 flex-wrap mt-3 mb-3">
+        <hr className="section-divider saas-admin-section__divider" />
+        <div className="d-flex gap-2 flex-wrap saas-org-tabs mt-3">
           <button
             type="button"
             className={`btn btn-sm ${inactiveTab === "org" ? "btn-primary" : "btn-outline-light"}`}
@@ -704,7 +710,7 @@ export default function SaasAdminOrganizationsPage() {
           <>
             <div className="table-controls">
               <div className="table-length">Show {PAGE_SIZE} entries</div>
-              <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="d-flex align-items-center gap-2 flex-wrap saas-org-table__controls-right">
                 <label className="table-search" htmlFor="saas-inactive-search">
                   <span>Search:</span>
                   <input
@@ -736,16 +742,16 @@ export default function SaasAdminOrganizationsPage() {
               </div>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Organization</th>
                     <th>Admin User Name</th>
                     <th>Email ID</th>
-                    <th>Products</th>
+                    <th className="saas-org-table__products">Products</th>
                     <th>Plan</th>
                     <th>Expire Date</th>
-                    <th>Action</th>
+                    <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -762,28 +768,30 @@ export default function SaasAdminOrganizationsPage() {
                         </td>
                         <td>{org.subscription?.plan_name || "-"}</td>
                         <td>{org.subscription?.end_date || "-"}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-outline-light btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/organizations/${org.id}#edit`)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDelete(org)}
-                          >
-                            Delete
-                          </button>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}#edit`)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDelete(org)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -825,7 +833,7 @@ export default function SaasAdminOrganizationsPage() {
               </label>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Dealer</th>
@@ -835,7 +843,7 @@ export default function SaasAdminOrganizationsPage() {
                     <th>Status</th>
                     <th>Start Date</th>
                     <th>End Date</th>
-                    <th>Action</th>
+                    <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -849,28 +857,30 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{titleCase(dealer.subscription_status)}</td>
                         <td>{dealer.subscription_start || "-"}</td>
                         <td>{dealer.subscription_end || "-"}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-outline-light btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/dealers/${dealer.id}`)}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm me-2"
-                            onClick={() => navigate(`/saas-admin/dealers/${dealer.id}#edit`)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDealerDelete(dealer)}
-                          >
-                            Delete
-                          </button>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/dealers/${dealer.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => navigate(`/saas-admin/dealers/${dealer.id}#edit`)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDealerDelete(dealer)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -897,13 +907,14 @@ export default function SaasAdminOrganizationsPage() {
             </div>
           </>
         )}
-      </div>
+      </section>
 
-      <div className="card p-3 mt-4">
+      <section className="mt-4 saas-org-table">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
           <h4 className="mb-0">Deleted Accounts</h4>
         </div>
-        <div className="d-flex gap-2 flex-wrap mt-3 mb-3">
+        <hr className="section-divider saas-admin-section__divider" />
+        <div className="d-flex gap-2 flex-wrap saas-org-tabs mt-3">
           <button
             type="button"
             className={`btn btn-sm ${deletedTab === "org" ? "btn-primary" : "btn-outline-light"}`}
@@ -936,7 +947,7 @@ export default function SaasAdminOrganizationsPage() {
               </label>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Organization</th>
@@ -944,7 +955,7 @@ export default function SaasAdminOrganizationsPage() {
                     <th>Email ID</th>
                     <th>Deleted At</th>
                     <th>Reason</th>
-                    <th>Action</th>
+                    <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -956,7 +967,7 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{formatValue(org.owner_email)}</td>
                         <td>{formatValue(org.deleted_at)}</td>
                         <td>{formatValue(org.reason)}</td>
-                        <td>
+                        <td className="table-actions">
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"
@@ -1006,7 +1017,7 @@ export default function SaasAdminOrganizationsPage() {
               </label>
             </div>
             <div className="table-responsive">
-              <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Dealer</th>
@@ -1048,7 +1059,7 @@ export default function SaasAdminOrganizationsPage() {
             </div>
           </>
         )}
-      </div>
+      </section>
 
       {viewModal.open ? (
         <div className="modal-overlay" onClick={closeView}>
