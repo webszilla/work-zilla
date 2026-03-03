@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("whatsapp_automation", "0007_digitalcardentry_icon_size_pt_and_more"),
-        ("core", "0119_alter_chatwidget_public_chat_code"),
+        ("core", "0118_alter_chatwidget_public_chat_code"),
     ]
 
     operations = [
