@@ -5,6 +5,7 @@ SERVER_HOST="${SERVER_HOST:-root@89.167.16.104}"
 SERVER_PROJECT_PATH="${SERVER_PROJECT_PATH:-/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com}"
 SERVER_CADDY_DOMAIN_CONFIG="${SERVER_CADDY_DOMAIN_CONFIG:-/etc/openpanel/caddy/domains/getworkzilla.com.conf}"
 SERVER_CADDY_STATIC_ROOT="${SERVER_CADDY_STATIC_ROOT:-/etc/openpanel/caddy/static}"
+SERVER_CADDY_DOWNLOAD_ROOT="${SERVER_CADDY_DOWNLOAD_ROOT:-$SERVER_CADDY_STATIC_ROOT/downloads}"
 
 echo "Deploying code to ${SERVER_HOST}:${SERVER_PROJECT_PATH}"
 
@@ -20,8 +21,8 @@ git pull origin main
 
 cat > "$SERVER_CADDY_DOMAIN_CONFIG" <<CADDY
 getworkzilla.com {
-  handle /static/downloads/* {
-    root * $SERVER_CADDY_STATIC_ROOT
+  handle_path /static/downloads/* {
+    root * $SERVER_CADDY_DOWNLOAD_ROOT
     file_server
     header Content-Disposition "attachment"
   }
@@ -37,8 +38,8 @@ getworkzilla.com {
 }
 CADDY
 
-mkdir -p "$SERVER_CADDY_STATIC_ROOT/downloads"
-rsync -a --delete "$SERVER_PROJECT_PATH/apps/backend/static/downloads/" "$SERVER_CADDY_STATIC_ROOT/downloads/"
+mkdir -p "$SERVER_CADDY_DOWNLOAD_ROOT"
+rsync -a --delete "$SERVER_PROJECT_PATH/apps/backend/static/downloads/" "$SERVER_CADDY_DOWNLOAD_ROOT/"
 
 docker restart caddy >/dev/null
 
