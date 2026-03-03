@@ -158,21 +158,23 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-02-27 08:03:38 UTC
-  - Local commit SHA: 0bb419c
-  - GitHub main SHA: 0bb419c
-  - Server live SHA (git metadata): 541c972 (code synced by rsync-fallback)
-  - Deploy method: rsync-fallback
+  - Published at (UTC): 2026-03-03 11:50:33 UTC
+  - Local commit SHA: f079770
+  - GitHub main SHA: f079770
+  - Server live SHA (git metadata): f079770
+  - Deploy method: git-pull
   - Gunicorn status: yes (listening on :8000)
   - Verified URLs:
-    - /downloads/windows-agent/ (200)
-    - /downloads/mac-agent/ (200)
+    - /downloads/windows-agent/ (302 -> Backblaze signed URL)
+    - /downloads/mac-agent/ (302 -> Backblaze signed URL)
     - /downloads/bootstrap-products.json (200)
-    - /downloads/mac-storage-product-agent/ (200)
+    - /static/public/css/site.css (200)
+    - /static/common/css/public.css (200)
   - Notes / rollback point:
-    - Purpose: Online Storage installer availability fix + rebuilt mac bootstrap/agent binaries + desktop auto-retry on `device_org_mismatch`
-    - Incident handled: post-sync `502` fixed by rebinding gunicorn on :8000
-    - Rollback to previous GitHub main: dba3feb
+    - Purpose: product access control, SaaS Admin/WhatsApp Automation UI refresh, Website & Catalogue category flow, and public pricing/UI updates
+    - Live migrations applied: `core.0120_product_access_control`, `whatsapp_automation.0008_cataloguecategory_catalogueproduct_item_type`
+    - Database safety: no local database files were uploaded or synced
+    - Rollback to previous GitHub main: 2608cc1
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
