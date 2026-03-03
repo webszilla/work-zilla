@@ -6,7 +6,7 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? "/app/" : "/",
   build: {
     outDir: "dist",
-    assetsDir: "app/assets",
+    assetsDir: "assets",
     emptyOutDir: true
   }
 }));

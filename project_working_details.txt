@@ -97,6 +97,19 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - git pull origin main
 
+2.5) Static refresh after every code deploy (mandatory)
+- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+- source venv/bin/activate
+- venv/bin/python apps/backend/manage.py collectstatic --noinput
+- Reason: public/global CSS and JS under `/static/...` break if code is updated without refreshing `apps/backend/staticfiles`
+
+2.6) Installer static mirror refresh (mandatory)
+- Keep source installer files in project only:
+  - `apps/backend/static/downloads`
+- On server, mirror them to Caddy-served path:
+  - `/etc/openpanel/caddy/static/downloads`
+- Reason: `/downloads/...` must redirect to `/static/downloads/...` and large installers should be served directly by Caddy, not streamed by Django/Gunicorn
+
 3) Restart backend (important)
 Preferred manual gunicorn flow:
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
@@ -173,9 +186,30 @@ FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
   - rsync -azn --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
 - Then actual sync:
   - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
+- Immediately after fallback sync, always run:
+  - source venv/bin/activate
+  - venv/bin/python apps/backend/manage.py collectstatic --noinput
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - pkill -f "gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" || true
 - nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 >/tmp/workzilla-gunicorn.out 2>&1 &
+
+RECOMMENDED ONE-COMMAND SERVER DEPLOY
+- Local helper:
+  - cd ~/Desktop/webszilla/saas/work-zilla
+  - ./scripts/deploy_server_code.sh
+- This helper runs:
+  - git pull
+  - collectstatic
+  - sync installer files to `/etc/openpanel/caddy/static/downloads`
+  - ensure `getworkzilla.com` Caddy config serves `/static/downloads/*` directly
+  - gunicorn restart
+  - live URL verification
+
+CODEX SHORT INSTRUCTION
+- Before any local-to-online move, commit and push local fixes first when possible.
+- Prefer `./scripts/deploy_server_code.sh` for live deploys.
+- If fallback sync is used, always run `collectstatic` before restarting gunicorn.
+- After deploy, verify `/static/public/css/site.css`, `/static/common/css/public.css`, and `/downloads/bootstrap-products.json`.
 
 INCIDENT NOTE (2026-02-19)
 - Cause found: rsync fallback used without sqlite excludes, so server `apps/backend/db.sqlite3` was overwritten by local test DB.

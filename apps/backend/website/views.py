@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, redirect
 from types import SimpleNamespace
-from django.http import JsonResponse, HttpResponse, FileResponse, Http404
+from django.http import JsonResponse, HttpResponse, Http404
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
@@ -125,9 +125,7 @@ def _prefer_arm64_mac(request):
 
 def _build_latest_static_download_url(request, *candidates, fallback_path=None):
     try:
-        file_path, filename = _resolve_latest_download(*candidates)
-        if _is_local_download_request(request):
-            return Path(file_path).resolve().as_uri()
+        _, filename = _resolve_latest_download(*candidates)
         return request.build_absolute_uri(f"/static/downloads/{quote(filename)}")
     except Http404:
         if fallback_path:
@@ -135,19 +133,29 @@ def _build_latest_static_download_url(request, *candidates, fallback_path=None):
         raise
 
 
+def _redirect_to_latest_static_download(request, *candidates, fallback_path=None):
+    return redirect(
+        _build_latest_static_download_url(
+            request,
+            *candidates,
+            fallback_path=fallback_path,
+        )
+    )
+
+
 def download_windows_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/windows-agent/")
     if redirect_response:
         return redirect_response
     _prune_download_variants("Work Zilla Installer-win-*.exe", "Work Zilla Agent Setup *.exe")
-    file_path, filename = _resolve_latest_download(
+    return _redirect_to_latest_static_download(
+        request,
         "Work Zilla Installer-win-x64-*.exe",
         "Work Zilla Installer-win-*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
 def download_windows_product_agent(request):
@@ -155,31 +163,32 @@ def download_windows_product_agent(request):
     if redirect_response:
         return redirect_response
     _prune_download_variants("Work Zilla Agent Setup *.exe")
-    file_path, filename = _resolve_latest_download(
+    return _redirect_to_latest_static_download(
+        request,
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 def download_windows_monitor_product_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/windows-monitor-product-agent/")
     if redirect_response:
         return redirect_response
     _prune_download_variants("Work Zilla Agent Setup *.exe")
-    file_path, filename = _resolve_latest_download(
+    return _redirect_to_latest_static_download(
+        request,
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 def download_windows_storage_product_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/windows-storage-product-agent/")
     if redirect_response:
         return redirect_response
     _prune_download_variants("Work Zilla Storage Setup *.exe", "Work Zilla Storage Agent Setup *.exe")
-    file_path, filename = _resolve_latest_download(
+    return _redirect_to_latest_static_download(
+        request,
         "Work Zilla Storage Setup *.exe",
         "Work Zilla Storage Agent Setup *.exe",
         "Work Zilla Storage Setup.exe",
@@ -187,7 +196,6 @@ def download_windows_storage_product_agent(request):
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
 def download_mac_agent(request):
@@ -205,7 +213,8 @@ def download_mac_agent(request):
     )
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
-        file_path, filename = _resolve_latest_download(
+        return _redirect_to_latest_static_download(
+            request,
             "Work Zilla Installer-mac-arm64-*.dmg",
             "Work Zilla Installer-mac-arm64-*.zip",
             "Work Zilla Installer-mac-x64-*.dmg",
@@ -219,22 +228,21 @@ def download_mac_agent(request):
             "Work Zilla Agent-*.pkg",
             "Work Zilla Agent-*-mac.zip",
         )
-    else:
-        file_path, filename = _resolve_latest_download(
-            "Work Zilla Installer-mac-x64-*.dmg",
-            "Work Zilla Installer-mac-x64-*.zip",
-            "Work Zilla Installer-mac-arm64-*.dmg",
-            "Work Zilla Installer-mac-arm64-*.zip",
-            "Work Zilla Installer-mac-*.dmg",
-            "Work Zilla Installer-mac-*.zip",
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-        )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Installer-mac-x64-*.dmg",
+        "Work Zilla Installer-mac-x64-*.zip",
+        "Work Zilla Installer-mac-arm64-*.dmg",
+        "Work Zilla Installer-mac-arm64-*.zip",
+        "Work Zilla Installer-mac-*.dmg",
+        "Work Zilla Installer-mac-*.zip",
+        "Work Zilla Agent-*.dmg",
+        "Work Zilla Agent-*.pkg",
+        "Work Zilla Agent-*-mac.zip",
+        "Work Zilla Agent-*-arm64.dmg",
+        "Work Zilla Agent-*-arm64.pkg",
+        "Work Zilla Agent-*-arm64-mac.zip",
+    )
 
 
 def download_mac_product_agent(request):
@@ -244,7 +252,8 @@ def download_mac_product_agent(request):
     _prune_download_variants("Work Zilla Agent-*.dmg", "Work Zilla Agent-*.pkg", "Work Zilla Agent-*-mac.zip")
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
-        file_path, filename = _resolve_latest_download(
+        return _redirect_to_latest_static_download(
+            request,
             "Work Zilla Agent-*-arm64.dmg",
             "Work Zilla Agent-*-arm64.pkg",
             "Work Zilla Agent-*-arm64-mac.zip",
@@ -252,16 +261,15 @@ def download_mac_product_agent(request):
             "Work Zilla Agent-*.pkg",
             "Work Zilla Agent-*-mac.zip",
         )
-    else:
-        file_path, filename = _resolve_latest_download(
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-        )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Agent-*.dmg",
+        "Work Zilla Agent-*.pkg",
+        "Work Zilla Agent-*-mac.zip",
+        "Work Zilla Agent-*-arm64.dmg",
+        "Work Zilla Agent-*-arm64.pkg",
+        "Work Zilla Agent-*-arm64-mac.zip",
+    )
 
 def download_mac_monitor_product_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/mac-monitor-product-agent/")
@@ -270,7 +278,8 @@ def download_mac_monitor_product_agent(request):
     _prune_download_variants("Work Zilla Agent-*.dmg", "Work Zilla Agent-*.pkg", "Work Zilla Agent-*-mac.zip")
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
-        file_path, filename = _resolve_latest_download(
+        return _redirect_to_latest_static_download(
+            request,
             "Work Zilla Agent-*-arm64.dmg",
             "Work Zilla Agent-*-arm64.pkg",
             "Work Zilla Agent-*-arm64-mac.zip",
@@ -278,16 +287,15 @@ def download_mac_monitor_product_agent(request):
             "Work Zilla Agent-*.pkg",
             "Work Zilla Agent-*-mac.zip",
         )
-    else:
-        file_path, filename = _resolve_latest_download(
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-        )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Agent-*.dmg",
+        "Work Zilla Agent-*.pkg",
+        "Work Zilla Agent-*-mac.zip",
+        "Work Zilla Agent-*-arm64.dmg",
+        "Work Zilla Agent-*-arm64.pkg",
+        "Work Zilla Agent-*-arm64-mac.zip",
+    )
 
 def download_mac_storage_product_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/mac-storage-product-agent/")
@@ -296,7 +304,8 @@ def download_mac_storage_product_agent(request):
     _prune_download_variants("Work Zilla Storage-*.dmg", "Work Zilla Storage-*.pkg", "Work Zilla Storage-*-mac.zip")
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
-        file_path, filename = _resolve_latest_download(
+        return _redirect_to_latest_static_download(
+            request,
             "Work Zilla Storage-*-arm64.dmg",
             "Work Zilla Storage-*-arm64.pkg",
             "Work Zilla Storage-*-arm64-mac.zip",
@@ -310,22 +319,21 @@ def download_mac_storage_product_agent(request):
             "Work Zilla Agent-*.pkg",
             "Work Zilla Agent-*-mac.zip",
         )
-    else:
-        file_path, filename = _resolve_latest_download(
-            "Work Zilla Storage-*.dmg",
-            "Work Zilla Storage-*.pkg",
-            "Work Zilla Storage-*-mac.zip",
-            "Work Zilla Storage-*-arm64.dmg",
-            "Work Zilla Storage-*-arm64.pkg",
-            "Work Zilla Storage-*-arm64-mac.zip",
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-        )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Storage-*.dmg",
+        "Work Zilla Storage-*.pkg",
+        "Work Zilla Storage-*-mac.zip",
+        "Work Zilla Storage-*-arm64.dmg",
+        "Work Zilla Storage-*-arm64.pkg",
+        "Work Zilla Storage-*-arm64-mac.zip",
+        "Work Zilla Agent-*.dmg",
+        "Work Zilla Agent-*.pkg",
+        "Work Zilla Agent-*-mac.zip",
+        "Work Zilla Agent-*-arm64.dmg",
+        "Work Zilla Agent-*-arm64.pkg",
+        "Work Zilla Agent-*-arm64-mac.zip",
+    )
 
 
 def download_windows_imposition_product_agent(request):
@@ -333,7 +341,8 @@ def download_windows_imposition_product_agent(request):
     if redirect_response:
         return redirect_response
     _prune_download_variants("Work Zilla Imposition Setup *.exe", "Work Zilla Installer-win-*.exe", "Work Zilla Agent Setup *.exe")
-    file_path, filename = _resolve_latest_download(
+    return _redirect_to_latest_static_download(
+        request,
         "Work Zilla Imposition Setup *.exe",
         "Work Zilla Installer-win-x64-*.exe",
         "Work Zilla Installer-win-*.exe",
@@ -341,7 +350,6 @@ def download_windows_imposition_product_agent(request):
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
     )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
 
 
 def download_mac_imposition_product_agent(request):
@@ -363,7 +371,8 @@ def download_mac_imposition_product_agent(request):
     )
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
-        file_path, filename = _resolve_latest_download(
+        return _redirect_to_latest_static_download(
+            request,
             "Work Zilla Agent-*-arm64.dmg",
             "Work Zilla Agent-*-arm64.pkg",
             "Work Zilla Agent-*-arm64-mac.zip",
@@ -377,22 +386,21 @@ def download_mac_imposition_product_agent(request):
             "Work Zilla Imposition-*.pkg",
             "Work Zilla Imposition-*-mac.zip",
         )
-    else:
-        file_path, filename = _resolve_latest_download(
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-            "Work Zilla Imposition-*.dmg",
-            "Work Zilla Imposition-*.pkg",
-            "Work Zilla Imposition-*-mac.zip",
-            "Work Zilla Imposition-*-arm64.dmg",
-            "Work Zilla Imposition-*-arm64.pkg",
-            "Work Zilla Imposition-*-arm64-mac.zip",
-        )
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=filename)
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Agent-*.dmg",
+        "Work Zilla Agent-*.pkg",
+        "Work Zilla Agent-*-mac.zip",
+        "Work Zilla Agent-*-arm64.dmg",
+        "Work Zilla Agent-*-arm64.pkg",
+        "Work Zilla Agent-*-arm64-mac.zip",
+        "Work Zilla Imposition-*.dmg",
+        "Work Zilla Imposition-*.pkg",
+        "Work Zilla Imposition-*-mac.zip",
+        "Work Zilla Imposition-*-arm64.dmg",
+        "Work Zilla Imposition-*-arm64.pkg",
+        "Work Zilla Imposition-*-arm64-mac.zip",
+    )
 
 
 def bootstrap_products_config(request):

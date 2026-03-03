@@ -4,6 +4,7 @@ import sys
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.contrib.staticfiles import finders
 from django.http import JsonResponse
 from django.urls import path, include, re_path
 from django.views.generic import RedirectView
@@ -36,7 +37,18 @@ def health_check(request):
 
 
 def serve_static_asset(request, path):
-    return static_serve(request, path, document_root=str(settings.STATIC_ROOT))
+    static_root = Path(settings.STATIC_ROOT)
+    if static_root.exists():
+        candidate = static_root / path
+        if candidate.is_file():
+            return static_serve(request, path, document_root=str(static_root))
+
+    source_path = finders.find(path)
+    if source_path:
+        source = Path(source_path)
+        return static_serve(request, source.name, document_root=str(source.parent))
+
+    return static_serve(request, path, document_root=str(static_root))
 
 
 def serve_media_asset(request, path):
