@@ -42,5 +42,7 @@ urlpatterns = [
     path("downloads/mac-monitor-product-agent/", views.download_mac_monitor_product_agent, name="download_mac_monitor_product_agent"),
     path("downloads/mac-storage-product-agent/", views.download_mac_storage_product_agent, name="download_mac_storage_product_agent"),
     path("downloads/mac-imposition-product-agent/", views.download_mac_imposition_product_agent, name="download_mac_imposition_product_agent"),
+    path("downloads/application-files/", views.application_downloads_page, name="application_downloads_page"),
+    path("downloads/files/<str:filename>/", views.download_managed_file, name="download_managed_file"),
     path("downloads/bootstrap-products.json", views.bootstrap_products_config, name="bootstrap_products_config"),
 ]

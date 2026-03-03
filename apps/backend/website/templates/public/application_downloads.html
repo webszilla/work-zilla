@@ -1,0 +1,84 @@
+{% extends "public/base.html" %}
+
+{% block meta_title %}Application Downloads | Work Zilla{% endblock %}
+{% block meta_description %}Browse the latest Work Zilla application installers and direct download links.{% endblock %}
+
+{% block content %}
+<section class="hero-section">
+  <div class="hero-copy">
+    <span class="eyebrow">Application Downloads</span>
+    <h1>Latest installer files</h1>
+    <p>
+      Files are published from {{ download_location_label }} and exposed here with direct download buttons.
+    </p>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-card">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+      <div>
+        <h2 class="section-title mb-1">Direct download routes</h2>
+        <p class="section-subtitle mb-0">Stable website paths for app downloads.</p>
+      </div>
+      <a class="btn btn-outline" href="/">Back to Website</a>
+    </div>
+    <div class="row g-3">
+      {% for route in download_routes %}
+        <div class="col-12 col-md-6 col-xl-3">
+          <a class="feature-card h-100 d-block" href="{{ route.path }}">
+            <div class="feature-icon"><i class="bi bi-cloud-download"></i></div>
+            <h3>{{ route.label }}</h3>
+            <p>{{ route.path }}</p>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-card">
+    <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+      <div>
+        <h2 class="section-title mb-1">Application folder</h2>
+        <p class="section-subtitle mb-0">Current files available for download.</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-dark align-middle mb-0">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Product</th>
+            <th>Platform</th>
+            <th>Arch</th>
+            <th>Size</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in download_items %}
+            <tr>
+              <td>{{ item.filename }}</td>
+              <td>{{ item.product }}</td>
+              <td>{{ item.platform }}</td>
+              <td>{{ item.arch }}</td>
+              <td>{{ item.size_bytes|filesizeformat }}</td>
+              <td>{% if item.last_modified %}{{ item.last_modified|date:"d M Y, H:i" }}{% else %}-{% endif %}</td>
+              <td class="text-end">
+                <a class="btn btn-primary btn-sm" href="{{ item.download_url }}">Download</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="text-center text-secondary">No application files available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

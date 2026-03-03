@@ -8,6 +8,7 @@ import json
 import os
 import math
 import zipfile
+import urllib.parse
 import urllib.request
 
 from django.conf import settings
@@ -62,6 +63,7 @@ from apps.backend.products.models import Product as CatalogProduct
 from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.retention.models import GlobalRetentionPolicy
 from apps.backend.retention.serializers import GlobalRetentionPolicySerializer
+from apps.backend.website import application_downloads
 from .observability import build_observability_summary
 from .serializers import serialize_notification
 from .whatsapp_notification_catalog import (
@@ -4189,6 +4191,21 @@ def _serialize_media_storage_settings(settings_obj):
     }
 
 
+def _serialize_application_download_item(item):
+    return {
+        "family": item.get("family") or "other",
+        "filename": item.get("filename") or "",
+        "relative_key": item.get("relative_key") or "",
+        "product": item.get("product") or "",
+        "platform": item.get("platform") or "",
+        "arch": item.get("arch") or "",
+        "size_bytes": int(item.get("size_bytes") or 0),
+        "updated_at": _format_datetime(item.get("last_modified")),
+        "download_url": item.get("download_url") or "",
+        "source": item.get("source") or "",
+    }
+
+
 def _serialize_whatsapp_cloud_settings(settings_obj):
     notification_toggles = normalize_whatsapp_notification_toggles(
         getattr(settings_obj, "notification_toggles", {}) or {}
@@ -4334,6 +4351,51 @@ def media_storage_settings(request):
     settings_obj.save()
 
     return JsonResponse(_serialize_media_storage_settings(settings_obj))
+
+
+@login_required
+@require_http_methods(["GET", "DELETE"])
+def application_downloads_settings(request):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+
+    if request.method == "DELETE":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        relative_key = (payload.get("relative_key") or "").strip()
+        if not relative_key:
+            return JsonResponse({"detail": "relative_key_required"}, status=400)
+        try:
+            application_downloads.delete_application_download(relative_key)
+        except ValueError as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        return JsonResponse({"deleted": True, "relative_key": relative_key})
+
+    settings_obj = GlobalMediaStorageSettings.get_solo()
+    items = application_downloads.list_application_downloads()
+    folder_prefix = ""
+    context = application_downloads.get_remote_application_download_context()
+    if context is not None:
+        folder_prefix = context.base_prefix
+    serialized_items = []
+    for item in items:
+        payload = _serialize_application_download_item(item)
+        if not payload["download_url"] and payload["filename"]:
+            payload["download_url"] = request.build_absolute_uri(
+                f"/downloads/files/{urllib.parse.quote(payload['filename'])}/"
+            )
+        serialized_items.append(payload)
+    return JsonResponse({
+        "storage_mode": settings_obj.storage_mode,
+        "object_ready": bool(context is not None),
+        "folder_prefix": folder_prefix or application_downloads.APPLICATION_DOWNLOADS_CATEGORY,
+        "public_page_path": "/downloads/application-files/",
+        "public_routes": application_downloads.DIRECT_DOWNLOAD_ROUTES,
+        "items": serialized_items,
+    })
 
 
 @login_required

@@ -26,9 +26,10 @@ HARD RULES
    - apps/frontend
 3) Remove only unnecessary/generated artifacts when asked:
    - node_modules, dist, .build caches, temporary archives, duplicate installers.
-4) Installer binaries must stay inside project only:
-   - apps/backend/static/downloads
-5) Keep only latest required installers unless explicitly asked to retain old versions.
+4) Installer binaries must not be kept as repo/static deploy artifacts.
+   - Publish generated installers to Backblaze object storage folder: `application-downloads/`
+   - Public website routes under `/downloads/...` must resolve from Backblaze
+5) When a new installer is uploaded for the same product/platform/arch family, remove the old Backblaze file.
 6) Never reintroduce legacy “Work Zilla Monitor” popup/process behavior.
 7) Product install behavior must be product-specific:
    - Work Suite click => only Work Suite install.
@@ -46,9 +47,9 @@ HARD RULES
    - Code deploy must not change DB contents unless explicit migration/data task is requested.
 
 CURRENT CLEAN STRUCTURE EXPECTATION
-- No external installer folders outside repo.
-- Keep local installer outputs under:
-  - apps/backend/static/downloads
+- No external installer staging folders outside repo.
+- Do not commit installer binaries into `apps/backend/static/downloads`.
+- Local build outputs can exist temporarily under app dist folders, but published downloads live in Backblaze `application-downloads/`.
 - Ignore heavy generated files/caches in Git (dist/node_modules/mac_helper build caches).
 
 LOCAL DEVELOPMENT WORKFLOW
@@ -103,12 +104,11 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - venv/bin/python apps/backend/manage.py collectstatic --noinput
 - Reason: public/global CSS and JS under `/static/...` break if code is updated without refreshing `apps/backend/staticfiles`
 
-2.6) Installer static mirror refresh (mandatory)
-- Keep source installer files in project only:
-  - `apps/backend/static/downloads`
-- On server, mirror them to Caddy-served path:
-  - `/etc/openpanel/caddy/static/downloads`
-- Reason: `/downloads/...` must redirect to `/static/downloads/...` and large installers should be served directly by Caddy, not streamed by Django/Gunicorn
+2.6) Application download publish rule (mandatory when installers change)
+- Generate installers in their app build output folders.
+- Publish them to Backblaze by running:
+  - `python3 scripts/sync_application_downloads.py`
+- Reason: `/downloads/...` must resolve from Backblaze `application-downloads/`, not from server static files.
 
 3) Restart backend (important)
 Preferred manual gunicorn flow:
@@ -200,8 +200,6 @@ RECOMMENDED ONE-COMMAND SERVER DEPLOY
 - This helper runs:
   - git pull
   - collectstatic
-  - sync installer files to `/etc/openpanel/caddy/static/downloads`
-  - ensure `getworkzilla.com` Caddy config serves `/static/downloads/*` directly
   - gunicorn restart
   - live URL verification
 
@@ -211,6 +209,7 @@ CODEX SHORT INSTRUCTION
 - If fallback sync is used, always run `collectstatic` before restarting gunicorn.
 - After deploy, verify `/static/public/css/site.css`, `/static/common/css/public.css`, and `/downloads/bootstrap-products.json`.
 - Screenshot/media fix rule: keep screenshot API path same, but when object storage/B2 is enabled let the authenticated endpoint redirect to the storage URL instead of streaming large image bytes through Django.
+- Application download fix rule: manage installers from Backblaze `application-downloads/`, expose them in SaaS Admin, and never depend on server-local installer mirrors.
 
 INCIDENT NOTE (2026-02-19)
 - Cause found: rsync fallback used without sqlite excludes, so server `apps/backend/db.sqlite3` was overwritten by local test DB.

@@ -12,6 +12,7 @@ urlpatterns = [
     path("settings/whatsapp-cloud", api_views.whatsapp_cloud_settings, name="saas_admin_whatsapp_cloud_settings"),
     path("settings/retention-policy", api_views.retention_policy_settings, name="saas_admin_retention_policy"),
     path("settings/media-storage", api_views.media_storage_settings, name="saas_admin_media_storage_settings"),
+    path("settings/application-downloads", api_views.application_downloads_settings, name="saas_admin_application_downloads"),
     path("settings/media-storage/pull-local/preview", api_views.media_storage_pull_preview, name="saas_admin_media_storage_pull_preview"),
     path("settings/media-storage/pull-local/start", api_views.media_storage_pull_start, name="saas_admin_media_storage_pull_start"),
     path("settings/media-storage/pull-local/status/<uuid:job_id>", api_views.media_storage_pull_status, name="saas_admin_media_storage_pull_status"),

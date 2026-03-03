@@ -1,11 +1,8 @@
-Place Windows agent installer here as:
+Do not store installer binaries here anymore.
 
-- WorkZillaAgentSetup.exe
+Current rule:
+- generated installers should be published to Backblaze object storage under the `application-downloads/` folder
+- use `python3 scripts/sync_application_downloads.py` after generating new build artifacts
+- public website routes like `/downloads/windows-agent/` and `/downloads/mac-agent/` resolve from Backblaze, not from this folder
 
-The download endpoint `/downloads/windows-agent/` will serve that file.
-
-Place macOS agent installer here as:
-
-- WorkZillaAgent.dmg
-
-The download endpoint `/downloads/mac-agent/` will serve that file.
+Keep only lightweight config files here when needed, such as `bootstrap-products.json`.

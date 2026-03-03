@@ -45,6 +45,7 @@ import SaasAdminInboxPage from "./pages/SaasAdminInboxPage.jsx";
 import OrgInboxPage from "./pages/OrgInboxPage.jsx";
 import SaasAdminRetentionPolicyPage from "./pages/SaasAdminRetentionPolicyPage.jsx";
 import SaasAdminStorageSettingsPage from "./pages/SaasAdminStorageSettingsPage.jsx";
+import SaasAdminApplicationDownloadsPage from "./pages/SaasAdminApplicationDownloadsPage.jsx";
 import SaasAdminWhatsAppSettingsPage from "./pages/SaasAdminWhatsAppSettingsPage.jsx";
 import SaasAdminSystemBackupManagerPage from "./pages/SaasAdminSystemBackupManagerPage.jsx";
 import SaasAdminBillingPage from "./pages/SaasAdminBillingPage.jsx";
@@ -241,6 +242,7 @@ const saasAdminPages = [
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
+  { key: "application-downloads", label: "App Downloads", path: "/saas-admin/application-downloads", icon: "bi-cloud-arrow-down" },
   { key: "server-monitoring", label: "Server Monitoring", path: "/saas-admin/server-monitoring", icon: "bi-cpu" },
   { key: "referrals", label: "Referrals", path: "/saas-admin/referrals", icon: "bi-people" },
   { key: "profile", label: "Profile", path: "/saas-admin/profile", icon: "bi-person" },
@@ -345,6 +347,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isOrganizationsSection = location.pathname.startsWith("/saas-admin/organizations");
   const isRetentionSection = location.pathname.startsWith("/saas-admin/retention-policy");
   const isStorageSection = location.pathname.startsWith("/saas-admin/storage");
+  const isApplicationDownloadsSection = location.pathname.startsWith("/saas-admin/application-downloads");
   const isBackupActivitySection = location.pathname.startsWith("/saas-admin/backup-activity");
   const isServerMonitoringSection = location.pathname.startsWith("/saas-admin/server-monitoring");
   const isReferralsSection = location.pathname.startsWith("/saas-admin/referrals");
@@ -358,6 +361,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     !isOrganizationsSection &&
     !isRetentionSection &&
     !isStorageSection &&
+    !isApplicationDownloadsSection &&
     !isBackupActivitySection &&
     !isServerMonitoringSection &&
     !isReferralsSection &&
@@ -814,6 +818,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                     isActive = isOrganizationsSection;
                   } else if (item.key === "server-monitoring") {
                     isActive = isServerMonitoringSection;
+                  } else if (item.key === "application-downloads") {
+                    isActive = isApplicationDownloadsSection;
                   } else if (item.key === "retention-policy") {
                     isActive = isRetentionSection;
                   } else if (item.key === "billing") {
@@ -1331,6 +1337,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/saas-admin/retention-policy"
             element={isSaasAdmin ? <SaasAdminRetentionPolicyPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/saas-admin/application-downloads"
+            element={isSaasAdmin ? <SaasAdminApplicationDownloadsPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/saas-admin/storage"

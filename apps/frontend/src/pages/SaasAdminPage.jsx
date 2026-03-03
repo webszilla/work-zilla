@@ -435,6 +435,19 @@ export default function SaasAdminPage() {
 
                   <div className="card p-3 h-100 admin-feature-card">
                       <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-cloud-arrow-down" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">Application Downloads</h5>
+                      <p className="text-secondary mb-3">
+                        Manage installer files stored in Backblaze and public download routes.
+                      </p>
+                      <Link to="/saas-admin/application-downloads" className="btn btn-primary btn-sm">
+                        Open
+                      </Link>
+                  </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
                         <i className="bi bi-cloud-download" aria-hidden="true" />
                       </div>
                       <h5 className="mb-1">Org Downloads</h5>

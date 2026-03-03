@@ -23,6 +23,7 @@ from apps.backend.enquiries.views import build_enquiry_context
 from apps.backend.brand.models import ProductRouteMapping
 from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.products.models import Product
+from apps.backend.website import application_downloads
 from core.observability import log_event
 from core.subscription_utils import is_free_plan, is_subscription_active
 from core.models import (
@@ -125,8 +126,10 @@ def _prefer_arm64_mac(request):
 
 def _build_latest_static_download_url(request, *candidates, fallback_path=None):
     try:
-        _, filename = _resolve_latest_download(*candidates)
-        return request.build_absolute_uri(f"/static/downloads/{quote(filename)}")
+        resolved_url, filename = application_downloads.resolve_latest_download_url(*candidates)
+        if resolved_url.startswith(("http://", "https://")):
+            return resolved_url
+        return request.build_absolute_uri(f"/downloads/files/{quote(filename)}")
     except Http404:
         if fallback_path:
             return request.build_absolute_uri(fallback_path)
@@ -140,6 +143,45 @@ def _redirect_to_latest_static_download(request, *candidates, fallback_path=None
             *candidates,
             fallback_path=fallback_path,
         )
+    )
+
+
+def download_managed_file(request, filename):
+    item = application_downloads.serve_local_application_download(filename)
+    file_handle = open(item["storage_key"], "rb")
+    return FileResponse(
+        file_handle,
+        content_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{item["filename"]}"',
+        },
+    )
+
+
+def application_downloads_page(request):
+    items = application_downloads.list_application_downloads()
+    table_rows = []
+    for item in items:
+        download_href = item["download_url"]
+        if not download_href:
+            download_href = request.build_absolute_uri(f"/downloads/files/{quote(item['filename'])}")
+        table_rows.append({
+            "filename": item["filename"],
+            "product": item["product"],
+            "platform": item["platform"] or "-",
+            "arch": item["arch"] or "-",
+            "size_bytes": item["size_bytes"],
+            "last_modified": item["last_modified"],
+            "download_url": download_href,
+        })
+    return render(
+        request,
+        "public/application_downloads.html",
+        {
+            "download_items": table_rows,
+            "download_routes": application_downloads.DIRECT_DOWNLOAD_ROUTES,
+            "download_location_label": "Backblaze Application Downloads",
+        },
     )
 
 
