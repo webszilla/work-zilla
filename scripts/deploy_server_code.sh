@@ -21,8 +21,19 @@ venv/bin/python apps/backend/manage.py migrate
 venv/bin/python apps/backend/manage.py collectstatic --noinput
 
 pgrep -f "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" | xargs -r kill
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if ! ss -ltnp | grep -q ':8000 '; then
+    break
+  fi
+  sleep 1
+done
 nohup env DJANGO_DEBUG=0 venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >/tmp/workzilla-gunicorn.out 2>&1 </dev/null &
-sleep 3
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if ss -ltnp | grep -q ':8000 '; then
+    break
+  fi
+  sleep 1
+done
 
 echo "Live SHA: \$(git rev-parse --short HEAD)"
 echo "Gunicorn:"
