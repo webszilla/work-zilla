@@ -377,8 +377,14 @@ def sync_local_application_downloads(delete_local=False):
         local_by_family.setdefault(item["family"], []).append(item)
 
     for family, family_items in local_by_family.items():
-        keep_filenames = {item["filename"] for item in family_items}
-        for item in family_items:
+        selected_items = [
+            max(
+                family_items,
+                key=lambda item: item["last_modified"] or datetime.min.replace(tzinfo=dt_timezone.utc),
+            )
+        ]
+        keep_filenames = {item["filename"] for item in selected_items}
+        for item in selected_items:
             key = f"{context.base_prefix}{item['filename']}" if context.base_prefix else item["filename"]
             with open(item["storage_key"], "rb") as handle:
                 client.upload_fileobj(handle, context.settings_obj.bucket_name, key)
