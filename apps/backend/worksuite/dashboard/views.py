@@ -194,6 +194,11 @@ def get_active_org(request):
 def get_active_subscription(org):
     sub = (
         Subscription.objects.filter(organization=org, status__in=("active", "trialing"))
+        .filter(
+            models.Q(plan__product__slug="monitor")
+            | models.Q(plan__product__slug="worksuite")
+            | models.Q(plan__product__isnull=True)
+        )
         .order_by("-start_date")
         .first()
     )

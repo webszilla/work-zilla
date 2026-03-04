@@ -928,7 +928,11 @@ def _activity_primary_url(activity):
 def _get_active_subscription(org):
     if not org:
         return None
-    plan_filter = Q(plan__product__slug="monitor") | Q(plan__product__isnull=True)
+    plan_filter = (
+        Q(plan__product__slug="monitor")
+        | Q(plan__product__slug="worksuite")
+        | Q(plan__product__isnull=True)
+    )
     sub = (
         Subscription.objects
         .filter(organization=org, status__in=("active", "trialing"))
@@ -3462,6 +3466,29 @@ def billing_summary(request):
         approved_transfers = approved_transfers.filter(transfer_filter)
         rejected_transfers = rejected_transfers.filter(transfer_filter)
 
+    approved_new_or_renew = list(
+        approved_transfers
+        .filter(request_type__in=("new", "renew"))
+        .select_related("plan", "plan__product")
+    )
+
+    filtered_pending_transfers = []
+    for transfer in pending_transfers.select_related("plan", "plan__product"):
+        superseded = False
+        if transfer.request_type in ("new", "renew"):
+            transfer_updated_at = transfer.updated_at or transfer.created_at
+            for approved in approved_new_or_renew:
+                approved_updated_at = approved.updated_at or approved.created_at
+                same_plan = approved.plan_id and transfer.plan_id and approved.plan_id == transfer.plan_id
+                same_product = approved.plan_id is None and transfer.plan_id is None
+                if same_plan or same_product:
+                    if approved_updated_at and transfer_updated_at and approved_updated_at >= transfer_updated_at:
+                        superseded = True
+                        break
+        if not superseded:
+            filtered_pending_transfers.append(transfer)
+    pending_transfers = filtered_pending_transfers
+
     approved_paid_transfer_exists = False
     approved_free_transfer_exists = False
     for t in approved_transfers:
@@ -3535,22 +3562,25 @@ def billing_summary(request):
             "end_date": _format_datetime(sub.end_date),
             "billing_cycle": sub.billing_cycle,
             "retention_days": sub.retention_days,
+            "screenshot_min_minutes": plan.screenshot_min_minutes,
             "addon_count": sub.addon_count,
             "addon_proration_amount": sub.addon_proration_amount,
             "prices": prices,
             "currency": show_currency,
             "allow_addons": plan.allow_addons,
+            "allow_app_usage": plan.allow_app_usage,
+            "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
+            "allow_hr_view": plan.allow_hr_view,
             "limits": limits,
             "features": features,
         }
 
     now = timezone.now()
-    pending_renew_plans = set(
-        pending_transfers.filter(request_type__in=("new", "renew")).values_list(
-            "plan_id",
-            flat=True,
-        )
-    )
+    pending_renew_plans = {
+        transfer.plan_id
+        for transfer in pending_transfers
+        if transfer.request_type in ("new", "renew") and transfer.plan_id
+    }
     history_rows = list(history_entries)
     has_active_paid_plan = bool(sub and sub.plan and not dashboard_views.is_free_plan(sub.plan))
     current_active_plan_id = sub.plan_id if has_active_paid_plan else None
@@ -3578,6 +3608,9 @@ def billing_summary(request):
             and not approved_free_transfer_exists
         ):
             # Direct paid plan activation: do not show implicit free rows in product billing history.
+            continue
+        if has_active_paid_plan and not entry.plan:
+            # Hide legacy synthetic rows with no bound plan once a paid plan exists.
             continue
         end_date = entry.end_date
         if (

@@ -303,8 +303,6 @@ function AppShell({ state, productPrefix, productSlug }) {
   const trialEndText = aiChatbotTrial?.trial_end
     ? formatDeviceDate(aiChatbotTrial.trial_end, "")
     : "";
-  const allowAppUsage = state.allowAppUsage !== false;
-  const allowGamingOttUsage = state.allowGamingOttUsage !== false;
   const themePrimary = state.themePrimary;
   const themeSecondary = state.themeSecondary;
   const sidebarMenuStyle = state.sidebarMenuStyle === "compact" ? "compact" : "default";
@@ -338,6 +336,12 @@ function AppShell({ state, productPrefix, productSlug }) {
   const currentFreePlanExpiry = currentFreePlanEndValue
     ? formatDeviceDate(currentFreePlanEndValue, "")
     : "";
+  const allowAppUsage = isMonitorProduct
+    ? currentProductSubscription?.allow_app_usage !== false
+    : state.allowAppUsage !== false;
+  const allowGamingOttUsage = isMonitorProduct
+    ? currentProductSubscription?.allow_gaming_ott_usage !== false
+    : state.allowGamingOttUsage !== false;
   const shouldShowCurrentProductFreePlanPopup = Boolean(
     currentProductSubscription &&
     currentProductSubscription.plan_is_free &&

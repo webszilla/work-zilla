@@ -6,6 +6,7 @@ from django.views.decorators.http import require_GET
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth import get_user_model
 from django.contrib import messages
+from django.db.models import Q
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.models import Organization, Subscription, UserProfile, PendingTransfer, Plan, ThemeSettings, DealerAccount, ReferralSettings, SubscriptionHistory, OrganizationSettings
@@ -415,8 +416,28 @@ def auth_me(request):
             maybe_expire_subscription(active_sub)
             active_sub = None
 
-    allow_app_usage = bool(active_sub and active_sub.plan and active_sub.plan.allow_app_usage)
-    allow_gaming_ott_usage = bool(active_sub and active_sub.plan and active_sub.plan.allow_gaming_ott_usage)
+    worksuite_sub = None
+    if org:
+        worksuite_sub = (
+            Subscription.objects
+            .filter(organization=org, status__in=("active", "trialing"))
+            .filter(
+                Q(plan__product__slug="monitor")
+                | Q(plan__product__slug="worksuite")
+                | Q(plan__product__isnull=True)
+            )
+            .select_related("plan")
+            .order_by("-start_date")
+            .first()
+        )
+        if worksuite_sub:
+            normalize_subscription_end_date(worksuite_sub)
+            if not is_subscription_active(worksuite_sub):
+                maybe_expire_subscription(worksuite_sub)
+                worksuite_sub = None
+
+    allow_app_usage = bool(worksuite_sub and worksuite_sub.plan and worksuite_sub.plan.allow_app_usage)
+    allow_gaming_ott_usage = bool(worksuite_sub and worksuite_sub.plan and worksuite_sub.plan.allow_gaming_ott_usage)
     free_plan_popup = False
     free_plan_expiry = None
     if active_sub and is_free_plan(active_sub.plan):
@@ -627,6 +648,9 @@ def auth_subscriptions(request):
             "plan_id": sub.plan_id,
             "plan_name": sub.plan.name if sub.plan else "",
             "plan_is_free": is_free_plan(sub.plan),
+            "allow_app_usage": bool(sub.plan and sub.plan.allow_app_usage),
+            "allow_gaming_ott_usage": bool(sub.plan and sub.plan.allow_gaming_ott_usage),
+            "allow_hr_view": bool(sub.plan and sub.plan.allow_hr_view),
             "starts_at": sub.start_date.isoformat() if sub.start_date else "",
             "ends_at": sub.end_date.isoformat() if sub.end_date else "",
             "trial_end": sub.trial_end.isoformat() if sub.trial_end else "",
@@ -663,6 +687,9 @@ def auth_subscriptions(request):
             "plan_id": row.plan_id,
             "plan_name": row.plan.name if row.plan else "",
             "plan_is_free": is_free_plan(row.plan),
+            "allow_app_usage": bool(row.plan and row.plan.allow_app_usage),
+            "allow_gaming_ott_usage": bool(row.plan and row.plan.allow_gaming_ott_usage),
+            "allow_hr_view": bool(row.plan and row.plan.allow_hr_view),
             "starts_at": row.start_date.isoformat() if row.start_date else "",
             "ends_at": row.end_date.isoformat() if row.end_date else "",
             "trial_end": "",
@@ -704,6 +731,9 @@ def auth_subscriptions(request):
             "plan_id": plan.id if plan else None,
             "plan_name": plan.name if plan else "",
             "plan_is_free": is_free_plan(plan),
+            "allow_app_usage": bool(plan and plan.allow_app_usage),
+            "allow_gaming_ott_usage": bool(plan and plan.allow_gaming_ott_usage),
+            "allow_hr_view": bool(plan and plan.allow_hr_view),
             "starts_at": start_date.isoformat() if start_date else "",
             "ends_at": end_date.isoformat() if end_date else "",
             "trial_end": "",
@@ -735,6 +765,9 @@ def auth_subscriptions(request):
                 "plan_id": plan.id if plan else None,
                 "plan_name": plan.name if plan else "",
                 "plan_is_free": bool(plan and (plan.name or "").strip().lower() == "free"),
+                "allow_app_usage": False,
+                "allow_gaming_ott_usage": False,
+                "allow_hr_view": False,
                 "starts_at": storage_sub.created_at.isoformat() if storage_sub.created_at else "",
                 "ends_at": renewal_date.isoformat() if renewal_date else "",
                 "trial_end": trial_end,
@@ -766,6 +799,9 @@ def auth_subscriptions(request):
                 "plan_id": imposition_sub.plan_id,
                 "plan_name": imposition_sub.plan.name or "",
                 "plan_is_free": False,
+                "allow_app_usage": False,
+                "allow_gaming_ott_usage": False,
+                "allow_hr_view": False,
                 "starts_at": imposition_sub.starts_at.isoformat() if imposition_sub.starts_at else "",
                 "ends_at": imposition_sub.ends_at.isoformat() if imposition_sub.ends_at else "",
                 "trial_end": imposition_sub.ends_at.isoformat() if imposition_sub.status == "trialing" and imposition_sub.ends_at else "",

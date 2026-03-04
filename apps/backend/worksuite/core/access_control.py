@@ -5,6 +5,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 
 from apps.backend.imposition.models import ImpositionOrgSubscription
 from apps.backend.products.models import Product
@@ -124,18 +125,24 @@ def org_has_product_subscription(org: Optional[Organization], product_slug: str 
     if not org_id or not slug:
         return False
 
+    org_product_filter = Q(product__slug=slug)
+    subscription_filter = Q(plan__product__slug=slug)
+
+    # Work Suite is still stored in some places under the legacy "worksuite" slug.
+    if slug == "monitor":
+        org_product_filter |= Q(product__slug="worksuite")
+        subscription_filter |= Q(plan__product__slug="worksuite") | Q(plan__product__isnull=True)
+
     if OrganizationProduct.objects.filter(
         organization_id=org_id,
-        product__slug=slug,
         subscription_status__in=("active", "trialing"),
-    ).exists():
+    ).filter(org_product_filter).exists():
         return True
 
     if Subscription.objects.filter(
         organization_id=org_id,
         status__in=("active", "trialing"),
-        plan__product__slug=slug,
-    ).exists():
+    ).filter(subscription_filter).exists():
         return True
 
     if slug == "storage":
