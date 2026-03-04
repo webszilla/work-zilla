@@ -107,7 +107,7 @@ export default function OrgMediaLibraryPage() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <h2 className="mb-1 page-title">Media Library</h2>
-          <div className="text-secondary">Browse media stored for this organization.</div>
+          <div className="text-secondary">Product-used images and documents for this workspace.</div>
         </div>
       </div>
       <hr className="section-divider" />
@@ -148,21 +148,23 @@ export default function OrgMediaLibraryPage() {
                             View
                           </a>
                         ) : null}
-                        <button
-                          type="button"
-                          className="org-media-library-page__action-btn org-media-library-page__action-btn--delete"
-                          disabled={deletingId === item.id}
-                          onClick={() => handleDelete(item)}
-                        >
-                          {deletingId === item.id ? "Deleting..." : "Delete"}
-                        </button>
+                        {item.can_delete !== false ? (
+                          <button
+                            type="button"
+                            className="org-media-library-page__action-btn org-media-library-page__action-btn--delete"
+                            disabled={deletingId === item.id}
+                            onClick={() => handleDelete(item)}
+                          >
+                            {deletingId === item.id ? "Deleting..." : "Delete"}
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={4}>No media found for this organization.</td>
+                  <td colSpan={4}>No product media found for this workspace.</td>
                 </tr>
               )}
             </tbody>

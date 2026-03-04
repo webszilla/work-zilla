@@ -210,7 +210,7 @@ export default function ProductAccessSection({
             : (isActive ? (hasAccess ? dashboardHref : `/pricing/?product=${product.key}`) : "");
           return (
             <div className="col-12 col-md-6 col-lg-4 col-xl-2" key={product.key}>
-              <article className={`product-access-card h-100 ${isCurrentProduct ? "product-access-card--current" : ""}`}>
+              <article className={`product-access-card ${isCurrentProduct ? "product-access-card--current" : ""}`}>
                 <div className="product-access-card__top">
                   <div className="product-access-card__icon" aria-hidden="true">
                     <i className={`bi ${product.icon}`} />

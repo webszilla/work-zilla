@@ -269,7 +269,7 @@ export default function WhatsappAutomationCompanyProfilePage() {
   }
 
   return (
-    <div className="p-4">
+    <div>
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h3 className="mb-0">Company Profile</h3>
         <div className="d-flex align-items-center gap-3">

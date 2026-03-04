@@ -5,6 +5,16 @@ import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 const PAGE_SIZE = 10;
 const COUNTRY_CODE_OPTIONS = PHONE_COUNTRIES;
 const COUNTRY_CODES_DESC = Array.from(new Set(PHONE_COUNTRIES.map((x) => x.code))).sort((a, b) => b.length - a.length);
+const CARD_TEMPLATE_OPTIONS = [
+  { value: "design1", label: "Design 1 - Executive Blue" },
+  { value: "design2", label: "Design 2 - Neon Profile" },
+  { value: "design3", label: "Design 3 - Clean Curve" },
+  { value: "design4", label: "Design 4 - Studio Wave" },
+  { value: "design5", label: "Design 5 - Portrait Pro" },
+  { value: "design6", label: "Design 6 - Premium Noir" },
+  { value: "design7", label: "Design 7 - Social Spotlight" },
+  { value: "design8", label: "Design 8 - Gold Corporate" },
+];
 
 function splitPhoneValue(rawValue) {
   const raw = String(rawValue || "").trim();
@@ -28,7 +38,7 @@ function emptyCardForm(prefill = {}) {
   const phoneParts = splitPhoneValue(prefill.phone || "");
   const whatsappParts = splitPhoneValue(prefill.whatsapp_number || "");
   return {
-    id: null,
+    id: prefill.id ?? null,
     public_slug: prefill.public_slug || "",
     card_title: prefill.card_title || "",
     person_name: prefill.person_name || "",
@@ -44,15 +54,18 @@ function emptyCardForm(prefill = {}) {
     address: prefill.address || "",
     description: prefill.description || "",
     theme_color: prefill.theme_color || "#22c55e",
+    theme_secondary_color: prefill.theme_secondary_color || "#0f172a",
     template_style: prefill.template_style || "design1",
     custom_domain: prefill.custom_domain || "",
     custom_domain_active: Boolean(prefill.custom_domain_active),
     logo_image_data: prefill.logo_image_data || "",
     hero_banner_image_data: prefill.hero_banner_image_data || "",
     logo_size: Number(prefill.logo_size || 96),
+    logo_radius_px: Number(prefill.logo_radius_px || 28),
     icon_size_pt: Number(prefill.icon_size_pt || 14),
     font_size_pt: Number(prefill.font_size_pt || 16),
     social_links_items: Array.isArray(prefill.social_links_items) ? prefill.social_links_items : [],
+    is_primary: Boolean(prefill.is_primary),
     is_active: prefill.is_active !== false,
     sort_order: Number(prefill.sort_order || 0),
   };
@@ -100,86 +113,250 @@ async function fileToDataUrl(file) {
   });
 }
 
+function buildVCardDownload(form, company) {
+  const fullName = String(form.person_name || company?.company_name || "Contact").trim() || "Contact";
+  const organization = String(form.card_title || company?.company_name || "").trim();
+  const role = String(form.role_title || "").trim();
+  const phone = String(form.phone || "").trim();
+  const whatsapp = String(form.whatsapp_number || "").trim();
+  const email = String(form.email || "").trim();
+  const website = String(form.website || "").trim();
+  const address = String(form.address || "").replace(/\r?\n/g, ", ").trim();
+  const note = String(form.description || company?.description || "").replace(/\r?\n/g, " ").trim();
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `FN:${fullName}`,
+    organization ? `ORG:${organization}` : "",
+    role ? `TITLE:${role}` : "",
+    phone ? `TEL;TYPE=CELL:${phone}` : "",
+    whatsapp && whatsapp !== phone ? `TEL;TYPE=WORK,VOICE:${whatsapp}` : "",
+    email ? `EMAIL:${email}` : "",
+    website ? `URL:${website}` : "",
+    address ? `ADR:;;${address};;;;` : "",
+    note ? `NOTE:${note}` : "",
+    "END:VCARD",
+  ].filter(Boolean);
+  const fileName = `${fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "contact"}.vcf`;
+  return {
+    href: `data:text/vcard;charset=utf-8,${encodeURIComponent(lines.join("\n"))}`,
+    fileName,
+  };
+}
+
+function getSocialIconClass(icon) {
+  switch (String(icon || "").toLowerCase()) {
+    case "facebook":
+      return "bi-facebook";
+    case "instagram":
+      return "bi-instagram";
+    case "linkedin":
+      return "bi-linkedin";
+    case "whatsapp":
+      return "bi-whatsapp";
+    case "youtube":
+      return "bi-youtube";
+    case "twitter":
+    case "x":
+      return "bi-twitter-x";
+    case "telegram":
+      return "bi-telegram";
+    case "website":
+    case "globe":
+      return "bi-globe";
+    default:
+      return "bi-link-45deg";
+  }
+}
+
+function templateLabel(value) {
+  const match = CARD_TEMPLATE_OPTIONS.find((item) => item.value === value);
+  return match ? match.label : String(value || "design1").replace("design", "Design ");
+}
+
+function toWebHref(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function toMapsHref(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}`;
+}
+
 function DigitalCardPreview({ form, company }) {
   const theme = form.theme_color || company?.theme_color || "#22c55e";
+  const secondaryTheme = form.theme_secondary_color || "#0f172a";
   const socials = Array.isArray(form.social_links_items) ? form.social_links_items.slice(0, 5) : [];
   const templateStyle = form.template_style || "design1";
   const iconPt = Math.max(8, Number(form.icon_size_pt || 14));
   const fontPt = Math.max(10, Number(form.font_size_pt || 16));
-  const previewWrapStyle =
-    templateStyle === "design2"
-      ? { background: "#0f172a", border: `1px solid ${theme}` }
-      : templateStyle === "design3"
-        ? { background: "linear-gradient(180deg,#08111f 0%,#111827 100%)", border: "1px solid rgba(255,255,255,0.12)" }
-        : {};
+  const logoSize = Math.max(72, Number(form.logo_size || 96));
+  const logoRadius = Math.max(0, Number(form.logo_radius_px ?? 28));
+  const initials = (form.card_title || form.person_name || company?.company_name || "C").slice(0, 1).toUpperCase();
+  const displayName = form.person_name || company?.company_name || "Your Name";
+  const displayRole = form.role_title || "Business / Professional";
+  const displayTitle = form.card_title || company?.company_name || "Company Name";
+  const displayDescription = form.description || company?.description || "Digital business card preview";
+  const socialBadges = socials.length
+    ? socials
+    : [
+        { label: "Fb", icon: "facebook" },
+        { label: "In", icon: "linkedin" },
+        { label: "Ig", icon: "instagram" },
+        { label: "Wa", icon: "whatsapp" },
+      ];
+  const quickActions = [
+    form.phone ? { label: "Call", href: `tel:${form.phone}` } : null,
+    form.website ? { label: "Website", href: form.website } : null,
+    form.whatsapp_number
+      ? { label: "WhatsApp", href: `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` }
+      : null,
+  ].filter(Boolean);
+  const infoRows = [
+    { icon: "bi-telephone", value: form.phone || "-", href: form.phone ? `tel:${form.phone}` : "" },
+    { icon: "bi-whatsapp", value: form.whatsapp_number || "-", href: form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` : "" },
+    { icon: "bi-envelope", value: form.email || "-", href: form.email ? `mailto:${form.email}` : "" },
+    { icon: "bi-globe", value: form.website || "-", href: toWebHref(form.website) },
+    { icon: "bi-geo-alt", value: form.address || "-", href: toMapsHref(form.address) },
+  ];
+  const contactCard = buildVCardDownload(form, company);
+  const publicCardUrl = form.public_slug && typeof window !== "undefined"
+    ? `${window.location.origin}/card/${form.public_slug}/`
+    : "";
+  const smsBody = encodeURIComponent(`Check my digital card: ${publicCardUrl || (form.website || "")}`.trim());
+  const enquiryHref = form.email
+    ? `mailto:${form.email}?subject=${encodeURIComponent("Enquiry")}`
+    : (form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}?text=${encodeURIComponent("Hi, I have an enquiry.")}` : "");
+  const bottomActions = [
+    { label: "Login", icon: "bi-box-arrow-in-right", href: "/auth/login/" },
+    { label: "Share", icon: "bi-share-fill", action: "share" },
+    { label: "SMS", icon: "bi-chat-left-text-fill", href: `sms:?body=${smsBody}` },
+    { label: "Upgrade", icon: "bi-basket-fill", href: "/pricing/" },
+    { label: "Enquiry", icon: "bi-chat-quote-fill", href: enquiryHref },
+  ];
+
+  function onShareClick(e) {
+    e.preventDefault();
+    const shareUrl = publicCardUrl || (typeof window !== "undefined" ? window.location.href : "");
+    if (typeof navigator !== "undefined" && navigator.share) {
+      navigator.share({ title: displayTitle, text: displayDescription, url: shareUrl }).catch(() => {});
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(shareUrl).catch(() => {});
+    }
+  }
+
   return (
-    <div className="card p-0 overflow-hidden" style={previewWrapStyle}>
+    <div
+      className={`digital-card-preview digital-card-preview--${templateStyle}`}
+      style={{ "--card-theme": theme, "--card-secondary": secondaryTheme, "--card-font-pt": fontPt, "--card-icon-pt": iconPt }}
+    >
       <div
+        className="digital-card-preview__hero"
         style={{
-          height: 110,
           background: form.hero_banner_image_data
             ? `center/cover no-repeat url(${form.hero_banner_image_data})`
-            : `linear-gradient(135deg, ${theme} 0%, #0f172a 100%)`,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
+            : undefined,
         }}
       />
-      <div className="p-3 position-relative">
+      <div className="digital-card-preview__body">
         <div
-          className="rounded-circle d-flex align-items-center justify-content-center border border-2"
-          style={{
-            width: 88,
-            height: 88,
-            marginTop: -54,
-            background: "#0b162b",
-            borderColor: theme,
-            overflow: "hidden",
-          }}
+          className="digital-card-preview__avatar"
+          style={{ width: `${logoSize}px`, height: `${logoSize}px`, borderRadius: `${logoRadius}px` }}
         >
           {form.logo_image_data ? (
             <img src={form.logo_image_data} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
-            <span style={{ color: theme, fontWeight: 700, fontSize: 28 }}>
-              {(form.card_title || form.person_name || company?.company_name || "C").slice(0, 1).toUpperCase()}
-            </span>
+            <span>{initials}</span>
           )}
         </div>
-        <h5 className="mt-3 mb-1">{form.person_name || company?.company_name || "Your Name"}</h5>
-        <div className="text-secondary small mb-2" style={{ fontSize: `${Math.max(10, fontPt - 2)}pt` }}>{form.role_title || "Business / Professional"}</div>
-        <div className="fw-semibold mb-1" style={{ fontSize: `${Math.max(12, fontPt)}pt` }}>{form.card_title || company?.company_name || "Company Name"}</div>
-        <div className="small mb-2">
-          <span className="badge" style={{ background: theme, color: "#071226" }}>
-            {(templateStyle || "design1").replace("design", "Design ")}
-          </span>
-        </div>
-        <p className="text-secondary small mb-3" style={{ fontSize: `${Math.max(9, fontPt - 3)}pt` }}>{form.description || company?.description || "Digital business card preview"}</p>
 
-        <div className="d-flex flex-wrap gap-2 mb-3">
-          {form.phone ? <a className="btn btn-sm btn-primary" href={`tel:${form.phone}`}>Call</a> : null}
-          {form.whatsapp_number ? (
-            <a className="btn btn-sm btn-outline-light" href={`https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}`} target="_blank" rel="noreferrer">
-              WhatsApp
+        <div className="digital-card-preview__identity">
+          <h5>{displayName}</h5>
+          <p className="digital-card-preview__role">{displayRole}</p>
+          <a className="digital-card-preview__template-badge" href={contactCard.href} download={contactCard.fileName}>
+            Save This Contact
+          </a>
+        </div>
+
+        <div className="digital-card-preview__socials">
+          {socialBadges.map((item, idx) => (
+            <span key={`${item.icon || item.label}-${idx}`} className="digital-card-preview__social-chip" title={item.label || item.icon || "Link"}>
+              {item.type === "custom" && item.custom_icon_data ? (
+                <img src={item.custom_icon_data} alt={item.label || "Social"} width="18" height="18" style={{ display: "block", objectFit: "contain" }} />
+              ) : (
+                <i className={`bi ${getSocialIconClass(item.icon)}`} aria-hidden="true" />
+              )}
+            </span>
+          ))}
+        </div>
+
+        <div className="digital-card-preview__title">{displayTitle}</div>
+        <p className="digital-card-preview__description">{displayDescription}</p>
+
+        <div className="digital-card-preview__actions">
+          {quickActions.map((item) => (
+            <a key={item.label} className="digital-card-preview__action" href={item.href} target={item.href.startsWith("http") ? "_blank" : undefined} rel={item.href.startsWith("http") ? "noreferrer" : undefined}>
+              {item.label}
             </a>
-          ) : null}
-          {form.website ? <a className="btn btn-sm btn-outline-light" href={form.website} target="_blank" rel="noreferrer">Website</a> : null}
+          ))}
         </div>
 
-        <div className="d-flex flex-column gap-2 small" style={{ fontSize: `${Math.max(9, fontPt - 2)}pt` }}>
-          <div><i className="bi bi-telephone me-2 text-success" style={{ fontSize: `${iconPt}pt` }} />{form.phone || "-"}</div>
-          <div><i className="bi bi-whatsapp me-2 text-success" style={{ fontSize: `${iconPt}pt` }} />{form.whatsapp_number || "-"}</div>
-          <div><i className="bi bi-envelope me-2 text-success" style={{ fontSize: `${iconPt}pt` }} />{form.email || "-"}</div>
-          <div><i className="bi bi-globe me-2 text-success" style={{ fontSize: `${iconPt}pt` }} />{form.website || "-"}</div>
-          <div><i className="bi bi-geo-alt me-2 text-success" style={{ fontSize: `${iconPt}pt` }} />{form.address || "-"}</div>
+        <div className="digital-card-preview__details">
+          {infoRows.map((item) => (
+            item.href ? (
+              <a
+                key={`${item.icon}-${item.value}`}
+                className="digital-card-preview__detail-row"
+                href={item.href}
+                target={item.href.startsWith("http") ? "_blank" : undefined}
+                rel={item.href.startsWith("http") ? "noreferrer" : undefined}
+              >
+                <i className={`bi ${item.icon}`} />
+                <span>{item.value}</span>
+              </a>
+            ) : (
+              <div key={`${item.icon}-${item.value}`} className="digital-card-preview__detail-row">
+                <i className={`bi ${item.icon}`} />
+                <span>{item.value}</span>
+              </div>
+            )
+          ))}
         </div>
 
-        {socials.length ? (
-          <div className="d-flex flex-wrap gap-2 mt-3">
-            {socials.map((item, idx) => (
-              <span key={`${item.icon}-${idx}`} className="badge bg-dark-subtle text-light border">
-                {item.label || item.icon || "Link"}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <div className="digital-card-preview__footer-actions">
+          {bottomActions.map((item) => (
+            item.action === "share" ? (
+              <a key={item.label} className="digital-card-preview__footer-action" href={publicCardUrl || "#"} onClick={onShareClick}>
+                <i className={`bi ${item.icon}`} />
+                <span>{item.label}</span>
+              </a>
+            ) : (
+              <a
+                key={item.label}
+                className="digital-card-preview__footer-action"
+                href={item.href || "#"}
+                target={item.href?.startsWith("http") ? "_blank" : undefined}
+                rel={item.href?.startsWith("http") ? "noreferrer" : undefined}
+              >
+                <i className={`bi ${item.icon}`} />
+                <span>{item.label}</span>
+              </a>
+            )
+          ))}
+        </div>
+
+        <div className="digital-card-preview__credit">
+          This virtual card was designed with{" "}
+          <a href="https://www.getworkzilla.com" target="_blank" rel="noreferrer">
+            www.getworkzilla.com
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -196,8 +373,8 @@ export default function DigitalBusinessCardDashboardPage() {
   const [limitInfo, setLimitInfo] = useState(null);
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, page_size: PAGE_SIZE, total_items: 0, total_pages: 1 });
-  const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [cardListTab, setCardListTab] = useState("primary");
   const [form, setForm] = useState(emptyCardForm());
   const [slugCheck, setSlugCheck] = useState(null);
   const [slugChecking, setSlugChecking] = useState(false);
@@ -239,21 +416,14 @@ export default function DigitalBusinessCardDashboardPage() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    const t = setTimeout(() => setQuery(search.trim()), 350);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
-    if (loading) return;
-    loadCards({ page: 1, q: query }).catch((err) => setError(err?.message || "Unable to load digital cards."));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
-
   const canCreateNew = useMemo(() => {
     if (!limitInfo) return true;
     return Boolean(limitInfo.can_create);
   }, [limitInfo]);
+
+  const primaryRows = useMemo(() => rows.filter((row) => row.is_primary), [rows]);
+  const otherRows = useMemo(() => rows.filter((row) => !row.is_primary), [rows]);
+  const visibleRows = cardListTab === "other" ? otherRows : primaryRows;
 
   function setField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -399,7 +569,7 @@ export default function DigitalBusinessCardDashboardPage() {
   const totalPages = pagination.total_pages || 1;
 
   return (
-    <div className="d-flex flex-column gap-3 p-4">
+    <div className="d-flex flex-column gap-3">
       <div className="d-flex align-items-center justify-content-between">
         <div>
           <h3 className="mb-1">Digital Business Card</h3>
@@ -439,9 +609,19 @@ export default function DigitalBusinessCardDashboardPage() {
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <h4 className="mb-0">Card Details</h4>
               <div className="d-flex gap-2">
-                {cardUrl ? <a className="btn btn-outline-light btn-sm" href={cardUrl} target="_blank" rel="noreferrer">View</a> : null}
-                {customUrl ? <a className="btn btn-outline-success btn-sm" href={customUrl} target="_blank" rel="noreferrer">Custom URL</a> : null}
-                <a className="btn btn-outline-light btn-sm" href="/app/whatsapp-automation/dashboard/company-profile">Company Profile</a>
+                {cardUrl ? <a className="btn btn-sm wa-card-toolbar-link" href={cardUrl} target="_blank" rel="noreferrer">View</a> : null}
+                {customUrl ? (
+                  <a
+                    className="btn btn-sm wa-card-toolbar-link wa-card-toolbar-link--primary"
+                    href={customUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ "--wa-card-toolbar-theme": form.theme_color || "#22c55e" }}
+                  >
+                    Custom URL
+                  </a>
+                ) : null}
+                <a className="btn btn-sm wa-card-toolbar-link" href="/app/whatsapp-automation/dashboard/company-profile">Company Profile</a>
               </div>
             </div>
             <p className="text-secondary small">Default values are loaded from the Company Profile. Any changes here are saved only for this individual card.</p>
@@ -540,8 +720,8 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
-              <div className="col-12 col-md-4">
-                <label className="form-label">Theme Color</label>
+              <div className="col-12 col-md-3">
+                <label className="form-label">Primary Color</label>
                 <input
                   type="color"
                   className="form-control form-control-color"
@@ -550,7 +730,15 @@ export default function DigitalBusinessCardDashboardPage() {
                 />
               </div>
 
-              <div className="col-12 col-md-8" />
+              <div className="col-12 col-md-3">
+                <label className="form-label">Secondary Color</label>
+                <input
+                  type="color"
+                  className="form-control form-control-color"
+                  value={form.theme_secondary_color || "#0f172a"}
+                  onChange={(e) => setField("theme_secondary_color", e.target.value)}
+                />
+              </div>
 
               <div className="col-12 col-md-6">
                 <label className="form-label">Card Template</label>
@@ -559,9 +747,11 @@ export default function DigitalBusinessCardDashboardPage() {
                   value={form.template_style || "design1"}
                   onChange={(e) => setField("template_style", e.target.value)}
                 >
-                  <option value="design1">Design 1</option>
-                  <option value="design2">Design 2</option>
-                  <option value="design3">Design 3</option>
+                  {CARD_TEMPLATE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -581,7 +771,7 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
-              <div className="col-12 col-md-4">
+              <div className="col-12 col-md-3">
                 <label className="form-label">Icon Size (pt)</label>
                 <input
                   type="number"
@@ -593,7 +783,7 @@ export default function DigitalBusinessCardDashboardPage() {
                 />
               </div>
 
-              <div className="col-12 col-md-4">
+              <div className="col-12 col-md-3">
                 <label className="form-label">Font Size (pt)</label>
                 <input
                   type="number"
@@ -605,7 +795,7 @@ export default function DigitalBusinessCardDashboardPage() {
                 />
               </div>
 
-              <div className="col-12 col-md-4">
+              <div className="col-12 col-md-3">
                 <label className="form-label">Logo Size (px)</label>
                 <input
                   type="number"
@@ -614,6 +804,18 @@ export default function DigitalBusinessCardDashboardPage() {
                   className="form-control"
                   value={form.logo_size || 96}
                   onChange={(e) => setField("logo_size", Number(e.target.value || 96))}
+                />
+              </div>
+
+              <div className="col-12 col-md-3">
+                <label className="form-label">Logo Radius (px)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="999"
+                  className="form-control"
+                  value={form.logo_radius_px ?? 28}
+                  onChange={(e) => setField("logo_radius_px", Number(e.target.value || 0))}
                 />
               </div>
 
@@ -640,6 +842,15 @@ export default function DigitalBusinessCardDashboardPage() {
                 <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("hero_banner_image_data", e.target.files?.[0], 1500)} />
                 <div className="d-flex gap-2 mt-2">
                   {form.hero_banner_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("hero_banner_image_data", "")}>Remove Banner</button> : null}
+                </div>
+              </div>
+
+              <div className="col-12">
+                <div className="d-flex flex-wrap gap-3">
+                  <div className="form-check">
+                    <input className="form-check-input" id="wa-card-primary" type="checkbox" checked={Boolean(form.is_primary)} onChange={(e) => setField("is_primary", e.target.checked)} />
+                    <label className="form-check-label" htmlFor="wa-card-primary">Primary card</label>
+                  </div>
                 </div>
               </div>
 
@@ -711,16 +922,22 @@ export default function DigitalBusinessCardDashboardPage() {
       <div className="p-0">
         <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
           <h4 className="mb-0">Created Cards</h4>
-          <label className="table-search wz-table-search mb-0" htmlFor="wa-digital-card-search">
-            <i className="bi bi-search" aria-hidden="true" />
-            <input
-              id="wa-digital-card-search"
-              type="search"
-              placeholder="Search cards"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
+          <div className="d-flex gap-2">
+            <button
+              type="button"
+              className={`btn btn-sm ${cardListTab === "primary" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setCardListTab("primary")}
+            >
+              Primary Card
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${cardListTab === "other" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setCardListTab("other")}
+            >
+              Other Cards
+            </button>
+          </div>
         </div>
 
         <div className="table-responsive wz-data-table-wrap">
@@ -730,7 +947,6 @@ export default function DigitalBusinessCardDashboardPage() {
                 <th>Title</th>
                 <th>Person</th>
                 <th>Slug</th>
-                <th>Template</th>
                 <th>Custom URL</th>
                 <th>QR</th>
                 <th>Status</th>
@@ -738,14 +954,18 @@ export default function DigitalBusinessCardDashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length ? rows.map((row) => (
+              {visibleRows.length ? visibleRows.map((row) => (
                 <tr key={row.id}>
-                  <td>{row.card_title || "-"}</td>
+                  <td>
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <span>{row.card_title || "-"}</span>
+                      {row.is_primary ? <span className="badge bg-info text-dark">Primary</span> : null}
+                    </div>
+                  </td>
                   <td>{row.person_name || "-"}</td>
                   <td>
                     <code className="digital-card-table__slug">{row.public_slug}</code>
                   </td>
-                  <td>{(row.template_style || "design1").replace("design", "Design ")}</td>
                   <td>
                     {row.custom_url ? (
                       <div className="d-flex flex-column gap-1">
@@ -801,7 +1021,7 @@ export default function DigitalBusinessCardDashboardPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan="8" className="text-center text-secondary py-4">No digital cards found.</td>
+                  <td colSpan="7" className="text-center text-secondary py-4">No digital cards found.</td>
                 </tr>
               )}
             </tbody>
@@ -810,7 +1030,7 @@ export default function DigitalBusinessCardDashboardPage() {
 
         <div className="wz-table-footer d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
           <small className="text-secondary">
-            Showing {rows.length ? ((page - 1) * PAGE_SIZE) + 1 : 0} to {((page - 1) * PAGE_SIZE) + rows.length} of {pagination.total_items || 0}
+            Showing {visibleRows.length ? ((page - 1) * PAGE_SIZE) + 1 : 0} to {((page - 1) * PAGE_SIZE) + visibleRows.length} of {cardListTab === "other" ? otherRows.length : primaryRows.length}
           </small>
           <div className="d-flex gap-2 wz-pagination-inline">
             <button

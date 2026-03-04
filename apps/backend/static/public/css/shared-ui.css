@@ -99,6 +99,11 @@ body {
   box-shadow: var(--shared-ui-shadow-soft);
 }
 
+.wz-route-surface {
+  border: 1px solid;
+  border-radius: 15px;
+}
+
 .app-shell .table thead,
 .table-ui thead,
 .wz-profile-workspace .table thead {

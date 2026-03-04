@@ -264,16 +264,11 @@ export default function WebsiteCatalogueDashboardPage() {
         </div>
       </div>
 
-      {company?.catalogue_url || company?.digital_card_url ? (
+      {company?.catalogue_url ? (
         <div className="d-flex flex-wrap gap-2">
           {company?.catalogue_url ? (
             <a className="btn btn-outline-light btn-sm" href={company.catalogue_url} target="_blank" rel="noreferrer">
               Open Public Catalogue
-            </a>
-          ) : null}
-          {company?.digital_card_url ? (
-            <a className="btn btn-outline-light btn-sm" href={company.digital_card_url} target="_blank" rel="noreferrer">
-              Open Digital Card
             </a>
           ) : null}
         </div>
@@ -400,36 +395,44 @@ export default function WebsiteCatalogueDashboardPage() {
               </button>
             </div>
 
-            <div className="row g-3">
-              <div className="col-12 col-md-3">
-                <label className="form-label">Type</label>
-                <select className="form-select" value={form.item_type} onChange={(e) => setForm((prev) => ({ ...prev, item_type: e.target.value }))}>
-                  <option value="product">Product</option>
-                  <option value="service">Service</option>
-                </select>
+            <div className="row g-3 align-items-start">
+              <div className="col-12 col-xl-4">
+                <div className="d-flex flex-column gap-3">
+                  <div>
+                    <label className="form-label">Type</label>
+                    <select className="form-select" value={form.item_type} onChange={(e) => setForm((prev) => ({ ...prev, item_type: e.target.value }))}>
+                      <option value="product">Product</option>
+                      <option value="service">Service</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Name</label>
+                    <input className="form-control" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} placeholder={form.item_type === "service" ? "Service name" : "Product name"} />
+                  </div>
+                  <div>
+                    <label className="form-label">Category</label>
+                    <select className="form-select" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
+                      <option value="">Select category</option>
+                      {availableCategories.map((category) => (
+                        <option key={category.id} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Price</label>
+                    <input className="form-control" value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} placeholder="INR 999" />
+                  </div>
+                </div>
               </div>
-              <div className="col-12 col-md-5">
-                <label className="form-label">Name</label>
-                <input className="form-control" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} placeholder={form.item_type === "service" ? "Service name" : "Product name"} />
-              </div>
-              <div className="col-12 col-md-4">
-                <label className="form-label">Category</label>
-                <select className="form-select" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
-                  <option value="">Select category</option>
-                  {availableCategories.map((category) => (
-                    <option key={category.id} value={category.name}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-12 col-md-3">
-                <label className="form-label">Price</label>
-                <input className="form-control" value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} placeholder="INR 999" />
-              </div>
-              <div className="col-12 col-md-9">
-                <label className="form-label">Description</label>
-                <textarea className="form-control" rows="3" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+              <div className="col-12 col-xl-8">
+                <TinyHtmlEditor
+                  label="Description"
+                  value={form.description}
+                  onChange={(next) => setForm((prev) => ({ ...prev, description: next }))}
+                  placeholder={`Write the ${currentItemLabel.toLowerCase()} description, highlights, and pricing notes.`}
+                />
               </div>
               <div className="col-12 d-flex flex-wrap gap-3">
                 <div className="form-check">

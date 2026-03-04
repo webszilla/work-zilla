@@ -2,6 +2,8 @@ import json
 import re
 import base64
 import uuid
+import mimetypes
+import os
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
@@ -12,7 +14,13 @@ from django.views.decorators.http import require_http_methods
 
 from dashboard import views as dashboard_views
 from core.models import AdminNotification, Subscription, UserProfile
-from apps.backend.storage.models import StorageFile
+from apps.backend.storage.models import StorageFile, StorageFolder
+from apps.backend.storage.storage_backend import (
+    build_storage_key,
+    storage_delete,
+    storage_save,
+    storage_url,
+)
 
 from .models import (
     AutomationRule,
@@ -73,6 +81,104 @@ def _save_company_logo_from_data_url(profile, data_url):
         raise ValueError("logo_too_large")
     filename = f"company-logo-{uuid.uuid4().hex[:12]}.{ext}"
     profile.logo.save(filename, ContentFile(file_bytes), save=False)
+
+
+def _ensure_storage_root_folder(org, owner):
+    folder = StorageFolder.objects.filter(
+        organization=org,
+        owner=owner,
+        parent__isnull=True,
+        is_deleted=False,
+    ).first()
+    if folder:
+        return folder
+    return StorageFolder.objects.create(
+        organization=org,
+        parent=None,
+        name="Root",
+        owner=owner,
+        created_by=owner,
+        is_deleted=False,
+    )
+
+
+def _delete_object_storage_asset(org, storage_key):
+    key = str(storage_key or "").strip()
+    if not key:
+        return
+    storage_delete(key)
+    StorageFile.objects.filter(organization=org, storage_key=key).delete()
+
+
+def _parse_image_data_url(data_url, *, max_bytes, field_name):
+    raw = str(data_url or "").strip()
+    if not raw:
+        return None
+    if not raw.startswith("data:") or ";base64," not in raw:
+        raise ValueError(f"invalid_{field_name}_data")
+    header, b64_data = raw.split(",", 1)
+    mime_part = header[5:].split(";", 1)[0].strip().lower()
+    ext_map = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/svg+xml": "svg",
+        "image/webp": "webp",
+        "image/gif": "gif",
+        "image/avif": "avif",
+    }
+    ext = ext_map.get(mime_part)
+    if not ext:
+        raise ValueError(f"unsupported_{field_name}_type")
+    try:
+        file_bytes = base64.b64decode(b64_data, validate=True)
+    except Exception as exc:
+        raise ValueError(f"invalid_{field_name}_data") from exc
+    if len(file_bytes) > max_bytes:
+        raise ValueError(f"{field_name}_too_large")
+    return {
+        "bytes": file_bytes,
+        "mime": mime_part,
+        "ext": ext,
+    }
+
+
+def _save_card_asset_to_object_storage(*, org, owner, data_url, field_name, filename_prefix, max_bytes):
+    parsed = _parse_image_data_url(data_url, max_bytes=max_bytes, field_name=field_name)
+    if not parsed:
+        return None
+    filename = f"{filename_prefix}-{uuid.uuid4().hex[:12]}.{parsed['ext']}"
+    storage_key = build_storage_key(
+        org,
+        owner,
+        root_folder_name="digital-card",
+        original_filename=filename,
+    )
+    content = ContentFile(parsed["bytes"], name=filename)
+    storage_save(storage_key, content)
+    folder = _ensure_storage_root_folder(org, owner)
+    StorageFile.objects.create(
+        organization=org,
+        folder=folder,
+        owner=owner,
+        original_filename=filename,
+        storage_key=storage_key,
+        size_bytes=len(parsed["bytes"]),
+        content_type=parsed["mime"],
+    )
+    return {
+        "storage_key": storage_key,
+        "url": storage_url(storage_key),
+    }
+
+
+def _resolve_card_asset_url(storage_key, fallback_value=""):
+    key = str(storage_key or "").strip()
+    if key:
+        url = storage_url(key)
+        if url:
+            return url
+    return str(fallback_value or "").strip()
 
 
 def _normalize_social_links_items(raw):
@@ -303,9 +409,41 @@ def _build_unique_card_entry_slug(base_text):
     return candidate
 
 
-def _card_entry_prefill(company_profile, default_slug=""):
+def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
     social_links_items = _normalize_social_links_items(getattr(company_profile, "social_links", {}) or {}) if company_profile else []
+    if source_entry:
+        return {
+            "id": None,
+            "card_title": source_entry.card_title or "",
+            "person_name": source_entry.person_name or "",
+            "role_title": source_entry.role_title or "",
+            "phone": source_entry.phone or "",
+            "whatsapp_number": source_entry.whatsapp_number or "",
+            "email": source_entry.email or "",
+            "website": source_entry.website or "",
+            "address": source_entry.address or "",
+            "description": source_entry.description or "",
+            "theme_color": source_entry.theme_color or "#22c55e",
+            "theme_secondary_color": getattr(source_entry, "theme_secondary_color", "") or "#0f172a",
+            "template_style": getattr(source_entry, "template_style", "") or "design1",
+            "social_links_items": _normalize_social_links_items(source_entry.social_links or {}),
+            "logo_image_data": _resolve_card_asset_url(
+                getattr(source_entry, "logo_storage_key", ""),
+                source_entry.logo_image_data or "",
+            ),
+            "hero_banner_image_data": _resolve_card_asset_url(
+                getattr(source_entry, "hero_banner_storage_key", ""),
+                source_entry.hero_banner_image_data or "",
+            ),
+            "logo_size": int(source_entry.logo_size or 96),
+            "logo_radius_px": int(getattr(source_entry, "logo_radius_px", 28) or 28),
+            "icon_size_pt": int(getattr(source_entry, "icon_size_pt", 14) or 14),
+            "font_size_pt": int(getattr(source_entry, "font_size_pt", 16) or 16),
+            "public_slug": default_slug or "",
+            "is_primary": False,
+        }
     return {
+        "id": None,
         "card_title": (company_profile.company_name if company_profile else "") or "",
         "person_name": (company_profile.company_name if company_profile else "") or "",
         "role_title": "Business Owner",
@@ -316,19 +454,27 @@ def _card_entry_prefill(company_profile, default_slug=""):
         "address": (company_profile.address if company_profile else "") or "",
         "description": (company_profile.description if company_profile else "") or "",
         "theme_color": (company_profile.theme_color if company_profile else "") or "#22c55e",
+        "theme_secondary_color": "#0f172a",
         "template_style": "design1",
         "social_links_items": social_links_items,
         "logo_image_data": "",
         "hero_banner_image_data": "",
         "logo_size": 96,
+        "logo_radius_px": 28,
         "icon_size_pt": 14,
         "font_size_pt": 16,
         "public_slug": default_slug or "",
+        "is_primary": False,
     }
 
 
 def _serialize_card_entry(obj):
     custom_domain = str(getattr(obj, "custom_domain", "") or "").strip()
+    logo_image_url = _resolve_card_asset_url(getattr(obj, "logo_storage_key", ""), obj.logo_image_data or "")
+    hero_banner_url = _resolve_card_asset_url(
+        getattr(obj, "hero_banner_storage_key", ""),
+        obj.hero_banner_image_data or "",
+    )
     return {
         "id": obj.id,
         "public_slug": obj.public_slug,
@@ -346,13 +492,16 @@ def _serialize_card_entry(obj):
         "address": obj.address or "",
         "description": obj.description or "",
         "theme_color": obj.theme_color or "#22c55e",
+        "theme_secondary_color": getattr(obj, "theme_secondary_color", "") or "#0f172a",
         "template_style": (getattr(obj, "template_style", "") or "design1"),
         "social_links_items": _normalize_social_links_items(obj.social_links or {}),
-        "logo_image_data": obj.logo_image_data or "",
-        "hero_banner_image_data": obj.hero_banner_image_data or "",
+        "logo_image_data": logo_image_url,
+        "hero_banner_image_data": hero_banner_url,
         "logo_size": int(obj.logo_size or 96),
+        "logo_radius_px": int(getattr(obj, "logo_radius_px", 28) or 28),
         "icon_size_pt": int(getattr(obj, "icon_size_pt", 14) or 14),
         "font_size_pt": int(getattr(obj, "font_size_pt", 16) or 16),
+        "is_primary": bool(getattr(obj, "is_primary", False)),
         "is_active": bool(obj.is_active),
         "sort_order": int(obj.sort_order or 0),
         "created_at": obj.created_at.isoformat() if obj.created_at else "",
@@ -422,9 +571,19 @@ def _ensure_default_card_entry(org, company_profile=None, user=None):
         description=prefill["description"],
         social_links={"items": prefill["social_links_items"]},
         theme_color=prefill["theme_color"],
+        theme_secondary_color=prefill["theme_secondary_color"],
+        logo_radius_px=prefill["logo_radius_px"],
+        is_primary=True,
         created_by=user,
         updated_by=user,
     )
+
+
+def _mime_from_data_url(data_url, fallback="image/*"):
+    raw = str(data_url or "").strip()
+    if raw.startswith("data:"):
+        return raw[5:].split(";", 1)[0].strip().lower() or fallback
+    return fallback
 
 
 @login_required
@@ -829,12 +988,22 @@ def digital_card_entries_api(request):
             )
         total = qs.count()
         start = (page - 1) * page_size
-        rows = list(qs.order_by("sort_order", "id")[start:start + page_size])
+        rows = list(qs.order_by("-is_primary", "sort_order", "id")[start:start + page_size])
         total_pages = (total + page_size - 1) // page_size if total else 1
         legacy_card = DigitalCard.objects.filter(company_profile=company_profile).first()
+        primary_entry = (
+            DigitalCardEntry.objects
+            .filter(organization=org, is_primary=True)
+            .order_by("sort_order", "id")
+            .first()
+        )
         return JsonResponse({
             "items": [_serialize_card_entry(row) for row in rows],
-            "default_prefill": _card_entry_prefill(company_profile, default_slug=(legacy_card.public_slug if legacy_card else "")),
+            "default_prefill": _card_entry_prefill(
+                company_profile,
+                default_slug=(legacy_card.public_slug if legacy_card else ""),
+                source_entry=primary_entry,
+            ),
             "limit": _digital_card_limit_payload(org),
             "dns_defaults": _dns_settings_payload(request, ""),
             "pagination": {
@@ -891,8 +1060,9 @@ def digital_card_entries_api(request):
     row.address = str(data.get("address") or "").strip()
     row.description = str(data.get("description") or "").strip()
     row.theme_color = str(data.get("theme_color") or "#22c55e").strip() or "#22c55e"
+    row.theme_secondary_color = str(data.get("theme_secondary_color") or "#0f172a").strip() or "#0f172a"
     template_style = str(data.get("template_style") or "design1").strip().lower()
-    if template_style not in ("design1", "design2", "design3"):
+    if template_style not in ("design1", "design2", "design3", "design4", "design5", "design6", "design7", "design8"):
         template_style = "design1"
     row.template_style = template_style
     custom_domain = _normalize_domain(data.get("custom_domain"))
@@ -907,6 +1077,10 @@ def digital_card_entries_api(request):
     except (TypeError, ValueError):
         row.logo_size = 96
     try:
+        row.logo_radius_px = max(0, min(999, int(data.get("logo_radius_px") or getattr(row, "logo_radius_px", 28) or 28)))
+    except (TypeError, ValueError):
+        row.logo_radius_px = 28
+    try:
         row.icon_size_pt = max(8, min(36, int(data.get("icon_size_pt") or getattr(row, "icon_size_pt", 14) or 14)))
     except (TypeError, ValueError):
         row.icon_size_pt = 14
@@ -914,12 +1088,68 @@ def digital_card_entries_api(request):
         row.font_size_pt = max(10, min(36, int(data.get("font_size_pt") or getattr(row, "font_size_pt", 16) or 16)))
     except (TypeError, ValueError):
         row.font_size_pt = 16
-    row.logo_image_data = str(data.get("logo_image_data") or "").strip()
-    row.hero_banner_image_data = str(data.get("hero_banner_image_data") or "").strip()
-    if len(row.logo_image_data) > 800000:
-        return JsonResponse({"logo_image_data": ["too_large"]}, status=400)
-    if len(row.hero_banner_image_data) > 3000000:
-        return JsonResponse({"hero_banner_image_data": ["too_large"]}, status=400)
+    row.is_primary = bool(data.get("is_primary", False))
+    incoming_logo_image = str(data.get("logo_image_data") or "").strip()
+    incoming_banner_image = str(data.get("hero_banner_image_data") or "").strip()
+    previous_logo_key = str(getattr(row, "logo_storage_key", "") or "").strip()
+    previous_banner_key = str(getattr(row, "hero_banner_storage_key", "") or "").strip()
+    current_logo_url = _resolve_card_asset_url(previous_logo_key, row.logo_image_data or "")
+    current_banner_url = _resolve_card_asset_url(previous_banner_key, row.hero_banner_image_data or "")
+    try:
+        if incoming_logo_image.startswith("data:"):
+            saved_logo = _save_card_asset_to_object_storage(
+                org=org,
+                owner=request.user,
+                data_url=incoming_logo_image,
+                field_name="logo",
+                filename_prefix=f"{public_slug or 'card'}-logo",
+                max_bytes=800000,
+            )
+            row.logo_storage_key = saved_logo["storage_key"]
+            row.logo_image_data = saved_logo["url"]
+            if previous_logo_key and previous_logo_key != row.logo_storage_key:
+                _delete_object_storage_asset(org, previous_logo_key)
+        elif not incoming_logo_image:
+            row.logo_storage_key = ""
+            row.logo_image_data = ""
+            if previous_logo_key:
+                _delete_object_storage_asset(org, previous_logo_key)
+        elif incoming_logo_image != current_logo_url:
+            row.logo_image_data = incoming_logo_image
+            row.logo_storage_key = ""
+            if previous_logo_key:
+                _delete_object_storage_asset(org, previous_logo_key)
+
+        if incoming_banner_image.startswith("data:"):
+            saved_banner = _save_card_asset_to_object_storage(
+                org=org,
+                owner=request.user,
+                data_url=incoming_banner_image,
+                field_name="hero_banner",
+                filename_prefix=f"{public_slug or 'card'}-banner",
+                max_bytes=3000000,
+            )
+            row.hero_banner_storage_key = saved_banner["storage_key"]
+            row.hero_banner_image_data = saved_banner["url"]
+            if previous_banner_key and previous_banner_key != row.hero_banner_storage_key:
+                _delete_object_storage_asset(org, previous_banner_key)
+        elif not incoming_banner_image:
+            row.hero_banner_storage_key = ""
+            row.hero_banner_image_data = ""
+            if previous_banner_key:
+                _delete_object_storage_asset(org, previous_banner_key)
+        elif incoming_banner_image != current_banner_url:
+            row.hero_banner_image_data = incoming_banner_image
+            row.hero_banner_storage_key = ""
+            if previous_banner_key:
+                _delete_object_storage_asset(org, previous_banner_key)
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"unsupported_logo_type", "logo_too_large", "invalid_logo_data"}:
+            return JsonResponse({"logo_image_data": [code]}, status=400)
+        if code in {"unsupported_hero_banner_type", "hero_banner_too_large", "invalid_hero_banner_data"}:
+            return JsonResponse({"hero_banner_image_data": [code]}, status=400)
+        return JsonResponse({"error": code}, status=400)
     social_links_items = data.get("social_links_items")
     if isinstance(social_links_items, list):
         row.social_links = {"items": _normalize_social_links_items(social_links_items)}
@@ -932,6 +1162,11 @@ def digital_card_entries_api(request):
     if not (row.card_title or row.person_name):
         return JsonResponse({"card_title": ["required"], "person_name": ["required"]}, status=400)
     row.save()
+    if row.is_primary:
+        DigitalCardEntry.objects.filter(organization=org).exclude(id=row.id).update(is_primary=False)
+    elif not DigitalCardEntry.objects.filter(organization=org, is_primary=True).exists():
+        row.is_primary = True
+        row.save(update_fields=["is_primary", "updated_at"])
     return JsonResponse({
         "item": {**_serialize_card_entry(row), "dns_settings": _dns_settings_payload(request, row.custom_domain)},
         "limit": _digital_card_limit_payload(org),
@@ -994,7 +1229,18 @@ def digital_card_entry_detail_api(request, card_id):
         return JsonResponse({"item": item})
     if not _is_org_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
+    was_primary = bool(row.is_primary)
     deleted, _ = DigitalCardEntry.objects.filter(id=card_id, organization=org).delete()
     if not deleted:
         return JsonResponse({"error": "not_found"}, status=404)
+    if was_primary:
+        replacement = (
+            DigitalCardEntry.objects
+            .filter(organization=org)
+            .order_by("sort_order", "id")
+            .first()
+        )
+        if replacement and not replacement.is_primary:
+            replacement.is_primary = True
+            replacement.save(update_fields=["is_primary", "updated_at"])
     return JsonResponse({"status": "deleted", "limit": _digital_card_limit_payload(org)})

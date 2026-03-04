@@ -5,100 +5,1278 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ company.company_name|default:public_slug }} - Digital Card</title>
   <style>
-    body{font-family:system-ui,sans-serif;background:#071226;color:#e5e7eb;margin:0;padding:24px}
-    .card{max-width:760px;margin:0 auto;background:#0b1a33;border:1px solid #1e2f4d;border-radius:20px;padding:24px;overflow:hidden}
-    .card.design2{background:#0f172a;border:2px solid {{ theme_color }};box-shadow:0 0 0 2px rgba(255,255,255,.04) inset}
-    .card.design3{background:linear-gradient(180deg,#08111f 0%,#111827 100%);border:1px solid #334155}
-    .hero{height:140px;border-radius:14px 14px 0 0;margin:-24px -24px 0 -24px;background:linear-gradient(135deg,{{ theme_color }} 0%,#0b1a33 100%);background-size:cover;background-position:center}
-    .card.design2 .hero{height:120px;border-radius:10px;margin:-24px -24px 12px -24px}
-    .card.design3 .hero{height:160px}
-    .logo-wrap{margin-top:-44px;display:flex;justify-content:center}
-    .logo{width:96px;height:96px;border-radius:50%;border:3px solid {{ theme_color }};background:#081525;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .logo img{width:100%;height:100%;object-fit:cover}
-    .btn{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;margin-right:8px;font-weight:600}
-    .primary{background:{{ theme_color }};color:#08111f}
-    .ghost{background:#13233f;color:#e5e7eb;border:1px solid #294265}
-    .muted{color:#94a3b8}
-    .socials{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
-    .social-link{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:#13233f;border:1px solid #294265;color:#e5e7eb;text-decoration:none}
-    .social-link img{display:block;border-radius:6px}
-    .social-emoji{font-size:18px;line-height:1}
-    ul{padding-left:18px}
+    :root{
+      --theme: {{ theme_color }};
+      --theme-secondary: {{ theme_secondary_color|default:"#0f172a" }};
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family: Inter, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, rgba(255,255,255,0.06), transparent 24%), #071226;
+      color:#e5e7eb;
+      padding:24px 16px;
+    }
+    .card-shell{
+      width:min(100%, 420px);
+      margin:0 auto;
+    }
+    .card{
+      min-height:720px;
+      border-radius:36px;
+      overflow:hidden;
+      border:1px solid rgba(148,163,184,0.18);
+      box-shadow:0 28px 60px rgba(2,6,23,0.34);
+      position:relative;
+      isolation:isolate;
+    }
+    .card::before{
+      content:"";
+      position:absolute;
+      inset:16px 16px auto;
+      height:22px;
+      width:120px;
+      margin:auto;
+      border-radius:999px;
+      background:rgba(15, 23, 42, 0.9);
+      z-index:3;
+      pointer-events:none;
+    }
+    .hero{
+      height:188px;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.18), transparent 32%),
+        linear-gradient(135deg, var(--theme) 0%, var(--theme-secondary) 88%);
+      background-size:cover;
+      background-position:center;
+      position:relative;
+    }
+    .hero::after{
+      content:"";
+      position:absolute;
+      inset:auto -18% -68px;
+      height:138px;
+      border-radius:50%;
+      background:rgba(255,255,255,0.15);
+    }
+    .content{
+      padding:0 22px 24px;
+      position:relative;
+      z-index:2;
+    }
+    .avatar{
+      width:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};
+      height:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};
+      margin:-68px auto 14px;
+      border:4px solid rgba(255,255,255,0.92);
+      background:linear-gradient(135deg, rgba(255,255,255,0.28), rgba(15,23,42,0.16));
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .avatar img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .avatar-fallback{
+      font-size:2rem;
+      font-weight:800;
+      color:#ffffff;
+    }
+    .identity{
+      text-align:center;
+    }
+    .identity h1{
+      margin:0;
+      font-size:2.1rem;
+      line-height:1.12;
+      font-weight:800;
+      text-shadow:0 2px 14px rgba(255,255,255,0.12);
+    }
+    .role{
+      margin:6px 0 4px;
+      font-size:1.03rem;
+      opacity:0.78;
+    }
+    .title{
+      font-size:1.1rem;
+      line-height:1.2;
+      font-weight:700;
+    }
+    .template-badge{
+      display:inline-flex;
+      margin-top:10px;
+      padding:6px 12px;
+      border-radius:999px;
+      background:linear-gradient(135deg, var(--theme), var(--theme-secondary));
+      color:#ffffff;
+      font-size:0.78rem;
+      font-weight:800;
+      letter-spacing:0.04em;
+      text-decoration:none;
+    }
+    .description{
+      margin:16px 0 0;
+      text-align:center;
+      font-size:0.97rem;
+      line-height:1.6;
+    }
+    .socials{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:center;
+      gap:8px;
+      margin-top:16px;
+    }
+    .social-link{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      min-height:34px;
+      min-width:34px;
+      padding:0 12px;
+      border-radius:999px;
+      text-decoration:none;
+      font-size:0.82rem;
+      font-weight:700;
+    }
+    .social-link img{
+      display:block;
+      border-radius:6px;
+      object-fit:contain;
+    }
+    .social-link svg{
+      width:18px;
+      height:18px;
+      display:block;
+      fill:currentColor;
+    }
+    .actions{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:10px;
+      margin-top:18px;
+    }
+    .action{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:48px;
+      border-radius:18px;
+      text-decoration:none;
+      font-size:0.96rem;
+      font-weight:700;
+      width:100%;
+    }
+    .details{
+      display:grid;
+      gap:12px;
+      margin-top:18px;
+    }
+    .detail{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:12px 14px;
+      border-radius:16px;
+      font-size:0.95rem;
+      line-height:1.45;
+      text-decoration:none;
+      color:inherit;
+    }
+    .footer-actions{
+      display:grid;
+      grid-template-columns:repeat(5, minmax(0, 1fr));
+      margin:20px -22px 0;
+      border-top:1px solid rgba(255,255,255,0.08);
+    }
+    .footer-action{
+      min-height:88px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      background:#080808;
+      color:#ffffff;
+      text-decoration:none;
+      border-right:1px solid rgba(255,255,255,0.08);
+      font-size:0.95rem;
+      font-weight:500;
+    }
+    .footer-action:last-child{
+      border-right:none;
+    }
+    .footer-action svg{
+      width:22px;
+      height:22px;
+      display:block;
+      fill:currentColor;
+    }
+    .footer-credit{
+      margin:0 -22px -24px;
+      padding:12px 16px;
+      background:#d6d6d6;
+      color:#3f3f46;
+      text-align:center;
+      font-size:0.92rem;
+    }
+    .footer-credit a{
+      color:#1f2937;
+      font-weight:700;
+      text-decoration:none;
+    }
+    .detail-icon{
+      width:1.2em;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      color:var(--theme);
+      font-weight:900;
+    }
+    .section-title{
+      margin:22px 0 12px;
+      font-size:1.05rem;
+      font-weight:800;
+    }
+    .html-content, .highlights-list, .greeting{
+      font-size:0.95rem;
+      line-height:1.65;
+    }
+    .highlights-list{
+      margin:0;
+      padding-left:18px;
+    }
+    .greeting{
+      white-space:pre-wrap;
+      padding:14px 16px;
+      border-radius:16px;
+      border:1px solid rgba(148,163,184,0.18);
+    }
+    .scroll-section{
+      margin-top:22px;
+      padding:16px;
+      border-radius:20px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(148,163,184,0.14);
+    }
+    .scroll-section h3{
+      margin:0 0 12px;
+      font-size:1.08rem;
+      font-weight:800;
+    }
+    .scroll-html{
+      font-size:0.94rem;
+      line-height:1.7;
+    }
+    .catalogue-group + .catalogue-group{
+      margin-top:18px;
+    }
+    .catalogue-group-title{
+      margin:0 0 10px;
+      font-size:0.98rem;
+      font-weight:800;
+      opacity:0.95;
+    }
+    .catalogue-list{
+      display:grid;
+      gap:10px;
+    }
+    .catalogue-item{
+      padding:14px 16px;
+      border-radius:16px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(148,163,184,0.12);
+    }
+    .catalogue-item-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:6px;
+    }
+    .catalogue-item-title{
+      font-size:0.98rem;
+      font-weight:800;
+    }
+    .catalogue-item-price{
+      white-space:nowrap;
+      font-size:0.88rem;
+      font-weight:700;
+      color:var(--theme);
+    }
+    .catalogue-item-meta{
+      font-size:0.78rem;
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+      opacity:0.72;
+      margin-bottom:6px;
+    }
+    .catalogue-item-description{
+      font-size:0.92rem;
+      line-height:1.65;
+      opacity:0.92;
+    }
+
+    .card.design1{
+      background:linear-gradient(180deg, color-mix(in srgb, var(--theme-secondary) 86%, black) 0%, #0c1630 100%);
+      color:#f8fafc;
+    }
+    .card.design1 .hero{
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 18%),
+        linear-gradient(180deg, color-mix(in srgb, var(--theme-secondary) 8%, white), transparent 38%),
+        linear-gradient(135deg, var(--theme), color-mix(in srgb, var(--theme) 70%, var(--theme-secondary) 30%) 55%, var(--theme-secondary));
+    }
+    .card.design1 .social-link{
+      background:rgba(15,23,42,0.78);
+      border:1px solid rgba(148,163,184,0.22);
+      color:#e2e8f0;
+    }
+    .card.design1 .role,
+    .card.design1 .description,
+    .card.design1 .detail{
+      color:#cbd5e1;
+    }
+    .card.design1 .action{
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(148,163,184,0.22);
+      color:#f8fafc;
+    }
+    .card.design1 .action.is-primary{
+      background:linear-gradient(135deg, var(--theme), color-mix(in srgb, var(--theme) 62%, white));
+      color:#071226;
+      border-color:transparent;
+    }
+    .card.design1 .detail{
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(148,163,184,0.12);
+    }
+    .card.design1 .greeting{
+      background:#081525;
+    }
+
+    .card.design2{
+      background:
+        radial-gradient(circle at top center, rgba(255,255,255,0.08), transparent 28%),
+        radial-gradient(circle at 15% 100%, color-mix(in srgb, var(--theme) 32%, transparent), transparent 44%),
+        linear-gradient(135deg, #05070d 0%, color-mix(in srgb, var(--theme-secondary) 86%, #04060b) 52%, #071116 100%);
+      color:#f8fafc;
+      border-color:color-mix(in srgb, var(--theme) 24%, rgba(148,163,184,0.18));
+    }
+    .card.design2 .hero{
+      height:152px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.02)),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme) 68%, #0f172a) 0%, color-mix(in srgb, var(--theme-secondary) 78%, #020617) 100%);
+    }
+    .card.design2 .hero::after{
+      inset:auto 0 -30px;
+      height:88px;
+      border-radius:42% 42% 0 0;
+      background:linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0.08));
+    }
+    .card.design2 .content{
+      padding:0 18px 20px;
+    }
+    .card.design2 .avatar{
+      margin:-94px 0 16px;
+      border-radius:36px;
+      border-width:6px;
+      border-color:color-mix(in srgb, var(--theme) 72%, #d1fae5);
+      background:#0b1220;
+    }
+    .card.design2 .identity{
+      text-align:left;
+    }
+    .card.design2 .identity h1{
+      font-size:2rem;
+      line-height:1.05;
+      margin-bottom:6px;
+    }
+    .card.design2 .role{
+      margin-bottom:18px;
+      color:#d1d5db;
+      font-size:1.05rem;
+    }
+    .card.design2 .title,
+    .card.design2 .template-badge{
+      display:none;
+    }
+    .card.design2 .socials{
+      display:grid;
+      grid-template-columns:repeat(6, minmax(0, 1fr));
+      gap:10px;
+      padding:16px 14px;
+      border-radius:20px;
+      border:1px solid color-mix(in srgb, var(--theme) 46%, rgba(255,255,255,0.14));
+      background:linear-gradient(135deg, rgba(12,22,32,0.88), rgba(10,22,18,0.68));
+    }
+    .card.design2 .social-link{
+      min-width:0;
+      min-height:48px;
+      padding:0;
+      border:none;
+      background:transparent;
+      color:color-mix(in srgb, var(--theme) 82%, #d1fae5);
+    }
+    .card.design2 .social-link svg{
+      width:22px;
+      height:22px;
+    }
+    .card.design2 .description{
+      text-align:left;
+      margin-top:20px;
+      padding:18px;
+      border-radius:18px;
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(255,255,255,0.08);
+      color:#dbe4ef;
+    }
+    .card.design2 .actions{
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:10px;
+      margin-top:18px;
+    }
+    .card.design2 .action{
+      min-height:62px;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 16px;
+      border-radius:16px;
+      background:linear-gradient(135deg, rgba(44,88,76,0.72), rgba(14,22,27,0.86));
+      border:1px solid color-mix(in srgb, var(--theme) 34%, rgba(255,255,255,0.1));
+      color:#f8fafc;
+      text-align:center;
+    }
+    .card.design2 .action::after{
+      content:"↗";
+      font-size:1rem;
+      opacity:0.9;
+    }
+    .card.design2 .action.is-primary{
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 48%, #183329), color-mix(in srgb, var(--theme-secondary) 80%, #04060b));
+      color:#ffffff;
+      border-color:transparent;
+    }
+    .card.design2 .detail{
+      color:#d6e2ea;
+      background:rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.06);
+    }
+    .card.design2 .detail-icon{
+      color:color-mix(in srgb, var(--theme) 82%, #d1fae5);
+    }
+    .card.design2 .greeting{
+      background:#191d20;
+      border-color:rgba(255,255,255,0.08);
+    }
+
+    .card.design3{
+      background:linear-gradient(180deg, #fbfdfd 0%, #f2fbf7 100%);
+      color:color-mix(in srgb, var(--theme-secondary) 72%, #0f766e);
+      border-color:rgba(20,184,166,0.16);
+    }
+    .card.design3 .hero{
+      height:152px;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.55), transparent 42%),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme) 22%, white), color-mix(in srgb, var(--theme-secondary) 16%, white));
+    }
+    .card.design3 .hero::after{
+      inset:auto -8% -42px;
+      height:92px;
+      background:rgba(255,255,255,0.96);
+    }
+    .card.design3 .avatar{
+      margin:-72px auto 14px;
+      border-radius:50%;
+      border-color:#ecfeff;
+      background:#ffffff;
+    }
+    .card.design3 .avatar-fallback,
+    .card.design3 .detail-icon{
+      color:var(--theme);
+    }
+    .card.design3 .template-badge{
+      color:#ffffff;
+    }
+    .card.design3 .social-link,
+    .card.design3 .action{
+      background:#ffffff;
+      color:var(--theme);
+      border:1px solid color-mix(in srgb, var(--theme) 30%, transparent);
+    }
+    .card.design3 .action.is-primary{
+      background:linear-gradient(135deg, var(--theme), var(--theme-secondary));
+      color:#ffffff;
+      border-color:transparent;
+    }
+    .card.design3 .role,
+    .card.design3 .description,
+    .card.design3 .detail{
+      color:color-mix(in srgb, var(--theme-secondary) 65%, #336b68);
+    }
+    .card.design3 .identity h1,
+    .card.design3 .title{
+      color:color-mix(in srgb, var(--theme-secondary) 82%, #0f172a);
+      text-shadow:none;
+    }
+    .card.design3 .detail{
+      background:rgba(255,255,255,0.9);
+      border:1px solid rgba(226,232,240,0.92);
+    }
+    .card.design3 .greeting{
+      background:#ffffff;
+    }
+
+    .card.design4{
+      background:linear-gradient(180deg, #f6f0de 0%, #efe3c3 100%);
+      color:#2b2f3a;
+      border-color:rgba(217,172,43,0.22);
+      box-shadow:0 24px 52px rgba(126,92,23,0.18);
+    }
+    .card.design4 .hero{
+      height:188px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.96)),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme) 86%, #f4b52d) 0%, color-mix(in srgb, var(--theme) 64%, #f7c84d) 100%);
+    }
+    .card.design4 .hero::after{
+      inset:auto 0 -64px;
+      height:136px;
+      background:linear-gradient(180deg, color-mix(in srgb, var(--theme) 92%, #f4b52d), color-mix(in srgb, var(--theme) 82%, #f0b62e));
+      border-radius:0 0 34px 34px;
+    }
+    .card.design4 .content{
+      padding:0 20px 24px;
+      display:grid;
+      grid-template-columns:112px minmax(0, 1fr);
+      align-items:center;
+      gap:16px 18px;
+    }
+    .card.design4 .avatar{
+      margin:-112px 0 0;
+      border-radius:24px;
+      border-width:0;
+      background:#f4b52d;
+      box-shadow:0 12px 32px rgba(190,135,16,0.18);
+    }
+    .card.design4 .avatar-fallback{
+      color:#ffffff;
+    }
+    .card.design4 .identity{
+      text-align:left;
+      margin-top:-52px;
+    }
+    .card.design4 .identity h1{
+      color:#2a2e38;
+      font-size:2rem;
+      text-shadow:none;
+    }
+    .card.design4 .role{
+      color:#8b8fa0;
+      font-size:1.02rem;
+      margin-bottom:0;
+    }
+    .card.design4 .title,
+    .card.design4 .template-badge{
+      display:none;
+    }
+    .card.design4 .social-link{
+      min-width:46px;
+      min-height:46px;
+      padding:0;
+      border-radius:50%;
+      background:#ffffff;
+      color:color-mix(in srgb, var(--theme) 90%, #d39b18);
+      border:none;
+      box-shadow:0 10px 22px rgba(176,124,22,0.16);
+    }
+    .card.design4 .role,
+    .card.design4 .description,
+    .card.design4 .detail{
+      color:#878b9b;
+    }
+    .card.design4 .socials{
+      grid-column:1 / -1;
+      display:grid;
+      grid-template-columns:repeat(6, minmax(0, 1fr));
+      gap:14px;
+      margin-top:-6px;
+      padding:18px 18px 12px;
+      border-radius:0 0 28px 28px;
+      background:linear-gradient(180deg, color-mix(in srgb, var(--theme) 92%, #f4b52d), color-mix(in srgb, var(--theme) 82%, #f0b62e));
+      box-shadow:0 24px 44px rgba(176,124,22,0.18);
+    }
+    .card.design4 .description{
+      grid-column:1 / -1;
+      text-align:left;
+      margin-top:16px;
+      font-size:1rem;
+      line-height:1.7;
+    }
+    .card.design4 .description::before{
+      content:"About Me";
+      display:block;
+      margin-bottom:10px;
+      color:#2a2e38;
+      font-size:1.9rem;
+      line-height:1.1;
+      font-weight:800;
+    }
+    .card.design4 .actions{
+      grid-column:1 / -1;
+      grid-template-columns:1fr;
+      gap:14px;
+      margin-top:8px;
+      padding-top:18px;
+      border-top:1px solid rgba(43,47,58,0.12);
+    }
+    .card.design4 .action{
+      min-height:86px;
+      justify-content:space-between;
+      padding:0 18px 0 22px;
+      background:#f9fafb;
+      color:#8b8fa0;
+      border:none;
+      border-radius:22px;
+      box-shadow:0 12px 28px rgba(129,116,82,0.08);
+      font-size:1rem;
+      font-weight:500;
+    }
+    .card.design4 .action.is-primary{
+      background:#f9fafb;
+      color:#8b8fa0;
+      border-color:transparent;
+    }
+    .card.design4 .action::after{
+      content:"View";
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:108px;
+      height:52px;
+      border-radius:999px;
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 96%, #f4b52d), color-mix(in srgb, var(--theme) 84%, #eaa81f));
+      color:#ffffff;
+      font-size:0.98rem;
+      font-weight:700;
+      box-shadow:0 12px 26px rgba(220,160,25,0.28);
+    }
+    .card.design4 .detail{
+      background:rgba(255,255,255,0.82);
+      border:1px solid rgba(217,172,43,0.16);
+      box-shadow:none;
+    }
+    .card.design4 .detail-icon{
+      color:color-mix(in srgb, var(--theme) 94%, #d49a18);
+    }
+    .card.design4 .greeting{
+      background:rgba(255,255,255,0.82);
+    }
+
+    .card.design5{
+      background:#f8fafc;
+      color:#1e293b;
+      border-color:rgba(148,163,184,0.24);
+    }
+    .card.design5 .hero{
+      height:210px;
+      background:
+        linear-gradient(180deg, rgba(15,23,42,0.08), rgba(15,23,42,0.42)),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme-secondary) 45%, white) 0%, color-mix(in srgb, var(--theme) 16%, white) 100%);
+    }
+    .card.design5 .content{
+      padding:0 18px 20px;
+    }
+    .card.design5 .avatar{
+      margin:-58px auto 12px;
+      border-radius:50%;
+      border-color:#e2e8f0;
+      background:#ffffff;
+    }
+    .card.design5 .avatar-fallback{
+      color:var(--theme-secondary);
+    }
+    .card.design5 .social-link{
+      padding:0;
+      background:#ffffff;
+      color:var(--theme-secondary);
+      border:1px solid rgba(148,163,184,0.24);
+    }
+    .card.design5 .role,
+    .card.design5 .description,
+    .card.design5 .detail{
+      color:#475569;
+    }
+    .card.design5 .action{
+      background:linear-gradient(135deg, #ffffff, color-mix(in srgb, var(--theme) 14%, white));
+      color:var(--theme-secondary);
+      border:1px solid rgba(148,163,184,0.24);
+    }
+    .card.design5 .action.is-primary{
+      background:linear-gradient(135deg, var(--theme), color-mix(in srgb, var(--theme-secondary) 35%, white));
+      color:#ffffff;
+      border-color:transparent;
+    }
+    .card.design5 .detail{
+      padding:10px 12px;
+      background:#ffffff;
+      border-radius:14px;
+      border:1px solid rgba(226,232,240,0.92);
+    }
+    .card.design5 .detail-icon{
+      color:var(--theme);
+    }
+    .card.design5 .greeting{
+      background:#ffffff;
+    }
+
+    .card.design6{
+      background:linear-gradient(180deg, #0d0d0d, #151515);
+      color:#f8fafc;
+    }
+    .card.design6 .hero{
+      height:220px;
+      background:
+        radial-gradient(circle at top center, rgba(255,255,255,0.12), transparent 36%),
+        radial-gradient(circle at bottom right, color-mix(in srgb, var(--theme) 28%, transparent), transparent 42%),
+        linear-gradient(180deg, color-mix(in srgb, var(--theme-secondary) 82%, black) 0%, #121212 100%);
+    }
+    .card.design6 .hero::after{
+      inset:auto 8% -54px;
+      height:110px;
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+    }
+    .card.design6 .avatar{
+      margin:-132px auto 14px;
+      border-radius:50%;
+      border-color:#e5e7eb;
+      background:#0f172a;
+    }
+    .card.design6 .social-link{
+      padding:0;
+      background:#2f2f2f;
+      border:1px solid rgba(255,255,255,0.08);
+      color:#f8fafc;
+    }
+    .card.design6 .role,
+    .card.design6 .description,
+    .card.design6 .detail{
+      color:#d1d5db;
+    }
+    .card.design6 .action{
+      justify-content:flex-start;
+      padding:0 16px;
+      background:#1f1f1f;
+      border:1px solid rgba(255,255,255,0.08);
+      color:#f8fafc;
+    }
+    .card.design6 .action.is-primary{
+      background:linear-gradient(135deg, var(--theme), color-mix(in srgb, var(--theme) 35%, white));
+      color:#061017;
+      border-color:transparent;
+    }
+    .card.design6 .detail{
+      background:rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.06);
+    }
+    .card.design6 .greeting{
+      background:#191919;
+    }
+
+    .card.design7{
+      background:#efefef;
+      color:#2d2455;
+      border-color:rgba(236,179,42,0.28);
+      box-shadow:0 26px 54px rgba(145,111,22,0.16);
+    }
+    .card.design7 .hero{
+      height:232px;
+      background:
+        linear-gradient(180deg, rgba(239,239,239,0.96), rgba(239,239,239,0.96)),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme) 58%, #ef5d8d), color-mix(in srgb, var(--theme-secondary) 20%, #efefef));
+    }
+    .card.design7 .hero::after{
+      display:none;
+    }
+    .card.design7 .content{
+      padding:20px 20px 26px;
+      display:grid;
+      grid-template-columns:minmax(0, 1.3fr) minmax(160px, 0.95fr);
+      gap:18px;
+      align-items:start;
+    }
+    .card.design7 .avatar{
+      width:100% !important;
+      height:200px !important;
+      margin:-212px 0 0;
+      border-radius:22px;
+      border-width:0;
+      background:linear-gradient(135deg, #ef5d8d, color-mix(in srgb, var(--theme) 72%, #f6a623));
+      box-shadow:0 22px 42px rgba(216,98,119,0.24);
+    }
+    .card.design7 .avatar-fallback{
+      color:#ffffff;
+      font-size:3rem;
+    }
+    .card.design7 .identity{
+      grid-column:1 / -1;
+      margin-top:-92px;
+      padding:22px;
+      border-radius:18px;
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 96%, #f1bc27), color-mix(in srgb, var(--theme) 84%, #f0b31f));
+      box-shadow:0 20px 38px rgba(219,170,31,0.24);
+    }
+    .card.design7 .identity h1{
+      color:#ffffff;
+      font-size:2rem;
+      text-shadow:none;
+    }
+    .card.design7 .role{
+      color:rgba(255,255,255,0.9);
+      font-size:1.02rem;
+      margin-bottom:0;
+    }
+    .card.design7 .title,
+    .card.design7 .template-badge{
+      display:none;
+    }
+    .card.design7 .socials{
+      align-self:start;
+      margin-top:24px;
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:12px;
+    }
+    .card.design7 .socials::before{
+      content:"Follow Me";
+      grid-column:1 / -1;
+      margin-bottom:4px;
+      color:#2d2455;
+      font-size:1.5rem;
+      font-weight:800;
+    }
+    .card.design7 .social-link{
+      min-width:0;
+      min-height:60px;
+      padding:0;
+      border:none;
+      border-radius:16px;
+      background:#ffffff;
+      color:var(--theme);
+      box-shadow:0 10px 24px rgba(39,33,87,0.1);
+    }
+    .card.design7 .social-link svg{
+      width:24px;
+      height:24px;
+    }
+    .card.design7 .social-link:nth-child(2){ background:#3b82f6; color:#fff; }
+    .card.design7 .social-link:nth-child(3){ background:#e1306c; color:#fff; }
+    .card.design7 .social-link:nth-child(4){ background:#38bdf8; color:#fff; }
+    .card.design7 .social-link:nth-child(5){ background:#ff4d4f; color:#fff; }
+    .card.design7 .social-link:nth-child(6){ background:#38bdf8; color:#fff; }
+    .card.design7 .social-link:nth-child(7){ background:#22c55e; color:#fff; }
+    .card.design7 .description{
+      grid-column:1 / -1;
+      text-align:left;
+      margin-top:8px;
+      color:#8c8ca1;
+      font-size:1rem;
+      line-height:1.7;
+    }
+    .card.design7 .description::before{
+      content:"My Recent Works";
+      display:block;
+      margin-bottom:18px;
+      color:#2d2455;
+      font-size:1.9rem;
+      line-height:1.1;
+      font-weight:800;
+    }
+    .card.design7 .actions{
+      grid-column:1 / -1;
+      grid-template-columns:1fr;
+      gap:16px;
+      margin-top:0;
+    }
+    .card.design7 .action{
+      min-height:78px;
+      background:#ffffff;
+      color:color-mix(in srgb, var(--theme) 90%, #e2ab1c);
+      border:2px solid color-mix(in srgb, var(--theme) 92%, #efb726);
+      border-radius:16px;
+      justify-content:center;
+      font-size:1rem;
+      font-weight:500;
+      box-shadow:none;
+    }
+    .card.design7 .details{
+      grid-column:1 / -1;
+      gap:12px;
+      margin-top:4px;
+    }
+    .card.design7 .detail{
+      background:#ffffff;
+      border:1px solid rgba(45,36,85,0.08);
+      color:#6f7088;
+    }
+    .card.design7 .detail-icon{
+      color:color-mix(in srgb, var(--theme) 92%, #efb726);
+    }
+    .card.design8{
+      background:#f4f4f4;
+      color:#111827;
+      border-color:rgba(216,174,63,0.28);
+      box-shadow:0 24px 56px rgba(120,96,28,0.18);
+    }
+    .card.design8 .hero{
+      height:264px;
+      background:
+        linear-gradient(180deg, #ffffff 0 42%, transparent 42%),
+        linear-gradient(135deg, color-mix(in srgb, var(--theme-secondary) 78%, #4338ca) 0%, color-mix(in srgb, var(--theme) 36%, #f4b82d) 30%, color-mix(in srgb, var(--theme-secondary) 80%, #4338ca) 30%, color-mix(in srgb, var(--theme-secondary) 88%, #312e81) 100%);
+    }
+    .card.design8 .hero::after{
+      content:"";
+      position:absolute;
+      inset:70px auto auto 50%;
+      transform:translateX(-50%);
+      width:126px;
+      height:126px;
+      border-radius:50%;
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 95%, #d7ae44), color-mix(in srgb, var(--theme) 78%, #f5cb57));
+      box-shadow:none;
+    }
+    .card.design8 .content{
+      padding:0;
+    }
+    .card.design8 .avatar{
+      width:92px !important;
+      height:92px !important;
+      margin:-76px auto 14px;
+      border-radius:50%;
+      border-width:0;
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 95%, #d7ae44), color-mix(in srgb, var(--theme) 78%, #f5cb57));
+      position:relative;
+      z-index:2;
+    }
+    .card.design8 .avatar-fallback{
+      color:#ffffff;
+    }
+    .card.design8 .identity{
+      text-align:center;
+      padding:0 20px;
+    }
+    .card.design8 .identity h1{
+      color:#111111;
+      text-shadow:none;
+      font-size:1.85rem;
+    }
+    .card.design8 .role{
+      color:#232323;
+      font-size:1rem;
+    }
+    .card.design8 .title{
+      color:#2f2f2f;
+      font-size:1.1rem;
+    }
+    .card.design8 .template-badge{
+      margin-top:14px;
+      padding:10px 18px;
+      background:#ffffff;
+      color:#af8730;
+      border:1px solid color-mix(in srgb, var(--theme) 90%, #d7ae44);
+      box-shadow:none;
+    }
+    .card.design8 .actions{
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:12px;
+      margin:18px 20px 0;
+    }
+    .card.design8 .action{
+      min-height:42px;
+      border-radius:999px;
+      background:#ffffff;
+      color:#111111;
+      border:1px solid color-mix(in srgb, var(--theme) 90%, #d7ae44);
+      font-size:0.92rem;
+      font-weight:700;
+    }
+    .card.design8 .socials{
+      margin:18px 0 0;
+      padding:16px 20px;
+      background:#dcdcdc;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .card.design8 .social-link{
+      min-width:48px;
+      min-height:48px;
+      padding:0;
+      border-radius:50%;
+      background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 95%, #d7ae44), color-mix(in srgb, var(--theme) 78%, #f5cb57));
+      color:#ffffff;
+      border:none;
+    }
+    .card.design8 .description{
+      margin:0;
+      text-align:left;
+      padding:12px 20px;
+      color:#2d2d2d;
+      font-size:0.96rem;
+      line-height:1.6;
+    }
+    .card.design8 .details{
+      gap:1px;
+      margin-top:0;
+      background:#cfcfcf;
+    }
+    .card.design8 .detail{
+      border-radius:0;
+      background:#f4f4f4;
+      padding:14px 18px;
+      color:#181818;
+      border:none;
+    }
+    .card.design8 .detail-icon{
+      color:color-mix(in srgb, var(--theme) 95%, #d7ae44);
+    }
+    .card.design8 .footer-actions{
+      margin-top:0;
+    }
+    .card.design8 .footer-credit{
+      background:#c7c7c7;
+    }
+    .card.design3 .scroll-section,
+    .card.design5 .scroll-section{
+      background:rgba(255,255,255,0.86);
+    }
+    .card.design4 .scroll-section,
+    .card.design7 .scroll-section,
+    .card.design8 .scroll-section{
+      background:rgba(255,255,255,0.82);
+      border-color:rgba(0,0,0,0.08);
+    }
   </style>
 </head>
 <body>
-  <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %}">
-    <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}></div>
-    <div class="logo-wrap">
-      <div class="logo" style="width:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};height:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %};">
-        {% if card_entry and card_entry.logo_image_data %}
-          <img src="{{ card_entry.logo_image_data }}" alt="Logo">
-        {% elif company.logo %}
-          <img src="{{ company.logo.url }}" alt="Logo">
-        {% else %}
-          <span style="font-size:30px;font-weight:700;color:{{ theme_color }}">{{ company.company_name|default:public_slug|slice:":1"|upper }}</span>
-        {% endif %}
-      </div>
-    </div>
-    <h1 style="margin-top:14px;text-align:center">{% if card_entry and card_entry.person_name %}{{ card_entry.person_name }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</h1>
-    {% if card_entry and card_entry.role_title %}<p style="text-align:center;margin-top:-6px">{{ card_entry.role_title }}</p>{% endif %}
-    <p class="muted" style="text-align:center;font-weight:600">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</p>
-    {% if card_entry and card_entry.template_style %}
-      <p class="muted" style="text-align:center;margin-top:-4px">Template: {{ card_entry.template_style|title }}</p>
-    {% endif %}
-    <p class="muted">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
-    <p>{{ card_entry.address|default:company.address }}</p>
-    <p class="muted">{{ card_entry.email|default:company.email }} {% if card_entry.phone|default:company.phone %}| {{ card_entry.phone|default:company.phone }}{% endif %}</p>
-    <div>
-      {% with phone=card_entry.phone|default:company.phone %}
-      {% if phone %}<a class="btn primary" href="tel:{{ phone }}">Call</a>{% endif %}
-      {% endwith %}
-      {% with wa_no=card_entry.whatsapp_number|default:company.whatsapp_number %}
-      {% if wa_no %}<a class="btn ghost" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
-      {% endwith %}
-      {% with website=card_entry.website|default:company.website %}
-      {% if website %}<a class="btn ghost" href="{{ website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
-      {% endwith %}
-      {% if catalogue_page %}<a class="btn ghost" href="/catalogue/{{ catalogue_page.public_slug }}/">Catalogue</a>{% endif %}
-    </div>
-    {% if social_links_items %}
-      <div class="socials">
-        {% for link in social_links_items %}
-          <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer">
-            {% if link.type == "custom" and link.custom_icon_data %}
-              <img src="{{ link.custom_icon_data }}" alt="{{ link.label }}" width="{{ link.icon_size }}" height="{{ link.icon_size }}">
-            {% else %}
-              <span class="social-emoji">
-                {% if link.icon == "instagram" %}📷
-                {% elif link.icon == "facebook" %}📘
-                {% elif link.icon == "youtube" %}▶️
-                {% elif link.icon == "linkedin" %}💼
-                {% elif link.icon == "twitter" or link.icon == "x" %}𝕏
-                {% elif link.icon == "whatsapp" %}💬
-                {% elif link.icon == "telegram" %}✈️
-                {% else %}🔗
+  <div class="card-shell">
+    <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %}">
+      <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}></div>
+
+      <div class="content">
+        <div class="avatar" style="border-radius:{% if logo_radius_px %}{{ logo_radius_px }}px{% else %}28px{% endif %};">
+          {% if card_entry and card_entry.logo_image_data %}
+            <img src="{{ card_entry.logo_image_data }}" alt="Logo">
+          {% elif company.logo %}
+            <img src="{{ company.logo.url }}" alt="Logo">
+          {% else %}
+            <span class="avatar-fallback">{{ company.company_name|default:public_slug|slice:":1"|upper }}</span>
+          {% endif %}
+        </div>
+
+        <div class="identity">
+          <h1>{% if card_entry and card_entry.person_name %}{{ card_entry.person_name }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</h1>
+          <p class="role">{% if card_entry and card_entry.role_title %}{{ card_entry.role_title }}{% else %}Business / Professional{% endif %}</p>
+          <a
+            class="template-badge"
+            href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if card_entry.website|default:company.website %}URL:{{ card_entry.website|default:company.website|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
+            download="{% if card_entry and card_entry.person_name %}{{ card_entry.person_name|slugify }}{% else %}contact{% endif %}.vcf"
+          >Save This Contact</a>
+        </div>
+
+        {% if social_links_items %}
+          <div class="socials">
+            {% for link in social_links_items %}
+              <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer" aria-label="{{ link.label }}">
+                {% if link.type == "custom" and link.custom_icon_data %}
+                  <img src="{{ link.custom_icon_data }}" alt="{{ link.label }}" width="{{ link.icon_size }}" height="{{ link.icon_size }}">
+                {% else %}
+                  {% if link.icon == "facebook" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 21v-7h2.4l.4-3h-2.8V9.1c0-.9.3-1.6 1.7-1.6H16V4.8c-.2 0-.9-.1-1.8-.1-1.8 0-3.1 1.1-3.1 3.3V11H8.5v3h2.6v7h2.4z"/></svg>
+                  {% elif link.icon == "instagram" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.8 3h8.4A4.8 4.8 0 0 1 21 7.8v8.4a4.8 4.8 0 0 1-4.8 4.8H7.8A4.8 4.8 0 0 1 3 16.2V7.8A4.8 4.8 0 0 1 7.8 3zm0 1.8A3 3 0 0 0 4.8 7.8v8.4a3 3 0 0 0 3 3h8.4a3 3 0 0 0 3-3V7.8a3 3 0 0 0-3-3H7.8zm8.85 1.35a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1zM12 7.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 0 1 12 7.5zm0 1.8A2.7 2.7 0 1 0 14.7 12 2.7 2.7 0 0 0 12 9.3z"/></svg>
+                  {% elif link.icon == "linkedin" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.94 8.5H4V20h2.94V8.5zM5.47 4A1.72 1.72 0 1 0 7.2 5.72 1.73 1.73 0 0 0 5.47 4zM20 12.77C20 9.86 18.45 8.5 16.38 8.5a3.56 3.56 0 0 0-3.2 1.76V8.5h-2.94V20h2.94v-6.39c0-1.68.32-3.3 2.4-3.3s2.1 1.94 2.1 3.41V20H20z"/></svg>
+                  {% elif link.icon == "whatsapp" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.52 3.48A11.83 11.83 0 0 0 12.1.01C5.58.01.28 5.31.28 11.83A11.7 11.7 0 0 0 1.87 17.7L0 24l6.47-1.7a11.79 11.79 0 0 0 5.63 1.43h.01c6.52 0 11.82-5.3 11.82-11.82a11.75 11.75 0 0 0-3.41-8.43zM12.11 21.7a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.84 1.01 1.02-3.74-.24-.39a9.83 9.83 0 1 1 8.45 4.71zm5.4-7.36c-.29-.15-1.73-.85-2-1s-.47-.15-.67.15-.77 1-.95 1.2-.35.22-.64.07a8.02 8.02 0 0 1-2.36-1.45 8.92 8.92 0 0 1-1.63-2.04c-.17-.29 0-.44.13-.59.13-.13.29-.35.44-.52a2.06 2.06 0 0 0 .29-.49.54.54 0 0 0 0-.51c-.08-.15-.67-1.62-.92-2.22-.24-.58-.48-.5-.67-.51h-.57a1.09 1.09 0 0 0-.79.37 3.31 3.31 0 0 0-1 2.46 5.76 5.76 0 0 0 1.2 3.06 13.25 13.25 0 0 0 5.06 4.47 17.17 17.17 0 0 0 1.69.62 4.1 4.1 0 0 0 1.88.12 3.08 3.08 0 0 0 2.02-1.42 2.48 2.48 0 0 0 .17-1.42c-.07-.11-.26-.18-.55-.33z"/></svg>
+                  {% elif link.icon == "youtube" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.8 8s-.2-1.4-.8-2a2.9 2.9 0 0 0-2-0.8C16.2 5 12 5 12 5h0s-4.2 0-7 .2a2.9 2.9 0 0 0-2 .8c-.6.6-.8 2-.8 2S2 9.6 2 11.2v1.5C2 14.4 2.2 16 2.2 16s.2 1.4.8 2a3.4 3.4 0 0 0 2.2.8c1.6.2 6.8.2 6.8.2s4.2 0 7-.2a2.9 2.9 0 0 0 2-.8c.6-.6.8-2 .8-2s.2-1.6.2-3.3v-1.5C22 9.6 21.8 8 21.8 8zM9.8 15.2V8.9l6 3.2-6 3.1z"/></svg>
+                  {% elif link.icon == "twitter" or link.icon == "x" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 3H21l-4.6 5.3L22 21h-4.5l-3.5-4.8L9.8 21H7.7l4.9-5.7L2 3h4.6l3.1 4.3L13.5 3h2.1l-4.9 5.7L18.9 3zm-1.6 16h1.3L6.1 4.9H4.7L17.3 19z"/></svg>
+                  {% elif link.icon == "telegram" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.6c.3-1.4-1-2.5-2.3-1.9L3.3 9.1c-1.5.6-1.4 2.8.1 3.3l3.5 1 1.3 4.1c.4 1.3 2.1 1.6 2.9.5l2-2.6 3.8 2.8c1.1.8 2.6.2 2.9-1.1l2.1-12.5zM9 12.9l8.7-6.4-6.8 7.7-.3 3-1.6-4.3z"/></svg>
+                  {% elif link.icon == "website" or link.icon == "globe" %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm7.9 9h-3.2a15.7 15.7 0 0 0-1.2-5A8 8 0 0 1 19.9 11zM12 4a13.7 13.7 0 0 1 1.9 7h-3.8A13.7 13.7 0 0 1 12 4zM8.5 6a15.7 15.7 0 0 0-1.2 5H4.1A8 8 0 0 1 8.5 6zM4.1 13h3.2a15.7 15.7 0 0 0 1.2 5A8 8 0 0 1 4.1 13zM12 20a13.7 13.7 0 0 1-1.9-7h3.8A13.7 13.7 0 0 1 12 20zm3.5-2a15.7 15.7 0 0 0 1.2-5h3.2a8 8 0 0 1-4.4 5z"/></svg>
+                  {% else %}
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3-3a1 1 0 1 1 1.4 1.4l-3 3a1 1 0 0 1-1.4 0zm-3.2 3.2a3 3 0 0 1 0-4.2l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a1 1 0 0 0 1.4 1.4l2.1-2.1a1 1 0 1 1 1.4 1.4l-2.1 2.1a3 3 0 0 1-4.2 0zm9.2-9.2a1 1 0 0 0-1.4-1.4l-2.1 2.1a1 1 0 1 0 1.4 1.4l2.1-2.1a1 1 0 0 1 1.4 1.4l-2.1 2.1a1 1 0 0 0 1.4 1.4l2.1-2.1a3 3 0 0 0-4.2-4.2z"/></svg>
+                  {% endif %}
                 {% endif %}
-              </span>
-            {% endif %}
-            <span>{{ link.label }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="title">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</div>
+        <p class="description">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
+
+        <div class="actions">
+          {% with phone=card_entry.phone|default:company.phone %}
+          {% if phone %}<a class="action is-primary" href="tel:{{ phone }}">Call</a>{% endif %}
+          {% endwith %}
+          {% with website=card_entry.website|default:company.website %}
+          {% if website %}<a class="action" href="{{ website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
+          {% endwith %}
+          {% with wa_no=card_entry.whatsapp_number|default:company.whatsapp_number %}
+          {% if wa_no %}<a class="action" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
+          {% endwith %}
+          {% if catalogue_page %}<a class="action" href="/catalogue/{{ catalogue_page.public_slug }}/">Catalogue</a>{% endif %}
+        </div>
+
+        <div class="details">
+          <a class="detail" href="tel:{{ card_entry.phone|default:company.phone|default:'' }}">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.2 11.2 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.2 11.2 0 0 0 .56 3.5 1 1 0 0 1-.24 1z"/></svg>
+            </span>
+            <span>{{ card_entry.phone|default:company.phone|default:"-" }}</span>
           </a>
-        {% endfor %}
+          <a class="detail" href="https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|default:''|cut:'+' }}" target="_blank" rel="noreferrer">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M20.52 3.48A11.83 11.83 0 0 0 12.1.01C5.58.01.28 5.31.28 11.83A11.7 11.7 0 0 0 1.87 17.7L0 24l6.47-1.7a11.79 11.79 0 0 0 5.63 1.43h.01c6.52 0 11.82-5.3 11.82-11.82a11.75 11.75 0 0 0-3.41-8.43zM12.11 21.7a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.84 1.01 1.02-3.74-.24-.39a9.83 9.83 0 1 1 8.45 4.71zm5.4-7.36c-.29-.15-1.73-.85-2-1s-.47-.15-.67.15-.77 1-.95 1.2-.35.22-.64.07a8.02 8.02 0 0 1-2.36-1.45 8.92 8.92 0 0 1-1.63-2.04c-.17-.29 0-.44.13-.59.13-.13.29-.35.44-.52a2.06 2.06 0 0 0 .29-.49.54.54 0 0 0 0-.51c-.08-.15-.67-1.62-.92-2.22-.24-.58-.48-.5-.67-.51h-.57a1.09 1.09 0 0 0-.79.37 3.31 3.31 0 0 0-1 2.46 5.76 5.76 0 0 0 1.2 3.06 13.25 13.25 0 0 0 5.06 4.47 17.17 17.17 0 0 0 1.69.62 4.1 4.1 0 0 0 1.88.12 3.08 3.08 0 0 0 2.02-1.42 2.48 2.48 0 0 0 .17-1.42c-.07-.11-.26-.18-.55-.33z"/></svg>
+            </span>
+            <span>{{ card_entry.whatsapp_number|default:company.whatsapp_number|default:"-" }}</span>
+          </a>
+          <a class="detail" href="mailto:{{ card_entry.email|default:company.email|default:'' }}">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v.4l-10 6.25L2 7.4V7a2 2 0 0 1 2-2zm18 4.1V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.1l9.47 5.92a1 1 0 0 0 1.06 0z"/></svg>
+            </span>
+            <span>{{ card_entry.email|default:company.email|default:"-" }}</span>
+          </a>
+          <a class="detail" href="{% if card_entry.website|default:company.website %}{% with site=card_entry.website|default:company.website %}{% if 'http://' in site or 'https://' in site %}{{ site }}{% else %}https://{{ site }}{% endif %}{% endwith %}{% endif %}" target="_blank" rel="noreferrer">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm7.9 9h-3.2a15.7 15.7 0 0 0-1.2-5A8 8 0 0 1 19.9 11zM12 4a13.7 13.7 0 0 1 1.9 7h-3.8A13.7 13.7 0 0 1 12 4zM8.5 6a15.7 15.7 0 0 0-1.2 5H4.1A8 8 0 0 1 8.5 6zM4.1 13h3.2a15.7 15.7 0 0 0 1.2 5A8 8 0 0 1 4.1 13zM12 20a13.7 13.7 0 0 1-1.9-7h3.8A13.7 13.7 0 0 1 12 20zm3.5-2a15.7 15.7 0 0 0 1.2-5h3.2a8 8 0 0 1-4.4 5z"/></svg>
+            </span>
+            <span>{{ card_entry.website|default:company.website|default:"-" }}</span>
+          </a>
+          <a class="detail" href="https://www.google.com/maps/search/?api=1&amp;query={{ card_entry.address|default:company.address|default:''|urlencode }}" target="_blank" rel="noreferrer">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.5z"/></svg>
+            </span>
+            <span>{{ card_entry.address|default:company.address|default:"-" }}</span>
+          </a>
+        </div>
+
+        {% if highlights_html or highlights %}
+          <h3 class="section-title">Product Highlights</h3>
+          {% if highlights_html %}
+            <div class="html-content">{{ highlights_html|safe }}</div>
+          {% else %}
+            <ul class="highlights-list">
+              {% for item in highlights %}<li>{{ item }}</li>{% endfor %}
+            </ul>
+          {% endif %}
+        {% endif %}
+
+        {% if catalogue_page and catalogue_page.about_content %}
+          <section class="scroll-section">
+            <h3>{{ catalogue_page.about_title|default:"About Us" }}</h3>
+            <div class="scroll-html">{{ catalogue_page.about_content|safe }}</div>
+          </section>
+        {% endif %}
+
+        {% if catalogue_page and catalogue_page.services_content %}
+          <section class="scroll-section">
+            <h3>{{ catalogue_page.services_title|default:"Services" }}</h3>
+            <div class="scroll-html">{{ catalogue_page.services_content|safe }}</div>
+          </section>
+        {% endif %}
+
+        {% if grouped_items %}
+          <section class="scroll-section">
+            <h3>Products &amp; Services</h3>
+            {% for group in grouped_items %}
+              <div class="catalogue-group">
+                <div class="catalogue-group-title">{{ group.name }}</div>
+                <div class="catalogue-list">
+                  {% for item in group.items %}
+                    <div class="catalogue-item">
+                      <div class="catalogue-item-head">
+                        <div class="catalogue-item-title">{{ item.title }}</div>
+                        {% if item.price %}<div class="catalogue-item-price">{{ item.price }}</div>{% endif %}
+                      </div>
+                      <div class="catalogue-item-meta">{{ item.item_type|default:"product" }}{% if item.category %} · {{ item.category }}{% endif %}</div>
+                      {% if item.description %}<div class="catalogue-item-description">{{ item.description|safe }}</div>{% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </section>
+        {% endif %}
+
+        {% if catalogue_page and catalogue_page.contact_note %}
+          <section class="scroll-section">
+            <h3>{{ catalogue_page.contact_title|default:"Contact" }}</h3>
+            <div class="scroll-html">{{ catalogue_page.contact_note|safe }}</div>
+          </section>
+        {% endif %}
+
+        <div class="footer-actions">
+          <a class="footer-action" href="/auth/login/">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17v-2h4V9h-4V7h6v10zm-7-5 5-5v3h7v4H8v3zM20 3H8a2 2 0 0 0-2 2v2h2V5h12v14H8v-2H6v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
+            <span>Login</span>
+          </a>
+          <a class="footer-action js-share-card" href="#">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16a3 3 0 0 0-2.39 1.2l-6.83-3.41a3.2 3.2 0 0 0 0-1.58l6.83-3.41A3 3 0 1 0 15 7a3.2 3.2 0 0 0 .07.64L8.24 11.05a3 3 0 1 0 0 1.9l6.83 3.41A3 3 0 1 0 18 16z"/></svg>
+            <span>Share</span>
+          </a>
+          <a class="footer-action" href="sms:?body=Check%20my%20digital%20card%3A%20{{ request.build_absolute_uri|urlencode }}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2zm3 6h10V8H7zm0 4h7v-2H7z"/></svg>
+            <span>SMS</span>
+          </a>
+          <a class="footer-action" href="/pricing/">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4V2h10v2h4v2H3V4zm13 4v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8zm-8 2v3H9v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+            <span>Upgrade</span>
+          </a>
+          <a class="footer-action" href="{% if card_entry.email|default:company.email %}mailto:{{ card_entry.email|default:company.email }}?subject=Enquiry{% elif card_entry.whatsapp_number|default:company.whatsapp_number %}https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry.{% else %}#{% endif %}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v15l-4-3H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm4 6h8V8H8zm0 4h5v-2H8z"/></svg>
+            <span>Enquiry</span>
+          </a>
+        </div>
+
+        <div class="footer-credit">
+          This virtual card was designed with <a href="https://www.getworkzilla.com" target="_blank" rel="noreferrer">www.getworkzilla.com</a>
+        </div>
+
       </div>
-    {% endif %}
-    {% if highlights_html or highlights %}
-      <h3>Product Highlights</h3>
-      {% if highlights_html %}
-        <div>{{ highlights_html|safe }}</div>
-      {% else %}
-        <ul>
-          {% for item in highlights %}<li>{{ item }}</li>{% endfor %}
-        </ul>
-      {% endif %}
-    {% endif %}
-    {% if wa_settings and wa_settings.welcome_message %}
-      <h3>WhatsApp Greeting</h3>
-      <pre style="white-space:pre-wrap;background:#081525;padding:12px;border-radius:12px;border:1px solid #1f3355">{{ wa_settings.welcome_message }}</pre>
-    {% endif %}
+    </div>
   </div>
+  <script>
+    (function () {
+      var shareButton = document.querySelector(".js-share-card");
+      if (!shareButton) return;
+      shareButton.addEventListener("click", function (event) {
+        event.preventDefault();
+        var shareUrl = window.location.href;
+        if (navigator.share) {
+          navigator.share({
+            title: document.title,
+            text: "Check my digital card",
+            url: shareUrl
+          }).catch(function () {});
+          return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shareUrl).catch(function () {});
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

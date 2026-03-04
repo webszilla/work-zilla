@@ -648,9 +648,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/dashboard/whatsapp-automation", 4],
           ["/dashboard/catalogue", 5],
           ["/dashboard/digital-card", 6],
-          ["/billing", 7],
-          ["/plans", 8],
-          ["/profile", 9],
+          ["/media-library", 7],
+          ["/billing", 8],
+          ["/plans", 9],
+          ["/profile", 10],
         ])
       : new Map([
           ["/", 0],
@@ -662,9 +663,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/ticketing", 6],
           ["/stocks", 7],
           ["/users", 8],
-          ["/billing", 9],
-          ["/plans", 10],
-          ["/profile", 11]
+          ["/media-library", 9],
+          ["/billing", 10],
+          ["/plans", 11],
+          ["/profile", 12]
         ]);
     return [...uniqueNavItems].sort((a, b) => {
       if (isWhatsappAutomationProduct) {
@@ -1226,7 +1228,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/media-library"
             element={
-              isAdmin && !isHrView && !isDealer && !isSaasAdminRoute
+              productSlug === "whatsapp-automation" && isAdmin && !isHrView && !isDealer && !isSaasAdminRoute
                 ? <OrgMediaLibraryPage />
                 : <Navigate to={withBase("/")} replace />
             }
@@ -1253,7 +1255,11 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/org-admin/media-library"
-            element={isAdmin && !isHrView ? <MediaLibraryPage scope="org" /> : <Navigate to={withBase("/")} replace />}
+            element={
+              isAdmin && !isHrView
+                ? <Navigate to={withBase("/media-library")} replace />
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/inbox"

@@ -50,6 +50,23 @@ def public_digital_card(request, public_slug):
         org = company_profile.organization if company_profile else None
     wa_settings = WhatsappSettings.objects.filter(organization=company_profile.organization).first() if company_profile else None
     catalogue_page = CataloguePage.objects.filter(company_profile=company_profile).first() if company_profile else None
+    items = list(
+        CatalogueProduct.objects.filter(organization=company_profile.organization, is_active=True).order_by("category", "sort_order", "id")
+    ) if company_profile else []
+    categories = list(
+        CatalogueCategory.objects.filter(organization=company_profile.organization, is_active=True).order_by("sort_order", "name", "id")
+    ) if company_profile else []
+    grouped_items = []
+    used_category_names = set()
+    for category in categories:
+        category_items = [item for item in items if (item.category or "").strip() == category.name]
+        if not category_items:
+            continue
+        grouped_items.append({"name": category.name, "items": category_items})
+        used_category_names.add(category.name)
+    uncategorized = [item for item in items if not (item.category or "").strip() or (item.category or "").strip() not in used_category_names]
+    if uncategorized:
+        grouped_items.append({"name": "General", "items": uncategorized})
     social_links_raw = (
         getattr(card_entry, "social_links", None)
         if card_entry is not None
@@ -65,11 +82,18 @@ def public_digital_card(request, public_slug):
         "wa_settings": wa_settings,
         "highlights": ((company_profile.product_highlights if company_profile else []) or []) if isinstance((company_profile.product_highlights if company_profile else []), list) else [],
         "highlights_html": (company_profile.product_highlights if company_profile and isinstance(company_profile.product_highlights, str) else "") or "",
+        "catalogue_items": items,
+        "grouped_items": grouped_items,
         "theme_color": (
             (card_entry.theme_color if card_entry else "")
             or (digital_card.theme_color if digital_card else "")
             or (company_profile.theme_color if company_profile else "#22c55e")
         ),
+        "theme_secondary_color": (
+            (getattr(card_entry, "theme_secondary_color", "") if card_entry else "")
+            or "#0f172a"
+        ),
+        "logo_radius_px": (getattr(card_entry, "logo_radius_px", 28) if card_entry else 28) or 28,
         "social_links_items": _normalize_social_links_items(social_links_raw),
     }
     return render(request, "whatsapp_automation/public_card.html", context)

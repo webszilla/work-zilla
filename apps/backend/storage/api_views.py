@@ -43,6 +43,8 @@ from .services_admin import (
     set_user_system_sync,
 )
 from core.models import Device, UserProfile
+from core.subscription_utils import has_active_subscription_for_org
+from apps.backend.modules.whatsapp_automation.models import CompanyProfile, CatalogueProduct, DigitalCardEntry
 import secrets
 import os
 import tempfile
@@ -64,7 +66,7 @@ def _get_org_or_error(request):
     return org, None
 
 
-def _require_active_subscription(org, allow_readonly=False):
+def _require_active_subscription(org, allow_readonly=False, allow_product_slugs=None):
     state, sub = get_storage_access_state(org)
     if state == "active":
         return sub, None
@@ -72,6 +74,9 @@ def _require_active_subscription(org, allow_readonly=False):
         return None, None
     if state == "read_only":
         return None, _json_error("read_only", status=403)
+    for slug in allow_product_slugs or ():
+        if has_active_subscription_for_org(org, slug):
+            return None, None
     return None, _json_error("subscription_required", status=403)
 
 
@@ -188,32 +193,85 @@ def org_media_library(request):
     org, error = _get_org_or_error(request)
     if error:
         return error
-    _, sub_error = _require_active_subscription(org, allow_readonly=True)
+    _, sub_error = _require_active_subscription(
+        org,
+        allow_readonly=True,
+        allow_product_slugs=("whatsapp-automation",),
+    )
     if sub_error:
         return sub_error
     if not is_org_admin(request.user):
         return _json_error("forbidden", status=403)
 
-    items = list(
-        StorageFile.objects
-        .filter(organization=org, is_deleted=False)
-        .select_related("owner")
-        .order_by("-created_at")
-    )
+    wa_items = []
+    company_profile = CompanyProfile.objects.filter(organization=org).first()
+    if company_profile and company_profile.logo:
+        logo_name = os.path.basename(company_profile.logo.name or "") or "company-logo"
+        wa_items.append({
+            "id": f"wa-company-logo-{company_profile.id}",
+            "filename": logo_name,
+            "type": mimetypes.guess_type(logo_name)[0] or "image/*",
+            "uploaded_at": (company_profile.updated_at or company_profile.created_at).isoformat(),
+            "is_image": True,
+            "owner_name": "WhatsApp Automation",
+            "download_url": company_profile.logo.url,
+            "view_url": company_profile.logo.url,
+            "can_delete": False,
+            "source": "whatsapp_automation",
+        })
+
+    for product in CatalogueProduct.objects.filter(organization=org).exclude(image="").order_by("-updated_at", "-created_at"):
+        if not product.image:
+            continue
+        image_name = os.path.basename(product.image.name or "") or f"catalogue-{product.id}"
+        wa_items.append({
+            "id": f"wa-catalogue-image-{product.id}",
+            "filename": image_name,
+            "type": mimetypes.guess_type(image_name)[0] or "image/*",
+            "uploaded_at": (product.updated_at or product.created_at).isoformat(),
+            "is_image": True,
+            "owner_name": f"Catalogue: {product.title}",
+            "download_url": product.image.url,
+            "view_url": product.image.url,
+            "can_delete": False,
+            "source": "whatsapp_automation",
+        })
+
+    for card in DigitalCardEntry.objects.filter(organization=org).order_by("-updated_at", "-created_at"):
+        if card.logo_image_data:
+            mime = card.logo_image_data[5:].split(";", 1)[0].strip().lower() if card.logo_image_data.startswith("data:") else "image/*"
+            ext = mimetypes.guess_extension(mime) or ".png"
+            wa_items.append({
+                "id": f"wa-digital-card-logo-{card.id}",
+                "filename": f"{(card.public_slug or f'card-{card.id}')}-logo{ext}",
+                "type": mime or "image/*",
+                "uploaded_at": (card.updated_at or card.created_at).isoformat(),
+                "is_image": True,
+                "owner_name": f"Digital Card: {card.card_title or card.person_name or card.public_slug}",
+                "download_url": card.logo_image_data,
+                "view_url": card.logo_image_data,
+                "can_delete": False,
+                "source": "whatsapp_automation",
+            })
+        if card.hero_banner_image_data:
+            mime = card.hero_banner_image_data[5:].split(";", 1)[0].strip().lower() if card.hero_banner_image_data.startswith("data:") else "image/*"
+            ext = mimetypes.guess_extension(mime) or ".png"
+            wa_items.append({
+                "id": f"wa-digital-card-banner-{card.id}",
+                "filename": f"{(card.public_slug or f'card-{card.id}')}-banner{ext}",
+                "type": mime or "image/*",
+                "uploaded_at": (card.updated_at or card.created_at).isoformat(),
+                "is_image": True,
+                "owner_name": f"Digital Card Banner: {card.card_title or card.person_name or card.public_slug}",
+                "download_url": card.hero_banner_image_data,
+                "view_url": card.hero_banner_image_data,
+                "can_delete": False,
+                "source": "whatsapp_automation",
+            })
+
+    items = sorted(wa_items, key=lambda row: row.get("uploaded_at") or "", reverse=True)
     return JsonResponse({
-        "items": [
-            {
-                "id": str(item.id),
-                "filename": item.original_filename,
-                "type": item.content_type or mimetypes.guess_type(item.original_filename or "")[0] or "application/octet-stream",
-                "uploaded_at": item.created_at.isoformat(),
-                "is_image": _is_inline_previewable(item),
-                "owner_name": (item.owner.get_full_name() or item.owner.username or "").strip(),
-                "download_url": f"/api/storage/files/{item.id}/download",
-                "view_url": f"/api/storage/files/{item.id}/download?disposition=inline" if _is_inline_previewable(item) else "",
-            }
-            for item in items
-        ]
+        "items": items
     })
 
 
@@ -697,7 +755,11 @@ def download_file(request, file_id):
     org, error = _get_org_or_error(request)
     if error:
         return error
-    _, sub_error = _require_active_subscription(org, allow_readonly=True)
+    _, sub_error = _require_active_subscription(
+        org,
+        allow_readonly=True,
+        allow_product_slugs=("whatsapp-automation",),
+    )
     if sub_error:
         return sub_error
     allow_all = is_org_admin(request.user)
@@ -888,7 +950,10 @@ def delete_file(request, file_id):
     org, error = _get_org_or_error(request)
     if error:
         return error
-    _, sub_error = _require_active_subscription(org)
+    _, sub_error = _require_active_subscription(
+        org,
+        allow_product_slugs=("whatsapp-automation",),
+    )
     if sub_error:
         return sub_error
     allow_all = is_org_admin(request.user)
