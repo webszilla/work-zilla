@@ -116,6 +116,7 @@ export default function OrgInboxPage() {
   const [createTicketForm, setCreateTicketForm] = useState({
     name: "",
     category: "support",
+    priority: "medium",
     subject: "",
     productSlug: currentProductSlug,
     message: "",
@@ -357,7 +358,7 @@ export default function OrgInboxPage() {
       const formData = buildTicketFormData({
         category: createTicketForm.category,
         subject,
-        message: `Name: ${requesterName}\n\n${message}`,
+        message: `Name: ${requesterName}\nPriority: ${titleCase(createTicketForm.priority || "medium")}\n\n${message}`,
         productSlug: createTicketForm.productSlug || currentProductSlug,
         attachments: createTicketForm.files,
       });
@@ -365,6 +366,7 @@ export default function OrgInboxPage() {
       setCreateTicketForm((prev) => ({
         name: "",
         category: "support",
+        priority: "medium",
         subject: "",
         productSlug: prev.productSlug || currentProductSlug,
         message: "",
@@ -584,8 +586,21 @@ export default function OrgInboxPage() {
                         />
                         <div className="small text-secondary mt-1">Up to 5 images, max 2MB each.</div>
                       </div>
-                      <div className="col-12 col-md-6 d-flex align-items-end">
-                        <div className="d-flex gap-2 flex-wrap w-100">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Priority</label>
+                        <select
+                          className="form-select"
+                          value={createTicketForm.priority || "medium"}
+                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, priority: event.target.value }))}
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="urgent">Urgent</option>
+                        </select>
+                      </div>
+                      <div className="col-12">
+                        <div className="d-flex gap-2 flex-wrap">
                           <button type="submit" className="btn btn-primary btn-sm" disabled={createTicketState.saving}>
                             {createTicketState.saving ? "Creating..." : "Create Ticket"}
                           </button>
