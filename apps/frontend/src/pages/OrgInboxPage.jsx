@@ -114,6 +114,7 @@ export default function OrgInboxPage() {
   const [ticketCategoryFilter, setTicketCategoryFilter] = useState("");
   const [showCreateTicket, setShowCreateTicket] = useState(false);
   const [createTicketForm, setCreateTicketForm] = useState({
+    name: "",
     category: "support",
     subject: "",
     productSlug: currentProductSlug,
@@ -339,10 +340,11 @@ export default function OrgInboxPage() {
 
   async function handleCreateTicket(event) {
     event.preventDefault();
+    const requesterName = String(createTicketForm.name || "").trim();
     const subject = String(createTicketForm.subject || "").trim();
     const message = String(createTicketForm.message || "").trim();
-    if (!subject || !message) {
-      setCreateTicketState({ saving: false, error: "Subject and message are required.", success: "" });
+    if (!requesterName || !subject || !message) {
+      setCreateTicketState({ saving: false, error: "Name, subject and message are required.", success: "" });
       return;
     }
     const fileError = validateImageFiles(createTicketForm.files);
@@ -355,12 +357,13 @@ export default function OrgInboxPage() {
       const formData = buildTicketFormData({
         category: createTicketForm.category,
         subject,
-        message,
+        message: `Name: ${requesterName}\n\n${message}`,
         productSlug: createTicketForm.productSlug || currentProductSlug,
         attachments: createTicketForm.files,
       });
       await createOrgTicket(formData);
       setCreateTicketForm((prev) => ({
+        name: "",
         category: "support",
         subject: "",
         productSlug: prev.productSlug || currentProductSlug,
@@ -520,64 +523,77 @@ export default function OrgInboxPage() {
               <h6 className="mb-3">Create Ticket</h6>
               <form className="d-flex flex-column gap-3" onSubmit={handleCreateTicket}>
                 <div className="row g-3">
-                  <div className="col-12 col-lg-3">
-                    <label className="form-label small text-secondary mb-1">Type</label>
-                    <select
-                      className="form-select"
-                      value={createTicketForm.category}
-                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, category: event.target.value }))}
-                    >
-                      <option value="support">Support</option>
-                      <option value="sales">Sales</option>
-                    </select>
+                  <div className="col-12 col-lg-5 d-flex flex-column gap-3">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={createTicketForm.name}
+                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, name: event.target.value }))}
+                        placeholder="Enter your name"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Type</label>
+                      <select
+                        className="form-select"
+                        value={createTicketForm.category}
+                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, category: event.target.value }))}
+                      >
+                        <option value="support">Support</option>
+                        <option value="sales">Sales</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Subject</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={createTicketForm.subject}
+                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
+                        placeholder="Enter ticket subject"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Product</label>
+                      <select
+                        className="form-select"
+                        value={createTicketForm.productSlug || ""}
+                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
+                      >
+                        {ticketProductOptions.map((item) => (
+                          <option key={item.slug} value={item.slug}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Attachment</label>
+                      <input
+                        type="file"
+                        className="form-control"
+                        accept="image/*"
+                        multiple
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files || []);
+                          setCreateTicketForm((prev) => ({ ...prev, files }));
+                        }}
+                      />
+                      <div className="small text-secondary mt-1">Up to 5 images, max 2MB each.</div>
+                    </div>
                   </div>
-                  <div className="col-12 col-lg-5">
-                    <label className="form-label small text-secondary mb-1">Subject</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={createTicketForm.subject}
-                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
-                      placeholder="Enter ticket subject"
+                  <div className="col-12 col-lg-7 d-flex flex-column">
+                    <label className="form-label small text-secondary mb-1">Message</label>
+                    <textarea
+                      className="form-control flex-grow-1"
+                      rows={12}
+                      value={createTicketForm.message}
+                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, message: event.target.value }))}
+                      placeholder="Describe your issue"
                     />
                   </div>
-                  <div className="col-12 col-lg-4">
-                    <label className="form-label small text-secondary mb-1">Product</label>
-                    <select
-                      className="form-select"
-                      value={createTicketForm.productSlug || ""}
-                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
-                    >
-                      {ticketProductOptions.map((item) => (
-                        <option key={item.slug} value={item.slug}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="form-label small text-secondary mb-1">Message</label>
-                  <textarea
-                    className="form-control"
-                    rows={4}
-                    value={createTicketForm.message}
-                    onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, message: event.target.value }))}
-                    placeholder="Describe your issue"
-                  />
-                </div>
-                <div>
-                  <label className="form-label small text-secondary mb-1">Attach Images (up to 5, max 2MB each)</label>
-                  <input
-                    type="file"
-                    className="form-control"
-                    accept="image/*"
-                    multiple
-                    onChange={(event) => {
-                      const files = Array.from(event.target.files || []);
-                      setCreateTicketForm((prev) => ({ ...prev, files }));
-                    }}
-                  />
                 </div>
                 {createTicketState.error ? <div className="alert alert-danger py-2 mb-0">{createTicketState.error}</div> : null}
                 <div className="d-flex gap-2">
