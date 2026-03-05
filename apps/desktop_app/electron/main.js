@@ -33,6 +33,7 @@ const syncService = new SyncService();
 let monitorProcess = null;
 let monitorHeartbeatTimer = null;
 let monitorCaptureTimer = null;
+let monitorSettingsTimer = null;
 let monitorCaptureInFlight = false;
 let monitorCaptureIntervalMs = 5 * 60 * 1000;
 let connectivityTimer = null;
@@ -225,16 +226,26 @@ public class WinApi {
 }
 "@
 $h=[WinApi]::GetForegroundWindow()
-if ($h -eq [IntPtr]::Zero) { Write-Output ""; exit 0 }
+if ($h -eq [IntPtr]::Zero) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  Write-Output '{"appName":"","windowTitle":"","url":""}'
+  exit 0
+}
 $sb=New-Object System.Text.StringBuilder 1024
 [WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
-$pid=0
-[WinApi]::GetWindowThreadProcessId($h,[ref]$pid) | Out-Null
+$windowPid=[uint32]0
+[WinApi]::GetWindowThreadProcessId($h,[ref]$windowPid) | Out-Null
 $app=""
-if ($pid -gt 0) {
-  try { $app=(Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch {}
+if ($windowPid -gt 0) {
+  try { $app=(Get-Process -Id $windowPid -ErrorAction Stop).ProcessName } catch {}
 }
-Write-Output ($app + "\\t" + $sb.ToString())
+$obj = [PSCustomObject]@{
+  appName = $app
+  windowTitle = $sb.ToString()
+  url = ""
+}
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Write-Output ($obj | ConvertTo-Json -Compress)
 `;
     const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
       encoding: "utf8",
@@ -244,8 +255,12 @@ Write-Output ($app + "\\t" + $sb.ToString())
     if (!output) {
       return { appName: "", windowTitle: "", url: "" };
     }
-    const [appName = "", windowTitle = ""] = output.split("\t");
-    return { appName: appName.trim(), windowTitle: windowTitle.trim(), url: "" };
+    const parsed = JSON.parse(output);
+    return {
+      appName: String(parsed?.appName || "").trim(),
+      windowTitle: String(parsed?.windowTitle || "").trim(),
+      url: String(parsed?.url || "").trim()
+    };
   } catch {
     return { appName: "", windowTitle: "", url: "" };
   }
@@ -1426,23 +1441,9 @@ async function startMonitorWithAuth() {
     }
   };
   setupHeartbeat();
-  if (process.platform === "darwin") {
-    try {
-      const intervalSettings = loadSettings();
-      const result = await getMonitorSettings({
-        companyKey: resolveCompanyKey(intervalSettings),
-        deviceId: intervalSettings.deviceId || "",
-        employeeId: intervalSettings.employeeId || null
-      });
-      const intervalSeconds = Number(result?.screenshot_interval_seconds || 0);
-      if (Number.isFinite(intervalSeconds) && intervalSeconds > 0) {
-        monitorCaptureIntervalMs = Math.max(15000, intervalSeconds * 1000);
-      }
-    } catch {
-      // ignore monitor settings errors
-    }
-  }
+  await syncMonitorCaptureIntervalFromServer();
   const status = startMonitorProcess();
+  startMonitorSettingsSync();
   if (status === "unsupported") {
     return { ok: true, status };
   }
@@ -1544,6 +1545,45 @@ function scheduleWindowsCapture(intervalMs) {
   monitorCaptureTimer = setInterval(() => {
     captureOnceWindows();
   }, intervalMs);
+}
+
+async function syncMonitorCaptureIntervalFromServer() {
+  try {
+    const intervalSettings = loadSettings();
+    const result = await getMonitorSettings({
+      companyKey: resolveCompanyKey(intervalSettings),
+      deviceId: intervalSettings.deviceId || "",
+      employeeId: intervalSettings.employeeId || null
+    });
+    const intervalSeconds = Number(result?.screenshot_interval_seconds || 0);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+      return;
+    }
+    const nextIntervalMs = Math.max(15000, intervalSeconds * 1000);
+    if (nextIntervalMs === monitorCaptureIntervalMs) {
+      return;
+    }
+    monitorCaptureIntervalMs = nextIntervalMs;
+    if (monitorCaptureTimer) {
+      if (process.platform === "darwin") {
+        scheduleMacCapture(monitorCaptureIntervalMs);
+      } else if (process.platform === "win32") {
+        scheduleWindowsCapture(monitorCaptureIntervalMs);
+      }
+    }
+  } catch {
+    // ignore monitor settings errors
+  }
+}
+
+function startMonitorSettingsSync() {
+  if (monitorSettingsTimer) {
+    clearInterval(monitorSettingsTimer);
+    monitorSettingsTimer = null;
+  }
+  monitorSettingsTimer = setInterval(() => {
+    syncMonitorCaptureIntervalFromServer();
+  }, 60000);
 }
 
 async function captureOnceMacElectron() {
@@ -1709,6 +1749,10 @@ function startMonitorProcess() {
 }
 
 function stopMonitorProcess() {
+  if (monitorSettingsTimer) {
+    clearInterval(monitorSettingsTimer);
+    monitorSettingsTimer = null;
+  }
   if (monitorCaptureTimer) {
     clearInterval(monitorCaptureTimer);
     monitorCaptureTimer = null;

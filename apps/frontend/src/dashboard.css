@@ -4207,6 +4207,55 @@ html[data-theme="light"] .shot-select{
   padding:0 2px;
 }
 
+.dashboard-page-analytics .dashboard-admin-activity-card .table-footer{
+  margin-top:14px;
+}
+.dashboard-page-analytics .dashboard-admin-activity-card .table-pagination{
+  gap:10px;
+}
+.dashboard-page-analytics .dashboard-admin-activity-card .table-pagination .shot-btn{
+  min-width:92px;
+  border-radius:10px;
+  padding:6px 12px;
+}
+.dashboard-page-analytics .dashboard-admin-activity-card .table-page-links{
+  gap:8px;
+}
+.dashboard-page-analytics .dashboard-admin-activity-card .table-page-link{
+  min-width:36px;
+  height:34px;
+  border-radius:10px;
+  padding:0 10px;
+  font-size:12px;
+  font-weight:700;
+}
+.dashboard-page-analytics .dashboard-admin-activity-card .table-page-link.active{
+  color:#081a2c;
+  border-color:var(--color-primary, #22c55e);
+  background:var(--color-primary, #22c55e);
+  box-shadow:0 10px 20px rgba(34, 197, 94, 0.25);
+}
+.dashboard-page-analytics .dashboard-summary-grid{
+  align-items:stretch;
+}
+.dashboard-page-analytics .dashboard-summary-card{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.dashboard-page-analytics .dashboard-summary-card h5{
+  margin-bottom:4px;
+}
+.dashboard-page-analytics .dashboard-summary-card .monitor-summary-row{
+  margin-bottom:0;
+}
+.dashboard-page-analytics .dashboard-summary-card .monitor-summary-row:last-child{
+  margin-bottom:0;
+}
+html[data-theme="light"] .dashboard-page-analytics .dashboard-admin-activity-card .table-page-link.active{
+  color:#ffffff;
+}
+
 .modal-overlay{
   position:fixed;
   inset:0;
@@ -4460,6 +4509,19 @@ html[data-theme="light"] .product-admin-link.active{
   }
   .table-search input{
     width:100%;
+  }
+  .dashboard-page-analytics .dashboard-admin-activity-card .table-footer{
+    align-items:flex-start;
+  }
+  .dashboard-page-analytics .dashboard-admin-activity-card .table-pagination{
+    width:100%;
+    justify-content:flex-start;
+  }
+  .dashboard-page-analytics .dashboard-admin-activity-card .table-pagination .shot-btn{
+    min-width:84px;
+  }
+  .dashboard-page-analytics .dashboard-admin-activity-card .table-page-link{
+    min-width:34px;
   }
   .screen-layout{
     grid-template-columns:1fr;

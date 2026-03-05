@@ -486,6 +486,55 @@ def _is_monitor_placeholder(app_name, window_title):
     return app in {"", "work zilla agent"} and title in {"", "monitor active"}
 
 
+def _infer_activity_app_name(window_title, url):
+    title = (window_title or "").strip().lower()
+    page = (url or "").strip().lower()
+    if "chrome" in title:
+        return "Chrome"
+    if "edge" in title:
+        return "Microsoft Edge"
+    if "firefox" in title:
+        return "Firefox"
+    if "safari" in title:
+        return "Safari"
+    if page.startswith("http://") or page.startswith("https://"):
+        return "Browser"
+    if "illustrator" in title or ".ai" in title:
+        return "Illustrator"
+    if "photoshop" in title or ".psd" in title:
+        return "Photoshop"
+    if "excel" in title or re.search(r"\.(xlsx|xls|csv)\b", title):
+        return "Excel"
+    if "word" in title or re.search(r"\.(docx|doc)\b", title):
+        return "Word"
+    if "notepad" in title or re.search(r"\.txt\b", title):
+        return "Text Editor"
+    return ""
+
+
+def _normalize_monitor_activity(app_name, window_title, url):
+    normalized_app_name = (app_name or "").strip()
+    normalized_window_title = (window_title or "").strip()
+    app_key = normalized_app_name.lower()
+    title_key = normalized_window_title.lower()
+    shell_apps = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+    shell_title_markers = {"powershell", "pwsh", "command prompt", "terminal"}
+    if app_key in shell_apps and title_key:
+        if not any(marker in title_key for marker in shell_title_markers):
+            inferred_app = _infer_activity_app_name(normalized_window_title, url)
+            if inferred_app:
+                normalized_app_name = inferred_app
+    if not normalized_app_name:
+        inferred_app = _infer_activity_app_name(normalized_window_title, url)
+        if inferred_app:
+            normalized_app_name = inferred_app
+    if not normalized_app_name:
+        normalized_app_name = "Work Zilla Agent"
+    if not normalized_window_title:
+        normalized_window_title = "Monitor Active"
+    return normalized_app_name, normalized_window_title
+
+
 def _normalize_keywords(value):
     keywords = []
     for raw_line in (value or "").splitlines():
@@ -923,6 +972,13 @@ def upload_activity(request):
                 activity_time = parsed
         data["start_time"] = activity_time
         data["end_time"] = activity_time
+        normalized_app_name, normalized_window_title = _normalize_monitor_activity(
+            data.get("app_name"),
+            data.get("window_title"),
+            data.get("url"),
+        )
+        data["app_name"] = normalized_app_name
+        data["window_title"] = normalized_window_title
 
         serializer = ActivitySerializer(data=data)
 
@@ -1104,8 +1160,11 @@ def upload_screenshot(request):
 
         image.name = _build_screenshot_filename(employee, pc_captured_at or timezone.now(), image.name)
         captured_at_for_activity = pc_captured_at or timezone.now()
-        normalized_app_name = app_name or "Work Zilla Agent"
-        normalized_window_title = window_title or "Monitor Active"
+        normalized_app_name, normalized_window_title = _normalize_monitor_activity(
+            app_name,
+            window_title,
+            url,
+        )
         try:
             Screenshot.objects.create(
                 employee=employee,
@@ -1265,11 +1324,16 @@ def monitor_heartbeat(request):
         window_title = (request.data.get("window_title") or "").strip()
         url = (request.data.get("url") or "").strip()
         if app_name or window_title or url:
-            if not _is_monitor_placeholder(app_name, window_title):
+            normalized_app_name, normalized_window_title = _normalize_monitor_activity(
+                app_name,
+                window_title,
+                url,
+            )
+            if not _is_monitor_placeholder(normalized_app_name, normalized_window_title):
                 Activity.objects.create(
                     employee=employee,
-                    app_name=app_name or "Work Zilla Agent",
-                    window_title=window_title or "Monitor Active",
+                    app_name=normalized_app_name,
+                    window_title=normalized_window_title,
                     url=url,
                     start_time=now,
                     end_time=now,

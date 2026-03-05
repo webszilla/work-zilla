@@ -231,7 +231,7 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
   }
 
   return (
-    <>
+    <div className="dashboard-page-analytics">
       <h2 className="page-title">Dashboard Analytics</h2>
       <hr className="section-divider" />
 
@@ -260,7 +260,7 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
       </div>
 
       {!isReadOnly ? (
-        <div className="card p-4 mt-4">
+        <div className="card p-4 mt-4 dashboard-admin-activity-card">
           <h4>Admin Activity (Last 100)</h4>
           <div className="table-controls">
             <div className="table-length">Show {PAGE_SIZE} entries</div>
@@ -317,9 +317,9 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
         </div>
       ) : null}
 
-      <div className="row g-3 mt-2">
+      <div className="row g-3 mt-2 dashboard-summary-grid">
         <div className="col-12 col-lg-4">
-          <div className="card p-3 h-100 monitor-summary-card">
+          <div className="card p-3 h-100 monitor-summary-card dashboard-summary-card">
             <h5>Company Details</h5>
             <div className="monitor-summary-row">
               <span>Name</span>
@@ -336,7 +336,7 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
           </div>
         </div>
         <div className="col-12 col-lg-4">
-          <div className="card p-3 h-100 monitor-summary-card">
+          <div className="card p-3 h-100 monitor-summary-card dashboard-summary-card">
             <h5>Subscription</h5>
             {subscription ? (
               <>
@@ -363,7 +363,7 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
           </div>
         </div>
         <div className="col-12 col-lg-4">
-          <div className="card p-3 h-100 monitor-summary-card">
+          <div className="card p-3 h-100 monitor-summary-card dashboard-summary-card">
             <h5>Screenshot Interval</h5>
             <div className="monitor-summary-row monitor-summary-row--accent">
               <span>Current Interval</span>
@@ -477,6 +477,6 @@ export default function DashboardPage({ productSlug = "", subscriptions = [] }) 
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

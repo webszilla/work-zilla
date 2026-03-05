@@ -514,7 +514,7 @@ def bootstrap_products_config(request):
 
 def _normalize_product_slug(value, default="monitor"):
     slug = (value or "").strip().lower()
-    if slug == "worksuite":
+    if slug in {"worksuite", "work-suite"}:
         return "monitor"
     return slug or default
 
@@ -1376,6 +1376,26 @@ def checkout_confirm(request):
         addon_count = 0
 
     org = _resolve_org_for_user(request.user)
+    plan_product_slug = _normalize_product_slug(plan.product.slug if plan and plan.product else "", default="")
+    pending_transfers = PendingTransfer.objects.filter(
+        organization=org,
+        status="pending",
+        request_type__in=("new", "renew"),
+    )
+    if plan_product_slug == "monitor":
+        pending_transfers = pending_transfers.filter(
+            Q(plan__product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(plan__product__isnull=True)
+        )
+    elif plan_product_slug:
+        pending_transfers = pending_transfers.filter(plan__product__slug=plan_product_slug)
+    existing_pending = pending_transfers.order_by("-created_at").first()
+    if existing_pending:
+        messages.info(
+            request,
+            "This plan payment is already pending approval. Please wait for admin approval or create a ticket in My Account.",
+        )
+        return redirect(f"/my-account/bank-transfer/{existing_pending.id}/")
+
     profile = BillingProfile.objects.filter(organization=org).first()
     if not _billing_profile_complete(profile):
         messages.error(request, "Please complete company billing details before checkout.")

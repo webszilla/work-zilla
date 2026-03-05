@@ -96,7 +96,7 @@ def _normalize_product_slug(value, default=""):
     slug = str(value or "").strip().lower()
     if not slug:
         return default
-    if slug == "worksuite":
+    if slug in {"worksuite", "work-suite"}:
         return "monitor"
     if slug in ("online-storage",):
         return "storage"
@@ -5078,7 +5078,7 @@ def plans_subscribe(request, plan_id):
     if existing_transfer:
         return JsonResponse({
             "redirect": f"/my-account/bank-transfer/{existing_transfer.id}/",
-            "message": "Previous payment for this product is still pending. Contact admin or create a ticket in My Account.",
+            "message": "This plan payment is already pending approval. Please wait for admin approval or create a ticket in My Account.",
         })
 
     request.session["pending_transfer_data"] = {
@@ -5224,6 +5224,26 @@ def bank_transfer_submit(request, transfer_id=None):
     plan = Plan.objects.filter(id=plan_id).first()
     if not plan:
         return _json_error("plan_not_found", status=404)
+
+    existing_transfer_qs = PendingTransfer.objects.filter(
+        organization=org,
+        status="pending",
+        request_type__in=("new", "renew"),
+    )
+    plan_product_slug = _normalize_product_slug(getattr(getattr(plan, "product", None), "slug", ""), default="")
+    if plan_product_slug == "monitor":
+        existing_transfer_qs = existing_transfer_qs.filter(
+            Q(plan__product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(plan__product__isnull=True)
+        )
+    elif plan_product_slug:
+        existing_transfer_qs = existing_transfer_qs.filter(plan__product__slug=plan_product_slug)
+    existing_transfer = existing_transfer_qs.order_by("-created_at").first()
+    if existing_transfer:
+        return _json_error(
+            "This plan payment is already pending approval. Please wait for admin approval or create a ticket in My Account.",
+            status=409,
+            extra={"redirect": f"/my-account/bank-transfer/{existing_transfer.id}/"},
+        )
 
     PendingTransfer.objects.create(
         organization=org,
