@@ -16,9 +16,18 @@ function formatValue(value) {
 }
 
 export default function SaasAdminBillingPage() {
+  const initialTransferFilter = useMemo(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    const params = new URLSearchParams(window.location.search);
+    const product = String(params.get("product") || "").trim();
+    const status = String(params.get("status") || "").trim();
+    return [product, status].filter(Boolean).join(" ").trim();
+  }, []);
   const [state, setState] = useState(emptyState);
-  const [billingTransferSearchTerm, setBillingTransferSearchTerm] = useState("");
-  const [billingTransferSearchQuery, setBillingTransferSearchQuery] = useState("");
+  const [billingTransferSearchTerm, setBillingTransferSearchTerm] = useState(initialTransferFilter);
+  const [billingTransferSearchQuery, setBillingTransferSearchQuery] = useState(initialTransferFilter);
   const [billingTransferPage, setBillingTransferPage] = useState(1);
   const [billingSubSearchTerm, setBillingSubSearchTerm] = useState("");
   const [billingSubSearchQuery, setBillingSubSearchQuery] = useState("");
@@ -51,6 +60,20 @@ export default function SaasAdminBillingPage() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const hash = String(window.location.hash || "").toLowerCase();
+    if (hash !== "#billing-activity") {
+      return;
+    }
+    const node = document.getElementById("billing-activity");
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, []);
 
   useEffect(() => {
@@ -225,7 +248,7 @@ export default function SaasAdminBillingPage() {
     <>
       <h3 className="page-title">Billing</h3>
 
-      <div className="mt-3">
+      <div className="mt-3" id="billing-activity">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
           <h5 className="mb-0">Billing Activity</h5>
           <label className="table-search" htmlFor="saas-billing-transfer-search">
@@ -244,7 +267,6 @@ export default function SaasAdminBillingPage() {
             <thead>
               <tr>
                 <th>Organization</th>
-                <th>Owner</th>
                 <th>Email</th>
                 <th>Product</th>
                 <th>Plan</th>
@@ -262,7 +284,6 @@ export default function SaasAdminBillingPage() {
                 billingTransfersPaged.paged.map((row) => (
                   <tr key={row.id}>
                     <td>{row.organization || "-"}</td>
-                    <td>{row.owner_name || "-"}</td>
                     <td>{row.owner_email || "-"}</td>
                     <td>{row.product || "-"}</td>
                     <td>{row.plan || "-"}</td>
@@ -298,7 +319,7 @@ export default function SaasAdminBillingPage() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="12">No billing activity found.</td>
+                  <td colSpan="11">No billing activity found.</td>
                 </tr>
               )}
             </tbody>
@@ -346,7 +367,6 @@ export default function SaasAdminBillingPage() {
                 <th>Cycle</th>
                 <th>Start</th>
                 <th>End</th>
-                <th>Created</th>
                 <th>User</th>
                 <th>Email</th>
               </tr>
@@ -362,14 +382,13 @@ export default function SaasAdminBillingPage() {
                     <td>{row.billing_cycle || "-"}</td>
                     <td>{row.start_date || "-"}</td>
                     <td>{row.end_date || "-"}</td>
-                    <td>{row.created_at || "-"}</td>
                     <td>{row.user_name || "-"}</td>
                     <td>{row.user_email || "-"}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="10">No subscription history found.</td>
+                  <td colSpan="9">No subscription history found.</td>
                 </tr>
               )}
             </tbody>

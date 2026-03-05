@@ -510,7 +510,19 @@
       }
       if (productSlug === "whatsapp-automation") {
         const key = String(plan.name || "").toLowerCase();
+        const trialPro = key === "free" && String((plan.features || {}).trial_features || "").toLowerCase() === "pro";
         if (key === "free") {
+          if (trialPro) {
+            return [
+              "1 Company Digital Card",
+              "WhatsApp Catalogue",
+              "Basic Automation",
+              "Add-on Users (Digital Card)",
+              "Team Management",
+              "Advanced Automation Flows",
+              "Priority Support",
+            ];
+          }
           return [
             "1 Company Digital Card",
             "Basic WhatsApp Automation",
@@ -674,13 +686,14 @@
           : planKey.includes("pro")
             ? "pro"
             : "free";
+      const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
       const defaultsByTier = {
         free: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: false, addons: false, priority: false },
         starter: { card: true, catalogue: true, basicAuto: true, advancedAuto: false, team: true, addons: false, priority: false },
         growth: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: false },
         pro: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: true },
       };
-      const defaults = defaultsByTier[tier] || defaultsByTier.free;
+      const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
       const boolFrom = (keys, fallback) => {
         for (const key of keys) {
           if (typeof features[key] === "boolean") return features[key];
@@ -765,7 +778,7 @@
     function whatsappAutomationPlanDescription(planName) {
       const key = String(planName || "").toLowerCase();
       if (key === "free") {
-        return "Try WhatsApp Automation core features with one company digital card and starter automation setup.";
+        return "7-day free trial with all WhatsApp Automation features enabled. Upgrade after trial.";
       }
       if (key.includes("starter") || key.includes("basic")) {
         return "Digital Card + Catalogue + Automation in ONE Platform for teams getting started.";

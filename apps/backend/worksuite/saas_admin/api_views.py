@@ -1240,6 +1240,7 @@ def _apply_transfer(transfer):
         sub.retention_days = transfer.retention_days or (transfer.plan.retention_days if transfer.plan else 30)
         if transfer.plan and transfer.plan.allow_addons and transfer.addon_count is not None:
             sub.addon_count = transfer.addon_count
+            sub.addon_next_cycle_count = transfer.addon_count
         sub.save()
 
         _record_history(
@@ -1292,6 +1293,7 @@ def _apply_transfer(transfer):
         if sub:
             addon_delta = max(0, transfer.addon_count or 0)
             sub.addon_count = (sub.addon_count or 0) + addon_delta
+            sub.addon_next_cycle_count = sub.addon_count
             sub.addon_proration_amount = transfer.amount or 0
             sub.addon_last_proration_at = transfer.updated_at or now
             sub.save()

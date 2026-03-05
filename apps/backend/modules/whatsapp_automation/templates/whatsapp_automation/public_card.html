@@ -8,6 +8,8 @@
     :root{
       --theme: {{ theme_color }};
       --theme-secondary: {{ theme_secondary_color|default:"#0f172a" }};
+      --card-font-pt:{% if card_entry and card_entry.font_size_pt %}{{ card_entry.font_size_pt }}{% else %}16{% endif %};
+      --card-icon-pt:{% if card_entry and card_entry.icon_size_pt %}{{ card_entry.icon_size_pt }}{% else %}14{% endif %};
     }
     *{box-sizing:border-box}
     body{
@@ -19,7 +21,7 @@
       padding:24px 16px;
     }
     .card-shell{
-      width:min(100%, 420px);
+      width:min(100%, 380px);
       margin:0 auto;
     }
     .card{
@@ -71,6 +73,7 @@
       margin:-68px auto 14px;
       border:4px solid rgba(255,255,255,0.92);
       background:linear-gradient(135deg, rgba(255,255,255,0.28), rgba(15,23,42,0.16));
+      box-shadow:none;
       overflow:hidden;
       display:flex;
       align-items:center;
@@ -91,18 +94,20 @@
     }
     .identity h1{
       margin:0;
-      font-size:2.1rem;
-      line-height:1.12;
+      font-size:calc(var(--card-font-pt, 16) * 1px + 13px);
+      line-height:1.15;
       font-weight:800;
       text-shadow:0 2px 14px rgba(255,255,255,0.12);
     }
     .role{
       margin:6px 0 4px;
-      font-size:1.03rem;
+      font-size:calc(var(--card-font-pt, 16) * 1px - 1px);
       opacity:0.78;
     }
     .title{
-      font-size:1.1rem;
+      margin-top:12px;
+      text-align:center;
+      font-size:calc(var(--card-font-pt, 16) * 1px + 2px);
       line-height:1.2;
       font-weight:700;
     }
@@ -121,8 +126,8 @@
     .description{
       margin:16px 0 0;
       text-align:center;
-      font-size:0.97rem;
-      line-height:1.6;
+      font-size:calc(var(--card-font-pt, 16) * 1px - 2px);
+      line-height:1.55;
     }
     .socials{
       display:flex;
@@ -183,7 +188,7 @@
       gap:12px;
       padding:12px 14px;
       border-radius:16px;
-      font-size:0.95rem;
+      font-size:calc(var(--card-font-pt, 16) * 1px - 2px);
       line-height:1.45;
       text-decoration:none;
       color:inherit;
@@ -237,6 +242,12 @@
       justify-content:center;
       color:var(--theme);
       font-weight:900;
+    }
+    .detail-icon svg{
+      width:calc(var(--card-icon-pt, 14) * 1px);
+      height:calc(var(--card-icon-pt, 14) * 1px);
+      display:block;
+      fill:currentColor;
     }
     .section-title{
       margin:22px 0 12px;
@@ -386,7 +397,7 @@
     .card.design2 .avatar{
       margin:-94px 0 16px;
       border-radius:36px;
-      border-width:6px;
+      border-width:3px;
       border-color:color-mix(in srgb, var(--theme) 72%, #d1fae5);
       background:#0b1220;
     }
@@ -403,22 +414,29 @@
       color:#d1d5db;
       font-size:1.05rem;
     }
-    .card.design2 .title,
     .card.design2 .template-badge{
       display:none;
+    }
+    .card.design2 .title{
+      display:block;
+      text-align:left;
+      margin-top:14px;
+      margin-bottom:0;
+      font-size:calc(var(--card-font-pt, 16) * 1px + 1px);
+      color:#e8eef7;
     }
     .card.design2 .socials{
       display:grid;
       grid-template-columns:repeat(6, minmax(0, 1fr));
       gap:10px;
-      padding:16px 14px;
+      padding:12px 14px;
       border-radius:20px;
       border:1px solid color-mix(in srgb, var(--theme) 46%, rgba(255,255,255,0.14));
       background:linear-gradient(135deg, rgba(12,22,32,0.88), rgba(10,22,18,0.68));
     }
     .card.design2 .social-link{
       min-width:0;
-      min-height:48px;
+      min-height:40px;
       padding:0;
       border:none;
       background:transparent;
@@ -445,18 +463,16 @@
     .card.design2 .action{
       min-height:62px;
       align-items:center;
-      justify-content:space-between;
+      justify-content:center;
       padding:0 16px;
-      border-radius:16px;
+      border-radius:12px;
       background:linear-gradient(135deg, rgba(44,88,76,0.72), rgba(14,22,27,0.86));
       border:1px solid color-mix(in srgb, var(--theme) 34%, rgba(255,255,255,0.1));
       color:#f8fafc;
       text-align:center;
     }
     .card.design2 .action::after{
-      content:"↗";
-      font-size:1rem;
-      opacity:0.9;
+      content:none;
     }
     .card.design2 .action.is-primary{
       background:linear-gradient(135deg, color-mix(in srgb, var(--theme) 48%, #183329), color-mix(in srgb, var(--theme-secondary) 80%, #04060b));
@@ -564,7 +580,7 @@
       border-radius:24px;
       border-width:0;
       background:#f4b52d;
-      box-shadow:0 12px 32px rgba(190,135,16,0.18);
+      box-shadow:none;
     }
     .card.design4 .avatar-fallback{
       color:#ffffff;
@@ -820,7 +836,7 @@
       border-radius:22px;
       border-width:0;
       background:linear-gradient(135deg, #ef5d8d, color-mix(in srgb, var(--theme) 72%, #f6a623));
-      box-shadow:0 22px 42px rgba(216,98,119,0.24);
+      box-shadow:none;
     }
     .card.design7 .avatar-fallback{
       color:#ffffff;
@@ -1063,6 +1079,29 @@
       background:rgba(255,255,255,0.82);
       border-color:rgba(0,0,0,0.08);
     }
+
+    /* Keep all templates shadow-free for clean, flat rendering */
+    .card,
+    .card::before,
+    .card .hero::after,
+    .card .avatar,
+    .card .identity h1,
+    .card .template-badge,
+    .card .social-link,
+    .card .action,
+    .card .action::after,
+    .card .detail,
+    .card .scroll-section,
+    .card .catalogue-item,
+    .card .footer-action{
+      box-shadow:none !important;
+      text-shadow:none !important;
+    }
+    .card .hero::after{
+      content:none !important;
+      display:none !important;
+      background:transparent !important;
+    }
   </style>
 </head>
 <body>
@@ -1086,13 +1125,13 @@
           <p class="role">{% if card_entry and card_entry.role_title %}{{ card_entry.role_title }}{% else %}Business / Professional{% endif %}</p>
           <a
             class="template-badge"
-            href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if card_entry.website|default:company.website %}URL:{{ card_entry.website|default:company.website|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
+            href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if website_url %}URL:{{ website_url|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
             download="{% if card_entry and card_entry.person_name %}{{ card_entry.person_name|slugify }}{% else %}contact{% endif %}.vcf"
           >Save This Contact</a>
         </div>
 
-        {% if social_links_items %}
-          <div class="socials">
+        <div class="socials">
+          {% if social_links_items %}
             {% for link in social_links_items %}
               <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer" aria-label="{{ link.label }}">
                 {% if link.type == "custom" and link.custom_icon_data %}
@@ -1120,8 +1159,21 @@
                 {% endif %}
               </a>
             {% endfor %}
-          </div>
-        {% endif %}
+          {% else %}
+            <span class="social-link" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M13.5 21v-7h2.4l.4-3h-2.8V9.1c0-.9.3-1.6 1.7-1.6H16V4.8c-.2 0-.9-.1-1.8-.1-1.8 0-3.1 1.1-3.1 3.3V11H8.5v3h2.6v7h2.4z"/></svg>
+            </span>
+            <span class="social-link" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M6.94 8.5H4V20h2.94V8.5zM5.47 4A1.72 1.72 0 1 0 7.2 5.72 1.73 1.73 0 0 0 5.47 4zM20 12.77C20 9.86 18.45 8.5 16.38 8.5a3.56 3.56 0 0 0-3.2 1.76V8.5h-2.94V20h2.94v-6.39c0-1.68.32-3.3 2.4-3.3s2.1 1.94 2.1 3.41V20H20z"/></svg>
+            </span>
+            <span class="social-link" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M7.8 3h8.4A4.8 4.8 0 0 1 21 7.8v8.4a4.8 4.8 0 0 1-4.8 4.8H7.8A4.8 4.8 0 0 1 3 16.2V7.8A4.8 4.8 0 0 1 7.8 3zm0 1.8A3 3 0 0 0 4.8 7.8v8.4a3 3 0 0 0 3 3h8.4a3 3 0 0 0 3-3V7.8a3 3 0 0 0-3-3H7.8zm8.85 1.35a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1zM12 7.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 0 1 12 7.5zm0 1.8A2.7 2.7 0 1 0 14.7 12 2.7 2.7 0 0 0 12 9.3z"/></svg>
+            </span>
+            <span class="social-link" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M20.52 3.48A11.83 11.83 0 0 0 12.1.01C5.58.01.28 5.31.28 11.83A11.7 11.7 0 0 0 1.87 17.7L0 24l6.47-1.7a11.79 11.79 0 0 0 5.63 1.43h.01c6.52 0 11.82-5.3 11.82-11.82a11.75 11.75 0 0 0-3.41-8.43zM12.11 21.7a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.84 1.01 1.02-3.74-.24-.39a9.83 9.83 0 1 1 8.45 4.71zm5.4-7.36c-.29-.15-1.73-.85-2-1s-.47-.15-.67.15-.77 1-.95 1.2-.35.22-.64.07a8.02 8.02 0 0 1-2.36-1.45 8.92 8.92 0 0 1-1.63-2.04c-.17-.29 0-.44.13-.59.13-.13.29-.35.44-.52a2.06 2.06 0 0 0 .29-.49.54.54 0 0 0 0-.51c-.08-.15-.67-1.62-.92-2.22-.24-.58-.48-.5-.67-.51h-.57a1.09 1.09 0 0 0-.79.37 3.31 3.31 0 0 0-1 2.46 5.76 5.76 0 0 0 1.2 3.06 13.25 13.25 0 0 0 5.06 4.47 17.17 17.17 0 0 0 1.69.62 4.1 4.1 0 0 0 1.88.12 3.08 3.08 0 0 0 2.02-1.42 2.48 2.48 0 0 0 .17-1.42c-.07-.11-.26-.18-.55-.33z"/></svg>
+            </span>
+          {% endif %}
+        </div>
 
         <div class="title">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</div>
         <p class="description">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
@@ -1130,13 +1182,10 @@
           {% with phone=card_entry.phone|default:company.phone %}
           {% if phone %}<a class="action is-primary" href="tel:{{ phone }}">Call</a>{% endif %}
           {% endwith %}
-          {% with website=card_entry.website|default:company.website %}
-          {% if website %}<a class="action" href="{{ website }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
-          {% endwith %}
+          {% if website_url %}<a class="action" href="{{ website_url }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
           {% with wa_no=card_entry.whatsapp_number|default:company.whatsapp_number %}
           {% if wa_no %}<a class="action" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
           {% endwith %}
-          {% if catalogue_page %}<a class="action" href="/catalogue/{{ catalogue_page.public_slug }}/">Catalogue</a>{% endif %}
         </div>
 
         <div class="details">
@@ -1158,7 +1207,7 @@
             </span>
             <span>{{ card_entry.email|default:company.email|default:"-" }}</span>
           </a>
-          <a class="detail" href="{% if card_entry.website|default:company.website %}{% with site=card_entry.website|default:company.website %}{% if 'http://' in site or 'https://' in site %}{{ site }}{% else %}https://{{ site }}{% endif %}{% endwith %}{% endif %}" target="_blank" rel="noreferrer">
+          <a class="detail" href="{{ website_url }}" target="_blank" rel="noreferrer">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm7.9 9h-3.2a15.7 15.7 0 0 0-1.2-5A8 8 0 0 1 19.9 11zM12 4a13.7 13.7 0 0 1 1.9 7h-3.8A13.7 13.7 0 0 1 12 4zM8.5 6a15.7 15.7 0 0 0-1.2 5H4.1A8 8 0 0 1 8.5 6zM4.1 13h3.2a15.7 15.7 0 0 0 1.2 5A8 8 0 0 1 4.1 13zM12 20a13.7 13.7 0 0 1-1.9-7h3.8A13.7 13.7 0 0 1 12 20zm3.5-2a15.7 15.7 0 0 0 1.2-5h3.2a8 8 0 0 1-4.4 5z"/></svg>
             </span>

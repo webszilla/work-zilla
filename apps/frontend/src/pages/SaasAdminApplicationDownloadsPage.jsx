@@ -114,7 +114,7 @@ export default function SaasAdminApplicationDownloadsPage() {
           </div>
         ) : null}
 
-        <div className="row g-3 mt-1">
+        <div className="row g-3 mt-1 application-downloads__routes">
           {state.public_routes.map((route) => (
             <div className="col-12 col-md-6 col-xl-3" key={route.path}>
               <a className="card p-3 h-100 admin-feature-card" href={route.path} target="_blank" rel="noreferrer">

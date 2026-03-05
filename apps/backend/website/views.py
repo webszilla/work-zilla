@@ -31,6 +31,7 @@ from core.models import (
     Plan,
     Subscription,
     PendingTransfer,
+    Employee,
     UserProfile,
     BillingProfile,
     SubscriptionHistory,
@@ -1099,6 +1100,33 @@ def _active_subscription_for_product(org, product_slug):
     return qs.order_by("-start_date", "-id").first()
 
 
+def _subscription_next_cycle_addon_count(subscription):
+    if not subscription:
+        return 0
+    scheduled = getattr(subscription, "addon_next_cycle_count", None)
+    if scheduled is None:
+        scheduled = subscription.addon_count
+    try:
+        return max(0, int(scheduled or 0))
+    except (TypeError, ValueError):
+        return max(0, int(subscription.addon_count or 0))
+
+
+def _subscription_temporary_addon_window(subscription, now=None):
+    now = now or timezone.now()
+    if not subscription:
+        return {"extra": 0, "until": None}
+    active_addons = max(0, int(subscription.addon_count or 0))
+    scheduled_addons = _subscription_next_cycle_addon_count(subscription)
+    extra = max(0, active_addons - scheduled_addons)
+    if extra <= 0:
+        return {"extra": 0, "until": None}
+    until = getattr(subscription, "end_date", None)
+    if until and until <= now:
+        return {"extra": 0, "until": None}
+    return {"extra": extra, "until": until}
+
+
 def _addon_proration_preview(subscription, currency="inr", now=None, addon_delta=1):
     now = now or timezone.now()
     addon_delta = max(0, int(addon_delta or 0))
@@ -1294,6 +1322,7 @@ def subscription_start(request):
                 trial_end=trial_end,
                 billing_cycle=interval,
                 retention_days=plan.retention_days or 30,
+                addon_next_cycle_count=0,
             )
             SubscriptionHistory.objects.create(
                 organization=org,
@@ -1383,6 +1412,8 @@ def checkout_confirm(request):
             status="pending",
             billing_cycle=billing,
             retention_days=plan.retention_days or 30,
+            addon_count=addon_count if plan.allow_addons else 0,
+            addon_next_cycle_count=addon_count if plan.allow_addons else 0,
         )
         if storage_plan:
             if currency.lower() == "usd":
@@ -1453,7 +1484,7 @@ def billing_renew_start(request):
     request.session["renew_plan_id"] = latest.plan_id
     request.session["renew_currency"] = "inr"
     request.session["renew_billing"] = latest.billing_cycle or "monthly"
-    request.session["renew_addon_count"] = int(latest.addon_count or 0)
+    request.session["renew_addon_count"] = _subscription_next_cycle_addon_count(latest)
     request.session.modified = True
     return redirect("/my-account/billing/renew/")
 
@@ -1653,7 +1684,11 @@ def billing_addons_manage(request):
         messages.info(request, "Add-on users are not available for this plan.")
         return redirect("/my-account/")
 
+    now = timezone.now()
     current_addons = int(sub.addon_count or 0)
+    scheduled_addons = _subscription_next_cycle_addon_count(sub)
+    temporary_window = _subscription_temporary_addon_window(sub, now=now)
+    existing_user_count = Employee.objects.filter(org=org).count() if org else 0
     currency = ((request.GET.get("currency") or request.POST.get("currency") or "INR").strip().upper())
     if currency not in ("INR", "USD"):
         currency = "INR"
@@ -1669,26 +1704,43 @@ def billing_addons_manage(request):
         .first()
     )
 
-    target_addons = current_addons
+    target_addons = scheduled_addons
     if request.method == "POST":
         try:
-            target_addons = int(request.POST.get("target_addon_count") or current_addons)
+            target_addons = int(request.POST.get("target_addon_count") or scheduled_addons)
         except (TypeError, ValueError):
-            target_addons = current_addons
+            target_addons = scheduled_addons
         target_addons = max(0, target_addons)
-        if target_addons == current_addons:
+        if target_addons == scheduled_addons:
             messages.info(request, "No add-on user change detected.")
             return redirect(f"/my-account/billing/addons/?product={product_slug}")
 
         if target_addons < current_addons:
-            sub.addon_count = target_addons
-            sub.save(update_fields=["addon_count"])
-            reduced = current_addons - target_addons
-            messages.success(
-                request,
-                f"Reduced {reduced} add-on user{'s' if reduced != 1 else ''}. New add-on count: {target_addons}.",
-            )
-            return redirect("/my-account/billing/")
+            sub.addon_next_cycle_count = target_addons
+            sub.save(update_fields=["addon_next_cycle_count"])
+            reduced_for_next_cycle = current_addons - target_addons
+            if reduced_for_next_cycle > 0:
+                end_date = sub.end_date
+                if end_date:
+                    messages.success(
+                        request,
+                        f"Next billing add-on users set to {target_addons}. "
+                        f"You still have {reduced_for_next_cycle} extra add-on user seat{'s' if reduced_for_next_cycle != 1 else ''} available until {end_date.strftime('%d %b %Y')}.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        f"Next billing add-on users set to {target_addons}. You can still use up to {current_addons} add-on users in the current cycle.",
+                    )
+            else:
+                messages.success(request, "Next billing cycle add-on target updated.")
+            return redirect(f"/my-account/billing/addons/?product={product_slug}")
+
+        if target_addons <= current_addons:
+            sub.addon_next_cycle_count = target_addons
+            sub.save(update_fields=["addon_next_cycle_count"])
+            messages.success(request, f"Next billing add-on users updated to {target_addons}.")
+            return redirect(f"/my-account/billing/addons/?product={product_slug}")
 
         if pending_addon:
             messages.info(request, "An add-on payment request is already pending approval.")
@@ -1712,6 +1764,7 @@ def billing_addons_manage(request):
             status="draft",
             notes=(
                 f"{preview['description']} Current add-ons: {current_addons}. "
+                f"Current next-cycle add-ons: {scheduled_addons}. "
                 f"Requested total add-ons after approval: {target_addons}."
             ),
         )
@@ -1719,9 +1772,9 @@ def billing_addons_manage(request):
         return redirect(f"/my-account/bank-transfer/{transfer.id}/")
     else:
         try:
-            target_addons = int(request.GET.get("target") or current_addons)
+            target_addons = int(request.GET.get("target") or scheduled_addons)
         except (TypeError, ValueError):
-            target_addons = current_addons
+            target_addons = scheduled_addons
         target_addons = max(0, target_addons)
 
     addon_delta_preview = max(0, target_addons - current_addons)
@@ -1730,12 +1783,16 @@ def billing_addons_manage(request):
     context.update({
         "organization": org,
         "addon_subscription": sub,
+        "addon_existing_user_count": existing_user_count,
         "addon_current_count": current_addons,
+        "addon_scheduled_count": scheduled_addons,
         "addon_target_count": target_addons,
         "addon_delta_preview": addon_delta_preview,
         "addon_currency": currency,
         "addon_pending_transfer": pending_addon,
         "addon_proration_preview": preview,
+        "addon_temporary_extra_count": temporary_window["extra"],
+        "addon_temporary_extra_until": temporary_window["until"],
     })
     return render(request, "public/billing_addons.html", context)
 

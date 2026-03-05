@@ -643,11 +643,11 @@ export default function SaasAdminPage() {
           {products.map((product) => (
             <div className="col-12 col-md-6 col-xl-4 col-xxl-2" key={product.id}>
               <article className="card p-3 h-100 admin-feature-card saas-admin-product-card">
-                <div className="d-flex align-items-center gap-2 mb-2">
+                <div className="saas-admin-product-card__head mb-2">
                   <div className="stat-icon stat-icon-primary saas-admin-product-card__icon">
                     <i className={`bi ${product.icon || "bi-grid"}`} aria-hidden="true" />
                   </div>
-                  <h5 className="mb-0">{product.name}</h5>
+                  <h5 className="mb-0 saas-admin-product-card__title">{product.name}</h5>
                 </div>
                 <div className="d-flex align-items-center gap-2 mt-auto saas-admin-product-card__actions">
                   {product.status === "active" ? (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchInbox, markInboxRead, deleteInboxNotification } from "../api/saasAdminInbox.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
@@ -29,6 +30,7 @@ function truncate(value, length = 120) {
 }
 
 export default function SaasAdminInboxPage() {
+  const navigate = useNavigate();
   const [state, setState] = useState(emptyState);
   const [selectedId, setSelectedId] = useState(null);
   const [page, setPage] = useState(1);
@@ -158,6 +160,17 @@ export default function SaasAdminInboxPage() {
     }
   }
 
+  function getApprovalButtonMeta(item) {
+    const status = String(item?.approval_status || "").toLowerCase();
+    if (status === "approved") {
+      return { label: "Approved", className: "btn btn-primary btn-sm inbox-detail-btn" };
+    }
+    if (status === "rejected") {
+      return { label: "Rejected", className: "btn btn-primary btn-sm inbox-detail-btn" };
+    }
+    return { label: "Go to Approval", className: "btn btn-primary btn-sm inbox-detail-btn" };
+  }
+
   if (state.loading) {
     return (
       <div className="card p-4 text-center">
@@ -261,10 +274,25 @@ export default function SaasAdminInboxPage() {
                   ) : null}
                 </div>
                 <div className="inbox-detail-actions">
+                  {selectedItem.is_payment_notification ? (
+                    <button
+                      type="button"
+                      className={getApprovalButtonMeta(selectedItem).className}
+                      disabled={!selectedItem.approval_url}
+                      onClick={() => {
+                        if (!selectedItem.approval_url) {
+                          return;
+                        }
+                        navigate(selectedItem.approval_url);
+                      }}
+                    >
+                      {getApprovalButtonMeta(selectedItem).label}
+                    </button>
+                  ) : null}
                   {!selectedItem.is_read ? (
                     <button
                       type="button"
-                      className="btn btn-outline-light btn-sm"
+                      className="btn btn-primary btn-sm inbox-detail-btn"
                       onClick={() => markSelectedRead(selectedItem)}
                     >
                       Mark read
@@ -272,7 +300,7 @@ export default function SaasAdminInboxPage() {
                   ) : null}
                   <button
                     type="button"
-                    className="btn btn-danger btn-sm"
+                    className="btn btn-outline-danger btn-sm inbox-detail-btn inbox-detail-btn--danger"
                     onClick={() => handleDelete(selectedItem)}
                   >
                     Delete

@@ -832,6 +832,7 @@ class Subscription(models.Model):
     retention_months = models.PositiveSmallIntegerField(default=1)
     retention_days = models.PositiveSmallIntegerField(default=30)
     addon_count = models.PositiveSmallIntegerField(default=0)
+    addon_next_cycle_count = models.PositiveSmallIntegerField(null=True, blank=True)
     addon_proration_amount = models.FloatField(default=0)
     addon_last_proration_at = models.DateTimeField(null=True, blank=True)
 

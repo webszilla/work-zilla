@@ -38,6 +38,25 @@
           <strong>{{ addon_current_count }}</strong>
         </div>
         <div class="plan-summary__row">
+          <span>Existing Active Users</span>
+          <strong>{{ addon_existing_user_count }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Next Billing Add-on Users</span>
+          <strong>{{ addon_scheduled_count }}</strong>
+        </div>
+        <div class="plan-summary__row">
+          <span>Temporary Extra Add-ons</span>
+          <strong>
+            {% if addon_temporary_extra_count > 0 %}
+              {{ addon_temporary_extra_count }}
+              {% if addon_temporary_extra_until %}(usable until {{ addon_temporary_extra_until|date:"d M Y" }}){% endif %}
+            {% else %}
+              0
+            {% endif %}
+          </strong>
+        </div>
+        <div class="plan-summary__row">
           <span>Current Plan Expiry</span>
           <strong>{% if addon_subscription.end_date %}{{ addon_subscription.end_date|date:"d M Y" }}{% else %}-{% endif %}</strong>
         </div>
@@ -57,7 +76,12 @@
           <div class="form-field">
             <label>Target Add-on Users</label>
             <input type="number" name="target_addon_count" min="0" value="{{ addon_target_count|default:addon_current_count }}">
-            <small class="text-secondary">You can increase anytime (payment required) or reduce anytime.</small>
+            <small class="text-secondary">
+              Increase above {{ addon_current_count }} requires payment. Reductions are applied for next billing cycle.
+              {% if addon_temporary_extra_count > 0 and addon_temporary_extra_until %}
+                You can still use up to {{ addon_current_count }} add-on users until {{ addon_temporary_extra_until|date:"d M Y" }}.
+              {% endif %}
+            </small>
           </div>
           <div class="form-field">
             <label>Currency</label>
@@ -100,7 +124,7 @@
           </div>
         {% else %}
           <div class="alert alert-info mt-3">
-            Reduce users and submit to save immediately. Increase users and we will create an add-on payment request with proration.
+            Reduce users now to change next month billing. Increase users and we will create an add-on payment request with proration.
           </div>
         {% endif %}
 

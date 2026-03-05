@@ -16,6 +16,7 @@ def create_admin_notification(
     message="",
     event_type="system",
     organization=None,
+    product_slug="",
 ):
     if isinstance(organization, int):
         organization = Organization.objects.filter(id=organization).first()
@@ -28,6 +29,7 @@ def create_admin_notification(
         event_type=event_type or "system",
         audience="saas_admin",
         channel="system",
+        product_slug=(product_slug or "").strip(),
         organization=organization,
     )
 
@@ -120,6 +122,7 @@ def notify_payment_pending(transfer, message=""):
         message=message or details,
         event_type="payment_pending",
         organization=org,
+        product_slug=(product.slug if product else ""),
     )
 
 

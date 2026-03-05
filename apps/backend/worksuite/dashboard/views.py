@@ -271,6 +271,7 @@ def ensure_active_subscription(org):
         sub.retention_days = retention_days
         if latest_approved.plan and latest_approved.plan.allow_addons and latest_approved.addon_count is not None:
             sub.addon_count = latest_approved.addon_count
+            sub.addon_next_cycle_count = latest_approved.addon_count
         sub.save()
     else:
         sub = Subscription.objects.create(
@@ -283,6 +284,7 @@ def ensure_active_subscription(org):
             billing_cycle=latest_approved.billing_cycle,
             retention_days=retention_days,
             addon_count=latest_approved.addon_count or 0,
+            addon_next_cycle_count=latest_approved.addon_count or 0,
         )
     record_subscription_history(
         org=org,
@@ -2016,7 +2018,8 @@ def billing_page(request):
         update_fields = []
         if addon_total != (sub.addon_count or 0):
             sub.addon_count = addon_total
-            update_fields.append("addon_count")
+            sub.addon_next_cycle_count = addon_total
+            update_fields.extend(["addon_count", "addon_next_cycle_count"])
         if last_addon_approved:
             approved_at = last_addon_approved.updated_at or last_addon_approved.created_at
             if approved_at and (not sub.addon_last_proration_at or approved_at > sub.addon_last_proration_at):
@@ -2593,6 +2596,7 @@ def approve_transfer(request, transfer_id):
             sub.retention_days = transfer.retention_days or (transfer.plan.retention_days if transfer.plan else 30)
             if transfer.plan and transfer.plan.allow_addons and transfer.addon_count is not None:
                 sub.addon_count = transfer.addon_count
+                sub.addon_next_cycle_count = transfer.addon_count
             sub.save()
             record_subscription_history(
                 org=org,
@@ -2632,6 +2636,7 @@ def approve_transfer(request, transfer_id):
             if sub:
                 addon_delta = max(0, transfer.addon_count or 0)
                 sub.addon_count = (sub.addon_count or 0) + addon_delta
+                sub.addon_next_cycle_count = sub.addon_count
                 sub.addon_proration_amount = transfer.amount or 0
                 sub.addon_last_proration_at = transfer.updated_at or now
                 sub.save()

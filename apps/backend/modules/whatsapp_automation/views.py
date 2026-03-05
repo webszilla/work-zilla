@@ -3,6 +3,17 @@ from django.shortcuts import get_object_or_404, render
 from .models import CatalogueCategory, CataloguePage, CatalogueProduct, DigitalCard, DigitalCardEntry, WhatsappSettings
 
 
+def _normalize_external_url(raw):
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://", "mailto:", "tel:")):
+        return value
+    if value.startswith("//"):
+        return f"https:{value}"
+    return f"https://{value}"
+
+
 def _normalize_social_links_items(raw):
     if isinstance(raw, dict):
         source = raw.get("items") if isinstance(raw.get("items"), list) else [
@@ -23,7 +34,7 @@ def _normalize_social_links_items(raw):
             "type": str(row.get("type") or "preset").strip().lower() or "preset",
             "label": str(row.get("label") or row.get("icon") or "Link").strip(),
             "icon": str(row.get("icon") or "").strip().lower(),
-            "url": url,
+            "url": _normalize_external_url(url),
             "icon_size": max(12, min(64, int(row.get("icon_size") or 20))) if str(row.get("icon_size") or "").strip() else 20,
             "custom_icon_data": str(row.get("custom_icon_data") or "").strip(),
         })
@@ -95,6 +106,10 @@ def public_digital_card(request, public_slug):
         ),
         "logo_radius_px": (getattr(card_entry, "logo_radius_px", 28) if card_entry else 28) or 28,
         "social_links_items": _normalize_social_links_items(social_links_raw),
+        "website_url": _normalize_external_url(
+            (card_entry.website if card_entry and card_entry.website else "")
+            or (company_profile.website if company_profile else "")
+        ),
     }
     return render(request, "whatsapp_automation/public_card.html", context)
 

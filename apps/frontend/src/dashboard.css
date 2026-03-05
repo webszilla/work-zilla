@@ -1377,6 +1377,27 @@ html[data-theme="light"] .admin-feature-card{
 .inbox-detail-actions{
   display:flex;
   gap:8px;
+  align-items: center;
+}
+.inbox-detail-btn{
+  min-height: 32px;
+  padding: 0.42rem 0.88rem;
+  border-radius: 10px;
+  border-width: 1px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.app-shell .inbox-detail-btn--danger{
+  border-color: rgba(239, 68, 68, 0.34) !important;
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+.app-shell .inbox-detail-btn--danger:hover,
+.app-shell .inbox-detail-btn--danger:focus{
+  border-color: rgba(239, 68, 68, 0.46) !important;
+  color: #dc2626 !important;
+  background: rgba(239, 68, 68, 0.14) !important;
 }
 .inbox-detail-meta{
   font-size:12px;
@@ -1593,6 +1614,17 @@ html[data-theme="light"] .inbox-detail-body{
   border-color:#dbe2ef;
   color:#0f172a;
 }
+html[data-theme="light"] .app-shell .inbox-detail-btn--danger{
+  border-color: rgba(239, 68, 68, 0.24) !important;
+  color: #dc2626 !important;
+  background: rgba(239, 68, 68, 0.05) !important;
+}
+html[data-theme="light"] .app-shell .inbox-detail-btn--danger:hover,
+html[data-theme="light"] .app-shell .inbox-detail-btn--danger:focus{
+  border-color: rgba(239, 68, 68, 0.38) !important;
+  color: #b91c1c !important;
+  background: rgba(239, 68, 68, 0.11) !important;
+}
 html[data-theme="light"] .wa-catalogue-category-chip{
   background: rgba(255,255,255,0.92);
   border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.12);
@@ -1706,6 +1738,17 @@ html[data-theme="light"] .inbox-auto-refresh{
 .saas-admin-product-card{
   text-align: left;
   justify-content: space-between;
+}
+
+.saas-admin-product-card__head{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.saas-admin-product-card__title{
+  line-height: 1.2;
 }
 
 .saas-admin-product-card__actions{
@@ -1842,6 +1885,21 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   justify-content: center;
   min-width: 80px;
   text-align: center;
+}
+.application-downloads__routes .admin-feature-card{
+  min-height: 170px;
+  padding: 14px !important;
+}
+.application-downloads__routes .admin-feature-card .stat-icon{
+  width: 46px;
+  height: 46px;
+  margin-bottom: 10px;
+}
+.application-downloads__routes .admin-feature-card h5{
+  margin-bottom: 4px !important;
+}
+.application-downloads__routes .admin-feature-card p{
+  line-height: 1.35;
 }
 .digital-card-domain-panel{
   border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.18);
@@ -2053,6 +2111,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   overflow:hidden;
   border:4px solid rgba(255,255,255,0.92);
   background:linear-gradient(135deg, rgba(255,255,255,0.28), rgba(15, 23, 42, 0.16));
+  box-shadow:none;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -2078,6 +2137,8 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   opacity:0.78;
 }
 .digital-card-preview__title{
+  margin-top:12px;
+  text-align:center;
   font-size:calc(var(--card-font-pt, 16) * 1px + 2px);
   font-weight:700;
   line-height:1.2;
@@ -2275,7 +2336,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview--design2 .digital-card-preview__avatar{
   margin:-94px 0 16px 0;
   border-radius:36px;
-  border-width:6px;
+  border-width:3px;
   border-color:color-mix(in srgb, var(--card-theme) 72%, #d1fae5);
   background:#0b1220;
 }
@@ -2293,7 +2354,12 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   font-size:1.05rem;
 }
 .digital-card-preview--design2 .digital-card-preview__title{
-  display:none;
+  display:block;
+  text-align:left;
+  margin-top:14px;
+  margin-bottom:0;
+  font-size:calc(var(--card-font-pt, 16) * 1px + 1px);
+  color:#e8eef7;
 }
 .digital-card-preview--design2 .digital-card-preview__template-badge{
   display:none;
@@ -2302,14 +2368,14 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   display:grid;
   grid-template-columns:repeat(6, minmax(0, 1fr));
   gap:10px;
-  padding:16px 14px;
+  padding:12px 14px;
   border-radius:20px;
   border:1px solid color-mix(in srgb, var(--card-theme) 46%, rgba(255,255,255,0.14));
   background:linear-gradient(135deg, rgba(12, 22, 32, 0.88), rgba(10, 22, 18, 0.68));
 }
 .digital-card-preview--design2 .digital-card-preview__social-chip{
   min-width:0;
-  min-height:48px;
+  min-height:40px;
   padding:0;
   border:none;
   background:transparent;
@@ -2333,18 +2399,16 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview--design2 .digital-card-preview__action{
   min-height:62px;
   align-items:center;
-  justify-content:space-between;
+  justify-content:center;
   padding:0 16px;
-  border-radius:16px;
+  border-radius:12px;
   background:linear-gradient(135deg, rgba(44, 88, 76, 0.72), rgba(14, 22, 27, 0.86));
   border:1px solid color-mix(in srgb, var(--card-theme) 34%, rgba(255,255,255,0.1));
   color:#f8fafc;
   text-align:center;
 }
 .digital-card-preview--design2 .digital-card-preview__action::after{
-  content:"↗";
-  font-size:1rem;
-  opacity:0.9;
+  content:none;
 }
 .digital-card-preview--design2 .digital-card-preview__action:first-child{
   background:linear-gradient(135deg, color-mix(in srgb, var(--card-theme) 48%, #183329), color-mix(in srgb, var(--card-secondary) 80%, #04060b));
@@ -2454,7 +2518,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   border-radius:24px;
   border-width:0;
   background:#f4b52d;
-  box-shadow:0 12px 32px rgba(190, 135, 16, 0.18);
+  box-shadow:none;
 }
 .digital-card-preview--design4 .digital-card-preview__avatar span{
   color:#ffffff;
@@ -2706,7 +2770,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   border-radius:22px;
   border-width:0;
   background:linear-gradient(135deg, #ef5d8d, color-mix(in srgb, var(--card-theme) 72%, #f6a623));
-  box-shadow:0 22px 42px rgba(216, 98, 119, 0.24);
+  box-shadow:none;
 }
 .digital-card-preview--design7 .digital-card-preview__avatar span{
   color:#ffffff;
@@ -2942,6 +3006,11 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 }
 .digital-card-preview--design8 .digital-card-preview__credit{
   background:#c7c7c7;
+}
+.digital-card-preview .digital-card-preview__hero::after{
+  content:none !important;
+  display:none !important;
+  background:transparent !important;
 }
 .whatsapp-automation-stat-card .imposition-stat-card__value{
   font-size: clamp(1.2rem, 1.3vw, 1.72rem);
@@ -4209,6 +4278,24 @@ html[data-theme="light"] .shot-select{
   margin:0 0 8px 0;
   font-size:18px;
 }
+
+.receipt-modal__close-btn{
+  min-width: 84px;
+}
+
+html[data-theme="light"] .receipt-modal__close-btn{
+  background:#e2e8f0 !important;
+  border-color:#cbd5e1 !important;
+  color:#0f172a !important;
+}
+
+html[data-theme="light"] .receipt-modal__close-btn:hover,
+html[data-theme="light"] .receipt-modal__close-btn:focus{
+  background:#cbd5e1 !important;
+  border-color:#94a3b8 !important;
+  color:#0f172a !important;
+}
+
 .modal-close{
   background:transparent;
   border:1px solid #334155;

@@ -503,7 +503,8 @@ def _reconcile_addon_count(sub, org):
     addon_total = base_addons + sum(t.addon_count or 0 for t in addon_transfers)
     if addon_total != (sub.addon_count or 0):
         sub.addon_count = addon_total
-        sub.save(update_fields=["addon_count"])
+        sub.addon_next_cycle_count = addon_total
+        sub.save(update_fields=["addon_count", "addon_next_cycle_count"])
     return sub
 
 
@@ -982,6 +983,7 @@ def _get_active_subscription(org):
         monitor_sub.retention_days = retention_days
         if latest_approved.plan and latest_approved.plan.allow_addons and latest_approved.addon_count is not None:
             monitor_sub.addon_count = latest_approved.addon_count
+            monitor_sub.addon_next_cycle_count = latest_approved.addon_count
         monitor_sub.save()
         return monitor_sub
     return Subscription.objects.create(
@@ -994,6 +996,7 @@ def _get_active_subscription(org):
         billing_cycle=latest_approved.billing_cycle,
         retention_days=retention_days,
         addon_count=latest_approved.addon_count or 0,
+        addon_next_cycle_count=latest_approved.addon_count or 0,
     )
 
 
@@ -3514,7 +3517,8 @@ def billing_summary(request):
         update_fields = []
         if addon_total != (sub.addon_count or 0):
             sub.addon_count = addon_total
-            update_fields.append("addon_count")
+            sub.addon_next_cycle_count = addon_total
+            update_fields.extend(["addon_count", "addon_next_cycle_count"])
         if last_addon_approved:
             approved_at = last_addon_approved.updated_at or last_addon_approved.created_at
             if approved_at and (not sub.addon_last_proration_at or approved_at > sub.addon_last_proration_at):
@@ -4626,6 +4630,7 @@ def plans_subscribe(request, plan_id):
         sub.retention_days = retention_days
         if plan and plan.allow_addons:
             sub.addon_count = addon_count
+            sub.addon_next_cycle_count = addon_count
         sub.save()
         dashboard_views.record_subscription_history(
             org=org,

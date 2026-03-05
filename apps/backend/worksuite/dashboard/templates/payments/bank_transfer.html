@@ -25,7 +25,7 @@
         <div>
           <h2 class="plan-title">{{ transfer.plan.name }}</h2>
           <p class="text-secondary">Product: {{ transfer.plan.product.name|default:"Work Suite" }}</p>
-          <p class="text-secondary">Billing: {{ transfer.billing_cycle|default:"monthly"|title }} Â· Currency: {{ transfer.currency|default:"INR" }}</p>
+          <p class="text-secondary">Billing: {{ transfer.billing_cycle|default:"monthly"|title }} &middot; Currency: {{ transfer.currency|default:"INR" }}</p>
         </div>
         <div class="plan-price">
           <span>{{ transfer.currency|default:"INR" }} {{ transfer.amount|default:"0" }}</span>

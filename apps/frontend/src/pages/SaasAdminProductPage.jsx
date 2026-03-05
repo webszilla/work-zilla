@@ -4102,7 +4102,7 @@ export default function SaasAdminProductPage() {
               </button>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary receipt-modal__close-btn"
                 onClick={() => setReceiptModal({ open: false, url: "", transferId: null, clearing: false })}
               >
                 Close

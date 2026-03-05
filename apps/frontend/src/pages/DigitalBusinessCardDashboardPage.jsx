@@ -181,6 +181,14 @@ function toWebHref(value) {
   return `https://${raw}`;
 }
 
+function toExternalHref(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") return "";
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw;
+  if (raw.startsWith("//")) return `https:${raw}`;
+  return `https://${raw}`;
+}
+
 function toMapsHref(value) {
   const raw = String(value || "").trim();
   if (!raw || raw === "-") return "";
@@ -211,7 +219,7 @@ function DigitalCardPreview({ form, company }) {
       ];
   const quickActions = [
     form.phone ? { label: "Call", href: `tel:${form.phone}` } : null,
-    form.website ? { label: "Website", href: form.website } : null,
+    form.website ? { label: "Website", href: toExternalHref(form.website) } : null,
     form.whatsapp_number
       ? { label: "WhatsApp", href: `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` }
       : null,
@@ -286,13 +294,21 @@ function DigitalCardPreview({ form, company }) {
 
         <div className="digital-card-preview__socials">
           {socialBadges.map((item, idx) => (
-            <span key={`${item.icon || item.label}-${idx}`} className="digital-card-preview__social-chip" title={item.label || item.icon || "Link"}>
+            <a
+              key={`${item.icon || item.label}-${idx}`}
+              className="digital-card-preview__social-chip"
+              title={item.label || item.icon || "Link"}
+              href={item.url ? toExternalHref(item.url) : "#"}
+              target={item.url ? "_blank" : undefined}
+              rel={item.url ? "noreferrer" : undefined}
+              onClick={item.url ? undefined : (e) => e.preventDefault()}
+            >
               {item.type === "custom" && item.custom_icon_data ? (
                 <img src={item.custom_icon_data} alt={item.label || "Social"} width="18" height="18" style={{ display: "block", objectFit: "contain" }} />
               ) : (
                 <i className={`bi ${getSocialIconClass(item.icon)}`} aria-hidden="true" />
               )}
-            </span>
+            </a>
           ))}
         </div>
 
