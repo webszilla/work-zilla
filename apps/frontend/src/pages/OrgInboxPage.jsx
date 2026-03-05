@@ -15,6 +15,7 @@ import {
 } from "../api/orgTickets.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
+import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
 
 const emptyState = {
   loading: true,
@@ -35,7 +36,7 @@ function formatValue(value) {
 
 function truncate(value, length = 120) {
   if (!value) return "";
-  const text = String(value);
+  const text = String(value).replace(/<[^>]*>/g, " ");
   return text.length <= length ? text : `${text.slice(0, length).trim()}...`;
 }
 
@@ -43,6 +44,17 @@ function titleCase(value) {
   return String(value || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function htmlToPlainText(value) {
+  const html = String(value || "");
+  if (!html) return "";
+  if (typeof window !== "undefined" && window.document) {
+    const node = window.document.createElement("div");
+    node.innerHTML = html;
+    return (node.textContent || node.innerText || "").trim();
+  }
+  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function resolveCurrentProductSlug(pathname) {
@@ -343,8 +355,8 @@ export default function OrgInboxPage() {
     event.preventDefault();
     const requesterName = String(createTicketForm.name || "").trim();
     const subject = String(createTicketForm.subject || "").trim();
-    const message = String(createTicketForm.message || "").trim();
-    if (!requesterName || !subject || !message) {
+    const message = String(createTicketForm.message || "");
+    if (!requesterName || !subject || !htmlToPlainText(message)) {
       setCreateTicketState({ saving: false, error: "Name, subject and message are required.", success: "" });
       return;
     }
@@ -358,7 +370,7 @@ export default function OrgInboxPage() {
       const formData = buildTicketFormData({
         category: createTicketForm.category,
         subject,
-        message: `Name: ${requesterName}\nPriority: ${titleCase(createTicketForm.priority || "medium")}\n\n${message}`,
+        message: `<p><strong>Name:</strong> ${requesterName}</p><p><strong>Priority:</strong> ${titleCase(createTicketForm.priority || "medium")}</p>${message}`,
         productSlug: createTicketForm.productSlug || currentProductSlug,
         attachments: createTicketForm.files,
       });
@@ -384,8 +396,8 @@ export default function OrgInboxPage() {
   async function handleReplyTicket(event) {
     event.preventDefault();
     if (!selectedTicketDetail?.id) return;
-    const message = String(replyForm.message || "").trim();
-    if (!message) {
+    const message = String(replyForm.message || "");
+    if (!htmlToPlainText(message)) {
       setReplyState({ saving: false, error: "Reply message is required.", success: "" });
       return;
     }
@@ -621,12 +633,12 @@ export default function OrgInboxPage() {
                   </div>
                   <div className="col-12 col-lg-7 d-flex flex-column">
                     <label className="form-label small text-secondary mb-1">Message</label>
-                    <textarea
-                      className="form-control flex-grow-1"
-                      rows={12}
+                    <TinyHtmlEditor
+                      label=""
                       value={createTicketForm.message}
-                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, message: event.target.value }))}
+                      onChange={(value) => setCreateTicketForm((prev) => ({ ...prev, message: value }))}
                       placeholder="Describe your issue"
+                      minHeight={460}
                     />
                   </div>
                 </div>
@@ -745,7 +757,7 @@ export default function OrgInboxPage() {
                           <span>{msg.author_name || titleCase(msg.author_role)}</span>
                           <span>{formatValue(msg.created_at)}</span>
                         </div>
-                        <div className="mb-1">{msg.message}</div>
+                        <div className="mb-1" dangerouslySetInnerHTML={{ __html: msg.message || "" }} />
                         {msg.attachments?.length ? (
                           <div className="d-flex flex-wrap gap-2">
                             {msg.attachments.map((att) => (
@@ -761,12 +773,12 @@ export default function OrgInboxPage() {
 
                   {replyState.success ? <div className="alert alert-success py-2">{replyState.success}</div> : null}
                   <form className="d-flex flex-column gap-2" onSubmit={handleReplyTicket}>
-                    <textarea
-                      className="form-control"
-                      rows={3}
-                      placeholder="Reply to this ticket"
+                    <TinyHtmlEditor
+                      label=""
                       value={replyForm.message}
-                      onChange={(event) => setReplyForm((prev) => ({ ...prev, message: event.target.value }))}
+                      onChange={(value) => setReplyForm((prev) => ({ ...prev, message: value }))}
+                      placeholder="Reply to this ticket"
+                      minHeight={220}
                     />
                     <input
                       type="file"
