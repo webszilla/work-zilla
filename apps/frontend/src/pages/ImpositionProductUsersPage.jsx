@@ -139,7 +139,7 @@ export default function ImpositionProductUsersPage() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <h2 className="page-title mb-1">Imposition Users</h2>
-          <div className="text-secondary">Manage users for Imposition Software under this organization.</div>
+          <div className="text-secondary">Manage users for Print Marks under this organization.</div>
         </div>
         <div className="text-secondary small">Active Users: {activeUsersText}</div>
       </div>

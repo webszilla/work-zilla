@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 import re
 from urllib.parse import urlencode
 
+from django.db import models
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from core.models import PendingTransfer
-from .models import Product
 
 
 def _format_datetime(value):
@@ -26,6 +26,13 @@ def _extract_reference_no(message):
     return (match.group(1).strip() if match else "") or ""
 
 
+def _extract_product_name_from_message(message):
+    if not message:
+        return ""
+    match = re.search(r"submitted a bank transfer for\s+(.+?)\s*\(", str(message), flags=re.IGNORECASE)
+    return (match.group(1).strip() if match else "") or ""
+
+
 def _resolve_payment_transfer(item):
     if not item or item.event_type != "payment_pending" or not item.organization_id:
         return None
@@ -34,8 +41,21 @@ def _resolve_payment_transfer(item):
         .select_related("plan", "plan__product")
         .filter(organization_id=item.organization_id)
     )
-    if item.product_slug:
-        queryset = queryset.filter(plan__product__slug=item.product_slug)
+    raw_slug = str(getattr(item, "product_slug", "") or "").strip().lower()
+    if raw_slug:
+        if raw_slug in {"monitor", "worksuite", "work-suite"}:
+            queryset = queryset.filter(
+                (
+                    models.Q(plan__product__slug="monitor")
+                    | models.Q(plan__product__slug="worksuite")
+                    | models.Q(plan__product__slug="work-suite")
+                    | models.Q(plan__product__isnull=True)
+                )
+            )
+        elif raw_slug in {"storage", "online-storage"}:
+            queryset = queryset.filter(plan__product__slug__in=["storage", "online-storage"])
+        else:
+            queryset = queryset.filter(plan__product__slug=raw_slug)
 
     reference_no = _extract_reference_no(item.message)
     if reference_no:
@@ -62,18 +82,21 @@ def _resolve_saas_admin_product_slug(raw_slug):
     slug = str(raw_slug or "").strip().lower()
     if not slug:
         return ""
-    aliases = {
-        "online-storage": "storage",
-        "worksuite": "monitor",
-        "work-suite": "monitor",
-    }
-    candidates = [slug]
-    mapped = aliases.get(slug)
-    if mapped and mapped not in candidates:
-        candidates.append(mapped)
-    for candidate in candidates:
-        if Product.objects.filter(slug=candidate).exists():
-            return candidate
+    if slug in {"monitor", "worksuite", "work-suite"}:
+        return "work-suite"
+    if slug in {"online-storage", "storage"}:
+        return "storage"
+    return slug
+
+
+def _resolve_saas_admin_product_slug_from_name(raw_name):
+    name = str(raw_name or "").strip().lower()
+    if not name:
+        return ""
+    if name in {"work suite", "monitor"}:
+        return "work-suite"
+    if name in {"online storage", "storage"}:
+        return "storage"
     return ""
 
 
@@ -82,19 +105,62 @@ def _humanize_product_slug(raw_slug):
     if not slug:
         return ""
     label_map = {
-        "monitor": "Monitor",
+        "monitor": "Work Suite",
         "work-suite": "Work Suite",
         "worksuite": "Work Suite",
         "whatsapp-automation": "Whatsapp Automation",
         "ai-chatbot": "AI Chatbot",
         "storage": "Online Storage",
         "online-storage": "Online Storage",
-        "business-autopilot-erp": "Business Autopilot ERP",
-        "imposition-software": "Imposition Software",
+        "business-autopilot-erp": "Business Autopilot",
+        "imposition-software": "Print Marks",
     }
     if slug in label_map:
         return label_map[slug]
     return " ".join(part.capitalize() for part in slug.split("-") if part)
+
+
+def _canonical_product_name(raw_name, raw_slug):
+    slug = str(raw_slug or "").strip().lower()
+    name = str(raw_name or "").strip()
+    if slug in {"monitor", "worksuite", "work-suite"}:
+        return "Work Suite"
+    if name.lower() == "monitor":
+        return "Work Suite"
+    return name or _humanize_product_slug(slug) or "Product"
+
+
+def _normalized_payment_message(item, transfer, product_name):
+    if not item or item.event_type != "payment_pending" or not transfer:
+        return item.message or ""
+    org = transfer.organization or getattr(item, "organization", None)
+    org_name = getattr(org, "name", "") or "Unknown org"
+    plan_name = transfer.plan.name if transfer.plan else "Plan"
+    currency = transfer.currency or "INR"
+    amount = transfer.amount if transfer.amount is not None else 0
+    details = f"{org_name} submitted a bank transfer for {product_name} ({plan_name}). Amount {currency} {amount}."
+    submitter = getattr(transfer, "user", None)
+    submitter_name = (
+        f"{getattr(submitter, 'first_name', '')} {getattr(submitter, 'last_name', '')}".strip()
+        or getattr(submitter, "username", "")
+        or getattr(submitter, "email", "")
+        or ""
+    )
+    if submitter_name:
+        details = f"{details} Submitted by: {submitter_name}."
+    org_owner = getattr(org, "owner", None)
+    org_admin_name = (
+        f"{getattr(org_owner, 'first_name', '')} {getattr(org_owner, 'last_name', '')}".strip()
+        or getattr(org_owner, "username", "")
+        or getattr(org_owner, "email", "")
+        or ""
+    )
+    if org_admin_name:
+        details = f"{details} Org Admin: {org_admin_name}."
+    reference_no = transfer.reference_no or _extract_reference_no(item.message)
+    if reference_no:
+        details = f"{details} Reference: {reference_no}."
+    return details
 
 
 def serialize_notification(item):
@@ -115,8 +181,11 @@ def serialize_notification(item):
         transfer_product_slug = transfer.plan.product.slug or ""
         transfer_product_name = transfer.plan.product.name or ""
     product_slug = getattr(item, "product_slug", "") or transfer_product_slug or ""
+    fallback_product_name = transfer_product_name or _extract_product_name_from_message(getattr(item, "message", ""))
     approval_product_slug = _resolve_saas_admin_product_slug(product_slug)
-    product_name = transfer_product_name or _humanize_product_slug(product_slug)
+    product_name = _canonical_product_name(fallback_product_name, product_slug)
+    if not approval_product_slug:
+        approval_product_slug = _resolve_saas_admin_product_slug_from_name(product_name)
     if approval_product_slug:
         approval_url = f"/saas-admin/products/{approval_product_slug}#pending-transfers"
     else:
@@ -124,11 +193,12 @@ def serialize_notification(item):
         if product_name:
             query["product"] = product_name
         approval_url = f"/saas-admin/billing?{urlencode(query)}#billing-activity"
+    message = _normalized_payment_message(item, transfer, product_name)
 
     return {
         "id": item.id,
         "title": item.title,
-        "message": item.message or "",
+        "message": message,
         "event_type": item.event_type,
         "audience": getattr(item, "audience", "saas_admin"),
         "channel": getattr(item, "channel", "system"),

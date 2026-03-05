@@ -4,6 +4,7 @@ import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { setOrgTimezone as applyOrgTimezone } from "../lib/datetime.js";
 import { TIMEZONE_OPTIONS, getBrowserTimezone } from "../lib/timezones.js";
+import { createOrgTicket } from "../api/orgTickets.js";
 
 const emptyState = {
   loading: true,
@@ -34,6 +35,8 @@ const WHATSAPP_CLIENT_EVENT_OPTIONS = [
   "Custom Client Notification",
 ];
 const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
+const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
+const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 function normalizeHexColor(value, fallback = "") {
   const color = String(value || "").trim();
@@ -106,6 +109,22 @@ function buildEmptyWhatsappRule(adminName = "") {
   };
 }
 
+function validateTicketImages(files) {
+  const rows = Array.from(files || []);
+  if (rows.length > PROFILE_TICKET_MAX_ATTACHMENTS) {
+    return `Maximum ${PROFILE_TICKET_MAX_ATTACHMENTS} images allowed.`;
+  }
+  for (const file of rows) {
+    if (file.size > PROFILE_TICKET_MAX_ATTACHMENT_BYTES) {
+      return "Each image must be 2MB or smaller.";
+    }
+    if (file.type && !file.type.startsWith("image/")) {
+      return "Only image files are allowed.";
+    }
+  }
+  return "";
+}
+
 const phoneCountries = PHONE_COUNTRIES;
 export default function ProfilePage() {
   const initialProfileTab = (() => {
@@ -114,7 +133,7 @@ export default function ProfilePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const requestedTab = String(params.get("tab") || "").trim();
-    const allowedTabs = new Set(["profile", "uiTheme", "backup", "referral", "whatsappApi"]);
+    const allowedTabs = new Set(["profile", "uiTheme", "backup", "referral", "whatsappApi", "tickets"]);
     return allowedTabs.has(requestedTab) ? requestedTab : "profile";
   })();
   const [state, setState] = useState(emptyState);
@@ -135,6 +154,17 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [profileTopTab, setProfileTopTab] = useState(initialProfileTab);
+  const [ticketForm, setTicketForm] = useState({
+    category: "support",
+    subject: "",
+    message: "",
+    files: [],
+  });
+  const [ticketState, setTicketState] = useState({
+    saving: false,
+    error: "",
+    success: "",
+  });
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState("");
   const [backupItems, setBackupItems] = useState([]);
@@ -461,6 +491,37 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleCreateSupportTicket(event) {
+    event.preventDefault();
+    const subject = String(ticketForm.subject || "").trim();
+    const message = String(ticketForm.message || "").trim();
+    if (!subject || !message) {
+      setTicketState({ saving: false, error: "Subject and message are required.", success: "" });
+      return;
+    }
+    const fileError = validateTicketImages(ticketForm.files);
+    if (fileError) {
+      setTicketState({ saving: false, error: fileError, success: "" });
+      return;
+    }
+    setTicketState({ saving: true, error: "", success: "" });
+    try {
+      const formData = new FormData();
+      formData.set("category", ticketForm.category || "support");
+      formData.set("subject", subject);
+      formData.set("message", message);
+      if (currentProductSlug) {
+        formData.set("product_slug", currentProductSlug);
+      }
+      Array.from(ticketForm.files || []).forEach((file) => formData.append("attachments", file));
+      await createOrgTicket(formData);
+      setTicketForm({ category: "support", subject: "", message: "", files: [] });
+      setTicketState({ saving: false, error: "", success: "Ticket created successfully. You can track it in Inbox > Ticket." });
+    } catch (error) {
+      setTicketState({ saving: false, error: error?.message || "Unable to create ticket.", success: "" });
+    }
+  }
+
   const data = state.data || {};
   const user = data.user || {};
   const recentActions = data.recent_actions || [];
@@ -642,6 +703,13 @@ export default function ProfilePage() {
           onClick={() => setProfileTopTab("whatsappApi")}
         >
           WhatsApp API
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${profileTopTab === "tickets" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("tickets")}
+        >
+          Create Ticket
         </button>
       </div>
 
@@ -1097,6 +1165,73 @@ export default function ProfilePage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "tickets" ? (
+      <div className="mt-3">
+        <h5>Create Support Ticket</h5>
+        <p className="text-secondary mb-3">
+          Raise a Support or Sales ticket. You can track and reply in Inbox &gt; Ticket.
+        </p>
+        <div className="card p-3">
+          <form className="d-flex flex-column gap-3" onSubmit={handleCreateSupportTicket}>
+            <div className="row g-3">
+              <div className="col-12 col-md-3">
+                <label className="form-label small mb-1">Ticket Type</label>
+                <select
+                  className="form-select"
+                  value={ticketForm.category}
+                  onChange={(event) => setTicketForm((prev) => ({ ...prev, category: event.target.value }))}
+                >
+                  <option value="support">Support</option>
+                  <option value="sales">Sales</option>
+                </select>
+              </div>
+              <div className="col-12 col-md-9">
+                <label className="form-label small mb-1">Subject</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={ticketForm.subject}
+                  onChange={(event) => setTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
+                  placeholder="Enter ticket subject"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="form-label small mb-1">Message</label>
+              <textarea
+                className="form-control"
+                rows={4}
+                value={ticketForm.message}
+                onChange={(event) => setTicketForm((prev) => ({ ...prev, message: event.target.value }))}
+                placeholder="Write your issue or request"
+              />
+            </div>
+            <div>
+              <label className="form-label small mb-1">Image Attachments</label>
+              <input
+                type="file"
+                className="form-control"
+                accept="image/*"
+                multiple
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  setTicketForm((prev) => ({ ...prev, files }));
+                }}
+              />
+              <div className="form-text">Maximum 5 images. Each image must be 2MB or smaller.</div>
+            </div>
+            {ticketState.error ? <div className="alert alert-danger py-2 mb-0">{ticketState.error}</div> : null}
+            {ticketState.success ? <div className="alert alert-success py-2 mb-0">{ticketState.success}</div> : null}
+            <div>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={ticketState.saving}>
+                {ticketState.saving ? "Creating..." : "Create Ticket"}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
       ) : null}

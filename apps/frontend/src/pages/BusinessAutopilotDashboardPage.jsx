@@ -464,7 +464,7 @@ export default function BusinessAutopilotDashboardPage({
 
   return (
     <div>
-      <h4 className="mb-2">Business Autopilot ERP</h4>
+      <h4 className="mb-2">Business Autopilot</h4>
       <p className="text-secondary mb-3">
         Modular suite for CRM, HR, Projects, Accounts, Ticketing, and Stocks.
       </p>

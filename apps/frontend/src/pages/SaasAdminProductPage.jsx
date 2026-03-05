@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import { estimateCostInr } from "../lib/aiCost.js";
@@ -63,6 +63,7 @@ export default function SaasAdminProductPage() {
   const { branding } = useBranding();
   const [state, setState] = useState(emptyState);
   const [activeSection, setActiveSection] = useState("organizations");
+  const pendingTransfersSectionRef = useRef(null);
 
   const [orgState, setOrgState] = useState(emptyState);
   const [orgTypeTab, setOrgTypeTab] = useState("org");
@@ -249,6 +250,20 @@ export default function SaasAdminProductPage() {
       setActiveSection("organizations");
     }
   }, [location.hash, location.pathname, slug]);
+
+  useEffect(() => {
+    const hash = (location.hash || "").replace("#", "").trim().toLowerCase();
+    if (hash !== "pending-transfers" || activeSection !== "pending-transfers") {
+      return;
+    }
+    const node = pendingTransfersSectionRef.current;
+    if (!node) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: "auto", block: "start" });
+    });
+  }, [activeSection, location.hash]);
 
   useEffect(() => {
     let active = true;
@@ -3084,7 +3099,7 @@ export default function SaasAdminProductPage() {
           ) : null}
 
           {activeSection === "pending-transfers" ? (
-            <div className="card p-3">
+            <div id="pending-transfers" ref={pendingTransfersSectionRef} className="card p-3">
               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <h5 className="mb-0">Pending Transfers</h5>
               </div>

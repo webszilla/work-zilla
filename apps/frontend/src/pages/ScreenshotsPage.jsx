@@ -21,7 +21,7 @@ export default function ScreenshotsPage() {
   const isReadOnly = typeof window !== "undefined" && Boolean(window.__WZ_READ_ONLY__);
   const [filters, setFilters] = useState({
     employeeId: "",
-    preset: "today",
+    preset: "all",
     nickname: "",
     dateFrom: "",
     dateTo: ""
@@ -353,10 +353,8 @@ export default function ScreenshotsPage() {
   function handleApply(event) {
     event.preventDefault();
     if (!draftDates.dateFrom && !draftDates.dateTo) {
-      const now = new Date();
-      const date = formatDate(now);
-      setFilters((prev) => ({ ...prev, preset: "today", dateFrom: "", dateTo: "" }));
-      setDraftDates({ dateFrom: date, dateTo: date });
+      setFilters((prev) => ({ ...prev, preset: "all", dateFrom: "", dateTo: "" }));
+      setDraftDates({ dateFrom: "", dateTo: "" });
       setPage(1);
       return;
     }

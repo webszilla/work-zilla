@@ -28,7 +28,7 @@ export default function ImpositionProductBillingPage() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <h2 className="page-title mb-1">Billing History</h2>
-          <div className="text-secondary">Invoices and payment history for Imposition Software.</div>
+          <div className="text-secondary">Invoices and payment history for Print Marks.</div>
         </div>
         <button type="button" className="btn btn-outline-light btn-sm" onClick={loadBilling}>
           Refresh

@@ -4,6 +4,18 @@ from .models import AdminNotification, Organization
 ORG_ADMIN_INBOX_MAX_ITEMS = 100
 
 
+def _canonical_product_name(product, default="Work Suite"):
+    if not product:
+        return default
+    slug = str(getattr(product, "slug", "") or "").strip().lower()
+    name = str(getattr(product, "name", "") or "").strip()
+    if slug in {"monitor", "worksuite", "work-suite"}:
+        return "Work Suite"
+    if name.lower() == "monitor":
+        return "Work Suite"
+    return name or default
+
+
 def _user_display(user):
     if not user:
         return ""
@@ -104,7 +116,7 @@ def notify_payment_pending(transfer, message=""):
     org_admin = org.owner if org else None
     org_name = org.name if org else (transfer.user.username if transfer and transfer.user else "Unknown org")
     plan_name = plan.name if plan else "Plan"
-    product_name = product.name if product else "Work Suite"
+    product_name = _canonical_product_name(product, default="Work Suite")
     currency = transfer.currency if transfer and transfer.currency else "INR"
     amount = transfer.amount if transfer and transfer.amount is not None else 0
     reference = transfer.reference_no if transfer else ""
@@ -134,7 +146,7 @@ def notify_free_plan_expired(subscription, message=""):
     product = plan.product if plan else None
     org_name = org.name if org else "Unknown org"
     plan_name = plan.name if plan else "Free Plan"
-    product_name = product.name if product else "Work Suite"
+    product_name = _canonical_product_name(product, default="Work Suite")
     details = f"{org_name} free plan expired for {product_name} ({plan_name})."
     return create_admin_notification(
         title="Free Plan Expired",

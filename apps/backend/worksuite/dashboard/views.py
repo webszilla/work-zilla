@@ -646,7 +646,7 @@ def screenshot_view(request):
         preset = None
 
     if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
+        preset = "all"
 
     if preset == "today":
         today = timezone.localdate()

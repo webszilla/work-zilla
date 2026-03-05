@@ -890,6 +890,13 @@ def _receipt_upload_to(instance, filename):
     return f"payments/{safe_org}/{safe_name.lower()}_{date_label}{ext}"
 
 
+def _org_ticket_attachment_upload_to(instance, filename):
+    ticket_id = instance.ticket_id or "unknown"
+    safe_name = os.path.basename(filename or "attachment.jpg")
+    stamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    return f"org_tickets/{ticket_id}/{stamp}_{safe_name}"
+
+
 class PendingTransfer(models.Model):
     REQUEST_CHOICES = (
         ("new", "New Account"),
@@ -1082,6 +1089,12 @@ def pending_transfer_notify_admin(sender, instance, created, **kwargs):
 def pending_transfer_receipt_delete(sender, instance, **kwargs):
     if instance.receipt:
         instance.receipt.delete(save=False)
+
+
+@receiver(post_delete, sender="core.OrgSupportTicketAttachment")
+def org_ticket_attachment_delete(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
 
 
 class ReferralEarning(models.Model):
@@ -1322,6 +1335,95 @@ class AdminNotification(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.event_type})"
+
+
+class OrgSupportTicket(models.Model):
+    CATEGORY_CHOICES = (
+        ("support", "Support"),
+        ("sales", "Sales"),
+    )
+    STATUS_CHOICES = (
+        ("open", "Open"),
+        ("in_progress", "In Progress"),
+        ("resolved", "Resolved"),
+        ("closed", "Closed"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="support_tickets")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_support_tickets",
+    )
+    product_slug = models.CharField(max_length=120, blank=True, default="")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="support")
+    subject = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open")
+    last_message_at = models.DateTimeField(auto_now_add=True)
+    last_read_by_org_at = models.DateTimeField(null=True, blank=True)
+    last_read_by_saas_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-id"]
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+            models.Index(fields=["organization", "product_slug"]),
+            models.Index(fields=["category", "status"]),
+        ]
+
+    def __str__(self):
+        return f"#{self.id} {self.subject}"
+
+
+class OrgSupportTicketMessage(models.Model):
+    AUTHOR_CHOICES = (
+        ("org_admin", "Org Admin"),
+        ("saas_admin", "SaaS Admin"),
+        ("system", "System"),
+    )
+
+    ticket = models.ForeignKey(OrgSupportTicket, on_delete=models.CASCADE, related_name="messages")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    author_role = models.CharField(max_length=20, choices=AUTHOR_CHOICES, default="org_admin")
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["ticket", "created_at"]),
+            models.Index(fields=["author_role", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Ticket #{self.ticket_id} - {self.author_role}"
+
+
+class OrgSupportTicketAttachment(models.Model):
+    ticket = models.ForeignKey(OrgSupportTicket, on_delete=models.CASCADE, related_name="attachments")
+    message = models.ForeignKey(
+        OrgSupportTicketMessage,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="attachments",
+    )
+    file = models.ImageField(upload_to=_org_ticket_attachment_upload_to)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["ticket", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Ticket #{self.ticket_id} attachment"
 
 
 ADMIN_ACTIVITY_MAX_PER_USER = 500

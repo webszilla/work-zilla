@@ -218,6 +218,10 @@ img {
   border-bottom-color: var(--color-accent);
 }
 
+.site-nav .mobile-auth-link {
+  display: none;
+}
+
 .header-actions {
   display: flex;
   gap: 12px;
@@ -1597,6 +1601,10 @@ img {
   }
 
   .site-nav .nav-cta {
+    display: inline-flex;
+    margin-top: 6px;
+  }
+  .site-nav .mobile-auth-link {
     display: inline-flex;
     margin-top: 6px;
   }

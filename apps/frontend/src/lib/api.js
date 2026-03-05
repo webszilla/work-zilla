@@ -70,8 +70,9 @@ export async function apiFetch(url, options = {}) {
     if (!getCsrfToken()) {
       await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
     }
+    const isFormDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
     fetchOptions.headers = {
-      "Content-Type": "application/json",
+      ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
       "X-CSRFToken": getCsrfToken(),
       ...fetchOptions.headers
     };

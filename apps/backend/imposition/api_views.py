@@ -200,7 +200,7 @@ def _resolve_addon_catalog():
     return ImpositionAddonCatalog.objects.create(
         addon_code="imposition_user",
         addon_name="Additional User",
-        product="Imposition Software",
+        product="Print Marks",
         price_month_inr=Decimal("300"),
         price_year_inr=Decimal("3000"),
         price_month_usd=Decimal("4"),

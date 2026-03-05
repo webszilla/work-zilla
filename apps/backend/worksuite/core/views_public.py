@@ -32,8 +32,10 @@ def _public_product_slug(value):
 def _public_product_name(value, slug):
     if slug == "monitor":
         return "Work Suite"
+    if slug == "business-autopilot-erp":
+        return "Business Autopilot"
     if slug == "imposition-software":
-        return "Imposition Software"
+        return "Print Marks"
     if slug == "whatsapp-automation":
         return "WhatsApp Automation"
     return value

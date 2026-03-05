@@ -512,7 +512,7 @@ export default function BusinessAutopilotUsersPage() {
     <div className="d-flex flex-column gap-3">
       <div>
         <h4 className="mb-2">ERP Users</h4>
-        <p className="text-secondary mb-0">Create and manage users for Business Autopilot ERP.</p>
+        <p className="text-secondary mb-0">Create and manage users for Business Autopilot.</p>
         <div className="d-flex flex-wrap gap-2 mt-3">
           <button
             type="button"

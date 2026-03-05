@@ -61,13 +61,13 @@ export default function ProductAccessSection({
       features: ["Online Access", "Admin Controls", "Free System Sync"]
     },
     "imposition-software": {
-      name: "Imposition Software",
+      name: "Print Marks",
       icon: "bi-grid-1x2",
       description: "Licensed imposition workflow with devices, users, and print-ready operations.",
       features: ["License", "Devices", "Users", "Plans"]
     },
     "business-autopilot-erp": {
-      name: "Business Autopilot ERP",
+      name: "Business Autopilot",
       icon: "bi-building-gear",
       description: "Modular ERP suite for CRM, HR, projects, accounts, ticketing, and stocks.",
       features: ["CRM", "HR", "Projects", "Accounts / ERP", "Ticketing", "Stocks"]

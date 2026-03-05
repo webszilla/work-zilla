@@ -792,7 +792,7 @@ def auth_subscriptions(request):
                 raise StopIteration
             payload.append({
                 "product_slug": "imposition-software",
-                "product_name": "Imposition Software",
+                "product_name": "Print Marks",
                 "status": imposition_sub.status or "active",
                 "access_role": access_role,
                 "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),

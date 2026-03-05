@@ -548,9 +548,9 @@ def _display_product_name(product=None, slug=None):
     if normalized_slug == "ai-chatbot":
         return "AI Chatbot"
     if normalized_slug == "imposition-software":
-        return "Imposition Software"
+        return "Print Marks"
     if normalized_slug == "business-autopilot-erp":
-        return "Business Autopilot ERP"
+        return "Business Autopilot"
     return "Work Suite"
 
 

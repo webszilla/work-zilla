@@ -12,11 +12,21 @@ def product_marketing_view(request, slug):
         "digital-card": "whatsapp-automation",
         "ai-chat-widget": "ai-chatbot",
     }
+    legacy_slug_redirects = {
+        "business-autopilot-erp": "business-autopilot",
+    }
+    slug_alias_map = {
+        "business-autopilot": "business-autopilot-erp",
+    }
+    if slug in {"imposition-software", "print-marks"}:
+        return redirect("/imposition-software.html", permanent=True)
+    if slug in legacy_slug_redirects:
+        return redirect(f"/products/{legacy_slug_redirects[slug]}/", permanent=True)
     if slug in retired_product_redirects:
         return redirect(f"/products/{retired_product_redirects[slug]}/", permanent=True)
     if slug == "online-storage":
         slug = "storage"
-    raw_slug = slug
+    raw_slug = slug_alias_map.get(slug, slug)
     route = ProductRouteMapping.objects.select_related("product").filter(public_slug=raw_slug).first()
     if not route:
         if connection.vendor == "sqlite":
@@ -60,7 +70,7 @@ def product_marketing_view(request, slug):
     context["og_title"] = og_title
     context["og_description"] = og_description
     context["og_image"] = og_image_url
-    canonical_slug = route.public_slug if route else slug
+    canonical_slug = slug
     context["canonical_url"] = request.build_absolute_uri(f"/products/{canonical_slug}/")
     return render(request, templates, context)
 

@@ -363,7 +363,7 @@ class ImpositionBillingRecord(models.Model):
 class ImpositionAddonCatalog(models.Model):
     addon_code = models.CharField(max_length=50, unique=True)
     addon_name = models.CharField(max_length=120)
-    product = models.CharField(max_length=120, default="Imposition Software")
+    product = models.CharField(max_length=120, default="Print Marks")
     price_month_inr = models.DecimalField(max_digits=12, decimal_places=2, default=300)
     price_year_inr = models.DecimalField(max_digits=12, decimal_places=2, default=3000)
     price_month_usd = models.DecimalField(max_digits=12, decimal_places=2, default=4)

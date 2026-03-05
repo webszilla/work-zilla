@@ -98,11 +98,11 @@ def site_nav_context(request):
             "href": f"/products/{public_slug}/",
         })
 
-    # Ensure Imposition Software is present in public products dropdown.
+    # Ensure Print Marks is present in public products dropdown.
     if "imposition-software" not in seen_slugs:
         product_links.append({
             "slug": "imposition-software",
-            "name": "Imposition Software",
+            "name": "Print Marks",
             "href": "/products/imposition-software/",
         })
 

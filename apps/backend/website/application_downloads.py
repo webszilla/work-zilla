@@ -127,7 +127,7 @@ DOWNLOAD_CLASSIFIERS = [
     {
         "family": "imposition_windows",
         "label": "Imposition Installer",
-        "product": "Imposition Software",
+        "product": "Print Marks",
         "platform": "Windows",
         "arch": "x64",
         "patterns": [
@@ -137,7 +137,7 @@ DOWNLOAD_CLASSIFIERS = [
     {
         "family": "imposition_mac_arm64",
         "label": "Imposition Installer",
-        "product": "Imposition Software",
+        "product": "Print Marks",
         "platform": "macOS",
         "arch": "arm64",
         "patterns": [
@@ -149,7 +149,7 @@ DOWNLOAD_CLASSIFIERS = [
     {
         "family": "imposition_mac_x64",
         "label": "Imposition Installer",
-        "product": "Imposition Software",
+        "product": "Print Marks",
         "platform": "macOS",
         "arch": "x64",
         "patterns": [

@@ -4,6 +4,7 @@ from datetime import timedelta
 import datetime
 import json
 import math
+import os
 import re
 from types import SimpleNamespace
 
@@ -48,6 +49,9 @@ from core.models import (
     Device,
     UserProfile,
     ThemeSettings,
+    OrgSupportTicket,
+    OrgSupportTicketMessage,
+    OrgSupportTicketAttachment,
 )
 from saas_admin.models import Product
 from dashboard import views as dashboard_views
@@ -67,6 +71,8 @@ User = get_user_model()
 DEFAULT_ALLOWED_INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30]
 GSTIN_REGEX = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
 HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+TICKET_MAX_ATTACHMENTS = 5
+TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 
 
 def _normalize_text(value):
@@ -161,6 +167,15 @@ def _org_inbox_permission(request):
     return True, org
 
 
+def _is_org_admin_user(request, org):
+    if not request.user or not request.user.is_authenticated or not org:
+        return False
+    return bool(
+        getattr(request.user, "is_staff", False)
+        or getattr(org, "owner_id", None) == getattr(request.user, "id", None)
+    )
+
+
 def _get_org_or_error(request):
     org = dashboard_views.get_active_org(request)
     if not org:
@@ -176,6 +191,98 @@ def _format_datetime(value):
     if not value:
         return ""
     return timezone.localtime(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_ticket_category(value, default="support"):
+    category = str(value or "").strip().lower()
+    return category if category in {"support", "sales"} else default
+
+
+def _normalize_ticket_status(value, default="open"):
+    status = str(value or "").strip().lower()
+    return status if status in {"open", "in_progress", "resolved", "closed"} else default
+
+
+def _validate_ticket_attachments(files):
+    if len(files) > TICKET_MAX_ATTACHMENTS:
+        return f"Maximum {TICKET_MAX_ATTACHMENTS} images allowed."
+    for file_obj in files:
+        size = int(getattr(file_obj, "size", 0) or 0)
+        if size > TICKET_MAX_ATTACHMENT_BYTES:
+            return "Each image must be 2MB or smaller."
+        content_type = str(getattr(file_obj, "content_type", "") or "").lower()
+        if content_type and not content_type.startswith("image/"):
+            return "Only image attachments are allowed."
+    return ""
+
+
+def _serialize_ticket_attachment(item):
+    return {
+        "id": item.id,
+        "name": os.path.basename(item.file.name or ""),
+        "url": item.file.url if item.file else "",
+        "created_at": _format_datetime(item.created_at),
+    }
+
+
+def _serialize_ticket_message(item):
+    author_name = ""
+    if item.author:
+        author_name = (
+            f"{getattr(item.author, 'first_name', '')} {getattr(item.author, 'last_name', '')}".strip()
+            or getattr(item.author, "username", "")
+            or getattr(item.author, "email", "")
+            or ""
+        )
+    return {
+        "id": item.id,
+        "author_role": item.author_role,
+        "author_name": author_name or ("SaaS Admin" if item.author_role == "saas_admin" else "Org Admin"),
+        "message": item.message or "",
+        "created_at": _format_datetime(item.created_at),
+        "attachments": [_serialize_ticket_attachment(att) for att in item.attachments.all()],
+    }
+
+
+def _serialize_ticket_summary(ticket):
+    latest_message = ticket.messages.order_by("-created_at", "-id").first()
+    preview = (latest_message.message or "") if latest_message else ""
+    preview = preview if len(preview) <= 120 else f"{preview[:120].strip()}..."
+    unread_qs = ticket.messages.filter(author_role="saas_admin")
+    if ticket.last_read_by_org_at:
+        unread_qs = unread_qs.filter(created_at__gt=ticket.last_read_by_org_at)
+    unread_count = unread_qs.count()
+    return {
+        "id": ticket.id,
+        "subject": ticket.subject,
+        "category": ticket.category,
+        "status": ticket.status,
+        "product_slug": ticket.product_slug or "",
+        "created_at": _format_datetime(ticket.created_at),
+        "updated_at": _format_datetime(ticket.updated_at),
+        "last_message_at": _format_datetime(ticket.last_message_at),
+        "latest_message_preview": preview,
+        "unread_replies": unread_count,
+    }
+
+
+def _serialize_ticket_detail(ticket):
+    messages = (
+        ticket.messages
+        .select_related("author")
+        .prefetch_related("attachments")
+        .order_by("created_at", "id")
+    )
+    return {
+        "id": ticket.id,
+        "subject": ticket.subject,
+        "category": ticket.category,
+        "status": ticket.status,
+        "product_slug": ticket.product_slug or "",
+        "created_at": _format_datetime(ticket.created_at),
+        "updated_at": _format_datetime(ticket.updated_at),
+        "messages": [_serialize_ticket_message(msg) for msg in messages],
+    }
 
 
 def _read_browser_timezone(request):
@@ -352,6 +459,214 @@ def org_inbox_compose(request):
     })
 
 
+@login_required
+@require_http_methods(["GET", "POST"])
+def org_tickets(request):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+
+    if request.method == "GET":
+        try:
+            page = max(int(request.GET.get("page", 1)), 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.GET.get("page_size", 20))
+        except (TypeError, ValueError):
+            page_size = 20
+        page_size = min(max(page_size, 5), 100)
+
+        requested_product = _normalize_product_slug(request.GET.get("product"), default="")
+        requested_category = _normalize_ticket_category(request.GET.get("category"), default="")
+        requested_status = _normalize_ticket_status(request.GET.get("status"), default="")
+        if str(request.GET.get("status") or "").strip() == "":
+            requested_status = ""
+        if str(request.GET.get("category") or "").strip() == "":
+            requested_category = ""
+
+        queryset = (
+            OrgSupportTicket.objects
+            .filter(organization=org)
+            .order_by("-updated_at", "-id")
+        )
+        if requested_product:
+            if requested_product == "monitor":
+                queryset = queryset.filter(product_slug__in=["monitor", "worksuite", "work-suite"])
+            else:
+                queryset = queryset.filter(product_slug=requested_product)
+        if requested_category:
+            queryset = queryset.filter(category=requested_category)
+        if requested_status:
+            queryset = queryset.filter(status=requested_status)
+
+        total = queryset.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+        rows = list(queryset[start:end])
+        results = [_serialize_ticket_summary(ticket) for ticket in rows]
+        total_pages = max(math.ceil(total / page_size), 1)
+        unread_count = 0
+        for ticket in queryset:
+            unread_qs = ticket.messages.filter(author_role="saas_admin")
+            if ticket.last_read_by_org_at:
+                unread_qs = unread_qs.filter(created_at__gt=ticket.last_read_by_org_at)
+            if unread_qs.exists():
+                unread_count += 1
+        return JsonResponse({
+            "results": results,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "unread_count": unread_count,
+        })
+
+    if not _is_org_admin_user(request, org):
+        return JsonResponse({"error": "admin_only"}, status=403)
+
+    category = _normalize_ticket_category(request.POST.get("category"), default="support")
+    subject = _normalize_text(request.POST.get("subject") or request.POST.get("title") or "")
+    message = str(request.POST.get("message") or "").strip()
+    product_slug = _normalize_product_slug(request.POST.get("product_slug"), default="monitor")
+    files = request.FILES.getlist("attachments")
+
+    if not subject:
+        return _json_error("subject_required", status=400)
+    if not message:
+        return _json_error("message_required", status=400)
+    file_error = _validate_ticket_attachments(files)
+    if file_error:
+        return _json_error(file_error, status=400)
+
+    with transaction.atomic():
+        ticket = OrgSupportTicket.objects.create(
+            organization=org,
+            created_by=request.user,
+            product_slug=product_slug,
+            category=category,
+            subject=subject,
+            status="open",
+        )
+        msg = OrgSupportTicketMessage.objects.create(
+            ticket=ticket,
+            author=request.user,
+            author_role="org_admin",
+            message=message,
+        )
+        for file_obj in files:
+            OrgSupportTicketAttachment.objects.create(
+                ticket=ticket,
+                message=msg,
+                file=file_obj,
+                uploaded_by=request.user,
+            )
+        now = timezone.now()
+        ticket.last_message_at = now
+        ticket.last_read_by_org_at = now
+        ticket.save(update_fields=["last_message_at", "last_read_by_org_at", "updated_at"])
+
+    return JsonResponse({
+        "status": "ok",
+        "message": "Ticket created successfully.",
+        "ticket": _serialize_ticket_detail(ticket),
+    })
+
+
+@login_required
+@require_http_methods(["GET"])
+def org_ticket_detail(request, ticket_id):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
+    ticket.last_read_by_org_at = timezone.now()
+    ticket.save(update_fields=["last_read_by_org_at", "updated_at"])
+    return JsonResponse({"ticket": _serialize_ticket_detail(ticket)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def org_ticket_reply(request, ticket_id):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    if not _is_org_admin_user(request, org):
+        return JsonResponse({"error": "admin_only"}, status=403)
+
+    ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
+    message = str(request.POST.get("message") or "").strip()
+    files = request.FILES.getlist("attachments")
+    if not message:
+        return _json_error("message_required", status=400)
+    file_error = _validate_ticket_attachments(files)
+    if file_error:
+        return _json_error(file_error, status=400)
+
+    with transaction.atomic():
+        msg = OrgSupportTicketMessage.objects.create(
+            ticket=ticket,
+            author=request.user,
+            author_role="org_admin",
+            message=message,
+        )
+        for file_obj in files:
+            OrgSupportTicketAttachment.objects.create(
+                ticket=ticket,
+                message=msg,
+                file=file_obj,
+                uploaded_by=request.user,
+            )
+        now = timezone.now()
+        if ticket.status == "closed":
+            ticket.status = "open"
+        ticket.last_message_at = now
+        ticket.last_read_by_org_at = now
+        ticket.save(update_fields=["status", "last_message_at", "last_read_by_org_at", "updated_at"])
+
+    return JsonResponse({
+        "status": "ok",
+        "message": "Reply added.",
+        "ticket": _serialize_ticket_detail(ticket),
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def org_ticket_status(request, ticket_id):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    if not _is_org_admin_user(request, org):
+        return JsonResponse({"error": "admin_only"}, status=403)
+
+    ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    next_status = _normalize_ticket_status(payload.get("status"), default="")
+    if not next_status:
+        return _json_error("status_required", status=400)
+    if next_status not in {"open", "in_progress", "resolved", "closed"}:
+        return _json_error("invalid_status", status=400)
+    if ticket.status == next_status:
+        return JsonResponse({"status": "ok", "ticket": _serialize_ticket_detail(ticket)})
+    ticket.status = next_status
+    ticket.save(update_fields=["status", "updated_at"])
+    OrgSupportTicketMessage.objects.create(
+        ticket=ticket,
+        author=request.user,
+        author_role="system",
+        message=f"Ticket status changed to {next_status.replace('_', ' ').title()}.",
+    )
+    return JsonResponse({"status": "ok", "ticket": _serialize_ticket_detail(ticket)})
+
+
 def _cleanup_old_monitor_data(org, days=30):
     cutoff = timezone.now() - timedelta(days=max(int(days or 30), 1))
     Activity.objects.filter(
@@ -368,7 +683,7 @@ def _resolve_monitor_preset(date_from_raw, date_to_raw, preset):
         preset = None
 
     if not preset and not date_from_raw and not date_to_raw:
-        preset = "today"
+        preset = "all"
 
     today = timezone.localdate()
     if preset == "today":
@@ -4682,15 +4997,23 @@ def plans_subscribe(request, plan_id):
             "message": f"Plan {plan.name} updated successfully.",
         })
 
-    existing_transfer = PendingTransfer.objects.filter(
+    existing_transfer_qs = PendingTransfer.objects.filter(
         organization=org,
         status="pending",
         request_type__in=("new", "renew"),
-    ).order_by("-created_at").first()
+    )
+    plan_product_slug = _normalize_product_slug(getattr(getattr(plan, "product", None), "slug", ""), default="")
+    if plan_product_slug == "monitor":
+        existing_transfer_qs = existing_transfer_qs.filter(
+            Q(plan__product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(plan__product__isnull=True)
+        )
+    elif plan_product_slug:
+        existing_transfer_qs = existing_transfer_qs.filter(plan__product__slug=plan_product_slug)
+    existing_transfer = existing_transfer_qs.order_by("-created_at").first()
     if existing_transfer:
         return JsonResponse({
             "redirect": f"/my-account/bank-transfer/{existing_transfer.id}/",
-            "message": "Payment already pending. Please complete the existing request.",
+            "message": "Previous payment for this product is still pending. Contact admin or create a ticket in My Account.",
         })
 
     request.session["pending_transfer_data"] = {
@@ -5367,7 +5690,7 @@ def dealer_subscribe(request):
     if existing_transfer:
         return JsonResponse({
             "redirect": f"/app/dealer-bank-transfer/{existing_transfer.id}/",
-            "message": "Payment already pending. Please complete the existing request.",
+            "message": "Previous payment is still pending. Contact admin or create a support ticket.",
         })
 
     settings_obj = ReferralSettings.get_active()

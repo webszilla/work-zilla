@@ -321,9 +321,9 @@ function AppShell({ state, productPrefix, productSlug }) {
     : productSlug === "whatsapp-automation"
     ? "Whatsapp Automation"
     : productSlug === "business-autopilot-erp"
-    ? "Business Autopilot ERP"
+    ? "Business Autopilot"
     : productSlug === "imposition-software"
-    ? "Imposition Software"
+    ? "Print Marks"
     : productSlug === "saas-admin"
     ? "SaaS Admin"
     : "Work Zilla";
@@ -1600,8 +1600,8 @@ export default function App() {
     { prefix: "/work-suite", slug: "worksuite", label: "Work Suite" },
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
-    { prefix: "/imposition", slug: "imposition-software", label: "Imposition Software" },
-    { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot ERP" },
+    { prefix: "/imposition", slug: "imposition-software", label: "Print Marks" },
+    { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot" },
     { prefix: "/whatsapp-automation", slug: "whatsapp-automation", label: "Whatsapp Automation" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
