@@ -3966,10 +3966,13 @@ function AccountsErpModule() {
     additionalEmails: [],
     billingAddress: "",
     shippingAddress: "",
-    country: "India",
-    state: "",
-    city: "",
-    pincode: ""
+    billingCountry: "India",
+    billingState: "",
+    billingPincode: "",
+    shippingCountry: "India",
+    shippingState: "",
+    shippingPincode: "",
+    billingShippingSame: false
   });
   const [editingCustomerId, setEditingCustomerId] = useState("");
   const [itemMasterForm, setItemMasterForm] = useState({
@@ -4186,7 +4189,8 @@ function AccountsErpModule() {
     () => new Map(inventoryItems.map((row) => [String(row.id || ""), row])),
     [inventoryItems]
   );
-  const customerStateOptions = getStateOptionsForCountry(String(customerForm.country || "India"));
+  const billingStateOptions = getStateOptionsForCountry(String(customerForm.billingCountry || "India"));
+  const shippingStateOptions = getStateOptionsForCountry(String(customerForm.shippingCountry || "India"));
 
   function normalizeCustomerRecord(row = {}) {
     const legacyPhone = String(row.phone || "").trim();
@@ -4208,10 +4212,13 @@ function AccountsErpModule() {
       additionalEmails: emailList.length ? emailList.slice(1).map((e) => e || "") : (legacyEmail ? [] : []),
       billingAddress: row.billingAddress || "",
       shippingAddress: row.shippingAddress || "",
-      country: row.country || "India",
-      state: row.state || "",
-      city: row.city || "",
-      pincode: row.pincode || ""
+      billingCountry: row.billingCountry || row.country || "India",
+      billingState: row.billingState || row.state || "",
+      billingPincode: row.billingPincode || row.pincode || "",
+      shippingCountry: row.shippingCountry || row.country || "India",
+      shippingState: row.shippingState || row.state || "",
+      shippingPincode: row.shippingPincode || row.pincode || "",
+      billingShippingSame: Boolean(row.billingShippingSame)
     };
   }
 
@@ -4432,10 +4439,13 @@ function AccountsErpModule() {
       additionalEmails: [],
       billingAddress: "",
       shippingAddress: "",
-      country: "India",
-      state: "",
-      city: "",
-      pincode: ""
+      billingCountry: "India",
+      billingState: "",
+      billingPincode: "",
+      shippingCountry: "India",
+      shippingState: "",
+      shippingPincode: "",
+      billingShippingSame: false
     });
   }
 
@@ -4454,6 +4464,23 @@ function AccountsErpModule() {
     const additionalEmails = (customerForm.additionalEmails || [])
       .map((value) => String(value || "").trim())
       .filter(Boolean);
+    const billingCountry = String(customerForm.billingCountry || "").trim() || "India";
+    const billingState = String(customerForm.billingState || "").trim();
+    const billingPincode = String(customerForm.billingPincode || "").trim();
+    const useSameShipping = Boolean(customerForm.billingShippingSame);
+    const shippingAddress = useSameShipping
+      ? String(customerForm.billingAddress || "").trim()
+      : String(customerForm.shippingAddress || "").trim();
+    const shippingCountry = useSameShipping
+      ? billingCountry
+      : (String(customerForm.shippingCountry || "").trim() || "India");
+    const shippingState = useSameShipping
+      ? billingState
+      : String(customerForm.shippingState || "").trim();
+    const shippingPincode = useSameShipping
+      ? billingPincode
+      : String(customerForm.shippingPincode || "").trim();
+
     const payload = {
       ...customerForm,
       companyName,
@@ -4471,11 +4498,17 @@ function AccountsErpModule() {
       ],
       emailList: [primaryEmail, ...additionalEmails].filter(Boolean),
       billingAddress: String(customerForm.billingAddress || "").trim(),
-      shippingAddress: String(customerForm.shippingAddress || "").trim(),
-      country: String(customerForm.country || "").trim(),
-      state: String(customerForm.state || "").trim(),
-      city: String(customerForm.city || "").trim(),
-      pincode: String(customerForm.pincode || "").trim()
+      shippingAddress,
+      billingCountry,
+      billingState,
+      billingPincode,
+      shippingCountry,
+      shippingState,
+      shippingPincode,
+      billingShippingSame: useSameShipping,
+      country: billingCountry,
+      state: billingState,
+      pincode: billingPincode
     };
     setModuleData((prev) => {
       const rows = prev.customers || [];
@@ -5536,63 +5569,133 @@ function AccountsErpModule() {
                   ))}
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Billing Address</label>
-                  <textarea className="form-control" rows="2" value={customerForm.billingAddress || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, billingAddress: e.target.value }))} placeholder="Billing address" />
-                </div>
-                <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Shipping Address</label>
-                  <textarea className="form-control" rows="2" value={customerForm.shippingAddress || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, shippingAddress: e.target.value }))} placeholder="Shipping address" />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Country</label>
-                  <select
-                    className="form-select"
-                    value={customerForm.country || "India"}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, country: e.target.value, state: "" }))}
-                  >
-                    {COUNTRY_OPTIONS.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">State</label>
-                  {customerStateOptions.length ? (
-                    <select
-                      className="form-select"
-                      value={customerForm.state || ""}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, state: e.target.value }))}
-                    >
-                      <option value="">Select State</option>
-                      {customerStateOptions.map((state) => (
-                        <option key={state} value={state}>{state}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <>
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0"
+                        checked={Boolean(customerForm.billingShippingSame)}
+                        onChange={(e) =>
+                          setCustomerForm((p) => ({
+                            ...p,
+                            billingShippingSame: e.target.checked,
+                          }))
+                        }
+                      />
+                      Billing and Shipping Same
+                    </label>
+                  </div>
+                  <textarea
+                    className="form-control mb-2"
+                    rows="2"
+                    value={customerForm.billingAddress || ""}
+                    onChange={(e) => setCustomerForm((p) => ({ ...p, billingAddress: e.target.value }))}
+                    placeholder="Billing address"
+                  />
+                  <div className="d-flex flex-column gap-2">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Country</label>
+                      <select
+                        className="form-select"
+                        value={customerForm.billingCountry || "India"}
+                        onChange={(e) => setCustomerForm((p) => ({ ...p, billingCountry: e.target.value, billingState: "" }))}
+                      >
+                        {COUNTRY_OPTIONS.map((country) => (
+                          <option key={`billing-country-${country}`} value={country}>{country}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">State</label>
+                      {billingStateOptions.length ? (
+                        <select
+                          className="form-select"
+                          value={customerForm.billingState || ""}
+                          onChange={(e) => setCustomerForm((p) => ({ ...p, billingState: e.target.value }))}
+                        >
+                          <option value="">Select State</option>
+                          {billingStateOptions.map((state) => (
+                            <option key={`billing-state-${state}`} value={state}>{state}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="form-control"
+                          value={customerForm.billingState || ""}
+                          onChange={(e) => setCustomerForm((p) => ({ ...p, billingState: e.target.value }))}
+                          placeholder="State / Province / Region"
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Pincode</label>
                       <input
                         className="form-control"
-                        list="baerp-state-options"
-                        value={customerForm.state || ""}
-                        onChange={(e) => setCustomerForm((p) => ({ ...p, state: e.target.value }))}
-                        placeholder="State / Province / Region"
+                        value={customerForm.billingPincode || ""}
+                        onChange={(e) => setCustomerForm((p) => ({ ...p, billingPincode: e.target.value }))}
+                        placeholder="Pincode"
                       />
-                      <datalist id="baerp-state-options">
-                        {customerStateOptions.map((state) => (
-                          <option key={state} value={state} />
-                        ))}
-                      </datalist>
-                    </>
-                  )}
+                    </div>
+                  </div>
                 </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">City</label>
-                  <input className="form-control" value={customerForm.city || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, city: e.target.value }))} placeholder="City" />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Pincode</label>
-                  <input className="form-control" value={customerForm.pincode || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, pincode: e.target.value }))} placeholder="Pincode" />
-                </div>
+                {!customerForm.billingShippingSame ? (
+                  <div className="col-12 col-xl-6">
+                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <textarea
+                      className="form-control mb-2"
+                      rows="2"
+                      value={customerForm.shippingAddress || ""}
+                      onChange={(e) => setCustomerForm((p) => ({ ...p, shippingAddress: e.target.value }))}
+                      placeholder="Shipping address"
+                    />
+                    <div className="d-flex flex-column gap-2">
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Country</label>
+                        <select
+                          className="form-select"
+                          value={customerForm.shippingCountry || "India"}
+                          onChange={(e) => setCustomerForm((p) => ({ ...p, shippingCountry: e.target.value, shippingState: "" }))}
+                        >
+                          {COUNTRY_OPTIONS.map((country) => (
+                            <option key={`shipping-country-${country}`} value={country}>{country}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">State</label>
+                        {shippingStateOptions.length ? (
+                          <select
+                            className="form-select"
+                            value={customerForm.shippingState || ""}
+                            onChange={(e) => setCustomerForm((p) => ({ ...p, shippingState: e.target.value }))}
+                          >
+                            <option value="">Select State</option>
+                            {shippingStateOptions.map((state) => (
+                              <option key={`shipping-state-${state}`} value={state}>{state}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="form-control"
+                            value={customerForm.shippingState || ""}
+                            onChange={(e) => setCustomerForm((p) => ({ ...p, shippingState: e.target.value }))}
+                            placeholder="State / Province / Region"
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <input
+                          className="form-control"
+                          value={customerForm.shippingPincode || ""}
+                          onChange={(e) => setCustomerForm((p) => ({ ...p, shippingPincode: e.target.value }))}
+                          placeholder="Pincode"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div className="d-flex gap-2">
                 <button type="submit" className="btn btn-success btn-sm">{editingCustomerId ? "Update Customer" : "Create Customer"}</button>
@@ -5621,10 +5724,12 @@ function AccountsErpModule() {
               row.gstin,
               ...(formatCustomerPhones(row)),
               ...(formatCustomerEmails(row)),
-              row.country,
-              row.state,
-              row.city,
-              row.pincode,
+              row.billingCountry || row.country,
+              row.billingState || row.state,
+              row.billingPincode || row.pincode,
+              row.shippingCountry,
+              row.shippingState,
+              row.shippingPincode,
             ].join(" ")}
             renderCells={(row) => [
               <span className="fw-semibold">{row.companyName || row.name || "-"}</span>,
@@ -5632,7 +5737,9 @@ function AccountsErpModule() {
               row.gstin || "-",
               <span style={{ whiteSpace: "normal" }}>{formatCustomerPhones(row).join(", ") || "-"}</span>,
               <span style={{ whiteSpace: "normal" }}>{formatCustomerEmails(row).join(", ") || "-"}</span>,
-              <span style={{ whiteSpace: "normal" }}>{[row.city, row.state, row.country, row.pincode].filter(Boolean).join(", ") || "-"}</span>,
+              <span style={{ whiteSpace: "normal" }}>
+                {[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}
+              </span>,
             ]}
             renderActions={(row) => (
               <div className="d-inline-flex gap-2">
