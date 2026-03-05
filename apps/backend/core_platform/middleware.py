@@ -108,11 +108,24 @@ class ProductRouteRedirectMiddleware:
 
 
 class ProductAuthorizationMiddleware:
+    PUBLIC_AGENT_API_PREFIXES = (
+        "/api/activity/upload",
+        "/api/screenshot/upload",
+        "/api/monitor/",
+        "/api/worksuite/stop",
+        "/api/org/settings",
+        "/api/employee/register",
+        "/api/org/register",
+    )
+
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         path = request.path or ""
+        if any(path.startswith(prefix) for prefix in self.PUBLIC_AGENT_API_PREFIXES):
+            return self.get_response(request)
+
         product_slug = get_request_product_slug(path)
         if not product_slug or is_exempt_product_path(path):
             return self.get_response(request)
