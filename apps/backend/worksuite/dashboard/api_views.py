@@ -61,6 +61,7 @@ from core.subscription_utils import is_subscription_active
 from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
 from core.notification_emails import notify_password_changed, notify_account_limit_reached, send_email_verification
 from core.notifications import create_org_admin_inbox_notification
+from core.access_control import iter_accessible_product_slugs
 from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 
@@ -73,6 +74,18 @@ GSTIN_REGEX = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
 HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+PRODUCT_LABEL_OVERRIDES = {
+    "monitor": "Work Suite",
+    "worksuite": "Work Suite",
+    "work-suite": "Work Suite",
+    "business-autopilot-erp": "Business Autopilot",
+    "imposition-software": "Print Marks",
+    "storage": "Online Storage",
+    "ai-chatbot": "AI Chatbot",
+    "whatsapp-automation": "Whatsapp Automation",
+    "digital-card": "Digital Business Card",
+    "ai-chat-widget": "AI Chat Widget",
+}
 
 
 def _normalize_text(value):
@@ -88,6 +101,52 @@ def _normalize_product_slug(value, default=""):
     if slug in ("online-storage",):
         return "storage"
     return slug
+
+
+def _resolve_product_label(slug, product_map):
+    normalized = _normalize_product_slug(slug, default="")
+    if not normalized:
+        return ""
+    if normalized in PRODUCT_LABEL_OVERRIDES:
+        return PRODUCT_LABEL_OVERRIDES[normalized]
+    if normalized == "monitor":
+        return (
+            product_map.get("monitor")
+            or product_map.get("worksuite")
+            or product_map.get("work-suite")
+            or "Work Suite"
+        )
+    return product_map.get(normalized) or _title_case(normalized)
+
+
+def _ticket_product_options_for_user(user):
+    slugs = []
+    seen = set()
+    for raw_slug in iter_accessible_product_slugs(user):
+        slug = _normalize_product_slug(raw_slug, default="")
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        slugs.append(slug)
+
+    if not slugs:
+        slugs = ["monitor"]
+
+    candidate_slugs = set(slugs)
+    if "monitor" in candidate_slugs:
+        candidate_slugs.update({"worksuite", "work-suite"})
+    product_map = {
+        _normalize_product_slug(row["slug"], default=row["slug"]): row["name"]
+        for row in Product.objects.filter(slug__in=list(candidate_slugs)).values("slug", "name")
+    }
+
+    return [
+        {
+            "slug": slug,
+            "name": _resolve_product_label(slug, product_map),
+        }
+        for slug in slugs
+    ]
 
 
 def _validate_gstin(value):
@@ -467,6 +526,8 @@ def org_tickets(request):
         return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
     org = org_or_error
 
+    product_options = _ticket_product_options_for_user(request.user)
+
     if request.method == "GET":
         try:
             page = max(int(request.GET.get("page", 1)), 1)
@@ -521,6 +582,7 @@ def org_tickets(request):
             "total": total,
             "total_pages": total_pages,
             "unread_count": unread_count,
+            "product_options": product_options,
         })
 
     if not _is_org_admin_user(request, org):
@@ -531,11 +593,14 @@ def org_tickets(request):
     message = str(request.POST.get("message") or "").strip()
     product_slug = _normalize_product_slug(request.POST.get("product_slug"), default="monitor")
     files = request.FILES.getlist("attachments")
+    allowed_product_slugs = {item["slug"] for item in product_options}
 
     if not subject:
         return _json_error("subject_required", status=400)
     if not message:
         return _json_error("message_required", status=400)
+    if product_slug not in allowed_product_slugs:
+        return _json_error("invalid_product_slug", status=400)
     file_error = _validate_ticket_attachments(files)
     if file_error:
         return _json_error(file_error, status=400)

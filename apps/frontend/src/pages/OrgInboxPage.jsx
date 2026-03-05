@@ -113,7 +113,13 @@ export default function OrgInboxPage() {
   const [ticketStatusFilter, setTicketStatusFilter] = useState("");
   const [ticketCategoryFilter, setTicketCategoryFilter] = useState("");
   const [showCreateTicket, setShowCreateTicket] = useState(false);
-  const [createTicketForm, setCreateTicketForm] = useState({ category: "support", subject: "", message: "", files: [] });
+  const [createTicketForm, setCreateTicketForm] = useState({
+    category: "support",
+    subject: "",
+    productSlug: currentProductSlug,
+    message: "",
+    files: [],
+  });
   const [createTicketState, setCreateTicketState] = useState({ saving: false, error: "", success: "" });
   const [replyForm, setReplyForm] = useState({ message: "", files: [] });
   const [replyState, setReplyState] = useState({ saving: false, error: "", success: "" });
@@ -130,6 +136,13 @@ export default function OrgInboxPage() {
   const ticketItems = ticketState.data?.results || [];
   const ticketTotalPages = ticketState.data?.total_pages || 1;
   const ticketUnreadCount = ticketState.data?.unread_count || 0;
+  const ticketProductOptions = useMemo(() => {
+    const options = ticketState.data?.product_options || [];
+    if (options.length) {
+      return options;
+    }
+    return [{ slug: currentProductSlug, name: titleCase(currentProductSlug.replace(/-/g, " ")) }];
+  }, [ticketState.data, currentProductSlug]);
 
   async function loadInbox({ keepSelection = false } = {}) {
     setInboxState((prev) => ({ ...prev, loading: true, error: "" }));
@@ -199,6 +212,22 @@ export default function OrgInboxPage() {
     loadTickets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProductSlug, ticketPage, ticketStatusFilter, ticketCategoryFilter]);
+
+  useEffect(() => {
+    if (!ticketProductOptions.length) {
+      return;
+    }
+    const allowed = new Set(ticketProductOptions.map((item) => String(item.slug || "")));
+    const preferred = allowed.has(currentProductSlug)
+      ? currentProductSlug
+      : String(ticketProductOptions[0]?.slug || "");
+    setCreateTicketForm((prev) => {
+      if (prev.productSlug && allowed.has(prev.productSlug)) {
+        return prev;
+      }
+      return { ...prev, productSlug: preferred };
+    });
+  }, [ticketProductOptions, currentProductSlug]);
 
   useEffect(() => {
     if (!autoRefreshInbox || activeTab !== "inbox") return;
@@ -327,11 +356,17 @@ export default function OrgInboxPage() {
         category: createTicketForm.category,
         subject,
         message,
-        productSlug: currentProductSlug,
+        productSlug: createTicketForm.productSlug || currentProductSlug,
         attachments: createTicketForm.files,
       });
       await createOrgTicket(formData);
-      setCreateTicketForm({ category: "support", subject: "", message: "", files: [] });
+      setCreateTicketForm((prev) => ({
+        category: "support",
+        subject: "",
+        productSlug: prev.productSlug || currentProductSlug,
+        message: "",
+        files: [],
+      }));
       setCreateTicketState({ saving: false, error: "", success: "Ticket created successfully." });
       setShowCreateTicket(false);
       setTicketPage(1);
@@ -496,7 +531,7 @@ export default function OrgInboxPage() {
                       <option value="sales">Sales</option>
                     </select>
                   </div>
-                  <div className="col-12 col-lg-9">
+                  <div className="col-12 col-lg-5">
                     <label className="form-label small text-secondary mb-1">Subject</label>
                     <input
                       type="text"
@@ -505,6 +540,20 @@ export default function OrgInboxPage() {
                       onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
                       placeholder="Enter ticket subject"
                     />
+                  </div>
+                  <div className="col-12 col-lg-4">
+                    <label className="form-label small text-secondary mb-1">Product</label>
+                    <select
+                      className="form-select"
+                      value={createTicketForm.productSlug || ""}
+                      onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
+                    >
+                      {ticketProductOptions.map((item) => (
+                        <option key={item.slug} value={item.slug}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <div>
