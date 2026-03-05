@@ -523,65 +523,85 @@ export default function OrgInboxPage() {
               <h6 className="mb-3">Create Ticket</h6>
               <form className="d-flex flex-column gap-3" onSubmit={handleCreateTicket}>
                 <div className="row g-3">
-                  <div className="col-12 col-lg-5 d-flex flex-column gap-3">
-                    <div>
-                      <label className="form-label small text-secondary mb-1">Name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={createTicketForm.name}
-                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, name: event.target.value }))}
-                        placeholder="Enter your name"
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label small text-secondary mb-1">Type</label>
-                      <select
-                        className="form-select"
-                        value={createTicketForm.category}
-                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, category: event.target.value }))}
-                      >
-                        <option value="support">Support</option>
-                        <option value="sales">Sales</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label small text-secondary mb-1">Subject</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={createTicketForm.subject}
-                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
-                        placeholder="Enter ticket subject"
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label small text-secondary mb-1">Product</label>
-                      <select
-                        className="form-select"
-                        value={createTicketForm.productSlug || ""}
-                        onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
-                      >
-                        {ticketProductOptions.map((item) => (
-                          <option key={item.slug} value={item.slug}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label small text-secondary mb-1">Attachment</label>
-                      <input
-                        type="file"
-                        className="form-control"
-                        accept="image/*"
-                        multiple
-                        onChange={(event) => {
-                          const files = Array.from(event.target.files || []);
-                          setCreateTicketForm((prev) => ({ ...prev, files }));
-                        }}
-                      />
-                      <div className="small text-secondary mt-1">Up to 5 images, max 2MB each.</div>
+                  <div className="col-12 col-lg-5">
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={createTicketForm.name}
+                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, name: event.target.value }))}
+                          placeholder="Enter your name"
+                        />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Type</label>
+                        <select
+                          className="form-select"
+                          value={createTicketForm.category}
+                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, category: event.target.value }))}
+                        >
+                          <option value="support">Support</option>
+                          <option value="sales">Sales</option>
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Subject</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={createTicketForm.subject}
+                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
+                          placeholder="Enter ticket subject"
+                        />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Product</label>
+                        <select
+                          className="form-select"
+                          value={createTicketForm.productSlug || ""}
+                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
+                        >
+                          {ticketProductOptions.map((item) => (
+                            <option key={item.slug} value={item.slug}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Attachment</label>
+                        <input
+                          type="file"
+                          className="form-control"
+                          accept="image/*"
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []);
+                            setCreateTicketForm((prev) => ({ ...prev, files }));
+                          }}
+                        />
+                        <div className="small text-secondary mt-1">Up to 5 images, max 2MB each.</div>
+                      </div>
+                      <div className="col-12 col-md-6 d-flex align-items-end">
+                        <div className="d-flex gap-2 flex-wrap w-100">
+                          <button type="submit" className="btn btn-primary btn-sm" disabled={createTicketState.saving}>
+                            {createTicketState.saving ? "Creating..." : "Create Ticket"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-light btn-sm"
+                            disabled={createTicketState.saving}
+                            onClick={() => {
+                              setShowCreateTicket(false);
+                              setCreateTicketState((prev) => ({ ...prev, error: "" }));
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="col-12 col-lg-7 d-flex flex-column">
@@ -596,22 +616,6 @@ export default function OrgInboxPage() {
                   </div>
                 </div>
                 {createTicketState.error ? <div className="alert alert-danger py-2 mb-0">{createTicketState.error}</div> : null}
-                <div className="d-flex gap-2">
-                  <button type="submit" className="btn btn-primary btn-sm" disabled={createTicketState.saving}>
-                    {createTicketState.saving ? "Creating..." : "Create Ticket"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline-light btn-sm"
-                    disabled={createTicketState.saving}
-                    onClick={() => {
-                      setShowCreateTicket(false);
-                      setCreateTicketState((prev) => ({ ...prev, error: "" }));
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
               </form>
             </div>
           ) : null}
