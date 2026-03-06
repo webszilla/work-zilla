@@ -483,7 +483,12 @@ def _is_browser_app(app_name):
 def _is_monitor_placeholder(app_name, window_title):
     app = (app_name or "").strip().lower()
     title = (window_title or "").strip().lower()
-    return app in {"", "work zilla agent"} and title in {"", "monitor active"}
+    if app in {"", "work zilla agent"} and title in {"", "monitor active"}:
+        return True
+    # Some Windows captures can report shell host with no real active title.
+    if app in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"} and title in {"", "monitor active"}:
+        return True
+    return False
 
 
 def _infer_activity_app_name(window_title, url):
@@ -519,11 +524,14 @@ def _normalize_monitor_activity(app_name, window_title, url):
     title_key = normalized_window_title.lower()
     shell_apps = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
     shell_title_markers = {"powershell", "pwsh", "command prompt", "terminal"}
-    if app_key in shell_apps and title_key:
-        if not any(marker in title_key for marker in shell_title_markers):
+    if app_key in shell_apps:
+        if title_key and not any(marker in title_key for marker in shell_title_markers):
             inferred_app = _infer_activity_app_name(normalized_window_title, url)
             if inferred_app:
                 normalized_app_name = inferred_app
+        elif not title_key:
+            # Ignore shell host captures that don't carry actual foreground metadata.
+            normalized_app_name = ""
     if not normalized_app_name:
         inferred_app = _infer_activity_app_name(normalized_window_title, url)
         if inferred_app:
