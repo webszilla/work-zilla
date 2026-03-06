@@ -3144,14 +3144,12 @@ def gaming_ott_usage(request):
     keyword_q = dashboard_views.build_gaming_ott_query()
     placeholder_activity_q = (
         (
-            models.Q(app_name__iexact="work zilla agent")
-            | models.Q(app_name__iexact="powershell")
-            | models.Q(app_name__iexact="powershell.exe")
-            | models.Q(app_name__iexact="pwsh")
-            | models.Q(app_name__iexact="pwsh.exe")
+            models.Q(app_name__icontains="work zilla agent")
+            | models.Q(app_name__icontains="powershell")
+            | models.Q(app_name__icontains="pwsh")
         )
         & (
-            models.Q(window_title__iexact="monitor active")
+            models.Q(window_title__icontains="monitor active")
             | models.Q(window_title__exact="")
             | models.Q(window_title__isnull=True)
         )
