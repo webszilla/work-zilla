@@ -27,8 +27,8 @@ export default function TinyHtmlEditor({
 }) {
   const inputId = useId();
   const editorRef = useRef(null);
+  const validationRef = useRef(null);
   const statusId = useId();
-  const lastValidHtmlRef = useRef(value || "");
   const fontOptions = [
     { label: "Font", value: "" },
     { label: "Arial", value: "Arial, sans-serif" },
@@ -65,17 +65,6 @@ export default function TinyHtmlEditor({
     return text.split(" ").filter(Boolean).length;
   }
 
-  function setCaretToEnd(node) {
-    if (!node) return;
-    const selection = window.getSelection();
-    if (!selection) return;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
@@ -85,10 +74,7 @@ export default function TinyHtmlEditor({
     if (editor.innerHTML !== nextValue) {
       editor.innerHTML = nextValue;
     }
-    if (countWordsFromHtml(nextValue) <= maxWords) {
-      lastValidHtmlRef.current = nextValue;
-    }
-  }, [value, maxWords]);
+  }, [value]);
 
   function emitChange() {
     const editor = editorRef.current;
@@ -96,12 +82,6 @@ export default function TinyHtmlEditor({
       return;
     }
     const nextHtml = editor.innerHTML || "";
-    if (countWordsFromHtml(nextHtml) > maxWords) {
-      editor.innerHTML = lastValidHtmlRef.current || "";
-      setCaretToEnd(editor);
-      return;
-    }
-    lastValidHtmlRef.current = nextHtml;
     onChange(nextHtml);
   }
 
@@ -143,12 +123,24 @@ export default function TinyHtmlEditor({
   }
 
   const currentWordCount = countWordsFromHtml(value || "");
+  const overflowWords = Math.max(0, currentWordCount - maxWords);
   const isWordLimitReached = currentWordCount >= maxWords;
+  const isOverLimit = overflowWords > 0;
+  const wordLimitMessage = isOverLimit
+    ? `Maximum ${maxWords} words allowed. Remove ${overflowWords} extra words to continue.`
+    : "";
+
+  useEffect(() => {
+    if (!validationRef.current) {
+      return;
+    }
+    validationRef.current.setCustomValidity(wordLimitMessage);
+  }, [wordLimitMessage]);
 
   return (
     <div className="tiny-html-editor tiny-html-editor--simple">
       {label ? <label className="form-label" htmlFor={inputId}>{label}</label> : null}
-      <div className="tiny-html-editor__frame">
+      <div className={`tiny-html-editor__frame ${isOverLimit ? "is-overlimit" : ""}`}>
         <div className="tiny-html-editor__toolbar" role="toolbar" aria-label={`${label || "HTML"} toolbar`}>
           <select className="tiny-html-editor__select" defaultValue="" onChange={(event) => {
             handleSelectCommand("fontName", event.target.value);
@@ -230,7 +222,7 @@ export default function TinyHtmlEditor({
         <div
           id={inputId}
           ref={editorRef}
-          className="tiny-html-editor__content"
+          className={`tiny-html-editor__content ${isOverLimit ? "is-overlimit" : ""}`}
           contentEditable
           suppressContentEditableWarning
           data-placeholder={placeholder}
@@ -239,8 +231,16 @@ export default function TinyHtmlEditor({
           onBlur={emitChange}
           aria-describedby={statusId}
         />
+        <input
+          ref={validationRef}
+          className="tiny-html-editor__validator"
+          tabIndex={-1}
+          aria-hidden="true"
+          readOnly
+          value={isOverLimit ? `overflow:${overflowWords}` : ""}
+        />
       </div>
-      <div id={statusId} className={`tiny-html-editor__meta ${isWordLimitReached ? "is-limit" : ""}`}>
+      <div id={statusId} className={`tiny-html-editor__meta ${isWordLimitReached ? "is-limit" : ""} ${isOverLimit ? "is-overlimit" : ""}`}>
         {currentWordCount}/{maxWords} words
       </div>
     </div>

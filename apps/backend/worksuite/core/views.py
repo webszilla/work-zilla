@@ -921,21 +921,14 @@ def upload_activity(request):
             return error
         header_device_id = request.headers.get("X-Device-Id")
         request_device_id = header_device_id or request.data.get("device_id") or request.query_params.get("device_id") or request.POST.get("device_id")
-        employee_id = request.data.get("employee")
+        employee_id = request.data.get("employee") or request.data.get("employee_id") or request.POST.get("employee") or request.POST.get("employee_id")
         pc_time = request.data.get("pc_time")
 
-        if not employee_id:
-            log_event(
-                "agent_activity_upload",
-                status="error",
-                org=org,
-                device_id=request_device_id,
-                meta={"reason": "employee_required"},
-                request=request,
-            )
-            return Response({"error": "employee is required"}, status=400)
-
-        employee = Employee.objects.filter(id=employee_id, org=org).first()
+        employee = None
+        if employee_id:
+            employee = Employee.objects.filter(id=employee_id, org=org).first()
+        if not employee and request_device_id:
+            employee = Employee.objects.filter(device_id=request_device_id, org=org).first()
         if not employee:
             log_event(
                 "agent_activity_upload",
@@ -943,10 +936,10 @@ def upload_activity(request):
                 org=org,
                 device_id=request_device_id,
                 employee_id=employee_id,
-                meta={"reason": "invalid_employee"},
+                meta={"reason": "employee_not_found"},
                 request=request,
             )
-            return Response({"error": "Invalid employee"}, status=400)
+            return Response({"error": "employee is required"}, status=400)
         if request_device_id and employee.device_id != request_device_id:
             log_event(
                 "agent_activity_upload",
@@ -973,12 +966,14 @@ def upload_activity(request):
         data["start_time"] = activity_time
         data["end_time"] = activity_time
         normalized_app_name, normalized_window_title = _normalize_monitor_activity(
-            data.get("app_name"),
-            data.get("window_title"),
-            data.get("url"),
+            data.get("app_name") or data.get("app"),
+            data.get("window_title") or data.get("window") or data.get("title"),
+            data.get("url") or data.get("website"),
         )
         data["app_name"] = normalized_app_name
         data["window_title"] = normalized_window_title
+        if not data.get("url"):
+            data["url"] = data.get("website") or ""
 
         serializer = ActivitySerializer(data=data)
 
@@ -1320,9 +1315,9 @@ def monitor_heartbeat(request):
             return Response({"error": "Invalid employee"}, status=400)
 
         now = timezone.now()
-        app_name = (request.data.get("app_name") or "").strip()
-        window_title = (request.data.get("window_title") or "").strip()
-        url = (request.data.get("url") or "").strip()
+        app_name = (request.data.get("app_name") or request.data.get("app") or "").strip()
+        window_title = (request.data.get("window_title") or request.data.get("window") or request.data.get("title") or "").strip()
+        url = (request.data.get("url") or request.data.get("website") or "").strip()
         if app_name or window_title or url:
             normalized_app_name, normalized_window_title = _normalize_monitor_activity(
                 app_name,

@@ -392,6 +392,7 @@ function AppShell({ state, productPrefix, productSlug }) {
         pathname: location.pathname.slice(basePath.length) || "/"
       }
     : location;
+  const normalizedPathname = normalizedLocation.pathname || "/";
 
   function isAllowedPath(pathname, prefixList) {
     return prefixList.some((prefix) => {
@@ -751,6 +752,24 @@ function AppShell({ state, productPrefix, productSlug }) {
     : isSaasAdmin || isAdmin
       ? "ORG Admin"
       : "ORG User";
+  const showTopbarProductSection = (() => {
+    if (isSaasAdminRoute) {
+      return isOverviewSection;
+    }
+    if (isDealer) {
+      return normalizedPathname === "/dealer-dashboard";
+    }
+    if (isWhatsappAutomationProduct) {
+      return (
+        normalizedPathname === "/" ||
+        normalizedPathname === "/dashboard/company-profile" ||
+        normalizedPathname === "/dashboard/whatsapp-automation" ||
+        normalizedPathname === "/dashboard/catalogue" ||
+        normalizedPathname === "/dashboard/digital-card"
+      );
+    }
+    return normalizedPathname === "/";
+  })();
 
   return (
     <div
@@ -956,45 +975,47 @@ function AppShell({ state, productPrefix, productSlug }) {
       </aside>
 
       <div className="wz-workspace">
-        <header className="wz-topbar">
-          <div className="wz-topbar__intro">
-            <button
-              type="button"
-              className="sidebar-toggle"
-              onClick={() => setSidebarCollapsed((prev) => !prev)}
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              <i className={`bi ${sidebarCollapsed ? "bi-text-indent-left" : "bi-text-indent-right"}`} aria-hidden="true" />
-            </button>
-            <div>
-              <h1 className="wz-topbar__title">{productLabel}</h1>
-            </div>
-          </div>
-
-          <div className="wz-topbar__actions">
-            <div className="wz-topbar__panel">
-              <i className="bi bi-buildings" aria-hidden="true" />
-              <div className="wz-topbar__panel-copy">
-                <strong>{orgNameForUi}</strong>
-                <span>{roleDisplayName}</span>
-              </div>
-            </div>
-            <div className="wz-topbar__panel">
-              <i className="bi bi-palette2" aria-hidden="true" />
-              <div className="wz-topbar__panel-copy">
-                <strong>{planLabel}</strong>
-                <Link to={withBase("/profile?tab=uiTheme")}>{statusLabel} theme linked to admin branding</Link>
-              </div>
-            </div>
-            <div className="wz-profile-chip">
-              <div className="wz-profile-chip__avatar">{userInitials}</div>
+        {showTopbarProductSection ? (
+          <header className="wz-topbar">
+            <div className="wz-topbar__intro">
+              <button
+                type="button"
+                className="sidebar-toggle"
+                onClick={() => setSidebarCollapsed((prev) => !prev)}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                <i className={`bi ${sidebarCollapsed ? "bi-text-indent-left" : "bi-text-indent-right"}`} aria-hidden="true" />
+              </button>
               <div>
-                <strong>{userDisplayName}</strong>
-                <span>{productLabel}</span>
+                <h1 className="wz-topbar__title">{productLabel}</h1>
               </div>
             </div>
-          </div>
-        </header>
+
+            <div className="wz-topbar__actions">
+              <div className="wz-topbar__panel">
+                <i className="bi bi-buildings" aria-hidden="true" />
+                <div className="wz-topbar__panel-copy">
+                  <strong>{orgNameForUi}</strong>
+                  <span>{roleDisplayName}</span>
+                </div>
+              </div>
+              <div className="wz-topbar__panel">
+                <i className="bi bi-palette2" aria-hidden="true" />
+                <div className="wz-topbar__panel-copy">
+                  <strong>{planLabel}</strong>
+                  <Link to={withBase("/profile?tab=uiTheme")}>{statusLabel} theme linked to admin branding</Link>
+                </div>
+              </div>
+              <div className="wz-profile-chip">
+                <div className="wz-profile-chip__avatar">{userInitials}</div>
+                <div>
+                  <strong>{userDisplayName}</strong>
+                  <span>{productLabel}</span>
+                </div>
+              </div>
+            </div>
+          </header>
+        ) : null}
 
         <main className="main wz-main-stage">
           <div className="wz-alert-stack">
@@ -1582,6 +1603,7 @@ export default function App() {
     const TEXT_INPUT_TYPES = new Set(["text", "email", "url", "tel", "search", "password", "number"]);
     const DEFAULT_INPUT_MAX = 255;
     const DEFAULT_TEXTAREA_MAX = 1000;
+    const TEXT_OVERFLOW_CLASS = "wz-text-limit-overflow";
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const WEB_RE = /^(https?:\/\/|www\.|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(\/.*)?$/i;
 
@@ -1628,6 +1650,14 @@ export default function App() {
 
     const setValidationMessage = (el) => {
       const value = String(el.value || "").trim();
+      if (el.dataset.wzLimitOverflow === "true") {
+        const limit = Number(el.dataset.wzLimit || 0);
+        const extra = Number(el.dataset.wzLimitExtra || 0);
+        el.setCustomValidity(
+          `Maximum ${limit} characters allowed. Remove ${extra} extra characters to continue.`
+        );
+        return;
+      }
       if (!value) {
         el.setCustomValidity("");
         return;
@@ -1649,6 +1679,20 @@ export default function App() {
       if (!el || !(el instanceof Element) || el.hasAttribute("data-no-global-limit")) {
         return;
       }
+      const setOverflowState = (inputEl, limit, valueLength) => {
+        const overflow = valueLength > limit;
+        if (overflow) {
+          inputEl.dataset.wzLimitOverflow = "true";
+          inputEl.dataset.wzLimit = String(limit);
+          inputEl.dataset.wzLimitExtra = String(valueLength - limit);
+          inputEl.classList.add(TEXT_OVERFLOW_CLASS);
+        } else {
+          delete inputEl.dataset.wzLimitOverflow;
+          delete inputEl.dataset.wzLimit;
+          delete inputEl.dataset.wzLimitExtra;
+          inputEl.classList.remove(TEXT_OVERFLOW_CLASS);
+        }
+      };
       const applyLimitToInput = (inputEl) => {
         const limit = inputEl.maxLength > 0 ? inputEl.maxLength : inferLimit(inputEl, DEFAULT_INPUT_MAX);
         const sanitized = sanitizeValue(inputEl, inputEl.value);
@@ -1656,6 +1700,7 @@ export default function App() {
         if (trimmed !== inputEl.value) {
           inputEl.value = trimmed;
         }
+        setOverflowState(inputEl, limit, String(inputEl.value || "").length);
         setValidationMessage(inputEl);
       };
       if (el instanceof HTMLInputElement) {
@@ -1667,10 +1712,8 @@ export default function App() {
       }
       if (el instanceof HTMLTextAreaElement) {
         const limit = el.maxLength > 0 ? el.maxLength : inferLimit(el, DEFAULT_TEXTAREA_MAX);
-        const trimmed = String(el.value || "").slice(0, limit);
-        if (trimmed !== el.value) {
-          el.value = trimmed;
-        }
+        const currentLength = String(el.value || "").length;
+        setOverflowState(el, limit, currentLength);
         setValidationMessage(el);
       }
     };

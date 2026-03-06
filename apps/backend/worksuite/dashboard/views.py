@@ -55,6 +55,12 @@ GAMING_OTT_TITLE_KEYWORDS = [
     "addicting games", "coolmath games", "friv", "armor games",
     "newgrounds", "kizi", "itch.io", "roblox",
 ]
+GAMING_OTT_APP_KEYWORDS = [
+    "netflix", "prime video", "hotstar", "disney", "youtube", "twitch",
+    "steam", "steamwebhelper", "epic games", "epicgameslauncher", "battle.net",
+    "riot client", "valorant", "pubg", "dota", "counter-strike", "cs2",
+    "fortnite", "minecraft", "roblox",
+]
 
 
 def build_gaming_ott_query():
@@ -63,6 +69,9 @@ def build_gaming_ott_query():
         keyword_q |= models.Q(url__icontains=keyword)
     for keyword in GAMING_OTT_TITLE_KEYWORDS:
         keyword_q |= models.Q(window_title__icontains=keyword)
+        keyword_q |= models.Q(app_name__icontains=keyword)
+    for keyword in GAMING_OTT_APP_KEYWORDS:
+        keyword_q |= models.Q(app_name__icontains=keyword)
     return keyword_q
 
 

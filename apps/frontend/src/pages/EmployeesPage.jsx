@@ -290,7 +290,6 @@ export default function EmployeesPage() {
                     <th>Name</th>
                     <th>PC Name</th>
                     <th>Company Key</th>
-                    <th>Device</th>
                     <th className="employee-col-status">Status</th>
                     <th>Last Seen</th>
                     <th className="table-actions employee-col-action">Action</th>
@@ -312,7 +311,6 @@ export default function EmployeesPage() {
                           <td>{employee.name}</td>
                           <td>{employee.pc_name || "-"}</td>
                           <td>{companyKey}</td>
-                          <td>{employee.device_id}</td>
                           <td className="employee-col-status">
                             <span className={`badge ${badgeClass}`}>{status}</span>
                           </td>
@@ -345,7 +343,7 @@ export default function EmployeesPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="8">No employees found.</td>
+                      <td colSpan="7">No employees found.</td>
                     </tr>
                   )}
                 </tbody>

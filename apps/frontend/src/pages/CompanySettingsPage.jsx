@@ -253,7 +253,7 @@ export default function CompanySettingsPage() {
       {notice ? <div className="alert alert-success">{notice}</div> : null}
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
 
-      <div className="row g-3">
+      <div className="row g-3 company-settings-top-grid">
         <div className="col-12 col-lg-3">
           <div className="card p-3 h-100 monitor-summary-card">
             <h4>Company Details</h4>
