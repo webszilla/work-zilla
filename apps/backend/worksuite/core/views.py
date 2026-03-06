@@ -491,9 +491,32 @@ def _is_monitor_placeholder(app_name, window_title):
     return False
 
 
+_URLISH_PATTERN = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
+_DOMAINISH_PATTERN = re.compile(r"\b([a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?\b", re.IGNORECASE)
+
+
+def _extract_urlish_text(value):
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    match = _URLISH_PATTERN.search(raw)
+    if match:
+        return match.group(1).strip()
+    match = _DOMAINISH_PATTERN.search(raw)
+    if match:
+        return match.group(0).strip()
+    return ""
+
+
 def _infer_activity_app_name(window_title, url):
     title = (window_title or "").strip().lower()
     page = (url or "").strip().lower()
+    title_urlish = _extract_urlish_text(window_title or "").strip().lower()
+
+    if any(token in page for token in ("youtube.com", "netflix.com", "primevideo.com", "hotstar.com", "disneyplus.com", "spotify.com")):
+        return "Browser"
+    if any(token in title for token in ("youtube", "netflix", "prime video", "hotstar", "disney+", "spotify")):
+        return "Browser"
     if "chrome" in title:
         return "Chrome"
     if "edge" in title:
@@ -502,7 +525,17 @@ def _infer_activity_app_name(window_title, url):
         return "Firefox"
     if "safari" in title:
         return "Safari"
+    if title_urlish:
+        return "Browser"
     if page.startswith("http://") or page.startswith("https://"):
+        return "Browser"
+    if page.startswith("www."):
+        return "Browser"
+    if re.search(r"\.(pdf|html?|php|asp|aspx|jsp)(?:\?|$)", page):
+        return "Browser"
+    if re.search(r"\.(pdf|html?|php|asp|aspx|jsp)\b", title):
+        return "Browser"
+    if re.search(r"\b([a-z0-9-]+\.)+[a-z]{2,}\b", title):
         return "Browser"
     if "illustrator" in title or ".ai" in title:
         return "Illustrator"
@@ -589,7 +622,9 @@ def _should_blur_auto(settings_obj, url, window_title):
 def _should_blur_screenshot(patterns, url, app_name, window_title):
     if not patterns:
         return False
-    url_targets = [item.lower() for item in _expand_url_targets(url)] if _is_browser_app(app_name) else []
+    # URL patterns should still match even if the active app was mislabeled
+    # (for example, shell host process on Windows while browser tab is active).
+    url_targets = [item.lower() for item in _expand_url_targets(url)]
     app_target = (app_name or "").strip().lower()
     title_target = (window_title or "").strip().lower()
 
@@ -1084,7 +1119,12 @@ def upload_screenshot(request):
             return error
         header_device_id = request.headers.get("X-Device-Id")
         request_device_id = header_device_id or request.data.get("device_id") or request.query_params.get("device_id") or request.POST.get("device_id")
-        employee_id = request.data.get("employee") or request.POST.get("employee")
+        employee_id = (
+            request.data.get("employee")
+            or request.data.get("employee_id")
+            or request.POST.get("employee")
+            or request.POST.get("employee_id")
+        )
         image = (
             request.FILES.get("image")
             or request.FILES.get("file")

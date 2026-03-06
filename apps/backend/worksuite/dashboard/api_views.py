@@ -1289,6 +1289,7 @@ def _parse_date_flexible(value):
 
 _URL_PATTERN = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
 _DOMAIN_PATTERN = re.compile(r"\b([a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?\b", re.IGNORECASE)
+_SHELL_APP_KEYS = {"powershell", "pwsh", "conhost", "cmd", "terminal", "work zilla agent", "unknown"}
 
 
 def _extract_urlish(text):
@@ -1324,6 +1325,44 @@ def _activity_primary_url(activity):
         if found:
             return found
     return ""
+
+
+def _infer_activity_label(window_title, url):
+    title = str(window_title or "").strip().lower()
+    page = str(url or "").strip().lower()
+    if any(token in page for token in ("youtube.com", "netflix.com", "primevideo.com", "hotstar.com", "disneyplus.com", "spotify.com")):
+        return "Browser"
+    if any(token in title for token in ("youtube", "netflix", "prime video", "hotstar", "disney+", "spotify")):
+        return "Browser"
+    if "chrome" in title:
+        return "Chrome"
+    if "edge" in title:
+        return "Microsoft Edge"
+    if "firefox" in title:
+        return "Firefox"
+    if "safari" in title:
+        return "Safari"
+    if _extract_urlish(window_title):
+        return "Browser"
+    if page.startswith("http://") or page.startswith("https://") or page.startswith("www."):
+        return "Browser"
+    if re.search(r"\.(pdf|html?|php|asp|aspx|jsp)(?:\?|$)", page):
+        return "Browser"
+    if re.search(r"\.(pdf|html?|php|asp|aspx|jsp)\b", title):
+        return "Browser"
+    return ""
+
+
+def _resolved_activity_app_label(activity):
+    label = _normalize_app_label(activity.app_name)
+    label_key = label.lower().strip()
+    if label_key.endswith(".exe"):
+        label_key = label_key[:-4]
+    if label_key in _SHELL_APP_KEYS:
+        inferred = _infer_activity_label(activity.window_title, activity.url)
+        if inferred:
+            return inferred
+    return label
 
 
 def _get_active_subscription(org):
@@ -2851,12 +2890,12 @@ def app_usage(request):
         delta = (end - start).total_seconds()
         if delta <= 0:
             delta = default_interval
-        key = _normalize_app_label(act.app_name)
+        key = _resolved_activity_app_label(act)
         if key.lower() in ("system idle process", "system idle process.exe"):
             continue
         total_seconds += delta
         app_stats[key] = app_stats.get(key, 0) + delta
-        app_keys[key] = act.app_name or key
+        app_keys[key] = key
         resolved_url = _activity_primary_url(act)
         if resolved_url:
             last_time = app_url_time.get(key)
@@ -2894,12 +2933,12 @@ def app_usage(request):
             delta = (end - start).total_seconds()
             if delta <= 0:
                 delta = default_interval
-            key = _normalize_app_label(act.app_name)
+            key = _resolved_activity_app_label(act)
             if key.lower() in ("system idle process", "system idle process.exe"):
                 continue
             total_seconds += delta
             app_stats[key] = app_stats.get(key, 0) + delta
-            app_keys[key] = act.app_name or key
+            app_keys[key] = key
             resolved_url = _activity_primary_url(act)
             if resolved_url:
                 last_time = app_url_time.get(key)
@@ -2979,8 +3018,6 @@ def app_urls_usage(request):
     available_activities = Activity.objects.filter(employee__org=org)
     if selected_employee:
         available_activities = available_activities.filter(employee=selected_employee)
-    if app_key:
-        available_activities = available_activities.filter(app_name=app_key)
     available_dates = list(
         available_activities
         .annotate(activity_time=Coalesce("end_time", "start_time"))
@@ -3006,8 +3043,6 @@ def app_urls_usage(request):
     activities = Activity.objects.filter(employee__org=org)
     if selected_employee:
         activities = activities.filter(employee=selected_employee)
-    if app_key:
-        activities = activities.filter(app_name=app_key)
     if date_from or date_to:
         if not date_from:
             date_from = date_to
@@ -3054,13 +3089,13 @@ def app_urls_usage(request):
         delta = (end - start).total_seconds()
         if delta <= 0:
             delta = default_interval
-        if app_key and (act.app_name or "") != app_key:
+        normalized_label = _resolved_activity_app_label(act)
+        if app_key and normalized_label != app_key:
             continue
-        normalized_label = _normalize_app_label(act.app_name)
         if app_name and normalized_label.lower() != app_name.lower():
             continue
         key = (_activity_primary_url(act) or "").strip()
-        if not key and act.app_name and _normalize_app_label(act.app_name).lower() in browser_apps:
+        if not key and normalized_label.lower() in browser_apps:
             key = simplify_title(act.window_title)
         key = (key or "").strip()
         if not key:
@@ -3069,6 +3104,35 @@ def app_urls_usage(request):
             continue
         total_seconds += delta
         url_stats[key] = url_stats.get(key, 0) + delta
+
+    if not url_stats and selected_employee and active_preset == "today":
+        fallback_start = now - timedelta(hours=24)
+        fallback_qs = Activity.objects.filter(employee=selected_employee).filter(
+            models.Q(end_time__gte=fallback_start) | models.Q(start_time__gte=fallback_start)
+        )
+        for act in fallback_qs:
+            start = act.start_time or act.end_time
+            end = act.end_time or act.start_time
+            if not start or not end:
+                continue
+            delta = (end - start).total_seconds()
+            if delta <= 0:
+                delta = default_interval
+            normalized_label = _resolved_activity_app_label(act)
+            if app_key and normalized_label != app_key:
+                continue
+            if app_name and normalized_label.lower() != app_name.lower():
+                continue
+            key = (_activity_primary_url(act) or "").strip()
+            if not key and normalized_label.lower() in browser_apps:
+                key = simplify_title(act.window_title)
+            key = (key or "").strip()
+            if not key:
+                continue
+            if query and query.lower() not in key.lower():
+                continue
+            total_seconds += delta
+            url_stats[key] = url_stats.get(key, 0) + delta
 
     def format_seconds(seconds):
         seconds = int(seconds or 0)
@@ -3251,7 +3315,7 @@ def gaming_ott_usage(request):
         rows.append({
             "employee": act.employee.name,
             "date": format_date(end or start),
-            "app": _normalize_app_label(act.app_name),
+            "app": _resolved_activity_app_label(act),
             "detail": detail,
             "detail_url": detail_url,
             "start": format_time(start),
@@ -3283,7 +3347,7 @@ def gaming_ott_usage(request):
             rows.append({
                 "employee": act.employee.name,
                 "date": format_date(end or start),
-                "app": _normalize_app_label(act.app_name),
+                "app": _resolved_activity_app_label(act),
                 "detail": detail,
                 "detail_url": detail_url,
                 "start": format_time(start),
@@ -6132,33 +6196,3 @@ def dealer_referrals(request):
         "org_referrals": [serialize_row(row) for row in org_rows],
         "dealer_referrals": [serialize_row(row) for row in dealer_rows],
     })
-    if not url_stats and selected_employee and active_preset == "today":
-        fallback_start = now - timedelta(hours=24)
-        fallback_qs = Activity.objects.filter(employee=selected_employee).filter(
-            models.Q(end_time__gte=fallback_start) | models.Q(start_time__gte=fallback_start)
-        )
-        if app_key:
-            fallback_qs = fallback_qs.filter(app_name=app_key)
-        for act in fallback_qs:
-            start = act.start_time or act.end_time
-            end = act.end_time or act.start_time
-            if not start or not end:
-                continue
-            delta = (end - start).total_seconds()
-            if delta <= 0:
-                delta = default_interval
-            if app_key and (act.app_name or "") != app_key:
-                continue
-            normalized_label = _normalize_app_label(act.app_name)
-            if app_name and normalized_label.lower() != app_name.lower():
-                continue
-            key = (_activity_primary_url(act) or "").strip()
-            if not key and act.app_name and _normalize_app_label(act.app_name).lower() in browser_apps:
-                key = simplify_title(act.window_title)
-            key = (key or "").strip()
-            if not key:
-                continue
-            if query and query.lower() not in key.lower():
-                continue
-            total_seconds += delta
-            url_stats[key] = url_stats.get(key, 0) + delta
