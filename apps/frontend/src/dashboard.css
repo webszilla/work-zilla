@@ -1583,6 +1583,14 @@ html[data-theme="light"] .admin-feature-card{
   max-width:100%;
   height:auto;
 }
+.tiny-html-editor__meta{
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-align: right;
+}
+.tiny-html-editor__meta.is-limit{
+  color: #f59e0b;
+}
 html[data-theme="light"] .inbox-list-header{
   border-bottom-color:#e2e8f0;
 }
@@ -1666,6 +1674,12 @@ html[data-theme="light"] .tiny-html-editor__content blockquote{
 html[data-theme="light"] .tiny-html-editor__content code{
   background:#eef2f7;
   color:#111111;
+}
+html[data-theme="light"] .tiny-html-editor__meta{
+  color:#64748b;
+}
+html[data-theme="light"] .tiny-html-editor__meta.is-limit{
+  color:#b45309;
 }
 html[data-theme="light"] .inbox-auto-refresh{
   color:#64748b;
@@ -2016,6 +2030,56 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.digital-card-table__tab-btn{
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.58);
+  color: var(--color-text, #e5e7eb);
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 14px;
+}
+.digital-card-table__tab-btn:hover,
+.digital-card-table__tab-btn:focus-visible{
+  color: #ffffff;
+  border-color: rgba(148, 163, 184, 0.42);
+}
+.digital-card-table__tab-btn.is-active{
+  border-color: rgba(34, 197, 94, 0.42);
+  background:
+    linear-gradient(135deg, rgba(34, 197, 94, 0.28), rgba(34, 197, 94, 0.18)),
+    rgba(20, 83, 45, 0.36);
+  color: #dcfce7;
+  box-shadow: 0 8px 20px rgba(22, 101, 52, 0.22);
+}
+.digital-card-table__badge{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.digital-card-table__badge--primary{
+  border-color: rgba(56, 189, 248, 0.36);
+  background: rgba(8, 47, 73, 0.32);
+  color: #7dd3fc;
+}
+.digital-card-table__badge--status-active{
+  border-color: rgba(34, 197, 94, 0.36);
+  background: rgba(20, 83, 45, 0.3);
+  color: #86efac;
+}
+.digital-card-table__badge--status-inactive{
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(30, 41, 59, 0.5);
+  color: #cbd5e1;
 }
 .digital-card-table__action-btn{
   display: inline-flex !important;
@@ -2514,7 +2578,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   gap:16px 18px;
 }
 .digital-card-preview--design4 .digital-card-preview__avatar{
-  margin:-112px 0 0 0;
+  margin:-72px 0 0 0;
   border-radius:24px;
   border-width:0;
   background:#f4b52d;
@@ -2525,7 +2589,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 }
 .digital-card-preview--design4 .digital-card-preview__identity{
   text-align:left;
-  margin-top:-52px;
+  margin-top:-8px;
 }
 .digital-card-preview--design4 .digital-card-preview__identity h5{
   color:#2a2e38;
@@ -2609,7 +2673,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   border-color:transparent;
 }
 .digital-card-preview--design4 .digital-card-preview__action::after{
-  content:"View";
+  content:"Click";
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -2626,9 +2690,14 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   background:rgba(255,255,255,0.82);
   border:1px solid rgba(217, 172, 43, 0.16);
   box-shadow:none;
+  width:100%;
 }
 .digital-card-preview--design4 .digital-card-preview__detail-row i{
   color:color-mix(in srgb, var(--card-theme) 94%, #d49a18);
+}
+.digital-card-preview--design4 .digital-card-preview__details{
+  grid-column:1 / -1;
+  width:100%;
 }
 .digital-card-preview--design5{
   background:#f8fafc;
@@ -3007,6 +3076,23 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview--design8 .digital-card-preview__credit{
   background:#c7c7c7;
 }
+.digital-card-preview.is-flat{
+  background: color-mix(in srgb, var(--card-theme) 8%, #0f172a);
+}
+.digital-card-preview.is-flat .digital-card-preview__hero{
+  background:
+    radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 34%),
+    color-mix(in srgb, var(--card-theme) 86%, #0b1220);
+}
+.digital-card-preview.is-flat .digital-card-preview__template-badge,
+.digital-card-preview.is-flat .digital-card-preview__action.is-primary,
+.digital-card-preview.is-flat .digital-card-preview__action:first-child{
+  background: var(--card-theme) !important;
+  border-color: color-mix(in srgb, var(--card-theme) 78%, #0f172a) !important;
+}
+.digital-card-preview.is-flat .digital-card-preview__avatar{
+  background: color-mix(in srgb, var(--card-theme) 74%, #0f172a) !important;
+}
 .digital-card-preview .digital-card-preview__hero::after{
   content:none !important;
   display:none !important;
@@ -3201,6 +3287,38 @@ html[data-theme="light"] .digital-card-table__action-btn{
   background: rgba(255, 255, 255, 0.92);
   border-color: rgba(148, 163, 184, 0.26);
   color: #0f172a;
+}
+html[data-theme="light"] .digital-card-table__tab-btn{
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #0f172a;
+}
+html[data-theme="light"] .digital-card-table__tab-btn:hover,
+html[data-theme="light"] .digital-card-table__tab-btn:focus-visible{
+  border-color: rgba(148, 163, 184, 0.44);
+}
+html[data-theme="light"] .digital-card-table__tab-btn.is-active{
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.4);
+  background:
+    linear-gradient(135deg, rgba(var(--color-primary-rgb, 29, 78, 216), 0.2), rgba(var(--color-accent-rgb, 14, 165, 233), 0.16)),
+    rgba(239, 246, 255, 0.92);
+  color: var(--color-primary, #1d4ed8);
+  box-shadow: 0 8px 18px rgba(var(--color-primary-rgb, 29, 78, 216), 0.16);
+}
+html[data-theme="light"] .digital-card-table__badge--primary{
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.24);
+  background: rgba(var(--color-primary-rgb, 29, 78, 216), 0.1);
+  color: var(--color-primary, #1d4ed8);
+}
+html[data-theme="light"] .digital-card-table__badge--status-active{
+  border-color: rgba(22, 163, 74, 0.3);
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+html[data-theme="light"] .digital-card-table__badge--status-inactive{
+  border-color: rgba(148, 163, 184, 0.34);
+  background: rgba(241, 245, 249, 0.9);
+  color: #475569;
 }
 html[data-theme="light"] .org-media-library-page__action-btn{
   background: rgba(255, 255, 255, 0.92);

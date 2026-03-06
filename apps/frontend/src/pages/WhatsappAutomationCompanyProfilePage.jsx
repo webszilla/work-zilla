@@ -15,6 +15,27 @@ const SOCIAL_ICON_OPTIONS = [
   { value: "telegram", label: "Telegram", bi: "bi-telegram" },
   { value: "website", label: "Website", bi: "bi-globe2" },
 ];
+const LIMITS = {
+  companyName: 120,
+  phoneNumber: 20,
+  whatsappNumber: 20,
+  email: 120,
+  website: 255,
+  address: 260,
+  state: 80,
+  postalCode: 20,
+  description: 320,
+  socialLabel: 60,
+  socialUrl: 255,
+};
+
+function limitText(value, max) {
+  return String(value || "").slice(0, max);
+}
+
+function digitsOnly(value, max) {
+  return String(value || "").replace(/[^\d]/g, "").slice(0, max);
+}
 
 function socialBootstrapIcon(icon) {
   return SOCIAL_ICON_OPTIONS.find((opt) => opt.value === icon)?.bi || "bi-link-45deg";
@@ -302,7 +323,7 @@ export default function WhatsappAutomationCompanyProfilePage() {
       <div className="row g-3">
         <div className="col-12 col-lg-4">
           <label className="form-label">Company Name</label>
-          <input className="form-control" value={form.company_name} onChange={(e) => setForm((p) => ({ ...p, company_name: e.target.value }))} />
+          <input className="form-control" maxLength={LIMITS.companyName} value={form.company_name} onChange={(e) => setForm((p) => ({ ...p, company_name: limitText(e.target.value, LIMITS.companyName) }))} />
         </div>
         <div className="col-12 col-lg-4">
           <label className="form-label">Phone</label>
@@ -322,8 +343,10 @@ export default function WhatsappAutomationCompanyProfilePage() {
             <input
               className="form-control"
               value={form.phone_number}
-              onChange={(e) => setForm((p) => ({ ...p, phone_number: e.target.value }))}
+              onChange={(e) => setForm((p) => ({ ...p, phone_number: digitsOnly(e.target.value, LIMITS.phoneNumber) }))}
               placeholder="Phone number"
+              maxLength={LIMITS.phoneNumber}
+              inputMode="numeric"
             />
           </div>
         </div>
@@ -345,18 +368,20 @@ export default function WhatsappAutomationCompanyProfilePage() {
             <input
               className="form-control"
               value={form.whatsapp_local_number}
-              onChange={(e) => setForm((p) => ({ ...p, whatsapp_local_number: e.target.value }))}
+              onChange={(e) => setForm((p) => ({ ...p, whatsapp_local_number: digitsOnly(e.target.value, LIMITS.whatsappNumber) }))}
               placeholder="WhatsApp number"
+              maxLength={LIMITS.whatsappNumber}
+              inputMode="numeric"
             />
           </div>
         </div>
         <div className="col-12 col-lg-4">
           <label className="form-label">Email</label>
-          <input className="form-control" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
+          <input className="form-control" maxLength={LIMITS.email} value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: limitText(e.target.value, LIMITS.email) }))} />
         </div>
         <div className="col-12 col-lg-4">
           <label className="form-label">Website</label>
-          <input className="form-control" value={form.website} onChange={(e) => setForm((p) => ({ ...p, website: e.target.value }))} />
+          <input className="form-control" maxLength={LIMITS.website} value={form.website} onChange={(e) => setForm((p) => ({ ...p, website: limitText(e.target.value, LIMITS.website) }))} />
         </div>
         <div className="col-12 col-lg-4">
           <label className="form-label">Company Logo (JPG / PNG / SVG)</label>
@@ -386,7 +411,7 @@ export default function WhatsappAutomationCompanyProfilePage() {
           <div className="row g-3">
             <div className="col-12">
               <label className="form-label">Address</label>
-              <textarea className="form-control" rows="3" value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} />
+              <textarea className="form-control" rows="3" maxLength={LIMITS.address} value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: limitText(e.target.value, LIMITS.address) }))} />
             </div>
             <div className="col-12 col-md-4">
               <label className="form-label">Country</label>
@@ -406,12 +431,12 @@ export default function WhatsappAutomationCompanyProfilePage() {
                   ))}
                 </select>
               ) : (
-                <input className="form-control" value={form.state} onChange={(e) => setForm((p) => ({ ...p, state: e.target.value }))} />
+                <input className="form-control" maxLength={LIMITS.state} value={form.state} onChange={(e) => setForm((p) => ({ ...p, state: limitText(e.target.value, LIMITS.state) }))} />
               )}
             </div>
             <div className="col-12 col-md-4">
               <label className="form-label">Pincode</label>
-              <input className="form-control" value={form.postal_code} onChange={(e) => setForm((p) => ({ ...p, postal_code: e.target.value }))} />
+              <input className="form-control" maxLength={LIMITS.postalCode} inputMode="numeric" value={form.postal_code} onChange={(e) => setForm((p) => ({ ...p, postal_code: limitText(e.target.value, LIMITS.postalCode) }))} />
             </div>
           </div>
         </div>
@@ -419,7 +444,7 @@ export default function WhatsappAutomationCompanyProfilePage() {
           <div className="row g-3">
             <div className="col-12">
               <label className="form-label">Description</label>
-              <textarea className="form-control" rows="4" value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
+              <textarea className="form-control" rows="4" maxLength={LIMITS.description} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: limitText(e.target.value, LIMITS.description) }))} />
             </div>
             <div className="col-12">
               <TinyHtmlEditor
@@ -504,7 +529,8 @@ export default function WhatsappAutomationCompanyProfilePage() {
                     <input
                       className="form-control form-control-sm"
                       value={row.label}
-                      onChange={(e) => setSocialLinks((prev) => prev.map((item) => item.id === row.id ? { ...item, label: e.target.value } : item))}
+                      onChange={(e) => setSocialLinks((prev) => prev.map((item) => item.id === row.id ? { ...item, label: limitText(e.target.value, LIMITS.socialLabel) } : item))}
+                      maxLength={LIMITS.socialLabel}
                       placeholder="Instagram"
                     />
                   </div>
@@ -513,7 +539,8 @@ export default function WhatsappAutomationCompanyProfilePage() {
                     <input
                       className="form-control form-control-sm"
                       value={row.url}
-                      onChange={(e) => setSocialLinks((prev) => prev.map((item) => item.id === row.id ? { ...item, url: e.target.value } : item))}
+                      onChange={(e) => setSocialLinks((prev) => prev.map((item) => item.id === row.id ? { ...item, url: limitText(e.target.value, LIMITS.socialUrl) } : item))}
+                      maxLength={LIMITS.socialUrl}
                       placeholder="https://..."
                     />
                   </div>

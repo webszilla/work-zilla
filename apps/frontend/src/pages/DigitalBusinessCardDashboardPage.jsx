@@ -4,6 +4,19 @@ import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
 
 const PAGE_SIZE = 10;
 const COUNTRY_CODE_OPTIONS = PHONE_COUNTRIES;
+const LIMITS = {
+  cardTitle: 120,
+  personName: 100,
+  roleTitle: 100,
+  email: 120,
+  website: 255,
+  customDomain: 255,
+  publicSlug: 80,
+  phoneLocal: 20,
+  address: 260,
+  description: 160,
+  search: 80,
+};
 const COUNTRY_CODES_DESC = Array.from(new Set(PHONE_COUNTRIES.map((x) => x.code))).sort((a, b) => b.length - a.length);
 const CARD_TEMPLATE_OPTIONS = [
   { value: "design1", label: "Design 1 - Executive Blue" },
@@ -34,9 +47,57 @@ function combinePhoneValue(code, local) {
   return `${normalizedCode}${normalizedLocal}`;
 }
 
+function limitText(value, max) {
+  return String(value || "").slice(0, max);
+}
+
+function digitsOnly(value, max) {
+  return String(value || "").replace(/[^\d]/g, "").slice(0, max);
+}
+
+function normalizeHexColor(value, fallback = "#22c55e") {
+  const raw = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) return raw.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(raw)) {
+    const short = raw.slice(1).toLowerCase();
+    return `#${short[0]}${short[0]}${short[1]}${short[1]}${short[2]}${short[2]}`;
+  }
+  return fallback;
+}
+
+function toRgb(hex) {
+  const safe = normalizeHexColor(hex).slice(1);
+  return {
+    r: parseInt(safe.slice(0, 2), 16),
+    g: parseInt(safe.slice(2, 4), 16),
+    b: parseInt(safe.slice(4, 6), 16),
+  };
+}
+
+function toHex({ r, g, b }) {
+  const clamp = (n) => Math.max(0, Math.min(255, Math.round(n)));
+  return `#${[clamp(r), clamp(g), clamp(b)].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function mixColor(baseHex, mixHex, ratio = 0.2) {
+  const base = toRgb(baseHex);
+  const mix = toRgb(mixHex);
+  const t = Math.max(0, Math.min(1, ratio));
+  return toHex({
+    r: (base.r * (1 - t)) + (mix.r * t),
+    g: (base.g * (1 - t)) + (mix.g * t),
+    b: (base.b * (1 - t)) + (mix.b * t),
+  });
+}
+
+function deriveFlatSecondary(primaryHex) {
+  return mixColor(normalizeHexColor(primaryHex), "#0f172a", 0.18);
+}
+
 function emptyCardForm(prefill = {}) {
   const phoneParts = splitPhoneValue(prefill.phone || "");
   const whatsappParts = splitPhoneValue(prefill.whatsapp_number || "");
+  const dnsSettings = prefill?.dns_settings && typeof prefill.dns_settings === "object" ? prefill.dns_settings : null;
   return {
     id: prefill.id ?? null,
     public_slug: prefill.public_slug || "",
@@ -55,6 +116,7 @@ function emptyCardForm(prefill = {}) {
     description: prefill.description || "",
     theme_color: prefill.theme_color || "#22c55e",
     theme_secondary_color: prefill.theme_secondary_color || "#0f172a",
+    theme_mode: prefill.theme_mode === "flat" ? "flat" : "gradient",
     template_style: prefill.template_style || "design1",
     custom_domain: prefill.custom_domain || "",
     custom_domain_active: Boolean(prefill.custom_domain_active),
@@ -65,6 +127,7 @@ function emptyCardForm(prefill = {}) {
     icon_size_pt: Number(prefill.icon_size_pt || 14),
     font_size_pt: Number(prefill.font_size_pt || 16),
     social_links_items: Array.isArray(prefill.social_links_items) ? prefill.social_links_items : [],
+    dns_settings: dnsSettings,
     is_primary: Boolean(prefill.is_primary),
     is_active: prefill.is_active !== false,
     sort_order: Number(prefill.sort_order || 0),
@@ -82,18 +145,19 @@ function shortDateTime(value) {
   return d.toLocaleString();
 }
 
-function buildDnsRows(customDomain) {
+function buildDnsRows(customDomain, dnsDefaults = null) {
   const domain = String(customDomain || "").trim().toLowerCase();
   if (!domain) return [];
-  const hostTarget = typeof window !== "undefined" ? window.location.host : "your-app-domain.com";
-  const hostname = hostTarget.split(":")[0];
+  const hostTarget = String(dnsDefaults?.app_host_target || "").trim().toLowerCase();
+  const ipTarget = String(dnsDefaults?.server_ip_target || "YOUR_SERVER_PUBLIC_IP").trim();
+  const hostname = hostTarget || "your-app-domain.com";
   const parts = domain.split(".");
   const isLikelySubdomain = parts.length > 2 || domain.startsWith("www.");
   if (isLikelySubdomain) {
     return [{ type: "CNAME", host: parts[0], value: hostname, ttl: "Auto" }];
   }
   return [
-    { type: "A", host: "@", value: "YOUR_SERVER_PUBLIC_IP", ttl: "Auto" },
+    { type: "A", host: "@", value: ipTarget || "YOUR_SERVER_PUBLIC_IP", ttl: "Auto" },
     { type: "CNAME", host: "www", value: domain, ttl: "Auto" },
   ];
 }
@@ -197,7 +261,10 @@ function toMapsHref(value) {
 
 function DigitalCardPreview({ form, company }) {
   const theme = form.theme_color || company?.theme_color || "#22c55e";
-  const secondaryTheme = form.theme_secondary_color || "#0f172a";
+  const themeMode = form.theme_mode === "flat" ? "flat" : "gradient";
+  const secondaryTheme = themeMode === "flat"
+    ? deriveFlatSecondary(theme)
+    : (form.theme_secondary_color || "#0f172a");
   const socials = Array.isArray(form.social_links_items) ? form.social_links_items.slice(0, 5) : [];
   const templateStyle = form.template_style || "design1";
   const iconPt = Math.max(8, Number(form.icon_size_pt || 14));
@@ -209,14 +276,6 @@ function DigitalCardPreview({ form, company }) {
   const displayRole = form.role_title || "Business / Professional";
   const displayTitle = form.card_title || company?.company_name || "Company Name";
   const displayDescription = form.description || company?.description || "Digital business card preview";
-  const socialBadges = socials.length
-    ? socials
-    : [
-        { label: "Fb", icon: "facebook" },
-        { label: "In", icon: "linkedin" },
-        { label: "Ig", icon: "instagram" },
-        { label: "Wa", icon: "whatsapp" },
-      ];
   const quickActions = [
     form.phone ? { label: "Call", href: `tel:${form.phone}` } : null,
     form.website ? { label: "Website", href: toExternalHref(form.website) } : null,
@@ -261,7 +320,7 @@ function DigitalCardPreview({ form, company }) {
 
   return (
     <div
-      className={`digital-card-preview digital-card-preview--${templateStyle}`}
+      className={`digital-card-preview digital-card-preview--${templateStyle}${themeMode === "flat" ? " is-flat" : ""}`}
       style={{ "--card-theme": theme, "--card-secondary": secondaryTheme, "--card-font-pt": fontPt, "--card-icon-pt": iconPt }}
     >
       <div
@@ -292,25 +351,27 @@ function DigitalCardPreview({ form, company }) {
           </a>
         </div>
 
-        <div className="digital-card-preview__socials">
-          {socialBadges.map((item, idx) => (
-            <a
-              key={`${item.icon || item.label}-${idx}`}
-              className="digital-card-preview__social-chip"
-              title={item.label || item.icon || "Link"}
-              href={item.url ? toExternalHref(item.url) : "#"}
-              target={item.url ? "_blank" : undefined}
-              rel={item.url ? "noreferrer" : undefined}
-              onClick={item.url ? undefined : (e) => e.preventDefault()}
-            >
-              {item.type === "custom" && item.custom_icon_data ? (
-                <img src={item.custom_icon_data} alt={item.label || "Social"} width="18" height="18" style={{ display: "block", objectFit: "contain" }} />
-              ) : (
-                <i className={`bi ${getSocialIconClass(item.icon)}`} aria-hidden="true" />
-              )}
-            </a>
-          ))}
-        </div>
+        {socials.length ? (
+          <div className="digital-card-preview__socials">
+            {socials.map((item, idx) => (
+              <a
+                key={`${item.icon || item.label}-${idx}`}
+                className="digital-card-preview__social-chip"
+                title={item.label || item.icon || "Link"}
+                href={item.url ? toExternalHref(item.url) : "#"}
+                target={item.url ? "_blank" : undefined}
+                rel={item.url ? "noreferrer" : undefined}
+                onClick={item.url ? undefined : (e) => e.preventDefault()}
+              >
+                {item.type === "custom" && item.custom_icon_data ? (
+                  <img src={item.custom_icon_data} alt={item.label || "Social"} width="18" height="18" style={{ display: "block", objectFit: "contain" }} />
+                ) : (
+                  <i className={`bi ${getSocialIconClass(item.icon)}`} aria-hidden="true" />
+                )}
+              </a>
+            ))}
+          </div>
+        ) : null}
 
         <div className="digital-card-preview__title">{displayTitle}</div>
         <p className="digital-card-preview__description">{displayDescription}</p>
@@ -386,20 +447,28 @@ export default function DigitalBusinessCardDashboardPage() {
   const [success, setSuccess] = useState("");
   const [company, setCompany] = useState(null);
   const [defaultPrefill, setDefaultPrefill] = useState({});
+  const [dnsDefaults, setDnsDefaults] = useState(null);
   const [limitInfo, setLimitInfo] = useState(null);
-  const [rows, setRows] = useState([]);
+  const [primaryRows, setPrimaryRows] = useState([]);
+  const [otherRows, setOtherRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, page_size: PAGE_SIZE, total_items: 0, total_pages: 1 });
   const [query, setQuery] = useState("");
-  const [cardListTab, setCardListTab] = useState("primary");
   const [form, setForm] = useState(emptyCardForm());
   const [slugCheck, setSlugCheck] = useState(null);
   const [slugChecking, setSlugChecking] = useState(false);
 
-  async function loadCards({ page = 1, q = query } = {}) {
-    const data = await waApi.getDigitalCards({ page, pageSize: PAGE_SIZE, q });
-    setRows(Array.isArray(data?.items) ? data.items : []);
+  async function loadPrimaryCards() {
+    const data = await waApi.getDigitalCards({ scope: "primary", page: 1, pageSize: 20 });
+    setPrimaryRows(Array.isArray(data?.items) ? data.items : []);
+    return data;
+  }
+
+  async function loadOtherCards({ page = 1, q = query } = {}) {
+    const data = await waApi.getDigitalCards({ scope: "other", page, pageSize: PAGE_SIZE, q });
+    setOtherRows(Array.isArray(data?.items) ? data.items : []);
     setDefaultPrefill(data?.default_prefill || {});
     setLimitInfo(data?.limit || null);
+    setDnsDefaults(data?.dns_defaults || null);
     setPagination(data?.pagination || { page, page_size: PAGE_SIZE, total_items: 0, total_pages: 1 });
     return data;
   }
@@ -408,20 +477,24 @@ export default function DigitalBusinessCardDashboardPage() {
     let active = true;
     (async () => {
       try {
-        const [companyRes, cardsRes] = await Promise.all([
+        const [companyRes, primaryRes, otherRes] = await Promise.all([
           waApi.getCompanyProfile(),
-          waApi.getDigitalCards({ page: 1, pageSize: PAGE_SIZE }),
+          waApi.getDigitalCards({ scope: "primary", page: 1, pageSize: 20 }),
+          waApi.getDigitalCards({ scope: "other", page: 1, pageSize: PAGE_SIZE }),
         ]);
         if (!active) return;
         const companyProfile = companyRes?.company_profile || null;
         setCompany(companyProfile);
-        const items = Array.isArray(cardsRes?.items) ? cardsRes.items : [];
-        const prefill = cardsRes?.default_prefill || {};
-        setRows(items);
+        const primaryItems = Array.isArray(primaryRes?.items) ? primaryRes.items : [];
+        const otherItems = Array.isArray(otherRes?.items) ? otherRes.items : [];
+        const prefill = otherRes?.default_prefill || {};
+        setPrimaryRows(primaryItems);
+        setOtherRows(otherItems);
         setDefaultPrefill(prefill);
-        setLimitInfo(cardsRes?.limit || null);
-        setPagination(cardsRes?.pagination || { page: 1, page_size: PAGE_SIZE, total_items: items.length, total_pages: 1 });
-        setForm(items[0] ? emptyCardForm(items[0]) : emptyCardForm(prefill));
+        setLimitInfo(otherRes?.limit || null);
+        setDnsDefaults(otherRes?.dns_defaults || null);
+        setPagination(otherRes?.pagination || { page: 1, page_size: PAGE_SIZE, total_items: otherItems.length, total_pages: 1 });
+        setForm(primaryItems[0] ? emptyCardForm(primaryItems[0]) : (otherItems[0] ? emptyCardForm(otherItems[0]) : emptyCardForm(prefill)));
         setLoading(false);
       } catch (err) {
         if (!active) return;
@@ -437,17 +510,20 @@ export default function DigitalBusinessCardDashboardPage() {
     return Boolean(limitInfo.can_create);
   }, [limitInfo]);
 
-  const primaryRows = useMemo(() => rows.filter((row) => row.is_primary), [rows]);
-  const otherRows = useMemo(() => rows.filter((row) => !row.is_primary), [rows]);
-  const visibleRows = cardListTab === "other" ? otherRows : primaryRows;
-
   function setField(key, value) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "custom_domain") {
+        next.dns_settings = null;
+      }
+      return next;
+    });
   }
 
   function setPhoneField(prefix, key, value) {
     setForm((prev) => {
-      const next = { ...prev, [key]: value };
+      const normalizedValue = key.endsWith("_local") ? digitsOnly(value, LIMITS.phoneLocal) : value;
+      const next = { ...prev, [key]: normalizedValue };
       const code = prefix === "phone" ? next.phone_country_code : next.whatsapp_country_code;
       const local = prefix === "phone" ? next.phone_local : next.whatsapp_local;
       const full = combinePhoneValue(code, local);
@@ -493,7 +569,10 @@ export default function DigitalBusinessCardDashboardPage() {
         setForm(emptyCardForm(item));
       }
       if (res?.limit) setLimitInfo(res.limit);
-      await loadCards({ page: pagination.page || 1, q: query });
+      await Promise.all([
+        loadPrimaryCards(),
+        loadOtherCards({ page: pagination.page || 1, q: query }),
+      ]);
       setSuccess(form.id ? "Digital card updated." : "Digital card created.");
     } catch (err) {
       if (err?.status === 403 && err?.data?.error === "addon_required") {
@@ -541,8 +620,11 @@ export default function DigitalBusinessCardDashboardPage() {
     try {
       const res = await waApi.deleteDigitalCard(row.id);
       if (res?.limit) setLimitInfo(res.limit);
-      const nextPage = rows.length === 1 && (pagination.page || 1) > 1 ? (pagination.page || 1) - 1 : (pagination.page || 1);
-      await loadCards({ page: nextPage, q: query });
+      const nextPage = otherRows.length === 1 && (pagination.page || 1) > 1 ? (pagination.page || 1) - 1 : (pagination.page || 1);
+      await Promise.all([
+        loadPrimaryCards(),
+        loadOtherCards({ page: nextPage, q: query }),
+      ]);
       setForm(emptyCardForm(defaultPrefill));
       setSuccess("Digital card deleted.");
     } catch (err) {
@@ -569,6 +651,24 @@ export default function DigitalBusinessCardDashboardPage() {
     setError("");
   }
 
+  async function onOtherSearchSubmit(event) {
+    event.preventDefault();
+    try {
+      await loadOtherCards({ page: 1, q: query });
+    } catch (err) {
+      setError(err?.message || "Unable to search cards.");
+    }
+  }
+
+  async function onOtherSearchClear() {
+    setQuery("");
+    try {
+      await loadOtherCards({ page: 1, q: "" });
+    } catch (err) {
+      setError(err?.message || "Unable to load cards.");
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-4 text-center">
@@ -580,7 +680,7 @@ export default function DigitalBusinessCardDashboardPage() {
 
   const cardUrl = form.public_slug ? `/card/${form.public_slug}/` : (company?.digital_card_url || "");
   const customUrl = form.custom_domain ? `https://${form.custom_domain}/` : "";
-  const dnsRows = buildDnsRows(form.custom_domain);
+  const dnsRows = Array.isArray(form?.dns_settings?.records) ? form.dns_settings.records : buildDnsRows(form.custom_domain, dnsDefaults);
   const page = pagination.page || 1;
   const totalPages = pagination.total_pages || 1;
 
@@ -625,19 +725,7 @@ export default function DigitalBusinessCardDashboardPage() {
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <h4 className="mb-0">Card Details</h4>
               <div className="d-flex gap-2">
-                {cardUrl ? <a className="btn btn-sm wa-card-toolbar-link" href={cardUrl} target="_blank" rel="noreferrer">View</a> : null}
-                {customUrl ? (
-                  <a
-                    className="btn btn-sm wa-card-toolbar-link wa-card-toolbar-link--primary"
-                    href={customUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ "--wa-card-toolbar-theme": form.theme_color || "#22c55e" }}
-                  >
-                    Custom URL
-                  </a>
-                ) : null}
-                <a className="btn btn-sm wa-card-toolbar-link" href="/app/whatsapp-automation/dashboard/company-profile">Company Profile</a>
+                {cardUrl ? <a className="btn btn-outline-light btn-sm" href={cardUrl} target="_blank" rel="noreferrer">View</a> : null}
               </div>
             </div>
             <p className="text-secondary small">Default values are loaded from the Company Profile. Any changes here are saved only for this individual card.</p>
@@ -656,7 +744,23 @@ export default function DigitalBusinessCardDashboardPage() {
                   <input
                     className="form-control"
                     value={form[key] || ""}
-                    onChange={(e) => setField(key, e.target.value)}
+                    maxLength={
+                      key === "card_title" ? LIMITS.cardTitle
+                        : key === "person_name" ? LIMITS.personName
+                          : key === "role_title" ? LIMITS.roleTitle
+                            : key === "email" ? LIMITS.email
+                              : key === "website" ? LIMITS.website
+                                : LIMITS.customDomain
+                    }
+                    onChange={(e) => setField(
+                      key,
+                      key === "card_title" ? limitText(e.target.value, LIMITS.cardTitle)
+                        : key === "person_name" ? limitText(e.target.value, LIMITS.personName)
+                          : key === "role_title" ? limitText(e.target.value, LIMITS.roleTitle)
+                            : key === "email" ? limitText(e.target.value, LIMITS.email)
+                              : key === "website" ? limitText(e.target.value, LIMITS.website)
+                                : limitText(e.target.value, LIMITS.customDomain)
+                    )}
                     placeholder={defaultPrefill[key] || ""}
                   />
                 </div>
@@ -681,6 +785,7 @@ export default function DigitalBusinessCardDashboardPage() {
                     onChange={(e) => setPhoneField("phone", "phone_local", e.target.value)}
                     placeholder="Mobile number"
                     inputMode="numeric"
+                    maxLength={LIMITS.phoneLocal}
                   />
                 </div>
               </div>
@@ -704,6 +809,7 @@ export default function DigitalBusinessCardDashboardPage() {
                     onChange={(e) => setPhoneField("whatsapp", "whatsapp_local", e.target.value)}
                     placeholder="WhatsApp number"
                     inputMode="numeric"
+                    maxLength={LIMITS.phoneLocal}
                   />
                 </div>
               </div>
@@ -713,8 +819,9 @@ export default function DigitalBusinessCardDashboardPage() {
                 <input
                   className="form-control"
                   value={form.public_slug || ""}
-                  onChange={(e) => setField("public_slug", e.target.value)}
+                  onChange={(e) => setField("public_slug", limitText(e.target.value, LIMITS.publicSlug))}
                   placeholder={defaultPrefill.public_slug || "your-card-slug"}
+                  maxLength={LIMITS.publicSlug}
                 />
                 <div className="d-flex align-items-center gap-2 small mt-1">
                   {slugChecking ? <span className="text-secondary">Checking...</span> : null}
@@ -736,24 +843,57 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
-              <div className="col-12 col-md-3">
+              <div className="col-12 col-md-2">
                 <label className="form-label">Primary Color</label>
                 <input
                   type="color"
                   className="form-control form-control-color"
                   value={form.theme_color || "#22c55e"}
-                  onChange={(e) => setField("theme_color", e.target.value)}
+                  onChange={(e) => {
+                    const nextPrimary = e.target.value;
+                    if ((form.theme_mode || "gradient") === "flat") {
+                      setForm((prev) => ({
+                        ...prev,
+                        theme_color: nextPrimary,
+                        theme_secondary_color: deriveFlatSecondary(nextPrimary),
+                      }));
+                      return;
+                    }
+                    setField("theme_color", nextPrimary);
+                  }}
                 />
               </div>
 
-              <div className="col-12 col-md-3">
+              <div className="col-12 col-md-2">
                 <label className="form-label">Secondary Color</label>
                 <input
                   type="color"
                   className="form-control form-control-color"
                   value={form.theme_secondary_color || "#0f172a"}
                   onChange={(e) => setField("theme_secondary_color", e.target.value)}
+                  disabled={(form.theme_mode || "gradient") === "flat"}
                 />
+              </div>
+
+              <div className="col-12 col-md-2">
+                <label className="form-label">Theme Fill</label>
+                <select
+                  className="form-select"
+                  value={form.theme_mode || "gradient"}
+                  onChange={(e) => {
+                    const nextMode = e.target.value === "flat" ? "flat" : "gradient";
+                    setForm((prev) => ({
+                      ...prev,
+                      theme_mode: nextMode,
+                      theme_secondary_color: nextMode === "flat"
+                        ? deriveFlatSecondary(prev.theme_color || "#22c55e")
+                        : (prev.theme_secondary_color || "#0f172a"),
+                    }));
+                  }}
+                >
+                  <option value="gradient">Gradient</option>
+                  <option value="flat">Flat Color</option>
+                </select>
               </div>
 
               <div className="col-12 col-md-6">
@@ -837,17 +977,21 @@ export default function DigitalBusinessCardDashboardPage() {
 
               <div className="col-12">
                 <label className="form-label">Address</label>
-                <textarea className="form-control" rows="2" value={form.address || ""} onChange={(e) => setField("address", e.target.value)} />
+                <textarea className="form-control" rows="2" maxLength={LIMITS.address} value={form.address || ""} onChange={(e) => setField("address", limitText(e.target.value, LIMITS.address))} />
               </div>
 
               <div className="col-12">
                 <label className="form-label">Description</label>
-                <textarea className="form-control" rows="3" value={form.description || ""} onChange={(e) => setField("description", e.target.value)} />
+                <textarea className="form-control" rows="3" maxLength={LIMITS.description} value={form.description || ""} onChange={(e) => setField("description", limitText(e.target.value, LIMITS.description))} />
+                <div className="text-secondary small text-end mt-1">
+                  {String(form.description || "").length}/{LIMITS.description}
+                </div>
               </div>
 
               <div className="col-12 col-md-6">
                 <label className="form-label">Profile Logo</label>
                 <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("logo_image_data", e.target.files?.[0], 500)} />
+                <div className="text-secondary small mt-1">Recommended: 512 x 512 px (square), max 500 KB.</div>
                 <div className="d-flex gap-2 mt-2">
                   {form.logo_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("logo_image_data", "")}>Remove Logo</button> : null}
                 </div>
@@ -856,24 +1000,22 @@ export default function DigitalBusinessCardDashboardPage() {
               <div className="col-12 col-md-6">
                 <label className="form-label">Hero Banner (small)</label>
                 <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("hero_banner_image_data", e.target.files?.[0], 1500)} />
+                <div className="text-secondary small mt-1">Recommended: 1200 x 400 px, max 1.5 MB.</div>
                 <div className="d-flex gap-2 mt-2">
                   {form.hero_banner_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("hero_banner_image_data", "")}>Remove Banner</button> : null}
                 </div>
               </div>
 
               <div className="col-12">
-                <div className="d-flex flex-wrap gap-3">
+                <div className="d-flex flex-wrap align-items-center gap-4">
                   <div className="form-check">
                     <input className="form-check-input" id="wa-card-primary" type="checkbox" checked={Boolean(form.is_primary)} onChange={(e) => setField("is_primary", e.target.checked)} />
                     <label className="form-check-label" htmlFor="wa-card-primary">Primary card</label>
                   </div>
-                </div>
-              </div>
-
-              <div className="col-12">
-                <div className="form-check">
-                  <input className="form-check-input" id="wa-card-active" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setField("is_active", e.target.checked)} />
-                  <label className="form-check-label" htmlFor="wa-card-active">Active card</label>
+                  <div className="form-check">
+                    <input className="form-check-input" id="wa-card-active" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setField("is_active", e.target.checked)} />
+                    <label className="form-check-label" htmlFor="wa-card-active">Active card</label>
+                  </div>
                 </div>
               </div>
 
@@ -935,137 +1077,185 @@ export default function DigitalBusinessCardDashboardPage() {
         </div>
       </div>
 
-      <div className="p-0">
-        <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-          <h4 className="mb-0">Created Cards</h4>
-          <div className="d-flex gap-2">
-            <button
-              type="button"
-              className={`btn btn-sm ${cardListTab === "primary" ? "btn-primary" : "btn-outline-light"}`}
-              onClick={() => setCardListTab("primary")}
-            >
-              Primary Card
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${cardListTab === "other" ? "btn-primary" : "btn-outline-light"}`}
-              onClick={() => setCardListTab("other")}
-            >
-              Other Cards
-            </button>
+      <div className="p-0 d-flex flex-column gap-3">
+        <div>
+          <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h4 className="mb-0">Primary Card</h4>
+          </div>
+          <div className="table-responsive wz-data-table-wrap">
+            <table className="table table-dark table-striped table-hover align-middle wz-data-table digital-card-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Person</th>
+                  <th>Custom URL</th>
+                  <th>QR</th>
+                  <th>Status</th>
+                  <th className="table-actions">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {primaryRows.length ? primaryRows.map((row) => (
+                  <tr key={`primary-${row.id}`}>
+                    <td>
+                      <div className="d-flex align-items-center gap-2 flex-wrap">
+                        <span>{row.card_title || "-"}</span>
+                        <span className="badge digital-card-table__badge digital-card-table__badge--primary">Primary</span>
+                      </div>
+                    </td>
+                    <td>{row.person_name || "-"}</td>
+                    <td>
+                      {row.custom_url ? (
+                        <div className="d-flex flex-column gap-1">
+                          <a href={row.custom_url} target="_blank" rel="noreferrer">{row.custom_domain}</a>
+                          <small className={row.custom_domain_active ? "text-success" : "text-warning"}>
+                            {row.custom_domain_active ? "Active" : "Pending"}
+                          </small>
+                        </div>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td>
+                      {row.public_url ? (
+                        <a href={qrPngUrl(row.public_url, 240)} target="_blank" rel="noreferrer" title="Open QR PNG" className="d-inline-block">
+                          <img src={qrPngUrl(row.public_url, 72)} alt="QR" style={{ width: 44, height: 44, borderRadius: 6, border: "1px solid rgba(148,163,184,0.25)", background: "#fff", padding: 2 }} />
+                        </a>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge digital-card-table__badge ${row.is_active ? "digital-card-table__badge--status-active" : "digital-card-table__badge--status-inactive"}`}>
+                        {row.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="table-actions">
+                      <div className="digital-card-table__actions">
+                        <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--neutral" href={row.public_url} target="_blank" rel="noreferrer">View</a>
+                        {row.public_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--qr" href={qrPngUrl(row.public_url, 480)} target="_blank" rel="noreferrer">QR</a> : null}
+                        {row.custom_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--success" href={row.custom_url} target="_blank" rel="noreferrer">URL</a> : null}
+                        <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--info" onClick={() => onEdit(row)}>Edit</button>
+                        <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--danger" disabled={deletingId === row.id} onClick={() => onDelete(row)}>
+                          {deletingId === row.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan="6" className="text-center text-secondary py-4">No primary card found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <div className="table-responsive wz-data-table-wrap">
-          <table className="table table-dark table-striped table-hover align-middle wz-data-table digital-card-table">
-            <thead>
-              <tr>
-                <th>Title</th>
-                <th>Person</th>
-                <th>Slug</th>
-                <th>Custom URL</th>
-                <th>QR</th>
-                <th>Status</th>
-                <th className="table-actions">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.length ? visibleRows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <div className="d-flex align-items-center gap-2 flex-wrap">
-                      <span>{row.card_title || "-"}</span>
-                      {row.is_primary ? <span className="badge bg-info text-dark">Primary</span> : null}
-                    </div>
-                  </td>
-                  <td>{row.person_name || "-"}</td>
-                  <td>
-                    <code className="digital-card-table__slug">{row.public_slug}</code>
-                  </td>
-                  <td>
-                    {row.custom_url ? (
-                      <div className="d-flex flex-column gap-1">
-                        <a href={row.custom_url} target="_blank" rel="noreferrer">{row.custom_domain}</a>
-                        <small className={row.custom_domain_active ? "text-success" : "text-warning"}>
-                          {row.custom_domain_active ? "Active" : "Pending"}
-                        </small>
-                      </div>
-                    ) : (
-                      <span className="text-secondary">-</span>
-                    )}
-                  </td>
-                  <td>
-                    {row.public_url ? (
-                      <a
-                        href={qrPngUrl(row.public_url, 240)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open QR PNG"
-                        className="d-inline-block"
-                      >
-                        <img
-                          src={qrPngUrl(row.public_url, 72)}
-                          alt="QR"
-                          style={{ width: 44, height: 44, borderRadius: 6, border: "1px solid rgba(148,163,184,0.25)", background: "#fff", padding: 2 }}
-                        />
-                      </a>
-                    ) : (
-                      <span className="text-secondary">-</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`badge ${row.is_active ? "bg-success" : "bg-secondary"}`}>
-                      {row.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="table-actions">
-                    <div className="digital-card-table__actions">
-                      <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--neutral" href={row.public_url} target="_blank" rel="noreferrer">View</a>
-                      {row.public_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--qr" href={qrPngUrl(row.public_url, 480)} target="_blank" rel="noreferrer">QR</a> : null}
-                      {row.custom_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--success" href={row.custom_url} target="_blank" rel="noreferrer">URL</a> : null}
-                      <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--info" onClick={() => onEdit(row)}>Edit</button>
-                      <button
-                        type="button"
-                        className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--danger"
-                        disabled={deletingId === row.id}
-                        onClick={() => onDelete(row)}
-                      >
-                        {deletingId === row.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan="7" className="text-center text-secondary py-4">No digital cards found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <div>
+          <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h4 className="mb-0">Other Cards</h4>
+            <form className="d-flex gap-2" onSubmit={onOtherSearchSubmit}>
+              <input
+                className="form-control form-control-sm"
+                style={{ minWidth: 220 }}
+                placeholder="Search other cards..."
+                value={query}
+                maxLength={LIMITS.search}
+                onChange={(e) => setQuery(limitText(e.target.value, LIMITS.search))}
+              />
+              <button type="submit" className="btn btn-outline-light btn-sm">Search</button>
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={onOtherSearchClear}>Clear</button>
+            </form>
+          </div>
 
-        <div className="wz-table-footer d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
-          <small className="text-secondary">
-            Showing {visibleRows.length ? ((page - 1) * PAGE_SIZE) + 1 : 0} to {((page - 1) * PAGE_SIZE) + visibleRows.length} of {cardListTab === "other" ? otherRows.length : primaryRows.length}
-          </small>
-          <div className="d-flex gap-2 wz-pagination-inline">
-            <button
-              type="button"
-              className="btn btn-outline-light btn-sm"
-              disabled={page <= 1}
-              onClick={() => loadCards({ page: page - 1, q: query }).catch((err) => setError(err?.message || "Unable to load digital cards."))}
-            >
-              Prev
-            </button>
-            <span className="btn btn-outline-light btn-sm disabled">Page {page} / {totalPages}</span>
-            <button
-              type="button"
-              className="btn btn-outline-light btn-sm"
-              disabled={page >= totalPages}
-              onClick={() => loadCards({ page: page + 1, q: query }).catch((err) => setError(err?.message || "Unable to load digital cards."))}
-            >
-              Next
-            </button>
+          <div className="table-responsive wz-data-table-wrap">
+            <table className="table table-dark table-striped table-hover align-middle wz-data-table digital-card-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Person</th>
+                  <th>Custom URL</th>
+                  <th>QR</th>
+                  <th>Status</th>
+                  <th className="table-actions">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {otherRows.length ? otherRows.map((row) => (
+                  <tr key={`other-${row.id}`}>
+                    <td>{row.card_title || "-"}</td>
+                    <td>{row.person_name || "-"}</td>
+                    <td>
+                      {row.custom_url ? (
+                        <div className="d-flex flex-column gap-1">
+                          <a href={row.custom_url} target="_blank" rel="noreferrer">{row.custom_domain}</a>
+                          <small className={row.custom_domain_active ? "text-success" : "text-warning"}>
+                            {row.custom_domain_active ? "Active" : "Pending"}
+                          </small>
+                        </div>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td>
+                      {row.public_url ? (
+                        <a href={qrPngUrl(row.public_url, 240)} target="_blank" rel="noreferrer" title="Open QR PNG" className="d-inline-block">
+                          <img src={qrPngUrl(row.public_url, 72)} alt="QR" style={{ width: 44, height: 44, borderRadius: 6, border: "1px solid rgba(148,163,184,0.25)", background: "#fff", padding: 2 }} />
+                        </a>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge digital-card-table__badge ${row.is_active ? "digital-card-table__badge--status-active" : "digital-card-table__badge--status-inactive"}`}>
+                        {row.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="table-actions">
+                      <div className="digital-card-table__actions">
+                        <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--neutral" href={row.public_url} target="_blank" rel="noreferrer">View</a>
+                        {row.public_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--qr" href={qrPngUrl(row.public_url, 480)} target="_blank" rel="noreferrer">QR</a> : null}
+                        {row.custom_url ? <a className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--success" href={row.custom_url} target="_blank" rel="noreferrer">URL</a> : null}
+                        <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--info" onClick={() => onEdit(row)}>Edit</button>
+                        <button type="button" className="btn btn-sm digital-card-table__action-btn digital-card-table__action-btn--danger" disabled={deletingId === row.id} onClick={() => onDelete(row)}>
+                          {deletingId === row.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan="6" className="text-center text-secondary py-4">No other cards found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="wz-table-footer d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+            <small className="text-secondary">
+              Showing {otherRows.length ? ((page - 1) * PAGE_SIZE) + 1 : 0} to {((page - 1) * PAGE_SIZE) + otherRows.length} of {pagination.total_items || 0}
+            </small>
+            <div className="d-flex gap-2 wz-pagination-inline">
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                disabled={page <= 1}
+                onClick={() => loadOtherCards({ page: page - 1, q: query }).catch((err) => setError(err?.message || "Unable to load cards."))}
+              >
+                Prev
+              </button>
+              <span className="btn btn-outline-light btn-sm disabled">Page {page} / {totalPages}</span>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                disabled={page >= totalPages}
+                onClick={() => loadOtherCards({ page: page + 1, q: query }).catch((err) => setError(err?.message || "Unable to load cards."))}
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>

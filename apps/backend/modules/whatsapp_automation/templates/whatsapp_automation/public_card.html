@@ -8,6 +8,7 @@
     :root{
       --theme: {{ theme_color }};
       --theme-secondary: {{ theme_secondary_color|default:"#0f172a" }};
+      --theme-mode: {{ theme_mode|default:"gradient" }};
       --card-font-pt:{% if card_entry and card_entry.font_size_pt %}{{ card_entry.font_size_pt }}{% else %}16{% endif %};
       --card-icon-pt:{% if card_entry and card_entry.icon_size_pt %}{{ card_entry.icon_size_pt }}{% else %}14{% endif %};
     }
@@ -332,6 +333,25 @@
       line-height:1.65;
       opacity:0.92;
     }
+    .catalogue-item-actions{
+      margin-top:10px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .catalogue-item-action{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:32px;
+      padding:0 12px;
+      border-radius:999px;
+      background:var(--accent);
+      color:#05131f;
+      text-decoration:none;
+      font-size:0.82rem;
+      font-weight:700;
+    }
 
     .card.design1{
       background:linear-gradient(180deg, color-mix(in srgb, var(--theme-secondary) 86%, black) 0%, #0c1630 100%);
@@ -576,7 +596,7 @@
       gap:16px 18px;
     }
     .card.design4 .avatar{
-      margin:-112px 0 0;
+      margin:-64px 0 0;
       border-radius:24px;
       border-width:0;
       background:#f4b52d;
@@ -587,7 +607,7 @@
     }
     .card.design4 .identity{
       text-align:left;
-      margin-top:-52px;
+      margin-top:8px;
     }
     .card.design4 .identity h1{
       color:#2a2e38;
@@ -623,7 +643,7 @@
       display:grid;
       grid-template-columns:repeat(6, minmax(0, 1fr));
       gap:14px;
-      margin-top:-6px;
+      margin-top:10px;
       padding:18px 18px 12px;
       border-radius:0 0 28px 28px;
       background:linear-gradient(180deg, color-mix(in srgb, var(--theme) 92%, #f4b52d), color-mix(in srgb, var(--theme) 82%, #f0b62e));
@@ -671,7 +691,7 @@
       border-color:transparent;
     }
     .card.design4 .action::after{
-      content:"View";
+      content:"Click";
       display:inline-flex;
       align-items:center;
       justify-content:center;
@@ -688,6 +708,13 @@
       background:rgba(255,255,255,0.82);
       border:1px solid rgba(217,172,43,0.16);
       box-shadow:none;
+    }
+    .card.design4 .details{
+      grid-column:1 / -1;
+      width:100%;
+    }
+    .card.design4 .details .detail{
+      width:100%;
     }
     .card.design4 .detail-icon{
       color:color-mix(in srgb, var(--theme) 94%, #d49a18);
@@ -1102,11 +1129,73 @@
       display:none !important;
       background:transparent !important;
     }
+    /* Keep footer menu and credit area consistent across every template */
+    .card .footer-actions{
+      grid-column:1 / -1 !important;
+      display:grid !important;
+      grid-template-columns:repeat(5, minmax(0, 1fr)) !important;
+      margin:20px -22px 0 !important;
+      border-top:1px solid rgba(255,255,255,0.08) !important;
+      background:#080808 !important;
+    }
+    .card .footer-action{
+      min-height:88px !important;
+      display:flex !important;
+      flex-direction:column !important;
+      align-items:center !important;
+      justify-content:center !important;
+      gap:10px !important;
+      background:#080808 !important;
+      color:#ffffff !important;
+      text-decoration:none !important;
+      border-right:1px solid rgba(255,255,255,0.08) !important;
+      font-size:0.95rem !important;
+      font-weight:500 !important;
+    }
+    .card .footer-action:last-child{
+      border-right:none !important;
+    }
+    .card .footer-action svg{
+      width:22px !important;
+      height:22px !important;
+      display:block !important;
+      fill:currentColor !important;
+    }
+    .card .footer-credit{
+      grid-column:1 / -1 !important;
+      margin:0 -22px -24px !important;
+      padding:12px 16px !important;
+      background:#d6d6d6 !important;
+      color:#3f3f46 !important;
+      text-align:center !important;
+      font-size:0.92rem !important;
+    }
+    .card .footer-credit a{
+      color:#1f2937 !important;
+      font-weight:700 !important;
+      text-decoration:none !important;
+    }
+    .card.is-flat{
+      background: color-mix(in srgb, var(--theme) 8%, #0f172a);
+    }
+    .card.is-flat .hero{
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 34%),
+        color-mix(in srgb, var(--theme) 86%, #0b1220) !important;
+    }
+    .card.is-flat .template-badge,
+    .card.is-flat .action.is-primary{
+      background: var(--theme) !important;
+      border-color: color-mix(in srgb, var(--theme) 78%, #0f172a) !important;
+    }
+    .card.is-flat .avatar{
+      background: color-mix(in srgb, var(--theme) 74%, #0f172a) !important;
+    }
   </style>
 </head>
 <body>
   <div class="card-shell">
-    <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %}">
+    <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %} {% if theme_mode == 'flat' %}is-flat{% endif %}">
       <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}></div>
 
       <div class="content">
@@ -1130,8 +1219,8 @@
           >Save This Contact</a>
         </div>
 
+        {% if social_links_items %}
         <div class="socials">
-          {% if social_links_items %}
             {% for link in social_links_items %}
               <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer" aria-label="{{ link.label }}">
                 {% if link.type == "custom" and link.custom_icon_data %}
@@ -1159,21 +1248,8 @@
                 {% endif %}
               </a>
             {% endfor %}
-          {% else %}
-            <span class="social-link" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M13.5 21v-7h2.4l.4-3h-2.8V9.1c0-.9.3-1.6 1.7-1.6H16V4.8c-.2 0-.9-.1-1.8-.1-1.8 0-3.1 1.1-3.1 3.3V11H8.5v3h2.6v7h2.4z"/></svg>
-            </span>
-            <span class="social-link" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M6.94 8.5H4V20h2.94V8.5zM5.47 4A1.72 1.72 0 1 0 7.2 5.72 1.73 1.73 0 0 0 5.47 4zM20 12.77C20 9.86 18.45 8.5 16.38 8.5a3.56 3.56 0 0 0-3.2 1.76V8.5h-2.94V20h2.94v-6.39c0-1.68.32-3.3 2.4-3.3s2.1 1.94 2.1 3.41V20H20z"/></svg>
-            </span>
-            <span class="social-link" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M7.8 3h8.4A4.8 4.8 0 0 1 21 7.8v8.4a4.8 4.8 0 0 1-4.8 4.8H7.8A4.8 4.8 0 0 1 3 16.2V7.8A4.8 4.8 0 0 1 7.8 3zm0 1.8A3 3 0 0 0 4.8 7.8v8.4a3 3 0 0 0 3 3h8.4a3 3 0 0 0 3-3V7.8a3 3 0 0 0-3-3H7.8zm8.85 1.35a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1zM12 7.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 0 1 12 7.5zm0 1.8A2.7 2.7 0 1 0 14.7 12 2.7 2.7 0 0 0 12 9.3z"/></svg>
-            </span>
-            <span class="social-link" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M20.52 3.48A11.83 11.83 0 0 0 12.1.01C5.58.01.28 5.31.28 11.83A11.7 11.7 0 0 0 1.87 17.7L0 24l6.47-1.7a11.79 11.79 0 0 0 5.63 1.43h.01c6.52 0 11.82-5.3 11.82-11.82a11.75 11.75 0 0 0-3.41-8.43zM12.11 21.7a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.84 1.01 1.02-3.74-.24-.39a9.83 9.83 0 1 1 8.45 4.71zm5.4-7.36c-.29-.15-1.73-.85-2-1s-.47-.15-.67.15-.77 1-.95 1.2-.35.22-.64.07a8.02 8.02 0 0 1-2.36-1.45 8.92 8.92 0 0 1-1.63-2.04c-.17-.29 0-.44.13-.59.13-.13.29-.35.44-.52a2.06 2.06 0 0 0 .29-.49.54.54 0 0 0 0-.51c-.08-.15-.67-1.62-.92-2.22-.24-.58-.48-.5-.67-.51h-.57a1.09 1.09 0 0 0-.79.37 3.31 3.31 0 0 0-1 2.46 5.76 5.76 0 0 0 1.2 3.06 13.25 13.25 0 0 0 5.06 4.47 17.17 17.17 0 0 0 1.69.62 4.1 4.1 0 0 0 1.88.12 3.08 3.08 0 0 0 2.02-1.42 2.48 2.48 0 0 0 .17-1.42c-.07-.11-.26-.18-.55-.33z"/></svg>
-            </span>
-          {% endif %}
         </div>
+        {% endif %}
 
         <div class="title">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</div>
         <p class="description">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
@@ -1261,6 +1337,22 @@
                       </div>
                       <div class="catalogue-item-meta">{{ item.item_type|default:"product" }}{% if item.category %} · {{ item.category }}{% endif %}</div>
                       {% if item.description %}<div class="catalogue-item-description">{{ item.description|safe }}</div>{% endif %}
+                      {% if item.order_button_enabled and company.whatsapp_number or item.call_button_enabled and company.phone or item.whatsapp_button_enabled and company.whatsapp_number or item.enquiry_button_enabled %}
+                        <div class="catalogue-item-actions">
+                          {% if item.order_button_enabled and company.whatsapp_number %}
+                            <a class="catalogue-item-action" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}" target="_blank" rel="noreferrer">Order</a>
+                          {% endif %}
+                          {% if item.call_button_enabled and company.phone %}
+                            <a class="catalogue-item-action" href="tel:{{ company.phone }}">Call</a>
+                          {% endif %}
+                          {% if item.whatsapp_button_enabled and company.whatsapp_number %}
+                            <a class="catalogue-item-action" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20need%20details%20about%20{{ item.title|urlencode }}" target="_blank" rel="noreferrer">WhatsApp</a>
+                          {% endif %}
+                          {% if item.enquiry_button_enabled %}
+                            <a class="catalogue-item-action" href="{% if company.email %}mailto:{{ company.email }}?subject=Enquiry%20-%20{{ item.title|urlencode }}{% elif company.whatsapp_number %}https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry%20about%20{{ item.title|urlencode }}.{% else %}#{% endif %}">Enquiry</a>
+                          {% endif %}
+                        </div>
+                      {% endif %}
                     </div>
                   {% endfor %}
                 </div>

@@ -2,6 +2,7 @@ from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 import datetime
+import ipaddress
 import json
 import math
 import os
@@ -72,6 +73,10 @@ User = get_user_model()
 DEFAULT_ALLOWED_INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30]
 GSTIN_REGEX = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
 HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+PUBLIC_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
+    re.IGNORECASE,
+)
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 PRODUCT_LABEL_OVERRIDES = {
@@ -90,6 +95,21 @@ PRODUCT_LABEL_OVERRIDES = {
 
 def _normalize_text(value):
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_domain_host(value):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    for prefix in ("http://", "https://"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
+    raw = raw.split("/", 1)[0].strip()
+    raw = raw.split("?", 1)[0].strip()
+    raw = raw.split("#", 1)[0].strip()
+    if ":" in raw:
+        raw = raw.split(":", 1)[0].strip()
+    return raw.strip(".")
 
 
 def _normalize_product_slug(value, default=""):
@@ -5394,6 +5414,7 @@ def profile_summary(request):
         })
 
     if dashboard_views.is_super_admin_user(user):
+        theme_settings = ThemeSettings.get_active()
         phone_country = "+91"
         phone_number = ""
         if profile.phone_number:
@@ -5418,6 +5439,8 @@ def profile_summary(request):
                 "role": profile.role,
                 "phone_number": profile.phone_number or "",
             },
+            "public_server_ip": str(theme_settings.public_server_ip or "").strip(),
+            "public_server_domain": str(theme_settings.public_server_domain or "").strip(),
             "phone_country": phone_country,
             "phone_number": phone_number,
             "recent_actions": [],
@@ -5570,6 +5593,8 @@ def profile_update_email(request):
     theme_primary = _normalize_hex_color(payload.get("theme_primary"))
     theme_secondary = _normalize_hex_color(payload.get("theme_secondary"))
     sidebar_menu_style = (payload.get("sidebar_menu_style") or "").strip().lower()
+    public_server_ip = str(payload.get("public_server_ip") or "").strip()
+    public_server_domain = _normalize_domain_host(payload.get("public_server_domain"))
     if "sidebar_menu_style" in payload and sidebar_menu_style not in {"default", "compact"}:
         return _json_error("Invalid sidebar menu style.", status=400)
     if not email:
@@ -5578,6 +5603,13 @@ def profile_update_email(request):
         return _json_error("Invalid primary color.", status=400)
     if "theme_secondary" in payload and not theme_secondary:
         return _json_error("Invalid secondary color.", status=400)
+    if "public_server_ip" in payload and public_server_ip:
+        try:
+            ipaddress.ip_address(public_server_ip)
+        except ValueError:
+            return _json_error("Invalid online server IP.", status=400)
+    if "public_server_domain" in payload and public_server_domain and not PUBLIC_DOMAIN_RE.match(public_server_domain):
+        return _json_error("Invalid online server domain.", status=400)
 
     user = request.user
     profile = dashboard_views.get_profile(user)
@@ -5599,6 +5631,21 @@ def profile_update_email(request):
     profile.phone_number = phone_value
     profile.save()
     saved_timezone = None
+    saved_public_server_ip = ""
+    saved_public_server_domain = ""
+    if dashboard_views.is_super_admin_user(user):
+        theme_settings = ThemeSettings.get_active()
+        updates = []
+        if "public_server_ip" in payload:
+            theme_settings.public_server_ip = public_server_ip
+            updates.append("public_server_ip")
+        if "public_server_domain" in payload:
+            theme_settings.public_server_domain = public_server_domain
+            updates.append("public_server_domain")
+        if updates:
+            theme_settings.save(update_fields=updates)
+        saved_public_server_ip = str(theme_settings.public_server_ip or "").strip()
+        saved_public_server_domain = str(theme_settings.public_server_domain or "").strip()
     if not dashboard_views.is_super_admin_user(user):
         org, error = _get_org_or_error(request)
         if error:
@@ -5633,6 +5680,8 @@ def profile_update_email(request):
         "theme_primary": theme_primary,
         "theme_secondary": theme_secondary,
         "sidebar_menu_style": sidebar_menu_style or "default",
+        "public_server_ip": saved_public_server_ip,
+        "public_server_domain": saved_public_server_domain,
         "email_verified": user.email_verified,
     })
 

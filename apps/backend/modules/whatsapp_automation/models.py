@@ -59,6 +59,13 @@ class DigitalCard(models.Model):
 
 
 class DigitalCardEntry(models.Model):
+    THEME_MODE_GRADIENT = "gradient"
+    THEME_MODE_FLAT = "flat"
+    THEME_MODE_CHOICES = (
+        (THEME_MODE_GRADIENT, "Gradient"),
+        (THEME_MODE_FLAT, "Flat"),
+    )
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_digital_card_entries")
     company_profile = models.ForeignKey(
         CompanyProfile,
@@ -80,6 +87,7 @@ class DigitalCardEntry(models.Model):
     social_links = models.JSONField(default=dict, blank=True)
     theme_color = models.CharField(max_length=20, blank=True, default="#22c55e")
     theme_secondary_color = models.CharField(max_length=20, blank=True, default="#0f172a")
+    theme_mode = models.CharField(max_length=16, choices=THEME_MODE_CHOICES, blank=True, default=THEME_MODE_GRADIENT)
     template_style = models.CharField(max_length=20, blank=True, default="design1")
     custom_domain = models.CharField(max_length=255, blank=True, default="")
     custom_domain_active = models.BooleanField(default=False)
@@ -205,6 +213,9 @@ class CatalogueProduct(models.Model):
     description = models.TextField(blank=True, default="")
     category = models.CharField(max_length=120, blank=True, default="")
     order_button_enabled = models.BooleanField(default=True)
+    call_button_enabled = models.BooleanField(default=True)
+    whatsapp_button_enabled = models.BooleanField(default=True)
+    enquiry_button_enabled = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

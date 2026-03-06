@@ -23,9 +23,12 @@ export default function TinyHtmlEditor({
   onChange,
   placeholder = "",
   minHeight = 320,
+  maxWords = 120,
 }) {
   const inputId = useId();
   const editorRef = useRef(null);
+  const statusId = useId();
+  const lastValidHtmlRef = useRef(value || "");
   const fontOptions = [
     { label: "Font", value: "" },
     { label: "Arial", value: "Arial, sans-serif" },
@@ -50,6 +53,29 @@ export default function TinyHtmlEditor({
     { label: "32", value: "6" },
   ];
 
+  function countWordsFromHtml(html) {
+    const text = String(html || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) {
+      return 0;
+    }
+    return text.split(" ").filter(Boolean).length;
+  }
+
+  function setCaretToEnd(node) {
+    if (!node) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
@@ -59,14 +85,24 @@ export default function TinyHtmlEditor({
     if (editor.innerHTML !== nextValue) {
       editor.innerHTML = nextValue;
     }
-  }, [value]);
+    if (countWordsFromHtml(nextValue) <= maxWords) {
+      lastValidHtmlRef.current = nextValue;
+    }
+  }, [value, maxWords]);
 
   function emitChange() {
     const editor = editorRef.current;
     if (!editor) {
       return;
     }
-    onChange(editor.innerHTML || "");
+    const nextHtml = editor.innerHTML || "";
+    if (countWordsFromHtml(nextHtml) > maxWords) {
+      editor.innerHTML = lastValidHtmlRef.current || "";
+      setCaretToEnd(editor);
+      return;
+    }
+    lastValidHtmlRef.current = nextHtml;
+    onChange(nextHtml);
   }
 
   function focusEditor() {
@@ -105,6 +141,9 @@ export default function TinyHtmlEditor({
     }
     runCommand(command, value);
   }
+
+  const currentWordCount = countWordsFromHtml(value || "");
+  const isWordLimitReached = currentWordCount >= maxWords;
 
   return (
     <div className="tiny-html-editor tiny-html-editor--simple">
@@ -198,7 +237,11 @@ export default function TinyHtmlEditor({
           style={{ minHeight }}
           onInput={emitChange}
           onBlur={emitChange}
+          aria-describedby={statusId}
         />
+      </div>
+      <div id={statusId} className={`tiny-html-editor__meta ${isWordLimitReached ? "is-limit" : ""}`}>
+        {currentWordCount}/{maxWords} words
       </div>
     </div>
   );

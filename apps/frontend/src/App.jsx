@@ -1579,6 +1579,142 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const TEXT_INPUT_TYPES = new Set(["text", "email", "url", "tel", "search", "password", "number"]);
+    const DEFAULT_INPUT_MAX = 255;
+    const DEFAULT_TEXTAREA_MAX = 1000;
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const WEB_RE = /^(https?:\/\/|www\.|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(\/.*)?$/i;
+
+    const semanticText = (el) => [
+      el.getAttribute("name"),
+      el.id,
+      el.getAttribute("placeholder"),
+      el.getAttribute("aria-label"),
+      el.className,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    const hasAny = (text, keywords) => keywords.some((key) => text.includes(key));
+
+    const inferLimit = (el, fallback) => {
+      const text = semanticText(el);
+      if (hasAny(text, ["slug"])) return 80;
+      if (hasAny(text, ["search", "query"])) return 80;
+      if (hasAny(text, ["title", "name", "subject", "label", "category"])) return 120;
+      if (hasAny(text, ["email"])) return 120;
+      if (hasAny(text, ["website", "url", "domain", "link"])) return 255;
+      if (hasAny(text, ["phone", "mobile", "whatsapp", "postal", "pincode", "zip"])) return 20;
+      if (hasAny(text, ["price", "amount", "cost", "qty", "quantity"])) return 32;
+      if (hasAny(text, ["state", "city", "country"])) return 80;
+      if (hasAny(text, ["address"])) return 260;
+      if (hasAny(text, ["description", "message", "note", "content", "bio", "about", "highlight"])) {
+        return el instanceof HTMLTextAreaElement ? 1000 : 320;
+      }
+      return fallback;
+    };
+
+    const sanitizeValue = (el, value) => {
+      const text = semanticText(el);
+      let next = String(value ?? "");
+      if (hasAny(text, ["phone", "mobile", "whatsapp", "postal", "pincode", "zip"])) {
+        next = next.replace(/[^\d+]/g, "");
+      } else if (hasAny(text, ["slug"])) {
+        next = next.toLowerCase().replace(/[^a-z0-9-]/g, "");
+      }
+      return next;
+    };
+
+    const setValidationMessage = (el) => {
+      const value = String(el.value || "").trim();
+      if (!value) {
+        el.setCustomValidity("");
+        return;
+      }
+      const text = semanticText(el);
+      if ((el.type === "email" || hasAny(text, ["email"])) && !EMAIL_RE.test(value)) {
+        el.setCustomValidity("Please enter a valid email address.");
+        return;
+      }
+      if ((el.type === "url" || hasAny(text, ["website", "url", "domain", "link"])) && !WEB_RE.test(value)) {
+        el.setCustomValidity("Please enter a valid website URL.");
+        return;
+      }
+      el.setCustomValidity("");
+    };
+
+    const applyGlobalTextLimit = (event) => {
+      const el = event?.target;
+      if (!el || !(el instanceof Element) || el.hasAttribute("data-no-global-limit")) {
+        return;
+      }
+      const applyLimitToInput = (inputEl) => {
+        const limit = inputEl.maxLength > 0 ? inputEl.maxLength : inferLimit(inputEl, DEFAULT_INPUT_MAX);
+        const sanitized = sanitizeValue(inputEl, inputEl.value);
+        const trimmed = sanitized.slice(0, limit);
+        if (trimmed !== inputEl.value) {
+          inputEl.value = trimmed;
+        }
+        setValidationMessage(inputEl);
+      };
+      if (el instanceof HTMLInputElement) {
+        if (!TEXT_INPUT_TYPES.has(el.type)) {
+          return;
+        }
+        applyLimitToInput(el);
+        return;
+      }
+      if (el instanceof HTMLTextAreaElement) {
+        const limit = el.maxLength > 0 ? el.maxLength : inferLimit(el, DEFAULT_TEXTAREA_MAX);
+        const trimmed = String(el.value || "").slice(0, limit);
+        if (trimmed !== el.value) {
+          el.value = trimmed;
+        }
+        setValidationMessage(el);
+      }
+    };
+
+    const onBlur = (event) => {
+      const el = event?.target;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        if (!el.hasAttribute("data-no-global-limit")) {
+          applyGlobalTextLimit({ target: el });
+          setValidationMessage(el);
+        }
+      }
+    };
+
+    const onSubmit = (event) => {
+      const form = event?.target;
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      const controls = form.querySelectorAll("input, textarea");
+      controls.forEach((el) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          if (!el.hasAttribute("data-no-global-limit")) {
+            applyGlobalTextLimit({ target: el });
+          }
+        }
+      });
+      if (!form.checkValidity()) {
+        event.preventDefault();
+        form.reportValidity();
+      }
+    };
+
+    document.addEventListener("input", applyGlobalTextLimit, true);
+    document.addEventListener("blur", onBlur, true);
+    document.addEventListener("submit", onSubmit, true);
+    return () => {
+      document.removeEventListener("input", applyGlobalTextLimit, true);
+      document.removeEventListener("blur", onBlur, true);
+      document.removeEventListener("submit", onSubmit, true);
+    };
+  }, []);
+
+  useEffect(() => {
     let active = true;
     async function boot() {
       try {

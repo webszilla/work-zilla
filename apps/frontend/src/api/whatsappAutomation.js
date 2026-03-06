@@ -78,6 +78,7 @@ export const waApi = {
     if (params.q) search.set("q", params.q);
     if (params.page) search.set("page", String(params.page));
     if (params.pageSize) search.set("page_size", String(params.pageSize));
+    if (params.scope) search.set("scope", String(params.scope));
     const qs = search.toString();
     return apiFetch(`/api/whatsapp-automation/digital-cards${qs ? `?${qs}` : ""}`);
   },

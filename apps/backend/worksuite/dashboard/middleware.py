@@ -3,6 +3,8 @@ from django.contrib import messages
 from django.contrib.messages import get_messages
 from django.utils import timezone
 from datetime import timedelta
+import json
+import re
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden, JsonResponse
 from core.models import Organization, Subscription, DeletedAccount, UserProfile, OrganizationSettings
@@ -38,6 +40,93 @@ LOGIN_PATHS = [
     "/admin/login/",
     "/hr-login/",
 ]
+VALIDATED_API_PREFIXES = (
+    "/api/dashboard/",
+    "/api/saas-admin/",
+    "/api/business-autopilot/",
+    "/api/whatsapp-automation/",
+    "/api/storage/",
+    "/api/imposition/",
+    "/api/backups/",
+    "/api/media-library/",
+)
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+URL_RE = re.compile(r"^(https?://|www\.|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(/.*)?$", re.IGNORECASE)
+PHONE_RE = re.compile(r"^\+?\d{1,20}$")
+HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _semantic_limit(key_name):
+    text = str(key_name or "").strip().lower()
+    if not text:
+        return 255
+    if any(k in text for k in ("slug",)):
+        return 80
+    if any(k in text for k in ("search", "query")):
+        return 80
+    if any(k in text for k in ("title", "name", "subject", "label", "category")):
+        return 120
+    if "email" in text:
+        return 120
+    if any(k in text for k in ("website", "url", "domain", "link")):
+        return 255
+    if any(k in text for k in ("phone", "mobile", "whatsapp", "postal", "pincode", "zip")):
+        return 20
+    if any(k in text for k in ("price", "amount", "cost", "qty", "quantity")):
+        return 32
+    if any(k in text for k in ("state", "city", "country")):
+        return 80
+    if "address" in text:
+        return 260
+    if any(k in text for k in ("description", "message", "note", "content", "bio", "about", "highlight")):
+        return 1000
+    if any(k in text for k in ("prompt", "instruction", "template", "script")):
+        return 4000
+    if any(k in text for k in ("password", "secret", "token", "key")):
+        return 255
+    if any(k in text for k in ("image", "logo", "banner", "avatar", "base64", "file_data", "_data")):
+        return 2_000_000
+    return 255
+
+
+def _validate_string_field(field_name, value):
+    raw = str(value or "")
+    max_len = _semantic_limit(field_name)
+    if len(raw) > max_len:
+        return f"Must be {max_len} characters or fewer."
+    trimmed = raw.strip()
+    if not trimmed:
+        return None
+
+    key = str(field_name or "").lower()
+    if "email" in key and not EMAIL_RE.match(trimmed):
+        return "Enter a valid email address."
+    if any(k in key for k in ("website", "url", "domain", "link")):
+        if trimmed not in {"#", "/"} and not URL_RE.match(trimmed):
+            return "Enter a valid URL or domain."
+    if any(k in key for k in ("phone", "mobile", "whatsapp", "postal", "pincode", "zip")):
+        if not PHONE_RE.match(trimmed):
+            return "Use digits only (optional leading +)."
+    if "color" in key and not HEX_COLOR_RE.match(trimmed):
+        return "Use a valid HEX color like #22c55e."
+    return None
+
+
+def _iter_payload_strings(payload, prefix=""):
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            next_prefix = f"{prefix}.{key}" if prefix else str(key)
+            yield from _iter_payload_strings(value, next_prefix)
+        return
+    if isinstance(payload, list):
+        for idx, value in enumerate(payload):
+            next_prefix = f"{prefix}[{idx}]"
+            yield from _iter_payload_strings(value, next_prefix)
+        return
+    if isinstance(payload, str):
+        field_name = prefix.split(".")[-1].split("[")[0]
+        yield prefix, field_name, payload
 
 
 class LoginSessionGuardMiddleware:
@@ -195,4 +284,36 @@ class OrganizationTimezoneMiddleware:
                 if org_settings and org_settings.org_timezone:
                     timezone.activate(normalize_timezone(org_settings.org_timezone))
 
+        return self.get_response(request)
+
+
+class GlobalPayloadValidationMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        method = (request.method or "").upper()
+        content_type = (request.content_type or "").lower()
+        path = request.path or ""
+        if (
+            method in {"POST", "PUT", "PATCH"}
+            and any(path.startswith(prefix) for prefix in VALIDATED_API_PREFIXES)
+            and "application/json" in content_type
+        ):
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                payload = None
+            if isinstance(payload, (dict, list)):
+                for field_path, field_name, value in _iter_payload_strings(payload):
+                    error = _validate_string_field(field_name, value)
+                    if error:
+                        return JsonResponse(
+                            {
+                                "error": "validation_error",
+                                "field": field_path,
+                                "message": error,
+                            },
+                            status=400,
+                        )
         return self.get_response(request)

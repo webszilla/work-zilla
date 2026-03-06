@@ -14,7 +14,8 @@
     .item{background:#0b1a33;border:1px solid #1e2f4d;border-radius:16px;padding:16px}
     .category-title{margin:0 0 12px}
     .price{color:{{ theme_color }};font-weight:700}
-    .btn{display:inline-block;margin-top:8px;background:{{ theme_color }};color:#08111f;text-decoration:none;padding:8px 12px;border-radius:10px;font-weight:600}
+    .item-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;background:{{ theme_color }};color:#08111f;text-decoration:none;padding:8px 12px;border-radius:10px;font-weight:600}
     .muted{color:#94a3b8}
     .type{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:0 10px;border-radius:999px;border:1px solid #1e2f4d;background:#10213f;color:#cbd5e1;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
     .contact-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
@@ -89,8 +90,21 @@
           <h3>{{ item.title }}</h3>
           {% if item.price %}<div class="price">{{ item.price }}</div>{% endif %}
           <p>{{ item.description }}</p>
-          {% if item.order_button_enabled and company.whatsapp_number %}
-            <a class="btn" target="_blank" rel="noreferrer" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}">Order on WhatsApp</a>
+          {% if item.order_button_enabled and company.whatsapp_number or item.call_button_enabled and company.phone or item.whatsapp_button_enabled and company.whatsapp_number or item.enquiry_button_enabled %}
+            <div class="item-actions">
+              {% if item.order_button_enabled and company.whatsapp_number %}
+                <a class="btn" target="_blank" rel="noreferrer" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}">Order</a>
+              {% endif %}
+              {% if item.call_button_enabled and company.phone %}
+                <a class="btn" href="tel:{{ company.phone }}">Call</a>
+              {% endif %}
+              {% if item.whatsapp_button_enabled and company.whatsapp_number %}
+                <a class="btn" target="_blank" rel="noreferrer" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20need%20details%20about%20{{ item.title|urlencode }}">WhatsApp</a>
+              {% endif %}
+              {% if item.enquiry_button_enabled %}
+                <a class="btn" href="{% if company.email %}mailto:{{ company.email }}?subject=Enquiry%20-%20{{ item.title|urlencode }}{% elif company.whatsapp_number %}https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry%20about%20{{ item.title|urlencode }}.{% else %}#{% endif %}">Enquiry</a>
+              {% endif %}
+            </div>
           {% endif %}
         </div>
         {% endfor %}

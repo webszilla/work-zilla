@@ -7,14 +7,38 @@ const emptyForm = {
   title: "",
   item_type: "product",
   price: "",
+  image_data_url: "",
   description: "",
   category: "",
   order_button_enabled: true,
+  call_button_enabled: true,
+  whatsapp_button_enabled: true,
+  enquiry_button_enabled: true,
   is_active: true,
   sort_order: 0,
 };
 
 const PAGE_SIZE = 10;
+const LIMITS = {
+  sectionTitle: 80,
+  categoryName: 60,
+  itemTitle: 120,
+  price: 40,
+  search: 80,
+};
+
+function limitText(value, max) {
+  return String(value || "").slice(0, max);
+}
+
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read image file."));
+    reader.readAsDataURL(file);
+  });
+}
 
 function deriveInitialTab() {
   if (typeof window === "undefined") {
@@ -55,6 +79,8 @@ export default function WebsiteCatalogueDashboardPage() {
   const [categoryForm, setCategoryForm] = useState({ id: null, name: "" });
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoryPage, setCategoryPage] = useState(1);
 
   async function loadItems() {
     setLoading(true);
@@ -97,6 +123,10 @@ export default function WebsiteCatalogueDashboardPage() {
     setPage(1);
   }, [search]);
 
+  useEffect(() => {
+    setCategoryPage(1);
+  }, [categorySearch]);
+
   function switchTab(nextTab) {
     setActiveTab(nextTab);
     if (typeof window !== "undefined") {
@@ -124,6 +154,10 @@ export default function WebsiteCatalogueDashboardPage() {
     const name = String(categoryForm.name || "").trim();
     if (!name) {
       setError("Category name is required.");
+      return;
+    }
+    if (!categoryForm.id && categories.length >= 25) {
+      setError("Maximum 25 categories allowed.");
       return;
     }
     setSaving(true);
@@ -171,6 +205,10 @@ export default function WebsiteCatalogueDashboardPage() {
       setError("Create and select a category first.");
       return;
     }
+    if (!form.id && items.length >= 50) {
+      setError("Maximum 50 products/services allowed.");
+      return;
+    }
     setSaving(true);
     setError("");
     setNotice("");
@@ -198,6 +236,25 @@ export default function WebsiteCatalogueDashboardPage() {
     }
   }
 
+  async function onItemImagePick(file) {
+    if (!file) return;
+    if (!String(file.type || "").startsWith("image/")) {
+      setError("Only image files are allowed.");
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      setError("Image size must be under 1 MB.");
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setForm((prev) => ({ ...prev, image_data_url: dataUrl }));
+      setError("");
+    } catch (err) {
+      setError(err?.message || "Unable to read selected image.");
+    }
+  }
+
   const availableCategories = useMemo(() => {
     const map = new Map();
     for (const row of categories) {
@@ -222,6 +279,16 @@ export default function WebsiteCatalogueDashboardPage() {
         .some((v) => String(v).toLowerCase().includes(q))
     );
   }, [items, search]);
+
+  const filteredCategories = useMemo(() => {
+    const q = categorySearch.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((row) => String(row?.name || "").toLowerCase().includes(q));
+  }, [categories, categorySearch]);
+
+  const categoryTotalPages = Math.max(1, Math.ceil(filteredCategories.length / PAGE_SIZE));
+  const currentCategoryPage = Math.min(categoryPage, categoryTotalPages);
+  const pagedCategories = filteredCategories.slice((currentCategoryPage - 1) * PAGE_SIZE, currentCategoryPage * PAGE_SIZE);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -289,7 +356,7 @@ export default function WebsiteCatalogueDashboardPage() {
             <div className="col-12 col-xl-4">
               <div className="wa-catalogue-website-column">
                 <label className="form-label">About Section Title</label>
-                <input className="form-control" value={cataloguePageForm.about_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, about_title: e.target.value }))} />
+                <input className="form-control" maxLength={LIMITS.sectionTitle} value={cataloguePageForm.about_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, about_title: limitText(e.target.value, LIMITS.sectionTitle) }))} />
                 <TinyHtmlEditor
                   label="About Content"
                   value={cataloguePageForm.about_content}
@@ -301,7 +368,7 @@ export default function WebsiteCatalogueDashboardPage() {
             <div className="col-12 col-xl-4">
               <div className="wa-catalogue-website-column">
                 <label className="form-label">Services Section Title</label>
-                <input className="form-control" value={cataloguePageForm.services_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, services_title: e.target.value }))} />
+                <input className="form-control" maxLength={LIMITS.sectionTitle} value={cataloguePageForm.services_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, services_title: limitText(e.target.value, LIMITS.sectionTitle) }))} />
                 <TinyHtmlEditor
                   label="Services Content"
                   value={cataloguePageForm.services_content}
@@ -313,7 +380,7 @@ export default function WebsiteCatalogueDashboardPage() {
             <div className="col-12 col-xl-4">
               <div className="wa-catalogue-website-column">
                 <label className="form-label">Contact Section Title</label>
-                <input className="form-control" value={cataloguePageForm.contact_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, contact_title: e.target.value }))} />
+                <input className="form-control" maxLength={LIMITS.sectionTitle} value={cataloguePageForm.contact_title} onChange={(e) => setCataloguePageForm((p) => ({ ...p, contact_title: limitText(e.target.value, LIMITS.sectionTitle) }))} />
                 <TinyHtmlEditor
                   label="Contact Intro / Note"
                   value={cataloguePageForm.contact_note}
@@ -334,60 +401,88 @@ export default function WebsiteCatalogueDashboardPage() {
       ) : (
         <div className="d-flex flex-column gap-3">
           <section className="wa-flat-section">
-            <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3">
-              <div>
-                <h4 className="mb-1">Catalogue Categories</h4>
-                <div className="text-secondary">Create categories first, then add products or services under them.</div>
+            <div className="row g-3 align-items-start">
+              <div className="col-12 col-xl-3">
+                <div className="d-flex flex-column gap-2">
+                  <h4 className="mb-1">Catalogue Categories</h4>
+                  <div className="text-secondary small">Create category first, then add products/services.</div>
+                  <input
+                    className="form-control"
+                    value={categoryForm.name}
+                    onChange={(e) => setCategoryForm((prev) => ({ ...prev, name: limitText(e.target.value, LIMITS.categoryName) }))}
+                    maxLength={LIMITS.categoryName}
+                    placeholder="Category name"
+                  />
+                  <button type="button" className="btn btn-primary btn-sm" onClick={saveCategory} disabled={saving}>
+                    {saving ? "Saving..." : categoryForm.id ? "Update Category" : "Create Category"}
+                  </button>
+                  <small className="text-secondary">Max categories: 25 | Current: {categories.length}</small>
+                </div>
               </div>
-              <div className="wa-catalogue-category-form">
-                <input
-                  className="form-control"
-                  value={categoryForm.name}
-                  onChange={(e) => setCategoryForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="Category name"
-                />
-                <button type="button" className="btn btn-primary btn-sm" onClick={saveCategory} disabled={saving}>
-                  {saving ? "Saving..." : categoryForm.id ? "Update Category" : "Create Category"}
-                </button>
-              </div>
-            </div>
 
-            <div className="wa-catalogue-category-list">
-              {availableCategories.length ? (
-                availableCategories.map((category) => {
-                  const fullCategory = categories.find((row) => row.name === category.name);
-                  return (
-                    <div className="wa-catalogue-category-chip" key={category.id}>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none"
-                        onClick={() => setCategoryForm({ id: fullCategory?.id || null, name: category.name })}
-                      >
-                        {category.name}
-                      </button>
-                      {fullCategory ? (
-                        <span className="text-secondary small">
-                          {fullCategory.product_count || 0} products · {fullCategory.service_count || 0} services
-                        </span>
-                      ) : null}
-                      {fullCategory ? (
-                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteCategory(fullCategory)}>
-                          Remove
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-secondary">No categories yet. Create your first category to start adding catalogue items.</div>
-              )}
+              <div className="col-12 col-xl-9">
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                  <h5 className="mb-0">Category List</h5>
+                  <label className="table-search mb-0" htmlFor="wa-category-search">
+                    <input
+                      id="wa-category-search"
+                      type="search"
+                      placeholder="Search categories"
+                      value={categorySearch}
+                      onChange={(e) => setCategorySearch(limitText(e.target.value, LIMITS.search))}
+                      maxLength={LIMITS.search}
+                    />
+                  </label>
+                </div>
+                <div className="table-responsive">
+                  <table className="table table-dark table-hover align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Products</th>
+                        <th>Services</th>
+                        <th className="text-end">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedCategories.length ? pagedCategories.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.name}</td>
+                          <td>{row.product_count || 0}</td>
+                          <td>{row.service_count || 0}</td>
+                          <td className="text-end">
+                            <div className="d-flex justify-content-end gap-2">
+                              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setCategoryForm({ id: row.id, name: row.name })}>Edit</button>
+                              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteCategory(row)}>Remove</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan="4" className="text-secondary">No categories found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+                  <small className="text-secondary">
+                    Showing {pagedCategories.length ? ((currentCategoryPage - 1) * PAGE_SIZE) + 1 : 0} to {((currentCategoryPage - 1) * PAGE_SIZE) + pagedCategories.length} of {filteredCategories.length}
+                  </small>
+                  <div className="d-flex gap-2">
+                    <button type="button" className="btn btn-outline-light btn-sm" disabled={currentCategoryPage <= 1} onClick={() => setCategoryPage((prev) => Math.max(1, prev - 1))}>Prev</button>
+                    <span className="btn btn-outline-light btn-sm disabled">Page {currentCategoryPage} / {categoryTotalPages}</span>
+                    <button type="button" className="btn btn-outline-light btn-sm" disabled={currentCategoryPage >= categoryTotalPages} onClick={() => setCategoryPage((prev) => Math.min(categoryTotalPages, prev + 1))}>Next</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
           <section className="wa-flat-section">
             <div className="d-flex align-items-center justify-content-between mb-3 gap-3 flex-wrap">
               <div>
-                <h4 className="mb-1">{form.id ? `Edit ${currentItemLabel}` : `Add ${currentItemLabel}`}</h4>
+                <h4 className="mb-1">{form.id ? "Edit Product / Service" : "Add Product / Service"}</h4>
                 <div className="text-secondary">Products and services are created category-wise for the public catalogue.</div>
               </div>
               <button type="button" className="btn btn-primary btn-sm" onClick={saveItem} disabled={saving}>
@@ -407,7 +502,7 @@ export default function WebsiteCatalogueDashboardPage() {
                   </div>
                   <div>
                     <label className="form-label">Name</label>
-                    <input className="form-control" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} placeholder={form.item_type === "service" ? "Service name" : "Product name"} />
+                    <input className="form-control" maxLength={LIMITS.itemTitle} value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: limitText(e.target.value, LIMITS.itemTitle) }))} placeholder={form.item_type === "service" ? "Service name" : "Product name"} />
                   </div>
                   <div>
                     <label className="form-label">Category</label>
@@ -422,7 +517,18 @@ export default function WebsiteCatalogueDashboardPage() {
                   </div>
                   <div>
                     <label className="form-label">Price</label>
-                    <input className="form-control" value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} placeholder="INR 999" />
+                    <input className="form-control" maxLength={LIMITS.price} value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: limitText(e.target.value, LIMITS.price) }))} placeholder="INR 999" />
+                  </div>
+                  <div>
+                    <label className="form-label">Image</label>
+                    <input type="file" accept="image/*" className="form-control" onChange={(e) => onItemImagePick(e.target.files?.[0])} />
+                    <div className="small text-secondary mt-1">Only image files allowed. Max size: 1 MB.</div>
+                    {form.image_data_url ? (
+                      <div className="d-flex align-items-center gap-2 mt-2">
+                        <img src={form.image_data_url} alt="Preview" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(148,163,184,0.25)" }} />
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setForm((prev) => ({ ...prev, image_data_url: "" }))}>Remove Image</button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -437,7 +543,19 @@ export default function WebsiteCatalogueDashboardPage() {
               <div className="col-12 d-flex flex-wrap gap-3">
                 <div className="form-check">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.order_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, order_button_enabled: e.target.checked }))} id="waCatalogueOrderBtn" />
-                  <label className="form-check-label" htmlFor="waCatalogueOrderBtn">Order Button Enabled</label>
+                  <label className="form-check-label" htmlFor="waCatalogueOrderBtn">Order Button</label>
+                </div>
+                <div className="form-check">
+                  <input className="form-check-input" type="checkbox" checked={Boolean(form.call_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, call_button_enabled: e.target.checked }))} id="waCatalogueCallBtn" />
+                  <label className="form-check-label" htmlFor="waCatalogueCallBtn">Call Button</label>
+                </div>
+                <div className="form-check">
+                  <input className="form-check-input" type="checkbox" checked={Boolean(form.whatsapp_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_button_enabled: e.target.checked }))} id="waCatalogueWhatsappBtn" />
+                  <label className="form-check-label" htmlFor="waCatalogueWhatsappBtn">WhatsApp Button</label>
+                </div>
+                <div className="form-check">
+                  <input className="form-check-input" type="checkbox" checked={Boolean(form.enquiry_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, enquiry_button_enabled: e.target.checked }))} id="waCatalogueEnquiryBtn" />
+                  <label className="form-check-label" htmlFor="waCatalogueEnquiryBtn">Enquiry Button</label>
                 </div>
                 <div className="form-check">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setForm((prev) => ({ ...prev, is_active: e.target.checked }))} id="waCatalogueActive" />
@@ -459,7 +577,8 @@ export default function WebsiteCatalogueDashboardPage() {
                   type="search"
                   placeholder="Search catalogue"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => setSearch(limitText(e.target.value, LIMITS.search))}
+                  maxLength={LIMITS.search}
                 />
               </label>
             </div>
@@ -467,6 +586,7 @@ export default function WebsiteCatalogueDashboardPage() {
               <table className="table table-dark table-hover align-middle mb-0">
                 <thead>
                   <tr>
+                    <th>Image</th>
                     <th>Name</th>
                     <th>Type</th>
                     <th>Category</th>
@@ -478,6 +598,13 @@ export default function WebsiteCatalogueDashboardPage() {
                 <tbody>
                   {pagedItems.length ? pagedItems.map((row) => (
                     <tr key={row.id}>
+                      <td>
+                        {row.image_url ? (
+                          <img src={row.image_url} alt={row.title || "Item"} style={{ width: 42, height: 42, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(148,163,184,0.25)" }} />
+                        ) : (
+                          <span className="text-secondary">-</span>
+                        )}
+                      </td>
                       <td>{row.title}</td>
                       <td>{titleCase(row.item_type || "product")}</td>
                       <td>{row.category || "-"}</td>
@@ -493,9 +620,13 @@ export default function WebsiteCatalogueDashboardPage() {
                               title: row.title || "",
                               item_type: row.item_type || "product",
                               price: row.price || "",
+                              image_data_url: row.image_url || "",
                               description: row.description || "",
                               category: row.category || "",
                               order_button_enabled: Boolean(row.order_button_enabled),
+                              call_button_enabled: Boolean(row.call_button_enabled),
+                              whatsapp_button_enabled: Boolean(row.whatsapp_button_enabled),
+                              enquiry_button_enabled: Boolean(row.enquiry_button_enabled),
                               is_active: Boolean(row.is_active),
                               sort_order: Number(row.sort_order || 0),
                             })}
@@ -510,7 +641,7 @@ export default function WebsiteCatalogueDashboardPage() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan="6" className="text-secondary">No catalogue items found.</td>
+                      <td colSpan="7" className="text-secondary">No catalogue items found.</td>
                     </tr>
                   )}
                 </tbody>

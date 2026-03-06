@@ -708,6 +708,8 @@ class Plan(models.Model):
 class ThemeSettings(models.Model):
     primary_color = models.CharField(max_length=20, default="#e11d48")
     secondary_color = models.CharField(max_length=20, default="#f59e0b")
+    public_server_ip = models.CharField(max_length=64, blank=True, default="")
+    public_server_domain = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         verbose_name = "Theme Settings"
@@ -723,6 +725,8 @@ class ThemeSettings(models.Model):
             defaults={
                 "primary_color": "#e11d48",
                 "secondary_color": "#f59e0b",
+                "public_server_ip": "",
+                "public_server_domain": "",
             },
         )
         return obj

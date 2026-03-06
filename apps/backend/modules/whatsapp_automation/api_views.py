@@ -13,7 +13,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
 
 from dashboard import views as dashboard_views
-from core.models import AdminNotification, Subscription, UserProfile
+from core.models import AdminNotification, Subscription, ThemeSettings, UserProfile
 from apps.backend.storage.models import StorageFile, StorageFolder
 from apps.backend.storage.storage_backend import (
     build_storage_key,
@@ -300,6 +300,9 @@ def _catalogue_payload(obj):
         "description": obj.description or "",
         "category": obj.category or "",
         "order_button_enabled": bool(obj.order_button_enabled),
+        "call_button_enabled": bool(obj.call_button_enabled),
+        "whatsapp_button_enabled": bool(obj.whatsapp_button_enabled),
+        "enquiry_button_enabled": bool(obj.enquiry_button_enabled),
         "sort_order": obj.sort_order or 0,
         "is_active": bool(obj.is_active),
     }
@@ -425,6 +428,7 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
             "description": source_entry.description or "",
             "theme_color": source_entry.theme_color or "#22c55e",
             "theme_secondary_color": getattr(source_entry, "theme_secondary_color", "") or "#0f172a",
+            "theme_mode": (getattr(source_entry, "theme_mode", "") or "gradient"),
             "template_style": getattr(source_entry, "template_style", "") or "design1",
             "social_links_items": _normalize_social_links_items(source_entry.social_links or {}),
             "logo_image_data": _resolve_card_asset_url(
@@ -455,6 +459,7 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
         "description": (company_profile.description if company_profile else "") or "",
         "theme_color": (company_profile.theme_color if company_profile else "") or "#22c55e",
         "theme_secondary_color": "#0f172a",
+        "theme_mode": "gradient",
         "template_style": "design1",
         "social_links_items": social_links_items,
         "logo_image_data": "",
@@ -493,6 +498,7 @@ def _serialize_card_entry(obj):
         "description": obj.description or "",
         "theme_color": obj.theme_color or "#22c55e",
         "theme_secondary_color": getattr(obj, "theme_secondary_color", "") or "#0f172a",
+        "theme_mode": (getattr(obj, "theme_mode", "") or "gradient"),
         "template_style": (getattr(obj, "template_style", "") or "design1"),
         "social_links_items": _normalize_social_links_items(obj.social_links or {}),
         "logo_image_data": logo_image_url,
@@ -523,7 +529,10 @@ def _normalize_domain(value):
 
 def _dns_settings_payload(request, custom_domain=""):
     custom_domain = _normalize_domain(custom_domain)
-    app_host = request.get_host().split(":")[0].strip().lower()
+    theme_settings = ThemeSettings.get_active()
+    configured_host = _normalize_domain(theme_settings.public_server_domain)
+    app_host = configured_host or request.get_host().split(":")[0].strip().lower()
+    configured_ip = str(theme_settings.public_server_ip or "").strip()
     card_path = "/card/<your-card-slug>/"
     is_subdomain = custom_domain.count(".") >= 2 and not custom_domain.startswith("www.")
     records = []
@@ -532,10 +541,16 @@ def _dns_settings_payload(request, custom_domain=""):
             label = custom_domain.split(".", 1)[0]
             records.append({"type": "CNAME", "host": label, "value": app_host, "ttl": "Auto"})
         else:
-            records.append({"type": "A", "host": "@", "value": "YOUR_SERVER_PUBLIC_IP", "ttl": "Auto"})
+            records.append({
+                "type": "A",
+                "host": "@",
+                "value": configured_ip or "YOUR_SERVER_PUBLIC_IP",
+                "ttl": "Auto",
+            })
             records.append({"type": "CNAME", "host": "www", "value": custom_domain, "ttl": "Auto"})
     return {
         "app_host_target": app_host,
+        "server_ip_target": configured_ip or "YOUR_SERVER_PUBLIC_IP",
         "custom_domain": custom_domain,
         "records": records,
         "notes": [
@@ -572,6 +587,7 @@ def _ensure_default_card_entry(org, company_profile=None, user=None):
         social_links={"items": prefill["social_links_items"]},
         theme_color=prefill["theme_color"],
         theme_secondary_color=prefill["theme_secondary_color"],
+        theme_mode=prefill.get("theme_mode") or "gradient",
         logo_radius_px=prefill["logo_radius_px"],
         is_primary=True,
         created_by=user,
@@ -811,6 +827,18 @@ def catalogue_products_api(request):
     row.description = str(data.get("description") or "").strip()
     category_name = str(data.get("category") or "").strip()
     if category_name:
+        if (
+            not CatalogueCategory.objects.filter(organization=org, name=category_name).exists()
+            and CatalogueCategory.objects.filter(organization=org).count() >= 25
+        ):
+            return JsonResponse(
+                {
+                    "error": "category_limit_reached",
+                    "message": "Maximum 25 categories allowed.",
+                    "max_categories": 25,
+                },
+                status=400,
+            )
         category_obj, _ = CatalogueCategory.objects.get_or_create(
             organization=org,
             name=category_name,
@@ -819,7 +847,33 @@ def catalogue_products_api(request):
         row.category = category_obj.name
     else:
         row.category = ""
+    incoming_image = str(data.get("image_data_url") or "").strip()
+    if "image_data_url" in data:
+        if incoming_image.startswith("data:"):
+            try:
+                parsed = _parse_image_data_url(
+                    incoming_image,
+                    max_bytes=1024 * 1024,
+                    field_name="catalogue_image",
+                )
+            except ValueError as exc:
+                code = str(exc)
+                message_map = {
+                    "unsupported_catalogue_image_type": "Only image files (JPG, PNG, SVG, WEBP, GIF, AVIF) are allowed.",
+                    "catalogue_image_too_large": "Image size must be under 1 MB.",
+                    "invalid_catalogue_image_data": "Invalid catalogue image data.",
+                }
+                return JsonResponse({"image_data_url": [code], "message": message_map.get(code, "Invalid image.")}, status=400)
+            filename = f"catalogue-item-{uuid.uuid4().hex[:12]}.{parsed['ext']}"
+            row.image.save(filename, ContentFile(parsed["bytes"]), save=False)
+        elif not incoming_image:
+            if row.image:
+                row.image.delete(save=False)
+            row.image = None
     row.order_button_enabled = bool(data.get("order_button_enabled", True))
+    row.call_button_enabled = bool(data.get("call_button_enabled", True))
+    row.whatsapp_button_enabled = bool(data.get("whatsapp_button_enabled", True))
+    row.enquiry_button_enabled = bool(data.get("enquiry_button_enabled", True))
     row.sort_order = int(data.get("sort_order") or 0)
     row.is_active = bool(data.get("is_active", True))
     row.save()
@@ -918,6 +972,15 @@ def catalogue_categories_api(request):
             return JsonResponse({"error": "not_found"}, status=404)
         previous_name = row.name
     else:
+        if CatalogueCategory.objects.filter(organization=org).count() >= 25:
+            return JsonResponse(
+                {
+                    "error": "category_limit_reached",
+                    "message": "Maximum 25 categories allowed.",
+                    "max_categories": 25,
+                },
+                status=400,
+            )
         row = CatalogueCategory(organization=org)
         previous_name = ""
     row.name = name
@@ -967,6 +1030,9 @@ def digital_card_entries_api(request):
 
     if request.method == "GET":
         query = str(request.GET.get("q") or "").strip()
+        scope = str(request.GET.get("scope") or "all").strip().lower()
+        if scope not in {"all", "primary", "other"}:
+            scope = "all"
         try:
             page = max(1, int(request.GET.get("page") or 1))
         except (TypeError, ValueError):
@@ -977,6 +1043,10 @@ def digital_card_entries_api(request):
             page_size = 10
         page_size = max(5, min(50, page_size))
         qs = DigitalCardEntry.objects.filter(organization=org)
+        if scope == "primary":
+            qs = qs.filter(is_primary=True)
+        elif scope == "other":
+            qs = qs.filter(is_primary=False)
         if query:
             qs = qs.filter(
                 Q(card_title__icontains=query)
@@ -998,7 +1068,7 @@ def digital_card_entries_api(request):
             .first()
         )
         return JsonResponse({
-            "items": [_serialize_card_entry(row) for row in rows],
+            "items": [{**_serialize_card_entry(row), "dns_settings": _dns_settings_payload(request, row.custom_domain)} for row in rows],
             "default_prefill": _card_entry_prefill(
                 company_profile,
                 default_slug=(legacy_card.public_slug if legacy_card else ""),
@@ -1012,6 +1082,7 @@ def digital_card_entries_api(request):
                 "total_items": total,
                 "total_pages": total_pages,
             },
+            "scope": scope,
         })
 
     if not _is_org_admin_user(request.user):
@@ -1061,6 +1132,10 @@ def digital_card_entries_api(request):
     row.description = str(data.get("description") or "").strip()
     row.theme_color = str(data.get("theme_color") or "#22c55e").strip() or "#22c55e"
     row.theme_secondary_color = str(data.get("theme_secondary_color") or "#0f172a").strip() or "#0f172a"
+    theme_mode = str(data.get("theme_mode") or "gradient").strip().lower()
+    if theme_mode not in ("gradient", "flat"):
+        theme_mode = "gradient"
+    row.theme_mode = theme_mode
     template_style = str(data.get("template_style") or "design1").strip().lower()
     if template_style not in ("design1", "design2", "design3", "design4", "design5", "design6", "design7", "design8"):
         template_style = "design1"

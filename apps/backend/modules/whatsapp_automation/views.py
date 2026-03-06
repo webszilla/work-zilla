@@ -7,6 +7,15 @@ def _normalize_external_url(raw):
     value = str(raw or "").strip()
     if not value:
         return ""
+    lowered = value.lower()
+    if lowered in {"about:blank", "javascript:void(0)", "javascript:void(0);"}:
+        return ""
+    if value == "#":
+        return "#"
+    if value == "/":
+        return "/"
+    if lowered.startswith("javascript:"):
+        return ""
     if value.startswith(("http://", "https://", "mailto:", "tel:")):
         return value
     if value.startswith("//"):
@@ -27,14 +36,15 @@ def _normalize_social_links_items(raw):
     for row in source:
         if not isinstance(row, dict):
             continue
-        url = str(row.get("url") or "").strip()
+        raw_url = str(row.get("url") or "").strip()
+        url = _normalize_external_url(raw_url)
         if not url:
             continue
         items.append({
             "type": str(row.get("type") or "preset").strip().lower() or "preset",
             "label": str(row.get("label") or row.get("icon") or "Link").strip(),
             "icon": str(row.get("icon") or "").strip().lower(),
-            "url": _normalize_external_url(url),
+            "url": url,
             "icon_size": max(12, min(64, int(row.get("icon_size") or 20))) if str(row.get("icon_size") or "").strip() else 20,
             "custom_icon_data": str(row.get("custom_icon_data") or "").strip(),
         })
@@ -78,11 +88,9 @@ def public_digital_card(request, public_slug):
     uncategorized = [item for item in items if not (item.category or "").strip() or (item.category or "").strip() not in used_category_names]
     if uncategorized:
         grouped_items.append({"name": "General", "items": uncategorized})
-    social_links_raw = (
-        getattr(card_entry, "social_links", None)
-        if card_entry is not None
-        else getattr(company_profile, "social_links", {})
-    ) or {}
+    company_social_links_items = _normalize_social_links_items(getattr(company_profile, "social_links", {}) or {})
+    card_social_links_items = _normalize_social_links_items(getattr(card_entry, "social_links", {}) or {}) if card_entry else []
+    social_links_items = company_social_links_items or card_social_links_items
     context = {
         "public_slug": public_slug,
         "company": company_profile,
@@ -104,8 +112,12 @@ def public_digital_card(request, public_slug):
             (getattr(card_entry, "theme_secondary_color", "") if card_entry else "")
             or "#0f172a"
         ),
+        "theme_mode": (
+            (getattr(card_entry, "theme_mode", "") if card_entry else "")
+            or "gradient"
+        ),
         "logo_radius_px": (getattr(card_entry, "logo_radius_px", 28) if card_entry else 28) or 28,
-        "social_links_items": _normalize_social_links_items(social_links_raw),
+        "social_links_items": social_links_items,
         "website_url": _normalize_external_url(
             (card_entry.website if card_entry and card_entry.website else "")
             or (company_profile.website if company_profile else "")

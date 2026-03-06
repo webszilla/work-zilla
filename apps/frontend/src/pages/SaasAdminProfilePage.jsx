@@ -16,6 +16,8 @@ export default function SaasAdminProfilePage() {
   const [email, setEmail] = useState("");
   const [phoneCountry, setPhoneCountry] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [publicServerIp, setPublicServerIp] = useState("");
+  const [publicServerDomain, setPublicServerDomain] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -33,6 +35,8 @@ export default function SaasAdminProfilePage() {
         setEmail(data.user?.email || "");
         setPhoneCountry(data.phone_country || "+91");
         setPhoneNumber(data.phone_number || "");
+        setPublicServerIp(data.public_server_ip || "");
+        setPublicServerDomain(data.public_server_domain || "");
       } catch (error) {
         if (error?.data?.redirect) {
           window.location.href = error.data.redirect;
@@ -63,7 +67,9 @@ export default function SaasAdminProfilePage() {
         body: JSON.stringify({
           email,
           phone_country: phoneCountry,
-          phone_number: phoneNumber
+          phone_number: phoneNumber,
+          public_server_ip: publicServerIp,
+          public_server_domain: publicServerDomain
         })
       });
       setNotice("Profile updated successfully.");
@@ -160,6 +166,26 @@ export default function SaasAdminProfilePage() {
                     placeholder="Phone number"
                   />
                 </div>
+              </div>
+              <div className="mb-2">
+                <label className="form-label">Online Server IP</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={publicServerIp}
+                  onChange={(event) => setPublicServerIp(event.target.value)}
+                  placeholder="203.0.113.10"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="form-label">Online Server Domain URL</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={publicServerDomain}
+                  onChange={(event) => setPublicServerDomain(event.target.value)}
+                  placeholder="app.yourdomain.com"
+                />
               </div>
               <button className="btn btn-primary btn-sm">Update Details</button>
             </form>
