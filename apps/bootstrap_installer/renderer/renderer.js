@@ -209,7 +209,8 @@ async function handleInstall(productKey) {
       : "";
     const modeLabel = result?.installMode === "silent" ? "Installed silently" : "Installer opened";
     const versionText = result?.latestVersion ? ` Version ${result.latestVersion}.` : "";
-    setStatus(`${modeLabel}: ${result.filename || result.path}.${versionText}${activationNote}`);
+    const installMessage = result?.message ? ` ${result.message}` : "";
+    setStatus(`${modeLabel}: ${result.filename || result.path}.${versionText}${installMessage}${activationNote}`);
     setTimeout(() => {
       refreshInstalledState();
       setStatus("Ready.");

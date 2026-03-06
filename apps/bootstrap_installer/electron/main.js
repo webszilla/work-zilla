@@ -453,14 +453,13 @@ async function runSilentInstall(installerPath) {
   const platform = getPlatformKey();
   const ext = path.extname(installerPath).toLowerCase();
   if (platform === "windows") {
-    if (ext === ".exe") {
-      await runExecFile(installerPath, ["/S"]);
-      return true;
-    }
     if (ext === ".msi") {
       await runExecFile("msiexec", ["/i", installerPath, "/qn", "/norestart"]);
       return true;
     }
+    // Prefer interactive flow for .exe installers so the user can see
+    // and complete wizard/UAC steps reliably.
+    return false;
   }
   // macOS pkg silent install needs elevated privileges; use interactive fallback.
   return false;
@@ -730,7 +729,7 @@ async function uninstallBaseAgentForWindows() {
 
   let lastError = null;
   for (const uninstaller of existing) {
-    for (const args of [["/S"], ["/quiet"], []]) {
+    for (const args of [[], ["/S"], ["/quiet"]]) {
       try {
         await runExecFile(uninstaller, args);
         return;
@@ -740,6 +739,21 @@ async function uninstallBaseAgentForWindows() {
     }
   }
   throw lastError || new Error("Unable to run Work Zilla Agent uninstaller.");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForBaseAgentInstall(maxWaitMs = 120000, stepMs = 2500) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (isBaseAgentInstalled()) {
+      return true;
+    }
+    await delay(stepMs);
+  }
+  return isBaseAgentInstalled();
 }
 
 function uninstallBaseAgentForMac() {
@@ -849,19 +863,26 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   fs.renameSync(tempDestination, destination);
 
   let installMode = "interactive";
+  let installDetected = false;
   try {
     savePreferredProduct(productKey);
     const silentlyInstalled = await runSilentInstall(destination);
     if (!silentlyInstalled) {
       await openInstaller(destination);
+      installDetected = await waitForBaseAgentInstall();
     } else {
       installMode = "silent";
+      installDetected = true;
     }
   } catch (_err) {
     await openInstaller(destination);
+    installDetected = await waitForBaseAgentInstall();
   }
-  markProductInstalled(productKey);
+  if (installDetected) {
+    markProductInstalled(productKey);
+  }
   const installedInfo = await detectInstalledProducts();
+  const installedMarked = Boolean(installedInfo?.[productKey]?.installed);
   return {
     ok: true,
     path: destination,
@@ -871,6 +892,10 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     filename: path.basename(destination),
     latestVersion: detectLatestVersionFromUrls(downloadUrls) || "latest",
     installedVersion: installedInfo?.[productKey]?.version || "",
+    installedMarked,
+    message: installedMarked
+      ? `${SUPPORTED_PRODUCTS[productKey].label} installation detected.`
+      : "Installer opened. Complete setup wizard and then click Refresh/Restart installer.",
     installMode,
     firstLaunch: {
       activationRequired: productKey === "imposition",
