@@ -144,6 +144,13 @@ body {
   color: var(--text);
 }
 
+.hero-panel__meta {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .hero-panel__label {
   display: block;
   color: var(--muted);
@@ -301,6 +308,25 @@ body {
   font-size: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.card-versions {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.card-version-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.card-version-row strong {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .card button {

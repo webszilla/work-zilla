@@ -3,6 +3,7 @@ const statusTextEl = document.getElementById("statusText");
 const progressBarEl = document.getElementById("progressBar");
 const platformPillEl = document.getElementById("platformPill");
 const sizeTextEl = document.getElementById("sizeText");
+const installerVersionTextEl = document.getElementById("installerVersionText");
 const themeLightBtn = document.getElementById("themeLightBtn");
 const themeDarkBtn = document.getElementById("themeDarkBtn");
 const SHARED_UI_VERSION = "20260228-1";
@@ -123,12 +124,22 @@ function createCard(product, onInstall) {
     ? "This module is already available on this device."
     : "Only the selected product installer will be downloaded.";
 
+  const versions = document.createElement("div");
+  versions.className = "card-versions";
+  const latestVersion = document.createElement("div");
+  latestVersion.className = "card-version-row";
+  latestVersion.innerHTML = `<span>Latest Package</span><strong>${product.latestVersion || "latest"}</strong>`;
+  const installedVersion = document.createElement("div");
+  installedVersion.className = "card-version-row";
+  installedVersion.innerHTML = `<span>Installed</span><strong>${product.installed ? (product.installedVersion || "Installed (version unknown)") : "-"}</strong>`;
+  versions.append(latestVersion, installedVersion);
+
   const actions = document.createElement("div");
   actions.className = "card-actions";
   actions.append(button, uninstallButton);
 
   header.append(title, chip);
-  card.append(header, subtitle, footnote, actions);
+  card.append(header, subtitle, versions, footnote, actions);
   return card;
 }
 
@@ -168,6 +179,9 @@ async function boot() {
   try {
     const data = await window.bootstrapApi.getProducts();
     platformPillEl.textContent = data.platform;
+    if (installerVersionTextEl) {
+      installerVersionTextEl.textContent = `Installer version: ${data.installerVersion || "-"}`;
+    }
     renderProducts(data.products || [], handleInstall);
     setStatus("Ready.");
     setInterval(refreshInstalledState, 5000);
@@ -194,7 +208,8 @@ async function handleInstall(productKey) {
       ? " First launch will ask License Code, validate via SaaS, and register this device."
       : "";
     const modeLabel = result?.installMode === "silent" ? "Installed silently" : "Installer opened";
-    setStatus(`${modeLabel}: ${result.filename || result.path}.${activationNote}`);
+    const versionText = result?.latestVersion ? ` Version ${result.latestVersion}.` : "";
+    setStatus(`${modeLabel}: ${result.filename || result.path}.${versionText}${activationNote}`);
     setTimeout(() => {
       refreshInstalledState();
       setStatus("Ready.");
@@ -212,6 +227,13 @@ async function handleInstall(productKey) {
 
 async function handleUninstall(productKey) {
   if (installing) return;
+  const selected = productState.find((item) => item.key === productKey);
+  const confirmMessage = selected?.installed
+    ? `Uninstall ${selected.label} from this computer?`
+    : "Selected module is not installed.";
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
   installing = true;
   activeProduct = productKey;
   setButtonsDisabled(true);
@@ -239,7 +261,8 @@ async function refreshInstalledState() {
     const installed = await window.bootstrapApi.getInstalledProducts();
     const next = productState.map((item) => ({
       ...item,
-      installed: Boolean(installed?.[item.key]),
+      installed: Boolean(installed?.[item.key]?.installed),
+      installedVersion: installed?.[item.key]?.version || "",
     }));
     renderProducts(next, handleInstall);
   } catch {

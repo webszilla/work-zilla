@@ -180,6 +180,33 @@ function detectInstallerName(productKey, downloadUrl) {
   return `${preferredBase}-${Date.now()}${defaultSuffix}`;
 }
 
+function extractVersionFromText(value) {
+  const text = String(value || "");
+  if (!text) {
+    return "";
+  }
+  const match = text.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match ? match[1] : "";
+}
+
+function detectLatestVersionFromUrls(urls = []) {
+  for (const item of urls) {
+    try {
+      const parsed = new URL(String(item || "").trim());
+      const version = extractVersionFromText(path.basename(parsed.pathname || ""));
+      if (version) {
+        return version;
+      }
+    } catch (_err) {
+      const version = extractVersionFromText(item);
+      if (version) {
+        return version;
+      }
+    }
+  }
+  return "";
+}
+
 function ensureHttpsDownload(urlText) {
   const parsed = new URL(urlText);
   if (!["https:", "http:", "file:"].includes(parsed.protocol)) {
@@ -492,22 +519,27 @@ async function downloadFromUrls({ urls, destination, progressCb }) {
   throw lastError || new Error("Download failed.");
 }
 
-function detectInstalledProducts() {
+async function detectInstalledProducts() {
   const initial = PRODUCT_KEYS.reduce((acc, key) => {
-    acc[key] = false;
+    acc[key] = { installed: false, version: "" };
     return acc;
   }, {});
   const baseInstalled = isBaseAgentInstalled();
   if (!baseInstalled) {
     return initial;
   }
+  const installedVersion = await getInstalledBaseAgentVersion();
   const state = readInstalledState();
   const hasAnyProductInstalled = PRODUCT_KEYS.some((key) => state[key] === true);
   if (!hasAnyProductInstalled) {
     return initial;
   }
   return PRODUCT_KEYS.reduce((acc, key) => {
-    acc[key] = Boolean(state[key]);
+    const isInstalled = Boolean(state[key]);
+    acc[key] = {
+      installed: isInstalled,
+      version: isInstalled ? installedVersion : "",
+    };
     return acc;
   }, {});
 }
@@ -603,6 +635,88 @@ function runExecFile(file, args = []) {
   });
 }
 
+function runExecFileWithOutput(file, args = []) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+    });
+  });
+}
+
+async function queryWindowsRegistryValue(rootKey, subKey, valueName) {
+  try {
+    const fullPath = `${rootKey}\\${subKey}`;
+    const { stdout } = await runExecFileWithOutput("reg", ["query", fullPath, "/v", valueName]);
+    const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const row = lines.find((line) => line.toLowerCase().startsWith(valueName.toLowerCase()));
+    if (!row) {
+      return "";
+    }
+    const parts = row.split(/\s{2,}/).filter(Boolean);
+    return String(parts[parts.length - 1] || "").trim();
+  } catch (_err) {
+    return "";
+  }
+}
+
+async function getInstalledBaseAgentVersion() {
+  const platform = getPlatformKey();
+  if (platform === "windows") {
+    const uninstallKeys = [
+      "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent_is1",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.workzilla.agent",
+      "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent",
+      "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent_is1",
+      "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.workzilla.agent",
+    ];
+    for (const root of ["HKCU", "HKLM"]) {
+      for (const subKey of uninstallKeys) {
+        const displayVersion = await queryWindowsRegistryValue(root, subKey, "DisplayVersion");
+        if (displayVersion) {
+          return displayVersion;
+        }
+      }
+    }
+    return isBaseAgentInstalled() ? "Installed (version unknown)" : "";
+  }
+  if (platform === "mac") {
+    const appCandidates = [
+      "/Applications/Work Zilla Agent.app/Contents/Info.plist",
+      path.join(os.homedir(), "Applications", "Work Zilla Agent.app", "Contents", "Info.plist"),
+    ];
+    for (const plistPath of appCandidates) {
+      if (!fs.existsSync(plistPath)) {
+        continue;
+      }
+      try {
+        const { stdout } = await runExecFileWithOutput("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", plistPath]);
+        const version = String(stdout || "").trim();
+        if (version) {
+          return version;
+        }
+      } catch (_err) {
+        // no-op
+      }
+      try {
+        const { stdout } = await runExecFileWithOutput("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleVersion", plistPath]);
+        const version = String(stdout || "").trim();
+        if (version) {
+          return version;
+        }
+      } catch (_err) {
+        // no-op
+      }
+    }
+    return isBaseAgentInstalled() ? "Installed (version unknown)" : "";
+  }
+  return "";
+}
+
 async function uninstallBaseAgentForWindows() {
   const uninstallers = [
     path.join(process.env.LOCALAPPDATA || "", "Programs", "Work Zilla Agent", "Uninstall Work Zilla Agent.exe"),
@@ -662,20 +776,31 @@ ipcMain.handle("bootstrap:get-products", async () => {
   }
 
   const { config, source } = await fetchConfigWithFallback();
-  const installed = detectInstalledProducts();
+  const installed = await detectInstalledProducts();
   const products = Object.entries(SUPPORTED_PRODUCTS).map(([key, meta]) => {
     const aliases = PRODUCT_CONFIG_ALIASES[key] || [key];
-    const hasPackage = aliases.some((alias) => Boolean(config?.[alias]?.[platform]));
+    const urls = aliases
+      .flatMap((alias) => {
+        const raw = config?.[alias]?.[platform];
+        return Array.isArray(raw) ? raw : [raw];
+      })
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    const hasPackage = urls.length > 0;
+    const installedInfo = installed[key] || { installed: false, version: "" };
     return {
       key,
       label: meta.label,
       description: meta.description || "",
       available: hasPackage,
-      installed: Boolean(installed[key]),
+      installed: Boolean(installedInfo.installed),
+      installedVersion: installedInfo.version || "",
+      latestVersion: detectLatestVersionFromUrls(urls) || "latest",
     };
   });
 
   return {
+    installerVersion: app.getVersion(),
     configUrl: source,
     platform,
     products,
@@ -736,6 +861,7 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     await openInstaller(destination);
   }
   markProductInstalled(productKey);
+  const installedInfo = await detectInstalledProducts();
   return {
     ok: true,
     path: destination,
@@ -743,6 +869,8 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     platform,
     sourceUrl: usedUrl,
     filename: path.basename(destination),
+    latestVersion: detectLatestVersionFromUrls(downloadUrls) || "latest",
+    installedVersion: installedInfo?.[productKey]?.version || "",
     installMode,
     firstLaunch: {
       activationRequired: productKey === "imposition",

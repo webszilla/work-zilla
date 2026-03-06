@@ -95,9 +95,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
         {isAuthed && !canUseMonitor && !canUseStorage && !canUseImposition ? (
           <div className="launch-version">No active product enabled for this account.</div>
         ) : null}
-        {agentVersion ? (
-          <div className="launch-version">Windows Agent Version: {agentVersion}</div>
-        ) : null}
+        {agentVersion ? <div className="launch-version">App Version: {agentVersion}</div> : null}
       </div>
     </div>
   );

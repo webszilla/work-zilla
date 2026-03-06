@@ -1269,13 +1269,8 @@ ipcMain.handle("app:open-external", (_event, payload) => {
 });
 
 ipcMain.handle("app:windows-agent-version", () => {
-  const filePath = path.join(__dirname, "..", "..", "backend", "static", "downloads", "WorkZillaAgentSetup.exe");
   try {
-    if (!fs.existsSync(filePath)) {
-      return { ok: false, error: "not_found" };
-    }
-    const stats = fs.statSync(filePath);
-    return { ok: true, version: stats.mtime.toISOString() };
+    return { ok: true, version: app.getVersion() };
   } catch (error) {
     return { ok: false, error: error?.message || "read_failed" };
   }

@@ -95,7 +95,7 @@ export default function SettingsScreen({ theme, onThemeChange }) {
             </div>
           </label>
           <label>
-            Windows Agent
+            Application
             <div className="button-row">
               <button
                 type="button"
@@ -108,7 +108,7 @@ export default function SettingsScreen({ theme, onThemeChange }) {
               </button>
               {downloadInfo.version ? (
                 <div className="text-muted" style={{ alignSelf: "center" }}>
-                  Version: {downloadInfo.version}
+                  App Version: {downloadInfo.version}
                 </div>
               ) : null}
             </div>
