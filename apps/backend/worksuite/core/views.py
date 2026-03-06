@@ -524,14 +524,16 @@ def _normalize_monitor_activity(app_name, window_title, url):
     title_key = normalized_window_title.lower()
     shell_apps = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
     shell_title_markers = {"powershell", "pwsh", "command prompt", "terminal"}
+    placeholder_titles = {"", "monitor active"}
     if app_key in shell_apps:
-        if title_key and not any(marker in title_key for marker in shell_title_markers):
+        if title_key in placeholder_titles:
+            # Placeholder shell snapshots should not be treated as real user activity.
+            normalized_app_name = ""
+            normalized_window_title = ""
+        elif title_key and not any(marker in title_key for marker in shell_title_markers):
             inferred_app = _infer_activity_app_name(normalized_window_title, url)
             if inferred_app:
                 normalized_app_name = inferred_app
-        elif not title_key:
-            # Ignore shell host captures that don't carry actual foreground metadata.
-            normalized_app_name = ""
     if not normalized_app_name:
         inferred_app = _infer_activity_app_name(normalized_window_title, url)
         if inferred_app:
@@ -982,6 +984,17 @@ def upload_activity(request):
         data["window_title"] = normalized_window_title
         if not data.get("url"):
             data["url"] = data.get("website") or ""
+        if _is_monitor_placeholder(normalized_app_name, normalized_window_title):
+            log_event(
+                "agent_activity_upload",
+                status="ignored",
+                org=org,
+                device_id=request_device_id,
+                employee_id=employee.id,
+                meta={"reason": "placeholder_activity"},
+                request=request,
+            )
+            return Response({"message": "Activity ignored"})
 
         serializer = ActivitySerializer(data=data)
 

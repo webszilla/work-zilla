@@ -3142,8 +3142,27 @@ def gaming_ott_usage(request):
         ).first()
 
     keyword_q = dashboard_views.build_gaming_ott_query()
+    placeholder_activity_q = (
+        (
+            models.Q(app_name__iexact="work zilla agent")
+            | models.Q(app_name__iexact="powershell")
+            | models.Q(app_name__iexact="powershell.exe")
+            | models.Q(app_name__iexact="pwsh")
+            | models.Q(app_name__iexact="pwsh.exe")
+        )
+        & (
+            models.Q(window_title__iexact="monitor active")
+            | models.Q(window_title__exact="")
+            | models.Q(window_title__isnull=True)
+        )
+    )
 
-    available_activities = Activity.objects.filter(employee__org=org).filter(keyword_q)
+    available_activities = (
+        Activity.objects
+        .filter(employee__org=org)
+        .exclude(placeholder_activity_q)
+        .filter(keyword_q)
+    )
     if selected_employee:
         available_activities = available_activities.filter(employee=selected_employee)
     available_dates = list(
@@ -3168,7 +3187,12 @@ def gaming_ott_usage(request):
     date_from, date_from_value = _parse_date_flexible(date_from_raw)
     date_to, date_to_value = _parse_date_flexible(date_to_raw)
 
-    activities = Activity.objects.filter(employee__org=org).filter(keyword_q)
+    activities = (
+        Activity.objects
+        .filter(employee__org=org)
+        .exclude(placeholder_activity_q)
+        .filter(keyword_q)
+    )
     if selected_employee:
         activities = activities.filter(employee=selected_employee)
     if date_from or date_to:
@@ -3239,7 +3263,12 @@ def gaming_ott_usage(request):
 
     if not rows and active_preset == "today":
         fallback_start = now - timedelta(hours=24)
-        fallback_qs = Activity.objects.filter(employee__org=org).filter(keyword_q)
+        fallback_qs = (
+            Activity.objects
+            .filter(employee__org=org)
+            .exclude(placeholder_activity_q)
+            .filter(keyword_q)
+        )
         if selected_employee:
             fallback_qs = fallback_qs.filter(employee=selected_employee)
         fallback_qs = fallback_qs.filter(
