@@ -225,23 +225,38 @@ public class WinApi {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 }
 "@
-$h=[WinApi]::GetForegroundWindow()
-if ($h -eq [IntPtr]::Zero) {
-  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-  Write-Output '{"appName":"","windowTitle":"","url":""}'
-  exit 0
-}
-$sb=New-Object System.Text.StringBuilder 1024
-[WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
-$windowPid=[uint32]0
-[WinApi]::GetWindowThreadProcessId($h,[ref]$windowPid) | Out-Null
-$app=""
-if ($windowPid -gt 0) {
-  try { $app=(Get-Process -Id $windowPid -ErrorAction Stop).ProcessName } catch {}
+$bestApp=""
+$bestTitle=""
+for ($i = 0; $i -lt 5; $i++) {
+  $h=[WinApi]::GetForegroundWindow()
+  if ($h -eq [IntPtr]::Zero) {
+    Start-Sleep -Milliseconds 120
+    continue
+  }
+  $sb=New-Object System.Text.StringBuilder 1024
+  [WinApi]::GetWindowText($h,$sb,$sb.Capacity) | Out-Null
+  $windowPid=[uint32]0
+  [WinApi]::GetWindowThreadProcessId($h,[ref]$windowPid) | Out-Null
+  $app=""
+  if ($windowPid -gt 0) {
+    try { $app=(Get-Process -Id $windowPid -ErrorAction Stop).ProcessName } catch {}
+  }
+  $title=$sb.ToString()
+  $appKey=($app | ForEach-Object { "$_".ToLowerInvariant().Trim() })
+  $titleKey=($title | ForEach-Object { "$_".ToLowerInvariant().Trim() })
+  $isShell=$appKey -in @("powershell","pwsh","conhost","cmd")
+  if (-not $isShell -and -not [string]::IsNullOrWhiteSpace($title)) {
+    $bestApp=$app
+    $bestTitle=$title
+    break
+  }
+  if ([string]::IsNullOrWhiteSpace($bestApp)) { $bestApp=$app }
+  if ([string]::IsNullOrWhiteSpace($bestTitle)) { $bestTitle=$title }
+  Start-Sleep -Milliseconds 120
 }
 $obj = [PSCustomObject]@{
-  appName = $app
-  windowTitle = $sb.ToString()
+  appName = $bestApp
+  windowTitle = $bestTitle
   url = ""
 }
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
