@@ -158,10 +158,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-03-04 11:06:35 UTC
-  - Local commit SHA: 946f31f
-  - GitHub main SHA: 946f31f
-  - Server live SHA (git metadata): 946f31f
+  - Published at (UTC): 2026-03-06 04:06:40 UTC
+  - Local commit SHA: e8354d7
+  - GitHub main SHA: e8354d7
+  - Server live SHA (git metadata): e8354d7
   - Deploy method: git-pull
   - Gunicorn status: yes (listening on :8000)
   - Verified URLs:
@@ -171,10 +171,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
     - /static/public/css/site.css (200)
     - /static/common/css/public.css (200)
   - Notes / rollback point:
-    - Purpose: Work Suite product access fixes, billing/history cleanup, Work Suite plan feature gating fixes, and Screenshots filter/action UI theme alignment
-    - Live migrations applied: `whatsapp_automation.0010_digitalcardentry_theme_secondary_color`, `whatsapp_automation.0011_digitalcardentry_logo_radius_px`, `whatsapp_automation.0012_digitalcardentry_is_primary`, `whatsapp_automation.0013_digitalcardentry_storage_keys`
+    - Purpose: Work Suite data pipeline + dashboard UI fixes (Gaming/OTT ingestion compatibility, topbar/dashboard visibility, text-limit validation behavior, Employees table column update, Company Settings top cards theme alignment)
+    - Live migrations applied: `core.0125_themesettings_public_server_fields`, `core.0126_rename_org_product_org_status_idx_org_product_organiz_70d807_idx_and_more`, `imposition.0006_alter_impositionaddoncatalog_product`, `whatsapp_automation.0014_digitalcardentry_theme_mode`, `whatsapp_automation.0015_catalogueproduct_call_button_enabled_and_more`
     - Database safety: no local database files were uploaded or synced
-    - Rollback to previous GitHub main: 632b68f
+    - Rollback to previous GitHub main: f00151c
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
