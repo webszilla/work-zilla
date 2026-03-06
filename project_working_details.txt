@@ -158,10 +158,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-03-06 04:19:17 UTC
-  - Local commit SHA: f0c2492
-  - GitHub main SHA: f0c2492
-  - Server live SHA (git metadata): f0c2492
+  - Published at (UTC): 2026-03-06 05:43:38 UTC
+  - Local commit SHA: 7c6cd04
+  - GitHub main SHA: 7c6cd04
+  - Server live SHA (git metadata): 7c6cd04
   - Deploy method: git-pull
   - Gunicorn status: yes (listening on :8000)
   - Verified URLs:
@@ -171,10 +171,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
     - /static/public/css/site.css (200)
     - /static/common/css/public.css (200)
   - Notes / rollback point:
-    - Purpose: Fix Work Suite activity normalization so shell-placeholder uploads (`powershell` + `Monitor Active`) are ignored; prevents wrong Gaming/OTT rows and keeps valid app/window records.
+    - Purpose: Improve Work Suite activity normalization and dashboard label resolution so shell-captured rows are inferred to real browser/app labels; also fixed screenshot blur URL rule matching for mislabeled app names and added screenshot upload `employee_id` alias support.
     - Live migrations applied: none
     - Database safety: no local database files were uploaded or synced
-    - Rollback to previous GitHub main: a7a736e
+    - Rollback to previous GitHub main: 329ff82
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
