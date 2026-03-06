@@ -312,7 +312,18 @@ def monitor_stop_event(request):
 def get_screenshot_interval_seconds(org):
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     minutes = settings_obj.screenshot_interval_minutes or 5
-    sub = Subscription.objects.filter(organization=org, status="active").order_by("-start_date").first()
+    monitor_plan_filter = (
+        Q(plan__product__slug="monitor")
+        | Q(plan__product__slug="worksuite")
+        | Q(plan__product__isnull=True)
+    )
+    sub = (
+        Subscription.objects
+        .filter(organization=org, status__in=("active", "trialing"))
+        .filter(monitor_plan_filter)
+        .order_by("-start_date")
+        .first()
+    )
     if sub:
         normalize_subscription_end_date(sub)
         if not is_subscription_active(sub):
