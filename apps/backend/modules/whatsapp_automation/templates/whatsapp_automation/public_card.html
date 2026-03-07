@@ -596,7 +596,7 @@
       gap:16px 18px;
     }
     .card.design4 .avatar{
-      margin:-64px 0 0;
+      margin:25px 0 0;
       border-radius:24px;
       border-width:0;
       background:#f4b52d;
@@ -607,7 +607,7 @@
     }
     .card.design4 .identity{
       text-align:left;
-      margin-top:8px;
+      margin-top:25px;
     }
     .card.design4 .identity h1{
       color:#2a2e38;
@@ -657,7 +657,7 @@
       line-height:1.7;
     }
     .card.design4 .description::before{
-      content:"About Me";
+      content:attr(data-company-title);
       display:block;
       margin-bottom:10px;
       color:#2a2e38;
@@ -935,7 +935,7 @@
       line-height:1.7;
     }
     .card.design7 .description::before{
-      content:"My Recent Works";
+      content:attr(data-company-title);
       display:block;
       margin-bottom:18px;
       color:#2d2455;
@@ -1090,12 +1090,6 @@
     .card.design8 .detail-icon{
       color:color-mix(in srgb, var(--theme) 95%, #d7ae44);
     }
-    .card.design8 .footer-actions{
-      margin-top:0;
-    }
-    .card.design8 .footer-credit{
-      background:#c7c7c7;
-    }
     .card.design3 .scroll-section,
     .card.design5 .scroll-section{
       background:rgba(255,255,255,0.86);
@@ -1159,7 +1153,11 @@
       width:22px !important;
       height:22px !important;
       display:block !important;
-      fill:currentColor !important;
+      fill:none !important;
+      stroke:currentColor !important;
+      stroke-width:1.9 !important;
+      stroke-linecap:round !important;
+      stroke-linejoin:round !important;
     }
     .card .footer-credit{
       grid-column:1 / -1 !important;
@@ -1175,21 +1173,12 @@
       font-weight:700 !important;
       text-decoration:none !important;
     }
-    .card.is-flat{
-      background: color-mix(in srgb, var(--theme) 8%, #0f172a);
-    }
-    .card.is-flat .hero{
-      background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 34%),
-        color-mix(in srgb, var(--theme) 86%, #0b1220) !important;
-    }
+    /* Flat mode: keep template background same, make CTA chips solid primary. */
     .card.is-flat .template-badge,
     .card.is-flat .action.is-primary{
       background: var(--theme) !important;
-      border-color: color-mix(in srgb, var(--theme) 78%, #0f172a) !important;
-    }
-    .card.is-flat .avatar{
-      background: color-mix(in srgb, var(--theme) 74%, #0f172a) !important;
+      border-color: var(--theme) !important;
+      box-shadow:none !important;
     }
   </style>
 </head>
@@ -1237,7 +1226,7 @@
                   {% elif link.icon == "youtube" %}
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.8 8s-.2-1.4-.8-2a2.9 2.9 0 0 0-2-0.8C16.2 5 12 5 12 5h0s-4.2 0-7 .2a2.9 2.9 0 0 0-2 .8c-.6.6-.8 2-.8 2S2 9.6 2 11.2v1.5C2 14.4 2.2 16 2.2 16s.2 1.4.8 2a3.4 3.4 0 0 0 2.2.8c1.6.2 6.8.2 6.8.2s4.2 0 7-.2a2.9 2.9 0 0 0 2-.8c.6-.6.8-2 .8-2s.2-1.6.2-3.3v-1.5C22 9.6 21.8 8 21.8 8zM9.8 15.2V8.9l6 3.2-6 3.1z"/></svg>
                   {% elif link.icon == "twitter" or link.icon == "x" %}
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 3H21l-4.6 5.3L22 21h-4.5l-3.5-4.8L9.8 21H7.7l4.9-5.7L2 3h4.6l3.1 4.3L13.5 3h2.1l-4.9 5.7L18.9 3zm-1.6 16h1.3L6.1 4.9H4.7L17.3 19z"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5L19 19"/><path d="M19 5L5 19"/></svg>
                   {% elif link.icon == "telegram" %}
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.6c.3-1.4-1-2.5-2.3-1.9L3.3 9.1c-1.5.6-1.4 2.8.1 3.3l3.5 1 1.3 4.1c.4 1.3 2.1 1.6 2.9.5l2-2.6 3.8 2.8c1.1.8 2.6.2 2.9-1.1l2.1-12.5zM9 12.9l8.7-6.4-6.8 7.7-.3 3-1.6-4.3z"/></svg>
                   {% elif link.icon == "website" or link.icon == "globe" %}
@@ -1252,7 +1241,7 @@
         {% endif %}
 
         <div class="title">{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</div>
-        <p class="description">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
+        <p class="description" data-company-title="{% if card_entry and card_entry.card_title %}{{ card_entry.card_title }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}">{{ card_entry.description|default:company.description|default:"Digital Business Card" }}</p>
 
         <div class="actions">
           {% with phone=card_entry.phone|default:company.phone %}
@@ -1370,23 +1359,46 @@
 
         <div class="footer-actions">
           <a class="footer-action" href="/auth/login/">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17v-2h4V9h-4V7h6v10zm-7-5 5-5v3h7v4H8v3zM20 3H8a2 2 0 0 0-2 2v2h2V5h12v14H8v-2H6v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-2"/>
+              <path d="M14 12H3"/>
+              <path d="m7 8-4 4 4 4"/>
+            </svg>
             <span>Login</span>
           </a>
           <a class="footer-action js-share-card" href="#">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16a3 3 0 0 0-2.39 1.2l-6.83-3.41a3.2 3.2 0 0 0 0-1.58l6.83-3.41A3 3 0 1 0 15 7a3.2 3.2 0 0 0 .07.64L8.24 11.05a3 3 0 1 0 0 1.9l6.83 3.41A3 3 0 1 0 18 16z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="18" cy="5" r="2"/>
+              <circle cx="6" cy="12" r="2"/>
+              <circle cx="18" cy="19" r="2"/>
+              <path d="M8 11l8-5"/>
+              <path d="M8 13l8 5"/>
+            </svg>
             <span>Share</span>
           </a>
           <a class="footer-action" href="sms:?body=Check%20my%20digital%20card%3A%20{{ request.build_absolute_uri|urlencode }}">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2zm3 6h10V8H7zm0 4h7v-2H7z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V7a2 2 0 0 1 2-2z"/>
+              <path d="M8 10h8"/>
+              <path d="M8 14h5"/>
+            </svg>
             <span>SMS</span>
           </a>
           <a class="footer-action" href="/pricing/">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4V2h10v2h4v2H3V4zm13 4v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8zm-8 2v3H9v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v9"/>
+              <path d="m8 7 4-4 4 4"/>
+              <path d="M5 13h14"/>
+              <rect x="4" y="13" width="16" height="8" rx="2"/>
+            </svg>
             <span>Upgrade</span>
           </a>
           <a class="footer-action" href="{% if card_entry.email|default:company.email %}mailto:{{ card_entry.email|default:company.email }}?subject=Enquiry{% elif card_entry.whatsapp_number|default:company.whatsapp_number %}https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry.{% else %}#{% endif %}">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v15l-4-3H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm4 6h8V8H8zm0 4h5v-2H8z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-4 3v-3H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>
+              <path d="M8 12h8"/>
+              <path d="M8 9h5"/>
+            </svg>
             <span>Enquiry</span>
           </a>
         </div>

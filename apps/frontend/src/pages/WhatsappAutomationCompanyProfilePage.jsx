@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
-import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
 import { COUNTRY_OPTIONS } from "../lib/countries.js";
 import { getStateOptions } from "../lib/locationOptions.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
@@ -24,7 +23,7 @@ const LIMITS = {
   address: 260,
   state: 80,
   postalCode: 20,
-  description: 320,
+  description: 180,
   socialLabel: 60,
   socialUrl: 255,
 };
@@ -445,15 +444,6 @@ export default function WhatsappAutomationCompanyProfilePage() {
             <div className="col-12">
               <label className="form-label">Description</label>
               <textarea className="form-control" rows="4" maxLength={LIMITS.description} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: limitText(e.target.value, LIMITS.description) }))} />
-            </div>
-            <div className="col-12">
-              <TinyHtmlEditor
-                label="Product Highlights"
-                value={form.product_highlights_html}
-                onChange={(next) => setForm((p) => ({ ...p, product_highlights_html: next }))}
-                placeholder="Add product highlights with bullets, headings, and links."
-                minHeight={240}
-              />
             </div>
           </div>
         </div>

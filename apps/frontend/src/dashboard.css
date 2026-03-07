@@ -2391,6 +2391,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview__footer-actions{
   display:grid;
   grid-template-columns:repeat(5, minmax(0, 1fr));
+  grid-column:1 / -1;
   margin-top:18px;
   overflow:hidden;
   border-radius:0;
@@ -2411,15 +2412,22 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview__footer-action:last-child{
   border-right:none;
 }
-.digital-card-preview__footer-action i{
-  font-size:1.35rem;
-  line-height:1;
+.digital-card-preview__footer-action svg{
+  width:22px;
+  height:22px;
+  display:block;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.9;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }
 .digital-card-preview__footer-action span{
   font-size:0.95rem;
   font-weight:500;
 }
 .digital-card-preview__credit{
+  grid-column:1 / -1;
   margin:0 -22px -24px;
   padding:12px 16px;
   background:#d6d6d6;
@@ -2672,7 +2680,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   gap:16px 18px;
 }
 .digital-card-preview--design4 .digital-card-preview__avatar{
-  margin:-72px 0 0 0;
+  margin:25px 0 0 0;
   border-radius:24px;
   border-width:0;
   background:#f4b52d;
@@ -2683,7 +2691,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 }
 .digital-card-preview--design4 .digital-card-preview__identity{
   text-align:left;
-  margin-top:-8px;
+  margin-top:25px;
 }
 .digital-card-preview--design4 .digital-card-preview__identity h5{
   color:#2a2e38;
@@ -2733,7 +2741,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   line-height:1.7;
 }
 .digital-card-preview--design4 .digital-card-preview__description::before{
-  content:"About Me";
+  content:attr(data-company-title);
   display:block;
   margin-bottom:10px;
   color:#2a2e38;
@@ -2822,6 +2830,11 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   background:#ffffff;
   color:var(--card-secondary);
   border:1px solid rgba(148, 163, 184, 0.24);
+}
+.digital-card-preview--design5 .digital-card-preview__identity h5{
+  color:#1e293b;
+  text-shadow:none;
+  opacity:1;
 }
 .digital-card-preview--design5 .digital-card-preview__description,
 .digital-card-preview--design5 .digital-card-preview__role,
@@ -3002,7 +3015,7 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   line-height:1.7;
 }
 .digital-card-preview--design7 .digital-card-preview__description::before{
-  content:"My Recent Works";
+  content:attr(data-company-title);
   display:block;
   margin-bottom:18px;
   color:#2d2455;
@@ -3164,28 +3177,14 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .digital-card-preview--design8 .digital-card-preview__detail-row i{
   color:color-mix(in srgb, var(--card-theme) 95%, #d7ae44);
 }
-.digital-card-preview--design8 .digital-card-preview__footer-actions{
-  margin-top:0;
-}
-.digital-card-preview--design8 .digital-card-preview__credit{
-  background:#c7c7c7;
-}
-.digital-card-preview.is-flat{
-  background: color-mix(in srgb, var(--card-theme) 8%, #0f172a);
-}
-.digital-card-preview.is-flat .digital-card-preview__hero{
-  background:
-    radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 34%),
-    color-mix(in srgb, var(--card-theme) 86%, #0b1220);
-}
+/* Flat mode should keep template background layout unchanged;
+   only interactive chips/buttons switch to solid primary color. */
 .digital-card-preview.is-flat .digital-card-preview__template-badge,
 .digital-card-preview.is-flat .digital-card-preview__action.is-primary,
 .digital-card-preview.is-flat .digital-card-preview__action:first-child{
   background: var(--card-theme) !important;
-  border-color: color-mix(in srgb, var(--card-theme) 78%, #0f172a) !important;
-}
-.digital-card-preview.is-flat .digital-card-preview__avatar{
-  background: color-mix(in srgb, var(--card-theme) 74%, #0f172a) !important;
+  border-color: var(--card-theme) !important;
+  box-shadow: none !important;
 }
 .digital-card-preview .digital-card-preview__hero::after{
   content:none !important;
@@ -5006,3 +5005,43 @@ html[data-theme="light"] .storage-meter__pointer-arrow {
 html[data-theme="light"] .storage-meter__labels {
   color: rgba(15, 23, 42, 0.6);
 }
+
+/* ===== Section Spacing Overrides ===== */
+.wz-route-surface{
+  --wz-section-gap: clamp(18px, 2vw, 28px);
+  --wz-block-gap: clamp(12px, 1.3vw, 18px);
+}
+.wz-route-surface .wz-table-toolbar{
+  margin-bottom: var(--wz-block-gap) !important;
+}
+.wz-route-surface .wz-data-table-wrap + .wz-table-footer{
+  margin-top: var(--wz-block-gap) !important;
+}
+.wz-route-surface .row.g-3{
+  --bs-gutter-y: var(--wz-block-gap);
+}
+.wz-route-surface .row.g-4{
+  --bs-gutter-y: calc(var(--wz-block-gap) + 4px);
+}
+
+.digital-card-dashboard{
+  gap: var(--wz-section-gap) !important;
+}
+.digital-card-dashboard__lists{
+  gap: var(--wz-section-gap) !important;
+}
+.digital-card-dashboard__list-block{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.digital-card-dashboard__list-block .wz-table-toolbar{
+  margin-bottom: 4px !important;
+}
+.digital-card-dashboard__list-block .wz-data-table-wrap{
+  margin-top: 0 !important;
+}
+.digital-card-dashboard__list-block + .digital-card-dashboard__list-block{
+  margin-top: 14px;
+}
+/* ===== End Section Spacing Overrides ===== */

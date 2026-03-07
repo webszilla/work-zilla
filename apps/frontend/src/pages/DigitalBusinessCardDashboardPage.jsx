@@ -238,6 +238,55 @@ function templateLabel(value) {
   return match ? match.label : String(value || "design1").replace("design", "Design ");
 }
 
+function FooterActionIcon({ name }) {
+  if (name === "login") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M10 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-2" />
+        <path d="M14 12H3" />
+        <path d="m7 8-4 4 4 4" />
+      </svg>
+    );
+  }
+  if (name === "share") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="18" cy="5" r="2" />
+        <circle cx="6" cy="12" r="2" />
+        <circle cx="18" cy="19" r="2" />
+        <path d="M8 11l8-5" />
+        <path d="M8 13l8 5" />
+      </svg>
+    );
+  }
+  if (name === "sms") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V7a2 2 0 0 1 2-2z" />
+        <path d="M8 10h8" />
+        <path d="M8 14h5" />
+      </svg>
+    );
+  }
+  if (name === "upgrade") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v9" />
+        <path d="m8 7 4-4 4 4" />
+        <path d="M5 13h14" />
+        <rect x="4" y="13" width="16" height="8" rx="2" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-4 3v-3H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
+      <path d="M8 12h8" />
+      <path d="M8 9h5" />
+    </svg>
+  );
+}
+
 function toWebHref(value) {
   const raw = String(value || "").trim();
   if (!raw || raw === "-") return "";
@@ -262,10 +311,15 @@ function toMapsHref(value) {
 function DigitalCardPreview({ form, company }) {
   const theme = form.theme_color || company?.theme_color || "#22c55e";
   const themeMode = form.theme_mode === "flat" ? "flat" : "gradient";
-  const secondaryTheme = themeMode === "flat"
-    ? deriveFlatSecondary(theme)
-    : (form.theme_secondary_color || "#0f172a");
-  const socials = Array.isArray(form.social_links_items) ? form.social_links_items.slice(0, 5) : [];
+  const secondaryTheme = form.theme_secondary_color || "#0f172a";
+  const socialSource = Array.isArray(form.social_links_items) && form.social_links_items.length
+    ? form.social_links_items
+    : Array.isArray(company?.social_links_items) && company.social_links_items.length
+      ? company.social_links_items
+      : Array.isArray(company?.social_links?.items)
+        ? company.social_links.items
+        : [];
+  const socials = socialSource.filter((item) => String(item?.url || "").trim()).slice(0, 5);
   const templateStyle = form.template_style || "design1";
   const iconPt = Math.max(8, Number(form.icon_size_pt || 14));
   const fontPt = Math.max(10, Number(form.font_size_pt || 16));
@@ -299,11 +353,11 @@ function DigitalCardPreview({ form, company }) {
     ? `mailto:${form.email}?subject=${encodeURIComponent("Enquiry")}`
     : (form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}?text=${encodeURIComponent("Hi, I have an enquiry.")}` : "");
   const bottomActions = [
-    { label: "Login", icon: "bi-box-arrow-in-right", href: "/auth/login/" },
-    { label: "Share", icon: "bi-share-fill", action: "share" },
-    { label: "SMS", icon: "bi-chat-left-text-fill", href: `sms:?body=${smsBody}` },
-    { label: "Upgrade", icon: "bi-basket-fill", href: "/pricing/" },
-    { label: "Enquiry", icon: "bi-chat-quote-fill", href: enquiryHref },
+    { label: "Login", icon: "login", href: "/auth/login/" },
+    { label: "Share", icon: "share", action: "share" },
+    { label: "SMS", icon: "sms", href: `sms:?body=${smsBody}` },
+    { label: "Upgrade", icon: "upgrade", href: "/pricing/" },
+    { label: "Enquiry", icon: "enquiry", href: enquiryHref },
   ];
 
   function onShareClick(e) {
@@ -374,11 +428,17 @@ function DigitalCardPreview({ form, company }) {
         ) : null}
 
         <div className="digital-card-preview__title">{displayTitle}</div>
-        <p className="digital-card-preview__description">{displayDescription}</p>
+        <p className="digital-card-preview__description" data-company-title={displayTitle}>{displayDescription}</p>
 
         <div className="digital-card-preview__actions">
-          {quickActions.map((item) => (
-            <a key={item.label} className="digital-card-preview__action" href={item.href} target={item.href.startsWith("http") ? "_blank" : undefined} rel={item.href.startsWith("http") ? "noreferrer" : undefined}>
+          {quickActions.map((item, idx) => (
+            <a
+              key={item.label}
+              className={`digital-card-preview__action${idx === 0 ? " is-primary" : ""}`}
+              href={item.href}
+              target={item.href.startsWith("http") ? "_blank" : undefined}
+              rel={item.href.startsWith("http") ? "noreferrer" : undefined}
+            >
               {item.label}
             </a>
           ))}
@@ -410,7 +470,7 @@ function DigitalCardPreview({ form, company }) {
           {bottomActions.map((item) => (
             item.action === "share" ? (
               <a key={item.label} className="digital-card-preview__footer-action" href={publicCardUrl || "#"} onClick={onShareClick}>
-                <i className={`bi ${item.icon}`} />
+                <FooterActionIcon name={item.icon} />
                 <span>{item.label}</span>
               </a>
             ) : (
@@ -421,7 +481,7 @@ function DigitalCardPreview({ form, company }) {
                 target={item.href?.startsWith("http") ? "_blank" : undefined}
                 rel={item.href?.startsWith("http") ? "noreferrer" : undefined}
               >
-                <i className={`bi ${item.icon}`} />
+                <FooterActionIcon name={item.icon} />
                 <span>{item.label}</span>
               </a>
             )
@@ -456,6 +516,7 @@ export default function DigitalBusinessCardDashboardPage() {
   const [form, setForm] = useState(emptyCardForm());
   const [slugCheck, setSlugCheck] = useState(null);
   const [slugChecking, setSlugChecking] = useState(false);
+  const [showTemplateOptions, setShowTemplateOptions] = useState(false);
 
   async function loadPrimaryCards() {
     const data = await waApi.getDigitalCards({ scope: "primary", page: 1, pageSize: 20 });
@@ -685,7 +746,7 @@ export default function DigitalBusinessCardDashboardPage() {
   const totalPages = pagination.total_pages || 1;
 
   return (
-    <div className="d-flex flex-column gap-3">
+    <div className="d-flex flex-column gap-3 digital-card-dashboard">
       <div className="d-flex align-items-center justify-content-between">
         <div>
           <h3 className="mb-1">Digital Business Card</h3>
@@ -725,12 +786,140 @@ export default function DigitalBusinessCardDashboardPage() {
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <h4 className="mb-0">Card Details</h4>
               <div className="d-flex gap-2">
-                {cardUrl ? <a className="btn btn-outline-light btn-sm" href={cardUrl} target="_blank" rel="noreferrer">View</a> : null}
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm"
+                  onClick={() => setShowTemplateOptions(false)}
+                >
+                  Data Update
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm"
+                  onClick={() => setShowTemplateOptions(true)}
+                >
+                  Template Option
+                </button>
+                {cardUrl ? <a className="btn btn-outline-light btn-sm" href={cardUrl} target="_blank" rel="noreferrer">Card View</a> : null}
               </div>
             </div>
             <p className="text-secondary small">Default values are loaded from the Company Profile. Any changes here are saved only for this individual card.</p>
 
             <div className="row g-3">
+              {showTemplateOptions ? (
+                <div className="col-12" id="card-theme-controls">
+                  <div className="card p-3">
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                      <h6 className="mb-0">Theme & Template</h6>
+                      <span className="text-secondary small">Style controls for live preview</span>
+                    </div>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label">Card Template</label>
+                        <select
+                          className="form-select"
+                          value={form.template_style || "design1"}
+                          onChange={(e) => setField("template_style", e.target.value)}
+                        >
+                          {CARD_TEMPLATE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="col-12 col-md-3">
+                        <label className="form-label">Font Size (pt)</label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="36"
+                          className="form-control"
+                          value={form.font_size_pt || 16}
+                          onChange={(e) => setField("font_size_pt", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="col-12 col-md-3">
+                        <label className="form-label">Icon Size (pt)</label>
+                        <input
+                          type="number"
+                          min="8"
+                          max="36"
+                          className="form-control"
+                          value={form.icon_size_pt || 14}
+                          onChange={(e) => setField("icon_size_pt", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="col-12 col-md-3">
+                        <label className="form-label">Logo Size (px)</label>
+                        <input
+                          type="number"
+                          min="48"
+                          max="180"
+                          className="form-control"
+                          value={form.logo_size || 96}
+                          onChange={(e) => setField("logo_size", Number(e.target.value || 96))}
+                        />
+                      </div>
+
+                      <div className="col-12 col-md-3">
+                        <label className="form-label">Logo Radius (px)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="999"
+                          className="form-control"
+                          value={form.logo_radius_px ?? 28}
+                          onChange={(e) => setField("logo_radius_px", Number(e.target.value || 0))}
+                        />
+                      </div>
+
+                      <div className="col-6 col-md-2">
+                        <label className="form-label">Primary</label>
+                        <input
+                          type="color"
+                          className="form-control form-control-color"
+                          value={form.theme_color || "#22c55e"}
+                          onChange={(e) => setField("theme_color", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="col-6 col-md-2">
+                        <label className="form-label">Secondary</label>
+                        <input
+                          type="color"
+                          className="form-control form-control-color"
+                          value={form.theme_secondary_color || "#0f172a"}
+                          onChange={(e) => setField("theme_secondary_color", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="col-12 col-md-2">
+                        <label className="form-label">Fill</label>
+                        <select
+                          className="form-select"
+                          value={form.theme_mode || "gradient"}
+                          onChange={(e) => setField("theme_mode", e.target.value === "flat" ? "flat" : "gradient")}
+                        >
+                          <option value="gradient">Gradient</option>
+                          <option value="flat">Flat</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="d-flex justify-content-end mt-3">
+                      <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={onSave}>
+                        {saving ? "Saving..." : "Save Template"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {!showTemplateOptions ? (
+                <>
               {[
                 ["card_title", "Card / Company Title"],
                 ["person_name", "Person Name"],
@@ -843,74 +1032,6 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
-              <div className="col-12 col-md-2">
-                <label className="form-label">Primary Color</label>
-                <input
-                  type="color"
-                  className="form-control form-control-color"
-                  value={form.theme_color || "#22c55e"}
-                  onChange={(e) => {
-                    const nextPrimary = e.target.value;
-                    if ((form.theme_mode || "gradient") === "flat") {
-                      setForm((prev) => ({
-                        ...prev,
-                        theme_color: nextPrimary,
-                        theme_secondary_color: deriveFlatSecondary(nextPrimary),
-                      }));
-                      return;
-                    }
-                    setField("theme_color", nextPrimary);
-                  }}
-                />
-              </div>
-
-              <div className="col-12 col-md-2">
-                <label className="form-label">Secondary Color</label>
-                <input
-                  type="color"
-                  className="form-control form-control-color"
-                  value={form.theme_secondary_color || "#0f172a"}
-                  onChange={(e) => setField("theme_secondary_color", e.target.value)}
-                  disabled={(form.theme_mode || "gradient") === "flat"}
-                />
-              </div>
-
-              <div className="col-12 col-md-2">
-                <label className="form-label">Theme Fill</label>
-                <select
-                  className="form-select"
-                  value={form.theme_mode || "gradient"}
-                  onChange={(e) => {
-                    const nextMode = e.target.value === "flat" ? "flat" : "gradient";
-                    setForm((prev) => ({
-                      ...prev,
-                      theme_mode: nextMode,
-                      theme_secondary_color: nextMode === "flat"
-                        ? deriveFlatSecondary(prev.theme_color || "#22c55e")
-                        : (prev.theme_secondary_color || "#0f172a"),
-                    }));
-                  }}
-                >
-                  <option value="gradient">Gradient</option>
-                  <option value="flat">Flat Color</option>
-                </select>
-              </div>
-
-              <div className="col-12 col-md-6">
-                <label className="form-label">Card Template</label>
-                <select
-                  className="form-select"
-                  value={form.template_style || "design1"}
-                  onChange={(e) => setField("template_style", e.target.value)}
-                >
-                  {CARD_TEMPLATE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <div className="col-12 col-md-6">
                 <div className="form-check mt-4">
                   <input
@@ -925,54 +1046,6 @@ export default function DigitalBusinessCardDashboardPage() {
                     Enable custom domain mapping
                   </label>
                 </div>
-              </div>
-
-              <div className="col-12 col-md-3">
-                <label className="form-label">Icon Size (pt)</label>
-                <input
-                  type="number"
-                  min="8"
-                  max="36"
-                  className="form-control"
-                  value={form.icon_size_pt || 14}
-                  onChange={(e) => setField("icon_size_pt", e.target.value)}
-                />
-              </div>
-
-              <div className="col-12 col-md-3">
-                <label className="form-label">Font Size (pt)</label>
-                <input
-                  type="number"
-                  min="10"
-                  max="36"
-                  className="form-control"
-                  value={form.font_size_pt || 16}
-                  onChange={(e) => setField("font_size_pt", e.target.value)}
-                />
-              </div>
-
-              <div className="col-12 col-md-3">
-                <label className="form-label">Logo Size (px)</label>
-                <input
-                  type="number"
-                  min="48"
-                  max="180"
-                  className="form-control"
-                  value={form.logo_size || 96}
-                  onChange={(e) => setField("logo_size", Number(e.target.value || 96))}
-                />
-              </div>
-
-              <div className="col-12 col-md-3">
-                <label className="form-label">Logo Radius (px)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="999"
-                  className="form-control"
-                  value={form.logo_radius_px ?? 28}
-                  onChange={(e) => setField("logo_radius_px", Number(e.target.value || 0))}
-                />
               </div>
 
               <div className="col-12">
@@ -1068,6 +1141,8 @@ export default function DigitalBusinessCardDashboardPage() {
                   </div>
                 </div>
               ) : null}
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1077,8 +1152,8 @@ export default function DigitalBusinessCardDashboardPage() {
         </div>
       </div>
 
-      <div className="p-0 d-flex flex-column gap-3">
-        <div>
+      <div className="p-0 d-flex flex-column gap-3 digital-card-dashboard__lists">
+        <section className="digital-card-dashboard__list-block">
           <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <h4 className="mb-0">Primary Card</h4>
           </div>
@@ -1150,9 +1225,9 @@ export default function DigitalBusinessCardDashboardPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div>
+        <section className="digital-card-dashboard__list-block">
           <div className="wz-table-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <h4 className="mb-0">Other Cards</h4>
             <form className="d-flex gap-2" onSubmit={onOtherSearchSubmit}>
@@ -1257,7 +1332,7 @@ export default function DigitalBusinessCardDashboardPage() {
               </button>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

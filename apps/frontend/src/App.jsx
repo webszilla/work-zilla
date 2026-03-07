@@ -762,10 +762,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (isWhatsappAutomationProduct) {
       return (
         normalizedPathname === "/" ||
-        normalizedPathname === "/dashboard/company-profile" ||
-        normalizedPathname === "/dashboard/whatsapp-automation" ||
-        normalizedPathname === "/dashboard/catalogue" ||
-        normalizedPathname === "/dashboard/digital-card"
+        normalizedPathname === "/dashboard/whatsapp-automation"
       );
     }
     return normalizedPathname === "/";

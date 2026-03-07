@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiFetch } from "../lib/api.js";
@@ -13,6 +13,69 @@ const emptyState = {
   public_page_path: "",
   public_routes: []
 };
+
+function detectPlatformKey(item) {
+  const platform = String(item?.platform || "").toLowerCase();
+  const filename = String(item?.filename || "").toLowerCase();
+  const relativeKey = String(item?.relative_key || "").toLowerCase();
+  const haystack = `${platform} ${filename} ${relativeKey}`;
+
+  if (haystack.includes("mac") || filename.endsWith(".dmg") || filename.endsWith(".pkg")) {
+    return "mac";
+  }
+  if (
+    haystack.includes("windows") ||
+    haystack.includes(" win") ||
+    filename.endsWith(".exe") ||
+    filename.endsWith(".msi")
+  ) {
+    return "windows";
+  }
+  return "other";
+}
+
+function detectRoutePlatformKey(route) {
+  const label = String(route?.label || "").toLowerCase();
+  const path = String(route?.path || "").toLowerCase();
+  const haystack = `${label} ${path}`;
+  if (haystack.includes("mac")) {
+    return "mac";
+  }
+  if (haystack.includes("windows") || haystack.includes("-win")) {
+    return "windows";
+  }
+  return "other";
+}
+
+function detectRouteFamily(route) {
+  const label = String(route?.label || "").toLowerCase();
+  const path = String(route?.path || "").toLowerCase();
+  const haystack = `${label} ${path}`;
+  if (haystack.includes("monitor")) {
+    return "monitor";
+  }
+  if (haystack.includes("storage")) {
+    return "storage";
+  }
+  if (haystack.includes("imposition")) {
+    return "imposition";
+  }
+  return "bootstrap";
+}
+
+function inferRouteProduct(route) {
+  const label = String(route?.label || "").toLowerCase();
+  if (label.includes("work suite") || label.includes("monitor")) {
+    return "Work Suite";
+  }
+  if (label.includes("online storage") || label.includes("storage")) {
+    return "Online Storage";
+  }
+  if (label.includes("imposition")) {
+    return "Print Marks";
+  }
+  return "Bootstrap Installer";
+}
 
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
@@ -33,6 +96,65 @@ export default function SaasAdminApplicationDownloadsPage() {
   const [state, setState] = useState(emptyState);
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
+  const [platformTab, setPlatformTab] = useState("mac");
+
+  const filteredItems = useMemo(() => {
+    return state.items.filter((item) => {
+      if (platformTab === "mac") {
+        return detectPlatformKey(item) === "mac";
+      }
+      if (platformTab === "windows") {
+        return detectPlatformKey(item) === "windows";
+      }
+      return true;
+    });
+  }, [platformTab, state.items]);
+
+  const routeFallbackItems = useMemo(() => {
+    const macItems = state.items.filter((item) => detectPlatformKey(item) === "mac");
+    const firstMacItem = macItems[0] || null;
+    const macFamilyReference = macItems.reduce((acc, item) => {
+      const family = String(item?.family || "").toLowerCase();
+      const familyKey = family.includes("monitor")
+        ? "monitor"
+        : family.includes("storage")
+          ? "storage"
+          : family.includes("imposition")
+            ? "imposition"
+            : family.includes("bootstrap")
+              ? "bootstrap"
+              : "";
+      if (!familyKey || acc[familyKey]) {
+        return acc;
+      }
+      return { ...acc, [familyKey]: item };
+    }, {});
+
+    return state.public_routes
+      .filter((route) => detectRoutePlatformKey(route) === platformTab)
+      .map((route) => {
+        const familyKey = detectRouteFamily(route);
+        const routeProduct = inferRouteProduct(route);
+        const productReference = macItems.find(
+          (item) => String(item?.product || "").toLowerCase() === routeProduct.toLowerCase()
+        );
+        const macReference = macFamilyReference[familyKey] || productReference || firstMacItem;
+        return {
+          family: "route",
+          filename: route.label || route.path || "Download Route",
+          relative_key: route.path || "",
+          product: macReference?.product || routeProduct,
+          platform: platformTab === "mac" ? "macOS" : "Windows",
+          arch: macReference?.arch || "x64",
+          size_bytes: Number(macReference?.size_bytes || 0),
+          updated_at: macReference?.updated_at || "-",
+          download_url: route.path || "",
+          is_route_fallback: true
+        };
+      });
+  }, [platformTab, state.items, state.public_routes]);
+
+  const tableItems = filteredItems.length ? filteredItems : routeFallbackItems;
 
   async function loadData() {
     setState((prev) => ({ ...prev, loading: true, error: "" }));
@@ -128,7 +250,31 @@ export default function SaasAdminApplicationDownloadsPage() {
           ))}
         </div>
 
-        <div className="table-responsive mt-4">
+        <div className="d-flex align-items-center gap-2 mt-4 mb-3">
+          <span className="small text-secondary">Platform:</span>
+          <div className="btn-group btn-group-sm" role="tablist" aria-label="Platform tabs">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={platformTab === "mac"}
+              className={`btn ${platformTab === "mac" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setPlatformTab("mac")}
+            >
+              macOS
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={platformTab === "windows"}
+              className={`btn ${platformTab === "windows" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setPlatformTab("windows")}
+            >
+              Windows
+            </button>
+          </div>
+        </div>
+
+        <div className="table-responsive">
           <table className="table table-dark table-hover align-middle mb-0">
             <thead>
               <tr>
@@ -142,7 +288,7 @@ export default function SaasAdminApplicationDownloadsPage() {
               </tr>
             </thead>
             <tbody>
-              {state.items.length ? state.items.map((item) => (
+              {tableItems.length ? tableItems.map((item) => (
                 <tr key={item.relative_key || item.filename}>
                   <td title={item.filename || ""}>
                     <span
@@ -153,9 +299,11 @@ export default function SaasAdminApplicationDownloadsPage() {
                     </span>
                   </td>
                   <td>{item.product || "-"}</td>
-                  <td>{item.platform || "-"}</td>
+                  <td>
+                    {item.platform || (detectPlatformKey(item) === "mac" ? "macOS" : detectPlatformKey(item) === "windows" ? "Windows" : "-")}
+                  </td>
                   <td>{item.arch || "-"}</td>
-                  <td>{formatBytes(item.size_bytes)}</td>
+                  <td>{item.size_bytes ? formatBytes(item.size_bytes) : "-"}</td>
                   <td>{item.updated_at || "-"}</td>
                   <td className="text-end">
                     <div className="d-flex justify-content-end gap-2 application-downloads__actions">
@@ -171,16 +319,18 @@ export default function SaasAdminApplicationDownloadsPage() {
                         type="button"
                         className="btn btn-outline-danger btn-sm application-downloads__action-btn"
                         onClick={() => handleRemove(item)}
-                        disabled={!state.object_ready || busyKey === item.relative_key}
+                        disabled={item.is_route_fallback || !state.object_ready || busyKey === item.relative_key}
                       >
-                        {busyKey === item.relative_key ? "Removing..." : "Remove"}
+                        {item.is_route_fallback ? "Route" : busyKey === item.relative_key ? "Removing..." : "Remove"}
                       </button>
                     </div>
                   </td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan="7" className="text-center text-secondary">No installer files found.</td>
+                  <td colSpan="7" className="text-center text-secondary">
+                    No {platformTab === "mac" ? "macOS" : "Windows"} installer files found.
+                  </td>
                 </tr>
               )}
             </tbody>
