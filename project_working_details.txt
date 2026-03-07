@@ -158,10 +158,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
-  - Published at (UTC): 2026-03-06 06:12:31 UTC
-  - Local commit SHA: 2f5884f
-  - GitHub main SHA: 2f5884f
-  - Server live SHA (git metadata): 2f5884f
+  - Published at (UTC): 2026-03-07 11:26:17 UTC
+  - Local commit SHA: 2602f4a
+  - GitHub main SHA: 2602f4a
+  - Server live SHA (git metadata): 2602f4a
   - Deploy method: git-pull
   - Gunicorn status: yes (listening on :8000)
   - Verified URLs:
@@ -171,10 +171,10 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
     - /static/public/css/site.css (200)
     - /static/common/css/public.css (200)
   - Notes / rollback point:
-    - Purpose: Added installer/app version visibility and uninstall UX improvements in bootstrap installer UI; installer cards now show latest package version and installed version; uninstall now uses clear confirmation; desktop app now shows application version from runtime package. Published new artifacts to Backblaze and removed older versions.
-    - Live migrations applied: none
+    - Purpose: Deployed WhatsApp automation updates (campaigns module, HTML editor code-view fix, pagination/search UI and related backend/API/migration changes).
+    - Live migrations applied: whatsapp_automation.0016_marketing_campaign_and_contacts
     - Database safety: no local database files were uploaded or synced
-    - Rollback to previous GitHub main: cb732b7
+    - Rollback to previous GitHub main: 5544281
 
 FAST SERVER CHECK COMMANDS
 - ssh root@89.167.16.104
