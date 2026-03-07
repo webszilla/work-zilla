@@ -84,13 +84,14 @@ function validateImageFiles(fileList) {
   return "";
 }
 
-function buildTicketFormData({ category, subject, message, productSlug, attachments }) {
+function buildTicketFormData({ category, subject, message, priority, productSlug, attachments }) {
   const formData = new FormData();
   formData.set("category", category || "support");
   if (subject !== undefined) {
     formData.set("subject", subject || "");
   }
   formData.set("message", message || "");
+  formData.set("priority", String(priority || "medium").toLowerCase());
   if (productSlug) {
     formData.set("product_slug", productSlug);
   }
@@ -157,6 +158,10 @@ export default function OrgInboxPage() {
     }
     return [{ slug: currentProductSlug, name: titleCase(currentProductSlug.replace(/-/g, " ")) }];
   }, [ticketState.data, currentProductSlug]);
+  const prioritySupportByProduct = ticketState.data?.priority_support_by_product || {};
+  const urgentAllowedForSelectedProduct = Boolean(
+    prioritySupportByProduct[createTicketForm.productSlug || currentProductSlug]
+  );
 
   async function loadInbox({ keepSelection = false } = {}) {
     setInboxState((prev) => ({ ...prev, loading: true, error: "" }));
@@ -365,11 +370,20 @@ export default function OrgInboxPage() {
       setCreateTicketState({ saving: false, error: fileError, success: "" });
       return;
     }
+    if (String(createTicketForm.priority || "").toLowerCase() === "urgent" && !urgentAllowedForSelectedProduct) {
+      setCreateTicketState({
+        saving: false,
+        error: "Urgent priority is available only for highest plan users.",
+        success: "",
+      });
+      return;
+    }
     setCreateTicketState({ saving: true, error: "", success: "" });
     try {
       const formData = buildTicketFormData({
         category: createTicketForm.category,
         subject,
+        priority: createTicketForm.priority || "medium",
         message: `<p><strong>Name:</strong> ${requesterName}</p><p><strong>Priority:</strong> ${titleCase(createTicketForm.priority || "medium")}</p>${message}`,
         productSlug: createTicketForm.productSlug || currentProductSlug,
         attachments: createTicketForm.files,
@@ -575,7 +589,17 @@ export default function OrgInboxPage() {
                         <select
                           className="form-select"
                           value={createTicketForm.productSlug || ""}
-                          onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, productSlug: event.target.value }))}
+                          onChange={(event) =>
+                            setCreateTicketForm((prev) => {
+                              const nextProductSlug = event.target.value;
+                              const urgentAllowed = Boolean(prioritySupportByProduct[nextProductSlug]);
+                              return {
+                                ...prev,
+                                productSlug: nextProductSlug,
+                                priority: prev.priority === "urgent" && !urgentAllowed ? "high" : prev.priority,
+                              };
+                            })
+                          }
                         >
                           {ticketProductOptions.map((item) => (
                             <option key={item.slug} value={item.slug}>
@@ -608,8 +632,11 @@ export default function OrgInboxPage() {
                           <option value="low">Low</option>
                           <option value="medium">Medium</option>
                           <option value="high">High</option>
-                          <option value="urgent">Urgent</option>
+                          {urgentAllowedForSelectedProduct ? <option value="urgent">Urgent</option> : null}
                         </select>
+                        {!urgentAllowedForSelectedProduct ? (
+                          <div className="small text-secondary mt-1">Urgent is available only for highest plan users.</div>
+                        ) : null}
                       </div>
                       <div className="col-12">
                         <div className="d-flex gap-2 flex-wrap">

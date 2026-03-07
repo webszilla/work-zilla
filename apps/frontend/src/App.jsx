@@ -760,10 +760,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       return normalizedPathname === "/dealer-dashboard";
     }
     if (isWhatsappAutomationProduct) {
-      return (
-        normalizedPathname === "/" ||
-        normalizedPathname === "/dashboard/whatsapp-automation"
-      );
+      return normalizedPathname === "/";
     }
     return normalizedPathname === "/";
   })();
@@ -989,13 +986,13 @@ function AppShell({ state, productPrefix, productSlug }) {
             </div>
 
             <div className="wz-topbar__actions">
-              <div className="wz-topbar__panel">
+              <Link className="wz-topbar__panel" to={withBase("/profile")}>
                 <i className="bi bi-buildings" aria-hidden="true" />
                 <div className="wz-topbar__panel-copy">
                   <strong>{orgNameForUi}</strong>
                   <span>{roleDisplayName}</span>
                 </div>
-              </div>
+              </Link>
               <div className="wz-topbar__panel">
                 <i className="bi bi-palette2" aria-hidden="true" />
                 <div className="wz-topbar__panel-copy">
@@ -1709,8 +1706,12 @@ export default function App() {
       }
       if (el instanceof HTMLTextAreaElement) {
         const limit = el.maxLength > 0 ? el.maxLength : inferLimit(el, DEFAULT_TEXTAREA_MAX);
-        const currentLength = String(el.value || "").length;
-        setOverflowState(el, limit, currentLength);
+        const sanitized = sanitizeValue(el, el.value);
+        const trimmed = sanitized.slice(0, limit);
+        if (trimmed !== el.value) {
+          el.value = trimmed;
+        }
+        setOverflowState(el, limit, String(el.value || "").length);
         setValidationMessage(el);
       }
     };

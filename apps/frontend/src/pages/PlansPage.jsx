@@ -309,9 +309,20 @@ function getWhatsappAutomationPlanFeatures(plan) {
     }
     return fallback;
   };
+  const keywordRuleLimit = (() => {
+    const configured = Number(features.wa_keyword_rules_limit ?? features.keyword_rules_limit);
+    if (Number.isFinite(configured) && configured > 0) {
+      return Math.floor(configured);
+    }
+    if (tier === "starter") return 20;
+    if (tier === "growth") return 50;
+    if (tier === "pro") return 100;
+    return 10;
+  })();
   return [
     { text: "Company Digital Card", ok: boolFrom(["digital_card", "digital_card_enabled"], defaults.card) },
     { text: "WhatsApp Catalogue", ok: boolFrom(["catalogue", "catalogue_enabled"], defaults.catalogue) },
+    { text: `Keyword Reply Rules: ${keywordRuleLimit} Lists`, ok: true },
     { text: "Basic Automation", ok: boolFrom(["basic_automation", "automation"], defaults.basicAuto) },
     { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
     { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },

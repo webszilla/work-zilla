@@ -34,6 +34,50 @@ export const waApi = {
   deleteRule(id) {
     return apiFetch(`/api/whatsapp-automation/rules/${id}`, { method: "DELETE" });
   },
+  getMarketingContacts() {
+    return apiFetch("/api/whatsapp-automation/marketing/contacts");
+  },
+  saveMarketingContact(payload) {
+    return apiFetch("/api/whatsapp-automation/marketing/contacts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateMarketingContact(id, payload) {
+    return apiFetch(`/api/whatsapp-automation/marketing/contacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteMarketingContact(id) {
+    return apiFetch(`/api/whatsapp-automation/marketing/contacts/${id}`, { method: "DELETE" });
+  },
+  importMarketingContactsCsv(payload) {
+    return apiFetch("/api/whatsapp-automation/marketing/contacts/import-csv", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  optOutMarketingContact(payload) {
+    return apiFetch("/api/whatsapp-automation/marketing/contacts/opt-out", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getMarketingCampaigns() {
+    return apiFetch("/api/whatsapp-automation/marketing/campaigns");
+  },
+  saveMarketingCampaign(payload) {
+    return apiFetch("/api/whatsapp-automation/marketing/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  retryFailedCampaign(campaignId) {
+    return apiFetch(`/api/whatsapp-automation/marketing/campaigns/${campaignId}/retry-failed`, {
+      method: "POST",
+    });
+  },
   previewReply(payload) {
     return apiFetch("/api/whatsapp-automation/preview-reply", {
       method: "POST",

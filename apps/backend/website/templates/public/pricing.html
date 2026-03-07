@@ -118,79 +118,6 @@
 
 {% block extra_head %}
 {{ block.super }}
-<style>
-  .addon-users-box {
-    margin-top: 12px;
-    padding: 12px;
-    border-radius: 12px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-  }
-  .addon-users-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .addon-users-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #334155;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    padding: 4px 8px;
-    border-radius: 999px;
-  }
-  .addon-users-tooltip {
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    border: 1px solid rgba(249, 115, 22, 0.35);
-    color: #ea580c;
-    background: #fff7ed;
-    cursor: help;
-  }
-  .addon-users-grid {
-    display: grid;
-    gap: 6px;
-  }
-  .addon-users-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 13px;
-    color: #475569;
-  }
-  .addon-users-row strong {
-    color: #111827;
-    font-weight: 700;
-  }
-  .addon-users-row.is-active {
-    color: #111827;
-    font-weight: 600;
-  }
-  .addon-users-value {
-    font-size: 14px;
-    color: #111827;
-    font-weight: 600;
-    line-height: 1.45;
-  }
-  .addon-users-note {
-    margin-top: 6px;
-    color: #64748b;
-    font-size: 12px;
-  }
-</style>
 {% endblock %}
 
 {% block extra_js %}
@@ -261,24 +188,6 @@
           userPriceTarget.textContent = formatPrice(userValue, pricingState.currency);
           userSuffixTarget.textContent = pricingState.billing === "monthly" ? "/user per month" : "/user per year";
         }
-        const addonDisplayTarget = card.querySelector("[data-addon-digital-card-display]");
-        if (addonDisplayTarget) {
-          const inrValue = pricingState.billing === "yearly"
-            ? Number(plan.addon_yearly_price || 0)
-            : Number(plan.addon_monthly_price || 0);
-          const usdValue = pricingState.billing === "yearly"
-            ? Number(plan.addon_usd_yearly_price || 0)
-            : Number(plan.addon_usd_monthly_price || 0);
-          const selectedCurrency = pricingState.currency === "usd" ? "usd" : "inr";
-          const primary = selectedCurrency === "usd"
-            ? formatAddonSymbolPrice(usdValue, "usd")
-            : formatAddonSymbolPrice(inrValue, "inr");
-          const secondary = selectedCurrency === "usd"
-            ? formatAddonSymbolPrice(inrValue, "inr")
-            : formatAddonSymbolPrice(usdValue, "usd");
-          const suffix = pricingState.billing === "yearly" ? "per extra user / year" : "per extra user / month";
-          addonDisplayTarget.textContent = `${primary} / ${secondary} ${suffix}`;
-        }
       });
       updateAddonPrices();
     }
@@ -339,7 +248,7 @@
       return `Up to ${limit} devices per user`;
     }
 
-    function buildFeatureList(plan, productSlug) {
+    function buildFeatureList(plan, productSlug, { prioritySupportEnabled = false } = {}) {
       const limits = plan.limits || {};
       if (productSlug === "imposition-software") {
         const planName = String(plan.name || "").toLowerCase();
@@ -379,6 +288,7 @@
           { text: "Excel Data Import", ok: !!featureFlags.excel_data_import },
           { text: "Serial Number Generator", ok: !!featureFlags.serial_number_generator },
           { text: "Team Users", ok: !!featureFlags.team_users },
+          { text: "Priority Support", ok: !!prioritySupportEnabled },
           { text: `Additional User: ${pricingState.currency === "usd" ? "$4" : "₹300"} / month` },
         ];
       }
@@ -402,7 +312,8 @@
             deviceLimitLabel,
             "Real-time smart sync included",
             "Admin Controls",
-            "Free System Sync"
+            "Free System Sync",
+            { text: "Priority Support", ok: !!prioritySupportEnabled },
           ];
         }
         if (planKey === "pro") {
@@ -413,7 +324,8 @@
             deviceLimitLabel,
             "Real-time smart sync included",
             "Full Admin Visibility",
-            "Free System Sync"
+            "Free System Sync",
+            { text: "Priority Support", ok: !!prioritySupportEnabled },
           ];
         }
         return [
@@ -423,7 +335,8 @@
           deviceLimitLabel,
           "Real-time smart sync included",
           "Online Access",
-          "Free System Sync"
+          "Free System Sync",
+          { text: "Priority Support", ok: !!prioritySupportEnabled },
         ];
       }
       if (productSlug === "ai-chatbot") {
@@ -562,7 +475,7 @@
       ];
     }
 
-    function buildMonitorFeatures(plan) {
+    function buildMonitorFeatures(plan, { prioritySupportEnabled = false } = {}) {
       const limits = plan.limits || {};
       const flags = plan.flags || {};
       const features = plan.features || {};
@@ -591,11 +504,12 @@
         { text: "Live activity report", ok: resolveFlag("allow_live_activity", "allow_live_activity", "live", true) },
         { text: "App usage tracking", ok: resolveFlag("allow_app_usage", "allow_app_usage", "app", false) },
         { text: "HR view", ok: resolveFlag("allow_hr_view", "allow_hr_view", "hr", false) },
-        { text: "OTT/Gaming usage", ok: resolveFlag("allow_gaming_ott_usage", "allow_gaming_ott_usage", "ott", false) }
+        { text: "OTT/Gaming usage", ok: resolveFlag("allow_gaming_ott_usage", "allow_gaming_ott_usage", "ott", false) },
+        { text: "Priority Support", ok: !!prioritySupportEnabled },
       ];
     }
 
-    function buildAiChatbotFeatures(plan) {
+    function buildAiChatbotFeatures(plan, { prioritySupportEnabled = false } = {}) {
       const limits = plan.limits || {};
       const flags = plan.flags || {};
       return [
@@ -612,11 +526,12 @@
         { text: "Analytics (basic)", ok: !!flags.analytics_basic },
         { text: "Remove branding", ok: !!flags.remove_branding },
         { text: "CSV export", ok: !!flags.csv_export },
+        { text: "Priority Support", ok: !!prioritySupportEnabled },
         { text: "Extra agents billed separately" }
       ];
     }
 
-    function buildBusinessAutopilotPricingFeatures(plan) {
+    function buildBusinessAutopilotPricingFeatures(plan, { prioritySupportEnabled = false } = {}) {
       const features = plan.features || {};
       const flags = plan.flags || {};
       const limits = plan.limits || {};
@@ -668,13 +583,13 @@
         { text: "API Access", ok: boolFrom(["api_access"], defaults.api) },
         { text: "Custom Dashboards", ok: boolFrom(["custom_dashboards"], defaults.dashboards) },
         { text: "Audit Logs", ok: boolFrom(["audit_logs"], defaults.audit) },
-        { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+        { text: "Priority Support", ok: !!prioritySupportEnabled },
       ];
       if (trialPro) rows.push({ text: "2 Add-on Users Included (Trial)" });
       return rows;
     }
 
-    function buildWhatsAppAutomationPricingFeatures(plan) {
+    function buildWhatsAppAutomationPricingFeatures(plan, { prioritySupportEnabled = false } = {}) {
       const features = plan.features || {};
       const flags = plan.flags || {};
       const limits = plan.limits || {};
@@ -702,15 +617,48 @@
         }
         return fallback;
       };
+      const keywordRuleLimit = (() => {
+        const configured = Number(features.wa_keyword_rules_limit ?? features.keyword_rules_limit);
+        if (Number.isFinite(configured) && configured > 0) {
+          return Math.floor(configured);
+        }
+        if (tier === "starter") return 20;
+        if (tier === "growth") return 50;
+        if (tier === "pro") return 100;
+        return 10;
+      })();
       return [
         { text: "Company Digital Card", ok: boolFrom(["digital_card", "digital_card_enabled"], defaults.card) },
         { text: "WhatsApp Catalogue", ok: boolFrom(["catalogue", "catalogue_enabled"], defaults.catalogue) },
+        { text: `Keyword Reply Rules: ${keywordRuleLimit} Lists`, ok: true },
         { text: "Basic Automation", ok: boolFrom(["basic_automation", "automation"], defaults.basicAuto) },
         { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
         { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },
         { text: "Advanced Automation Flows", ok: boolFrom(["advanced_automation", "automation_flows"], defaults.advancedAuto) },
-        { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+        { text: "Priority Support", ok: !!prioritySupportEnabled },
       ];
+    }
+
+    function findHighestPricedPlanId(plans) {
+      const rows = Array.isArray(plans) ? plans : [];
+      let bestId = null;
+      let bestValue = Number.NEGATIVE_INFINITY;
+      rows.forEach((plan) => {
+        const value = Math.max(
+          Number(plan?.price_inr_month || 0),
+          Number(plan?.price_inr_year || 0),
+          Number(plan?.price_usdt_month || 0),
+          Number(plan?.price_usdt_year || 0),
+        );
+        if (Number.isFinite(value) && value > bestValue) {
+          bestValue = value;
+          bestId = plan?.id ?? null;
+        }
+      });
+      if (!Number.isFinite(bestValue) || bestValue <= 0) {
+        return null;
+      }
+      return bestId;
     }
 
     function monitorPlanDescription(planName) {
@@ -905,6 +853,7 @@
           return aName.localeCompare(bName);
         });
       }
+      const highestPlanId = findHighestPricedPlanId(orderedPlans);
       orderedPlans.forEach((plan) => {
         pricingCache[String(plan.id)] = plan;
         const isMonitor = normalizedSlug === "monitor";
@@ -913,10 +862,6 @@
         const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
         const isWhatsAppAutomation = normalizedSlug === "whatsapp-automation";
         const isImposition = normalizedSlug === "imposition-software";
-        const waFeatures = plan.features || {};
-        const hasDigitalCardFeature = Boolean(
-          waFeatures.digital_card || waFeatures.digital_card_enabled || (plan.limits || {}).digital_card_enabled
-        );
         const isFreePlan = String(plan.name || "").toLowerCase() === "free";
         const isTrialPlan = isImposition && (
           String(plan.name || "").toLowerCase().includes("trial") ||
@@ -925,11 +870,16 @@
         const hasTrialPlanId = Number(plan.id) > 0;
         const trialNotConfigured = isTrialPlan && !hasTrialPlanId;
         const storageTrialOnly = isStorage && isFreePlan;
-        const features = buildFeatureList(plan, normalizedSlug);
-        const monitorFeatures = isMonitor ? buildMonitorFeatures(plan) : [];
-        const chatbotFeatures = isChatbot ? buildAiChatbotFeatures(plan) : [];
-        const erpFeatureFlags = isBusinessAutopilot ? buildBusinessAutopilotPricingFeatures(plan) : [];
-        const waFeatureFlags = isWhatsAppAutomation ? buildWhatsAppAutomationPricingFeatures(plan) : [];
+        const prioritySupportEnabled = highestPlanId !== null && plan.id === highestPlanId;
+        const features = buildFeatureList(plan, normalizedSlug, { prioritySupportEnabled });
+        const monitorFeatures = isMonitor ? buildMonitorFeatures(plan, { prioritySupportEnabled }) : [];
+        const chatbotFeatures = isChatbot ? buildAiChatbotFeatures(plan, { prioritySupportEnabled }) : [];
+        const erpFeatureFlags = isBusinessAutopilot
+          ? buildBusinessAutopilotPricingFeatures(plan, { prioritySupportEnabled })
+          : [];
+        const waFeatureFlags = isWhatsAppAutomation
+          ? buildWhatsAppAutomationPricingFeatures(plan, { prioritySupportEnabled })
+          : [];
         const activePlanId = activePlans[data.product.slug]?.plan_id || null;
         const isCurrentPlan = activePlanId === plan.id;
         const activePlan = data.plans.find((item) => item.id === activePlanId) || null;
@@ -985,24 +935,6 @@
               <span class="erp-plus">+</span>
               <span data-user-price>Custom</span>
               <span class="price-suffix-inline" data-user-suffix>/user per month</span>
-            </div>
-          ` : ""}
-          ${isWhatsAppAutomation && hasDigitalCardFeature && plan.allow_addons ? `
-            <div class="addon-users-box" data-addon-users-box>
-              <div class="addon-users-head">
-                <span class="addon-users-badge">Digital Card Add-on Users</span>
-                <span
-                  class="addon-users-tooltip"
-                  title="Add-on users apply only to Digital Card feature and are billed based on your selected currency and billing cycle."
-                  aria-label="Add-on users apply only to Digital Card feature and are billed based on your selected currency and billing cycle."
-                >i</span>
-              </div>
-              <div class="addon-users-grid">
-                <div class="addon-users-row">
-                  <span class="addon-users-value" data-addon-digital-card-display>Custom</span>
-                </div>
-              </div>
-              <div class="addon-users-note">Upgrade your plan to unlock discounted add-on user pricing.</div>
             </div>
           ` : ""}
           ${isMonitor ? `

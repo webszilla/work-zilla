@@ -1,11 +1,17 @@
 import json
 import re
+import html
+import csv
+import io
 import base64
 import uuid
 import mimetypes
 import os
+from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
+from django.utils import timezone
+from django.db import DatabaseError
 from django.db.models import Q
 from django.http import HttpResponseForbidden, JsonResponse
 from django.core.files.base import ContentFile
@@ -30,8 +36,12 @@ from .models import (
     CompanyProfile,
     DigitalCard,
     DigitalCardEntry,
+    MarketingCampaign,
+    MarketingCampaignDelivery,
+    MarketingContact,
     WhatsappSettings,
 )
+from apps.backend.common_auth.utils.whatsapp import send_whatsapp_message
 
 
 def _get_org(request):
@@ -54,6 +64,74 @@ def _json_body(request):
         return json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return None
+
+
+def _to_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return default
+
+
+def _normalize_whatsapp_text(value):
+    text = str(value or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _html_to_whatsapp_text(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", raw, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/\s*(p|div|section|article|h[1-6]|pre)\s*>", "\n", text, flags=re.IGNORECASE)
+
+    text = re.sub(
+        r"<\s*a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)<\s*/\s*a\s*>",
+        lambda match: f"{_normalize_whatsapp_text(re.sub(r'<[^>]+>', '', match.group(2)))} ({match.group(1).strip()})",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<\s*(strong|b)\b[^>]*>(.*?)<\s*/\s*(strong|b)\s*>",
+        lambda match: f"*{_normalize_whatsapp_text(re.sub(r'<[^>]+>', '', match.group(2)))}*",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<\s*(em|i)\b[^>]*>(.*?)<\s*/\s*(em|i)\s*>",
+        lambda match: f"_{_normalize_whatsapp_text(re.sub(r'<[^>]+>', '', match.group(2)))}_",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<\s*(del|strike|s)\b[^>]*>(.*?)<\s*/\s*(del|strike|s)\s*>",
+        lambda match: f"~{_normalize_whatsapp_text(re.sub(r'<[^>]+>', '', match.group(2)))}~",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<\s*code\b[^>]*>(.*?)<\s*/\s*code\s*>",
+        lambda match: f"`{_normalize_whatsapp_text(re.sub(r'<[^>]+>', '', match.group(1)))}`",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(r"<\s*li\b[^>]*>", "\n- ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/\s*li\s*>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    return _normalize_whatsapp_text(text)
 
 
 def _save_company_logo_from_data_url(profile, data_url):
@@ -290,6 +368,167 @@ def _rule_payload(obj):
     }
 
 
+def _normalize_phone_number(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) < 8 or len(digits) > 15:
+        return ""
+    return digits
+
+
+def _contact_payload(obj):
+    return {
+        "id": obj.id,
+        "name": obj.name or "",
+        "phone_number": obj.phone_number or "",
+        "email": obj.email or "",
+        "tags": obj.tags or "",
+        "is_opted_in": bool(obj.is_opted_in),
+        "has_opted_out": bool(obj.has_opted_out),
+        "opt_in_source": obj.opt_in_source or "",
+        "consent_note": obj.consent_note or "",
+        "opt_in_at": obj.opt_in_at.isoformat() if obj.opt_in_at else "",
+        "opted_out_at": obj.opted_out_at.isoformat() if obj.opted_out_at else "",
+        "last_message_at": obj.last_message_at.isoformat() if obj.last_message_at else "",
+        "updated_at": obj.updated_at.isoformat() if obj.updated_at else "",
+    }
+
+
+def _campaign_payload(obj):
+    return {
+        "id": obj.id,
+        "name": obj.name or "",
+        "template_name": obj.template_name or "",
+        "template_variables": obj.template_variables or [],
+        "status": obj.status or MarketingCampaign.STATUS_DRAFT,
+        "total_contacts": int(obj.total_contacts or 0),
+        "sent_count": int(obj.sent_count or 0),
+        "failed_count": int(obj.failed_count or 0),
+        "skipped_count": int(obj.skipped_count or 0),
+        "compliance_note": obj.compliance_note or "",
+        "created_at": obj.created_at.isoformat() if obj.created_at else "",
+        "updated_at": obj.updated_at.isoformat() if obj.updated_at else "",
+    }
+
+
+def _delivery_payload(obj):
+    return {
+        "id": obj.id,
+        "campaign_id": obj.campaign_id,
+        "contact_id": obj.contact_id,
+        "phone_number": obj.phone_number or "",
+        "status": obj.status or "",
+        "error_code": obj.error_code or "",
+        "error_message": obj.error_message or "",
+        "attempted_at": obj.attempted_at.isoformat() if obj.attempted_at else "",
+    }
+
+
+def _parse_template_variables(raw):
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        parts = [part.strip() for part in raw.split(",")]
+        return [part for part in parts if part]
+    return []
+
+
+def _is_valid_template_name(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.fullmatch(r"[a-z0-9_]{3,180}", text))
+
+
+def _failure_rate_guard(org):
+    window_since = timezone.now() - timedelta(days=7)
+    qs = MarketingCampaignDelivery.objects.filter(organization=org, attempted_at__gte=window_since)
+    total = qs.count()
+    if total < 20:
+        return True, 0.0
+    failed = qs.filter(status=MarketingCampaignDelivery.STATUS_FAILED).count()
+    ratio = failed / float(total or 1)
+    return ratio <= 0.20, ratio
+
+
+def _campaign_send_to_contacts(campaign, contacts):
+    sent = 0
+    failed = 0
+    skipped = 0
+    for contact in contacts:
+        phone = _normalize_phone_number(contact.phone_number)
+        if not phone:
+            MarketingCampaignDelivery.objects.create(
+                campaign=campaign,
+                organization=campaign.organization,
+                contact=contact,
+                phone_number=contact.phone_number or "",
+                status=MarketingCampaignDelivery.STATUS_SKIPPED,
+                error_code="invalid_number",
+                error_message="Invalid phone number format.",
+            )
+            skipped += 1
+            continue
+        if not contact.is_opted_in or contact.has_opted_out:
+            MarketingCampaignDelivery.objects.create(
+                campaign=campaign,
+                organization=campaign.organization,
+                contact=contact,
+                phone_number=phone,
+                status=MarketingCampaignDelivery.STATUS_SKIPPED,
+                error_code="consent_required",
+                error_message="Contact is not eligible (opt-in required / opted-out).",
+            )
+            skipped += 1
+            continue
+        ok = send_whatsapp_message(
+            to=phone,
+            template_name=campaign.template_name,
+            variables=campaign.template_variables or [],
+        )
+        if ok:
+            MarketingCampaignDelivery.objects.create(
+                campaign=campaign,
+                organization=campaign.organization,
+                contact=contact,
+                phone_number=phone,
+                status=MarketingCampaignDelivery.STATUS_SENT,
+            )
+            contact.last_message_at = timezone.now()
+            contact.save(update_fields=["last_message_at", "updated_at"])
+            sent += 1
+        else:
+            MarketingCampaignDelivery.objects.create(
+                campaign=campaign,
+                organization=campaign.organization,
+                contact=contact,
+                phone_number=phone,
+                status=MarketingCampaignDelivery.STATUS_FAILED,
+                error_code="provider_send_failed",
+                error_message="WhatsApp template send failed.",
+            )
+            failed += 1
+    campaign.total_contacts = len(contacts)
+    campaign.sent_count = sent
+    campaign.failed_count = failed
+    campaign.skipped_count = skipped
+    if failed and sent:
+        campaign.status = MarketingCampaign.STATUS_PARTIAL
+    elif failed and not sent:
+        campaign.status = MarketingCampaign.STATUS_FAILED
+    elif sent and not failed:
+        campaign.status = MarketingCampaign.STATUS_SENT
+    else:
+        campaign.status = MarketingCampaign.STATUS_BLOCKED
+    campaign.save(update_fields=[
+        "total_contacts",
+        "sent_count",
+        "failed_count",
+        "skipped_count",
+        "status",
+        "updated_at",
+    ])
+
+
 def _catalogue_payload(obj):
     return {
         "id": obj.id,
@@ -363,6 +602,67 @@ def _wa_subscription(org):
         # Keep endpoint resilient; status filter still protects common cases.
         pass
     return sub
+
+
+WA_KEYWORD_RULE_LIMIT_DEFAULTS = {
+    "free": 10,
+    "basic": 20,
+    "starter": 20,
+    "plus": 50,
+    "growth": 50,
+    "professional": 100,
+    "pro": 100,
+}
+
+
+def _wa_plan_tier_key(plan_name):
+    key = str(plan_name or "").strip().lower()
+    if "professional" in key:
+        return "professional"
+    if "plus" in key:
+        return "plus"
+    if "growth" in key:
+        return "growth"
+    if "basic" in key:
+        return "basic"
+    if "starter" in key:
+        return "starter"
+    if "pro" in key:
+        return "pro"
+    return "free"
+
+
+def _to_positive_int_or_none(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _default_wa_keyword_limit(plan_name):
+    tier_key = _wa_plan_tier_key(plan_name)
+    return WA_KEYWORD_RULE_LIMIT_DEFAULTS.get(tier_key, WA_KEYWORD_RULE_LIMIT_DEFAULTS["free"])
+
+
+def _wa_keyword_rule_limit(org):
+    sub = _wa_subscription(org)
+    if sub and sub.plan:
+        features = sub.plan.features or {}
+        configured = (
+            features.get("wa_keyword_rules_limit")
+            if isinstance(features, dict)
+            else None
+        )
+        if configured is None and isinstance(features, dict):
+            configured = features.get("keyword_rules_limit")
+        parsed = _to_positive_int_or_none(configured)
+        if parsed is not None:
+            return parsed
+        return _default_wa_keyword_limit(sub.plan.name)
+    return WA_KEYWORD_RULE_LIMIT_DEFAULTS["free"]
 
 
 def _digital_card_limit_payload(org):
@@ -677,7 +977,7 @@ def whatsapp_settings_api(request):
     if data is None:
         return JsonResponse({"error": "invalid_json"}, status=400)
     if "auto_reply_enabled" in data:
-        settings_obj.auto_reply_enabled = bool(data.get("auto_reply_enabled"))
+        settings_obj.auto_reply_enabled = _to_bool(data.get("auto_reply_enabled"), default=True)
     if "welcome_message" in data:
         settings_obj.welcome_message = str(data.get("welcome_message") or "").strip()
     settings_obj.save()
@@ -699,9 +999,14 @@ def automation_rules_api(request):
     org = _get_org(request)
     if not org:
         return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    keyword_rules_limit = _wa_keyword_rule_limit(org)
     if request.method == "GET":
         rows = AutomationRule.objects.filter(organization=org)
-        return JsonResponse({"rules": [_rule_payload(row) for row in rows]})
+        return JsonResponse({
+            "rules": [_rule_payload(row) for row in rows],
+            "keyword_rules_limit": keyword_rules_limit,
+            "keyword_rules_used": rows.count(),
+        })
     if not _is_org_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
     data = _json_body(request)
@@ -713,16 +1018,38 @@ def automation_rules_api(request):
         if not rule:
             return JsonResponse({"error": "not_found"}, status=404)
     else:
+        used_rules = AutomationRule.objects.filter(organization=org).count()
+        if used_rules >= keyword_rules_limit:
+            return JsonResponse(
+                {
+                    "error": "keyword_limit_reached",
+                    "detail": f"Keyword rule limit reached for your plan ({keyword_rules_limit}).",
+                    "keyword_rules_limit": keyword_rules_limit,
+                    "keyword_rules_used": used_rules,
+                },
+                status=400,
+            )
         rule = AutomationRule(organization=org)
-    keyword = str(data.get("keyword") or "").strip()
-    reply_message = str(data.get("reply_message") or "").strip()
+    keyword = str(data.get("keyword") or "").strip()[:120]
+    if not keyword:
+        return JsonResponse({"keyword": ["required"]}, status=400)
+    reply_message = _html_to_whatsapp_text(data.get("reply_message") or "")
     if not reply_message:
         return JsonResponse({"reply_message": ["required"]}, status=400)
+    if len(reply_message) > 350:
+        return JsonResponse(
+            {
+                "reply_message": ["max_length_exceeded"],
+                "message": "Reply message supports up to 350 characters.",
+                "max_length": 350,
+            },
+            status=400,
+        )
     rule.keyword = keyword
     rule.reply_message = reply_message
-    rule.is_default = bool(data.get("is_default", False))
+    rule.is_default = _to_bool(data.get("is_default", False), default=False)
     rule.sort_order = int(data.get("sort_order") or 0)
-    rule.is_active = bool(data.get("is_active", True))
+    rule.is_active = _to_bool(data.get("is_active", True), default=True)
     if rule.is_default:
         AutomationRule.objects.filter(organization=org, is_default=True).exclude(id=rule.id).update(is_default=False)
     rule.save()
@@ -741,6 +1068,314 @@ def automation_rule_detail_api(request, rule_id):
     if not deleted:
         return JsonResponse({"error": "not_found"}, status=404)
     return JsonResponse({"status": "deleted"})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def marketing_contacts_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if request.method == "GET":
+        try:
+            rows = MarketingContact.objects.filter(organization=org).order_by("-updated_at", "-id")
+            return JsonResponse({"contacts": [_contact_payload(row) for row in rows]})
+        except DatabaseError:
+            # Keep WhatsApp Automation page usable even if migration is pending.
+            return JsonResponse({"contacts": [], "warning": "marketing_tables_unavailable"})
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    phone = _normalize_phone_number(data.get("phone_number"))
+    if not phone:
+        return JsonResponse({"phone_number": ["invalid"]}, status=400)
+    name = str(data.get("name") or "").strip()[:160]
+    email = str(data.get("email") or "").strip()
+    tags = str(data.get("tags") or "").strip()[:240]
+    is_opted_in = _to_bool(data.get("is_opted_in"), default=False)
+    has_opted_out = _to_bool(data.get("has_opted_out"), default=False)
+    opt_in_source = str(data.get("opt_in_source") or "").strip()[:120]
+    consent_note = str(data.get("consent_note") or "").strip()
+    row, created = MarketingContact.objects.get_or_create(
+        organization=org,
+        phone_number=phone,
+        defaults={"name": name},
+    )
+    row.name = name or row.name
+    row.email = email
+    row.tags = tags
+    row.is_opted_in = bool(is_opted_in and not has_opted_out)
+    row.has_opted_out = bool(has_opted_out)
+    row.opt_in_source = opt_in_source
+    row.consent_note = consent_note
+    now = timezone.now()
+    if row.is_opted_in and not row.opt_in_at:
+        row.opt_in_at = now
+    if row.has_opted_out and not row.opted_out_at:
+        row.opted_out_at = now
+    if not row.has_opted_out:
+        row.opted_out_at = None
+        row.opt_out_reason = ""
+    row.save()
+    return JsonResponse({"contact": _contact_payload(row), "created": created})
+
+
+@login_required
+@require_http_methods(["PATCH", "DELETE"])
+def marketing_contact_detail_api(request, contact_id):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    row = MarketingContact.objects.filter(id=contact_id, organization=org).first()
+    if not row:
+        return JsonResponse({"error": "not_found"}, status=404)
+    if request.method == "DELETE":
+        row.delete()
+        return JsonResponse({"status": "deleted"})
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    if "name" in data:
+        row.name = str(data.get("name") or "").strip()[:160]
+    if "phone_number" in data:
+        phone = _normalize_phone_number(data.get("phone_number"))
+        if not phone:
+            return JsonResponse({"phone_number": ["invalid"]}, status=400)
+        exists = MarketingContact.objects.filter(organization=org, phone_number=phone).exclude(id=row.id).exists()
+        if exists:
+            return JsonResponse({"phone_number": ["already_exists"]}, status=400)
+        row.phone_number = phone
+    if "email" in data:
+        row.email = str(data.get("email") or "").strip()
+    if "tags" in data:
+        row.tags = str(data.get("tags") or "").strip()[:240]
+    if "is_opted_in" in data:
+        requested_opt_in = _to_bool(data.get("is_opted_in"), default=False)
+        row.is_opted_in = bool(requested_opt_in and not row.has_opted_out)
+        if row.is_opted_in and not row.opt_in_at:
+            row.opt_in_at = timezone.now()
+    if "has_opted_out" in data:
+        row.has_opted_out = _to_bool(data.get("has_opted_out"), default=False)
+        if row.has_opted_out:
+            row.opted_out_at = timezone.now()
+            row.is_opted_in = False
+            row.opt_out_reason = str(data.get("opt_out_reason") or "STOP").strip()[:160]
+        else:
+            row.opted_out_at = None
+            row.opt_out_reason = ""
+    if "consent_note" in data:
+        row.consent_note = str(data.get("consent_note") or "").strip()
+    if "opt_in_source" in data:
+        row.opt_in_source = str(data.get("opt_in_source") or "").strip()[:120]
+    row.save()
+    return JsonResponse({"contact": _contact_payload(row)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def marketing_contacts_opt_out_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    phone = _normalize_phone_number(data.get("phone_number"))
+    if not phone:
+        return JsonResponse({"phone_number": ["invalid"]}, status=400)
+    reason = str(data.get("reason") or "STOP").strip()[:160] or "STOP"
+    row = MarketingContact.objects.filter(organization=org, phone_number=phone).first()
+    if not row:
+        return JsonResponse({"error": "not_found"}, status=404)
+    row.has_opted_out = True
+    row.is_opted_in = False
+    row.opt_out_reason = reason
+    row.opted_out_at = timezone.now()
+    row.save(update_fields=["has_opted_out", "is_opted_in", "opt_out_reason", "opted_out_at", "updated_at"])
+    return JsonResponse({"status": "ok", "contact": _contact_payload(row)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def marketing_contacts_import_csv_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    csv_text = str(data.get("csv_text") or "")
+    if not csv_text.strip():
+        return JsonResponse({"csv_text": ["required"]}, status=400)
+    reader = csv.DictReader(io.StringIO(csv_text))
+    created = 0
+    updated = 0
+    skipped = 0
+    for item in reader:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        phone = _normalize_phone_number(item.get("phone_number") or item.get("phone") or item.get("mobile"))
+        if not phone:
+            skipped += 1
+            continue
+        name = str(item.get("name") or "").strip()[:160]
+        email = str(item.get("email") or "").strip()
+        tags = str(item.get("tags") or "").strip()[:240]
+        raw_opt_in = str(item.get("is_opted_in") or item.get("opt_in") or "false").strip().lower()
+        is_opted_in = raw_opt_in in {"true", "1", "yes", "y"}
+        opt_in_source = str(item.get("opt_in_source") or "csv_import").strip()[:120]
+        consent_note = str(item.get("consent_note") or "").strip()
+        row, was_created = MarketingContact.objects.get_or_create(
+            organization=org,
+            phone_number=phone,
+            defaults={"name": name},
+        )
+        row.name = name or row.name
+        row.email = email
+        row.tags = tags
+        row.opt_in_source = opt_in_source
+        row.consent_note = consent_note
+        if is_opted_in and not row.has_opted_out:
+            row.is_opted_in = True
+            if not row.opt_in_at:
+                row.opt_in_at = timezone.now()
+        row.save()
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+    return JsonResponse({"status": "ok", "created": created, "updated": updated, "skipped": skipped})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def marketing_campaigns_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if request.method == "GET":
+        try:
+            rows = MarketingCampaign.objects.filter(organization=org).order_by("-created_at", "-id")[:50]
+            recent_deliveries = (
+                MarketingCampaignDelivery.objects
+                .filter(organization=org)
+                .select_related("campaign", "contact")
+                .order_by("-attempted_at", "-id")[:100]
+            )
+            return JsonResponse({
+                "campaigns": [_campaign_payload(row) for row in rows],
+                "recent_deliveries": [_delivery_payload(row) for row in recent_deliveries],
+            })
+        except DatabaseError:
+            return JsonResponse({
+                "campaigns": [],
+                "recent_deliveries": [],
+                "warning": "marketing_tables_unavailable",
+            })
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    name = str(data.get("name") or "").strip()[:180]
+    template_name = str(data.get("template_name") or "").strip()[:180]
+    if not name:
+        return JsonResponse({"name": ["required"]}, status=400)
+    if not template_name:
+        return JsonResponse({"template_name": ["required"]}, status=400)
+    if not _is_valid_template_name(template_name):
+        return JsonResponse(
+            {
+                "template_name": ["invalid_format"],
+                "detail": "Use approved WhatsApp template name format: lowercase letters, numbers, underscore.",
+            },
+            status=400,
+        )
+    compliance_note = str(data.get("compliance_note") or "").strip()
+    if "stop" not in compliance_note.lower():
+        return JsonResponse(
+            {
+                "compliance_note": ["must_include_stop_instruction"],
+                "detail": "Compliance note must include STOP opt-out instruction.",
+            },
+            status=400,
+        )
+    template_variables = _parse_template_variables(data.get("template_variables"))
+    contact_ids = data.get("contact_ids") if isinstance(data.get("contact_ids"), list) else []
+    contacts_qs = MarketingContact.objects.filter(organization=org)
+    if contact_ids:
+        contacts_qs = contacts_qs.filter(id__in=contact_ids)
+    contacts = list(contacts_qs.order_by("id"))
+    if not contacts:
+        return JsonResponse({"contact_ids": ["no_contacts_selected"]}, status=400)
+    allowed_to_send, ratio = _failure_rate_guard(org)
+    campaign = MarketingCampaign.objects.create(
+        organization=org,
+        name=name,
+        template_name=template_name,
+        template_variables=template_variables,
+        compliance_note=compliance_note,
+        created_by=request.user,
+        status=MarketingCampaign.STATUS_DRAFT,
+    )
+    send_now = _to_bool(data.get("send_now"), default=True)
+    if not send_now:
+        campaign.total_contacts = len(contacts)
+        campaign.save(update_fields=["total_contacts", "updated_at"])
+        return JsonResponse({"campaign": _campaign_payload(campaign), "status": "draft_saved"})
+    if not allowed_to_send:
+        campaign.status = MarketingCampaign.STATUS_BLOCKED
+        campaign.failed_count = len(contacts)
+        campaign.total_contacts = len(contacts)
+        campaign.save(update_fields=["status", "failed_count", "total_contacts", "updated_at"])
+        return JsonResponse(
+            {
+                "campaign": _campaign_payload(campaign),
+                "detail": f"Campaign blocked due to high failure rate ({round(ratio * 100, 1)}%).",
+            },
+            status=400,
+        )
+    _campaign_send_to_contacts(campaign, contacts)
+    return JsonResponse({"campaign": _campaign_payload(campaign)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def marketing_campaign_retry_failed_api(request, campaign_id):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    campaign = MarketingCampaign.objects.filter(id=campaign_id, organization=org).first()
+    if not campaign:
+        return JsonResponse({"error": "not_found"}, status=404)
+    allowed_to_send, ratio = _failure_rate_guard(org)
+    if not allowed_to_send:
+        return JsonResponse(
+            {"error": "blocked", "detail": f"Retry blocked due to high failure rate ({round(ratio * 100, 1)}%)."},
+            status=400,
+        )
+    failed_contact_ids = list(
+        MarketingCampaignDelivery.objects
+        .filter(campaign=campaign, status=MarketingCampaignDelivery.STATUS_FAILED, contact__isnull=False)
+        .values_list("contact_id", flat=True)
+        .distinct()
+    )
+    contacts = list(MarketingContact.objects.filter(organization=org, id__in=failed_contact_ids))
+    if not contacts:
+        return JsonResponse({"status": "ok", "detail": "No failed contacts to retry.", "campaign": _campaign_payload(campaign)})
+    _campaign_send_to_contacts(campaign, contacts)
+    return JsonResponse({"status": "ok", "campaign": _campaign_payload(campaign)})
 
 
 @login_required

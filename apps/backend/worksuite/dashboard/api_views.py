@@ -169,6 +169,70 @@ def _ticket_product_options_for_user(user):
     ]
 
 
+def _ticket_product_plan_filter(product_slug):
+    normalized = _normalize_product_slug(product_slug, default="")
+    if normalized == "monitor":
+        return Q(plan__product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(plan__product__isnull=True)
+    if normalized:
+        return Q(plan__product__slug=normalized)
+    return Q(plan__product__isnull=False)
+
+
+def _highest_paid_plan_id_for_product(product_slug):
+    plan_filter = _ticket_product_plan_filter(product_slug)
+    plans = Plan.objects.filter(plan_filter).only(
+        "id",
+        "price",
+        "monthly_price",
+        "yearly_price",
+        "usd_monthly_price",
+        "usd_yearly_price",
+    )
+    best_id = None
+    best_value = Decimal("0")
+    for plan in plans:
+        values = [
+            Decimal(plan.price or 0),
+            Decimal(plan.monthly_price or 0),
+            Decimal(plan.yearly_price or 0),
+            Decimal(plan.usd_monthly_price or 0),
+            Decimal(plan.usd_yearly_price or 0),
+        ]
+        value = max(values)
+        if value > best_value:
+            best_value = value
+            best_id = plan.id
+    if best_value <= 0:
+        return None
+    return best_id
+
+
+def _org_has_priority_support_for_product(org, product_slug):
+    if not org:
+        return False
+    plan_filter = _ticket_product_plan_filter(product_slug)
+    sub = (
+        Subscription.objects
+        .select_related("plan", "plan__product")
+        .filter(
+            organization=org,
+            status__in=("active", "trialing"),
+        )
+        .filter(plan_filter)
+        .order_by("-start_date")
+        .first()
+    )
+    if not sub:
+        return False
+    if not is_subscription_active(sub):
+        dashboard_views.maybe_expire_subscription(sub)
+        return False
+    highest_plan_id = _highest_paid_plan_id_for_product(product_slug)
+    if not highest_plan_id:
+        return False
+    return sub.plan_id == highest_plan_id
+
+
 def _validate_gstin(value):
     if not value:
         return False
@@ -547,6 +611,10 @@ def org_tickets(request):
     org = org_or_error
 
     product_options = _ticket_product_options_for_user(request.user)
+    priority_support_by_product = {
+        item["slug"]: _org_has_priority_support_for_product(org, item["slug"])
+        for item in product_options
+    }
 
     if request.method == "GET":
         try:
@@ -603,12 +671,16 @@ def org_tickets(request):
             "total_pages": total_pages,
             "unread_count": unread_count,
             "product_options": product_options,
+            "priority_support_by_product": priority_support_by_product,
         })
 
     if not _is_org_admin_user(request, org):
         return JsonResponse({"error": "admin_only"}, status=403)
 
     category = _normalize_ticket_category(request.POST.get("category"), default="support")
+    priority = str(request.POST.get("priority") or "medium").strip().lower()
+    if priority not in {"low", "medium", "high", "urgent"}:
+        priority = "medium"
     subject = _normalize_text(request.POST.get("subject") or request.POST.get("title") or "")
     message = str(request.POST.get("message") or "").strip()
     product_slug = _normalize_product_slug(request.POST.get("product_slug"), default="monitor")
@@ -621,6 +693,8 @@ def org_tickets(request):
         return _json_error("message_required", status=400)
     if product_slug not in allowed_product_slugs:
         return _json_error("invalid_product_slug", status=400)
+    if priority == "urgent" and not _org_has_priority_support_for_product(org, product_slug):
+        return _json_error("urgent_priority_not_allowed_for_plan", status=400)
     file_error = _validate_ticket_attachments(files)
     if file_error:
         return _json_error(file_error, status=400)

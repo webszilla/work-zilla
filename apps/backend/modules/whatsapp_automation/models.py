@@ -228,6 +228,116 @@ class CatalogueProduct(models.Model):
         return f"{self.organization_id}:{self.title}"
 
 
+class MarketingContact(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_marketing_contacts")
+    name = models.CharField(max_length=160, blank=True, default="")
+    phone_number = models.CharField(max_length=40)
+    email = models.EmailField(blank=True, default="")
+    tags = models.CharField(max_length=240, blank=True, default="")
+    is_opted_in = models.BooleanField(default=False)
+    opt_in_source = models.CharField(max_length=120, blank=True, default="")
+    consent_note = models.TextField(blank=True, default="")
+    has_opted_out = models.BooleanField(default=False)
+    opt_out_reason = models.CharField(max_length=160, blank=True, default="")
+    opt_in_at = models.DateTimeField(null=True, blank=True)
+    opted_out_at = models.DateTimeField(null=True, blank=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "phone_number"]),
+            models.Index(fields=["organization", "is_opted_in", "has_opted_out"]),
+        ]
+        unique_together = ("organization", "phone_number")
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.phone_number}"
+
+
+class MarketingCampaign(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_SENT = "sent"
+    STATUS_PARTIAL = "partial"
+    STATUS_BLOCKED = "blocked"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_PARTIAL, "Partial"),
+        (STATUS_BLOCKED, "Blocked"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_marketing_campaigns")
+    name = models.CharField(max_length=180)
+    template_name = models.CharField(max_length=180)
+    template_variables = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    total_contacts = models.PositiveIntegerField(default=0)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    compliance_note = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wa_marketing_campaigns_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+            models.Index(fields=["organization", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.name}"
+
+
+class MarketingCampaignDelivery(models.Model):
+    STATUS_SENT = "sent"
+    STATUS_FAILED = "failed"
+    STATUS_SKIPPED = "skipped"
+    STATUS_CHOICES = (
+        (STATUS_SENT, "Sent"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_SKIPPED, "Skipped"),
+    )
+
+    campaign = models.ForeignKey(MarketingCampaign, on_delete=models.CASCADE, related_name="deliveries")
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_marketing_deliveries")
+    contact = models.ForeignKey(
+        MarketingContact,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="campaign_deliveries",
+    )
+    phone_number = models.CharField(max_length=40)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    error_code = models.CharField(max_length=120, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    attempted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-attempted_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "status", "attempted_at"]),
+            models.Index(fields=["campaign", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.phone_number}:{self.status}"
+
+
 def build_unique_public_slug(model_cls, base_text, fallback_prefix="page"):
     base = slugify(base_text or "")[:180] or f"{fallback_prefix}"
     candidate = base

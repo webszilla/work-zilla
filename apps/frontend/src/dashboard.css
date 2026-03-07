@@ -1525,6 +1525,18 @@ html[data-theme="light"] .admin-feature-card{
   gap: 12px;
   height: 100%;
 }
+.wa-welcome-textarea{
+  font-size: 15px !important;
+}
+.wa-default-cell{
+  vertical-align: middle !important;
+}
+.wa-default-cell .badge{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+}
 .tiny-html-editor{
   display: flex;
   flex-direction: column;
@@ -1537,7 +1549,7 @@ html[data-theme="light"] .admin-feature-card{
   flex-direction: column;
   min-height: 320px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 8px;
+  border-radius: 2pt;
   background: #08111f;
   overflow: hidden;
 }
@@ -1634,6 +1646,9 @@ html[data-theme="light"] .admin-feature-card{
   color:#f8fafc;
   font-family: Menlo, Monaco, monospace;
 }
+.tiny-html-editor__overflow-mark{
+  color:#ef4444;
+}
 .tiny-html-editor__content img{
   max-width:100%;
   height:auto;
@@ -1647,14 +1662,18 @@ html[data-theme="light"] .admin-feature-card{
   color: #f59e0b;
 }
 .tiny-html-editor__frame.is-overlimit{
-  border-color: rgba(248, 113, 113, 0.65);
-  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.18);
+  border-color: var(--color-border, #1f2937);
+  box-shadow: none;
 }
 .tiny-html-editor__content.is-overlimit{
-  background: rgba(127, 29, 29, 0.22);
+  background: var(--color-card, #0b1222);
 }
 .tiny-html-editor__meta.is-overlimit{
+  color: #94a3b8;
+}
+.tiny-html-editor__extra{
   color: #ef4444;
+  font-weight: 600;
 }
 .tiny-html-editor__validator{
   position: absolute;
@@ -1668,8 +1687,8 @@ html[data-theme="light"] .admin-feature-card{
   white-space: nowrap;
 }
 .wz-text-limit-overflow{
-  background: rgba(127, 29, 29, 0.22) !important;
-  border-color: rgba(248, 113, 113, 0.7) !important;
+  background: inherit !important;
+  border-color: inherit !important;
 }
 html[data-theme="light"] .inbox-list-header{
   border-bottom-color:#e2e8f0;
@@ -1755,6 +1774,9 @@ html[data-theme="light"] .tiny-html-editor__content code{
   background:#eef2f7;
   color:#111111;
 }
+html[data-theme="light"] .tiny-html-editor__overflow-mark{
+  color:#b91c1c;
+}
 html[data-theme="light"] .tiny-html-editor__meta{
   color:#64748b;
 }
@@ -1762,18 +1784,21 @@ html[data-theme="light"] .tiny-html-editor__meta.is-limit{
   color:#b45309;
 }
 html[data-theme="light"] .tiny-html-editor__frame.is-overlimit{
-  border-color: rgba(239, 68, 68, 0.52);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.16);
+  border-color: #cfcfcf;
+  box-shadow: none;
 }
 html[data-theme="light"] .tiny-html-editor__content.is-overlimit{
-  background: rgba(254, 226, 226, 0.9);
+  background:#ffffff;
 }
 html[data-theme="light"] .tiny-html-editor__meta.is-overlimit{
+  color:#64748b;
+}
+html[data-theme="light"] .tiny-html-editor__extra{
   color:#b91c1c;
 }
 html[data-theme="light"] .wz-text-limit-overflow{
-  background: rgba(254, 226, 226, 0.9) !important;
-  border-color: rgba(239, 68, 68, 0.48) !important;
+  background: inherit !important;
+  border-color: inherit !important;
 }
 html[data-theme="light"] .inbox-auto-refresh{
   color:#64748b;
