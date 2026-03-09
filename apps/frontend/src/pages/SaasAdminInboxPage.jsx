@@ -20,6 +20,13 @@ const emptyState = {
 };
 const INBOX_RETENTION_NOTE = "Auto cleanup: Older inbox messages are automatically deleted when inbox exceeds 100 notifications (same rule for all products).";
 const TICKET_RETENTION_NOTE = "Closed tickets are auto-deleted after 45 days.";
+const TICKET_STATUS_TABS = [
+  { key: "", label: "All Status" },
+  { key: "open", label: "Open" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "resolved", label: "Resolved" },
+  { key: "closed", label: "Closed" },
+];
 
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -398,21 +405,21 @@ export default function SaasAdminInboxPage() {
               <option value="support">Support</option>
               <option value="sales">Sales</option>
             </select>
-            <select
-              className="form-select form-select-sm"
-              style={{ maxWidth: "180px" }}
-              value={ticketStatusFilter}
-              onChange={(event) => {
-                setTicketStatusFilter(event.target.value);
-                setTicketPage(1);
-              }}
-            >
-              <option value="">All Status</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
-            </select>
+            <div className="ticket-status-tabs" role="tablist" aria-label="Ticket status filter">
+              {TICKET_STATUS_TABS.map((tab) => (
+                <button
+                  key={tab.key || "all-status"}
+                  type="button"
+                  className={`ticket-status-tabs__item ${ticketStatusFilter === tab.key ? "is-active" : ""}`}
+                  onClick={() => {
+                    setTicketStatusFilter(tab.key);
+                    setTicketPage(1);
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => loadTickets({ keepSelection: true })}>
               Refresh Tickets
             </button>

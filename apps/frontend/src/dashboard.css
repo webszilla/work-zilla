@@ -1473,6 +1473,32 @@ html[data-theme="light"] .admin-feature-card{
   font-size:12px;
   color:#9ca3af;
 }
+.ticket-status-tabs{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.ticket-status-tabs__item{
+  border:1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.28);
+  background:rgba(15, 23, 42, 0.32);
+  color:var(--color-text-muted, #94a3b8);
+  border-radius:999px;
+  font-size:12px;
+  line-height:1;
+  padding:8px 12px;
+  min-height:32px;
+  font-weight:500;
+}
+.ticket-status-tabs__item:hover{
+  border-color:rgba(var(--color-primary-rgb, 79, 70, 229), 0.45);
+  color:var(--color-text, #e5e7eb);
+}
+.ticket-status-tabs__item.is-active{
+  background:var(--color-primary, #4f46e5);
+  border-color:var(--color-primary, #4f46e5);
+  color:#ffffff;
+  box-shadow:0 8px 16px rgba(var(--color-primary-rgb, 79, 70, 229), 0.24);
+}
 .wa-catalogue-page{
   gap: 16px !important;
 }
@@ -1917,6 +1943,20 @@ html[data-theme="light"] .wz-text-limit-overflow{
 }
 html[data-theme="light"] .inbox-auto-refresh{
   color:#64748b;
+}
+html[data-theme="light"] .ticket-status-tabs__item{
+  border-color:rgba(var(--color-primary-rgb, 29, 78, 216), 0.24);
+  background:#ffffff;
+  color:#475569;
+}
+html[data-theme="light"] .ticket-status-tabs__item:hover{
+  border-color:rgba(var(--color-primary-rgb, 29, 78, 216), 0.42);
+  color:#0f172a;
+}
+html[data-theme="light"] .ticket-status-tabs__item.is-active{
+  background:var(--color-primary, #1d4ed8);
+  border-color:var(--color-primary, #1d4ed8);
+  color:#ffffff;
 }
 
 .saas-admin-kpis{
