@@ -75,7 +75,9 @@ import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboard
 import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPage.jsx";
 import WebsiteCatalogueDashboardPage from "./pages/WebsiteCatalogueDashboardPage.jsx";
 import DigitalBusinessCardDashboardPage from "./pages/DigitalBusinessCardDashboardPage.jsx";
+import DigitalCardVisitorAnalyticsPage from "./pages/DigitalCardVisitorAnalyticsPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
+import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
 import { formatDeviceDate, setOrgTimezone } from "./lib/datetime.js";
@@ -227,6 +229,7 @@ const reactPages = [
   { label: "Whatsapp Automation", path: "/dashboard/whatsapp-automation", icon: "bi-whatsapp", productOnly: "whatsapp-automation" },
   { label: "Website & Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
+  { label: "Visitor Analytics", path: "/dashboard/digital-card/analytics", icon: "bi-graph-up-arrow", productOnly: "whatsapp-automation" },
   { label: "Media Library", path: "/media-library", icon: "bi-images", adminOnly: true },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
   { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
@@ -241,7 +244,7 @@ const reactPages = [
 
 const saasAdminPages = [
   { key: "overview", label: "Overview", path: "/saas-admin", icon: "bi-grid-1x2" },
-  { key: "inbox", label: "Inbox", path: "/saas-admin/inbox", icon: "bi-inbox" },
+  { key: "inbox", label: "Ticket & Inbox", path: "/saas-admin/inbox", icon: "bi-inbox" },
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
@@ -653,10 +656,11 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/dashboard/whatsapp-automation", 4],
           ["/dashboard/catalogue", 5],
           ["/dashboard/digital-card", 6],
-          ["/media-library", 7],
-          ["/billing", 8],
-          ["/plans", 9],
-          ["/profile", 10],
+          ["/dashboard/digital-card/analytics", 7],
+          ["/media-library", 8],
+          ["/billing", 9],
+          ["/plans", 10],
+          ["/profile", 11],
         ])
       : new Map([
           ["/", 0],
@@ -1269,8 +1273,12 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={productSlug === "whatsapp-automation" ? <DigitalBusinessCardDashboardPage currentUsername={state.user?.username || ""} /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/dashboard/digital-card/analytics"
+            element={productSlug === "whatsapp-automation" ? <DigitalCardVisitorAnalyticsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/notifications-inbox"
-            element={!isDealer ? <OrgInboxPage /> : <Navigate to={withBase("/")} replace />}
+            element={!isDealer ? <OrgInboxPage productSlug={productSlug} /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/org-admin/media-library"
@@ -1934,25 +1942,27 @@ export default function App() {
   }
 
   return (
-    <ConfirmProvider>
-      <BrowserRouter basename="/app">
-        <BrandingShell getProductRoute={getProductRoute}>
-          {state.loading ? (
-            <div className="page-center">
-              <div className="panel">
-                <div className="spinner" />
-                <p>Loading dashboard...</p>
+    <UploadAlertProvider>
+      <ConfirmProvider>
+        <BrowserRouter basename="/app">
+          <BrandingShell getProductRoute={getProductRoute}>
+            {state.loading ? (
+              <div className="page-center">
+                <div className="panel">
+                  <div className="spinner" />
+                  <p>Loading dashboard...</p>
+                </div>
               </div>
-            </div>
-          ) : state.authenticated ? (
-            <ErrorBoundary>
-              <ProductShell />
-            </ErrorBoundary>
-          ) : (
-            <ForceHtmlLoginRedirect />
-          )}
-        </BrandingShell>
-      </BrowserRouter>
-    </ConfirmProvider>
+            ) : state.authenticated ? (
+              <ErrorBoundary>
+                <ProductShell />
+              </ErrorBoundary>
+            ) : (
+              <ForceHtmlLoginRedirect />
+            )}
+          </BrandingShell>
+        </BrowserRouter>
+      </ConfirmProvider>
+    </UploadAlertProvider>
   );
 }

@@ -3,6 +3,8 @@ import { waApi } from "../api/whatsappAutomation.js";
 import { COUNTRY_OPTIONS } from "../lib/countries.js";
 import { getStateOptions } from "../lib/locationOptions.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const SOCIAL_ICON_OPTIONS = [
   { value: "instagram", label: "Instagram", bi: "bi-instagram" },
@@ -53,7 +55,6 @@ const emptyForm = {
   state: "",
   postal_code: "",
   description: "",
-  theme_color: "#22c55e",
   product_highlights_html: "",
   social_links_text: "{}",
   logo_data_url: "",
@@ -170,7 +171,6 @@ export default function WhatsappAutomationCompanyProfilePage() {
           state: company.state || "",
           postal_code: company.postal_code || "",
           description: company.description || "",
-          theme_color: company.theme_color || "#22c55e",
           product_highlights_html: highlightListToHtml(company.product_highlights_html || company.product_highlights || ""),
           social_links_text: JSON.stringify(company.social_links || {}, null, 2),
           logo_data_url: "",
@@ -219,7 +219,6 @@ export default function WhatsappAutomationCompanyProfilePage() {
         state: form.state,
         postal_code: form.postal_code,
         description: form.description,
-        theme_color: form.theme_color,
         logo_data_url: form.logo_data_url || "",
         product_highlights_html: form.product_highlights_html,
         social_links_items,
@@ -247,12 +246,16 @@ export default function WhatsappAutomationCompanyProfilePage() {
   async function onCustomIconChange(id, file) {
     if (!file) return;
     if (!String(file.type || "").startsWith("image/")) {
-      setError("Custom icon must be an image file.");
+      const message = "Custom icon must be an image file.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     // keep it light for JSON storage
     if (file.size > 200 * 1024) {
-      setError("Custom icon size must be under 200 KB.");
+      const message = "Custom icon size must be under 200 KB.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -270,11 +273,15 @@ export default function WhatsappAutomationCompanyProfilePage() {
     const mime = String(file.type || "").toLowerCase();
     const allowed = new Set(["image/jpeg", "image/jpg", "image/png", "image/svg+xml"]);
     if (!allowed.has(mime)) {
-      setError("Company logo supports only JPG, PNG, SVG.");
+      const message = "Company logo supports only JPG, PNG, SVG.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     if (file.size > 500 * 1024) {
-      setError("Company logo size must be under 500 KB.");
+      const message = "Company logo size must be under 500 KB.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -293,16 +300,7 @@ export default function WhatsappAutomationCompanyProfilePage() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h3 className="mb-0">Company Profile</h3>
         <div className="d-flex align-items-center gap-3">
-          <div>
-            <label className="form-label small mb-1">Theme Color</label>
-            <input
-              type="color"
-              className="form-control form-control-color"
-              value={form.theme_color}
-              onChange={(e) => setForm((p) => ({ ...p, theme_color: e.target.value }))}
-            />
-          </div>
-          <button type="button" className="btn btn-primary btn-sm mt-3" onClick={onSave} disabled={saving}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saving}>
             {saving ? "Saving..." : "Save Data"}
           </button>
         </div>
@@ -327,18 +325,13 @@ export default function WhatsappAutomationCompanyProfilePage() {
         <div className="col-12 col-lg-4">
           <label className="form-label">Phone</label>
           <div className="input-group">
-            <select
-              className="form-select"
-              style={{ maxWidth: 140 }}
+            <PhoneCountryCodePicker
               value={form.phone_country}
-              onChange={(e) => setForm((p) => ({ ...p, phone_country: e.target.value }))}
-            >
-              {PHONE_COUNTRIES.map((entry) => (
-                <option key={`${entry.label}-${entry.code}`} value={entry.code}>
-                  {entry.code} {entry.label}
-                </option>
-              ))}
-            </select>
+              onChange={(code) => setForm((p) => ({ ...p, phone_country: code }))}
+              options={PHONE_COUNTRIES}
+              style={{ maxWidth: 140 }}
+              ariaLabel="Company phone country code"
+            />
             <input
               className="form-control"
               value={form.phone_number}
@@ -352,18 +345,13 @@ export default function WhatsappAutomationCompanyProfilePage() {
         <div className="col-12 col-lg-4">
           <label className="form-label">WhatsApp</label>
           <div className="input-group">
-            <select
-              className="form-select"
-              style={{ maxWidth: 140 }}
+            <PhoneCountryCodePicker
               value={form.whatsapp_country}
-              onChange={(e) => setForm((p) => ({ ...p, whatsapp_country: e.target.value }))}
-            >
-              {PHONE_COUNTRIES.map((entry) => (
-                <option key={`wa-${entry.label}-${entry.code}`} value={entry.code}>
-                  {entry.code} {entry.label}
-                </option>
-              ))}
-            </select>
+              onChange={(code) => setForm((p) => ({ ...p, whatsapp_country: code }))}
+              options={PHONE_COUNTRIES}
+              style={{ maxWidth: 140 }}
+              ariaLabel="WhatsApp country code"
+            />
             <input
               className="form-control"
               value={form.whatsapp_local_number}

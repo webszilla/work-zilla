@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import EditAgentModal from "../components/EditAgentModal.jsx";
 
 const emptyState = {
@@ -397,18 +398,13 @@ export default function AiChatbotAgentsPage() {
                   <div className="col-md-6">
                     <label className="form-label">Phone</label>
                     <div className="input-group">
-                      <select
-                        className="form-select"
+                      <PhoneCountryCodePicker
                         value={form.phoneCountry}
-                        onChange={(event) => setForm((prev) => ({ ...prev, phoneCountry: event.target.value }))}
+                        onChange={(code) => setForm((prev) => ({ ...prev, phoneCountry: code }))}
+                        options={PHONE_COUNTRIES}
                         style={{ maxWidth: "110px" }}
-                      >
-                        {PHONE_COUNTRIES.map((entry) => (
-                          <option key={`${entry.code}-${entry.label}`} value={entry.code}>
-                            {entry.label} {entry.code}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel="Agent phone country code"
+                      />
                       <input
                         type="text"
                         className="form-control"

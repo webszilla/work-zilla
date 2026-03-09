@@ -169,7 +169,16 @@ def _ticket_product_options_for_user(user):
     ]
 
 
-def _ticket_product_plan_filter(product_slug):
+def _ticket_product_filter_for_plan(product_slug):
+    normalized = _normalize_product_slug(product_slug, default="")
+    if normalized == "monitor":
+        return Q(product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(product__isnull=True)
+    if normalized:
+        return Q(product__slug=normalized)
+    return Q(product__isnull=False)
+
+
+def _ticket_product_filter_for_subscription(product_slug):
     normalized = _normalize_product_slug(product_slug, default="")
     if normalized == "monitor":
         return Q(plan__product__slug__in=["monitor", "worksuite", "work-suite"]) | Q(plan__product__isnull=True)
@@ -179,7 +188,7 @@ def _ticket_product_plan_filter(product_slug):
 
 
 def _highest_paid_plan_id_for_product(product_slug):
-    plan_filter = _ticket_product_plan_filter(product_slug)
+    plan_filter = _ticket_product_filter_for_plan(product_slug)
     plans = Plan.objects.filter(plan_filter).only(
         "id",
         "price",
@@ -210,7 +219,7 @@ def _highest_paid_plan_id_for_product(product_slug):
 def _org_has_priority_support_for_product(org, product_slug):
     if not org:
         return False
-    plan_filter = _ticket_product_plan_filter(product_slug)
+    plan_filter = _ticket_product_filter_for_subscription(product_slug)
     sub = (
         Subscription.objects
         .select_related("plan", "plan__product")
@@ -344,6 +353,15 @@ def _normalize_ticket_category(value, default="support"):
 def _normalize_ticket_status(value, default="open"):
     status = str(value or "").strip().lower()
     return status if status in {"open", "in_progress", "resolved", "closed"} else default
+
+
+def _purge_expired_closed_tickets(days=45):
+    cutoff = timezone.now() - timedelta(days=max(int(days or 45), 1))
+    return (
+        OrgSupportTicket.objects
+        .filter(status="closed", closed_at__isnull=False, closed_at__lt=cutoff)
+        .delete()
+    )
 
 
 def _validate_ticket_attachments(files):
@@ -609,6 +627,7 @@ def org_tickets(request):
     if not allowed:
         return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
     org = org_or_error
+    _purge_expired_closed_tickets(days=45)
 
     product_options = _ticket_product_options_for_user(request.user)
     priority_support_by_product = {
@@ -707,6 +726,7 @@ def org_tickets(request):
             category=category,
             subject=subject,
             status="open",
+            closed_at=None,
         )
         msg = OrgSupportTicketMessage.objects.create(
             ticket=ticket,
@@ -740,6 +760,7 @@ def org_ticket_detail(request, ticket_id):
     if not allowed:
         return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
     org = org_or_error
+    _purge_expired_closed_tickets(days=45)
     ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
     ticket.last_read_by_org_at = timezone.now()
     ticket.save(update_fields=["last_read_by_org_at", "updated_at"])
@@ -756,6 +777,7 @@ def org_ticket_reply(request, ticket_id):
     if not _is_org_admin_user(request, org):
         return JsonResponse({"error": "admin_only"}, status=403)
 
+    _purge_expired_closed_tickets(days=45)
     ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
     message = str(request.POST.get("message") or "").strip()
     files = request.FILES.getlist("attachments")
@@ -782,9 +804,10 @@ def org_ticket_reply(request, ticket_id):
         now = timezone.now()
         if ticket.status == "closed":
             ticket.status = "open"
+            ticket.closed_at = None
         ticket.last_message_at = now
         ticket.last_read_by_org_at = now
-        ticket.save(update_fields=["status", "last_message_at", "last_read_by_org_at", "updated_at"])
+        ticket.save(update_fields=["status", "closed_at", "last_message_at", "last_read_by_org_at", "updated_at"])
 
     return JsonResponse({
         "status": "ok",
@@ -803,6 +826,7 @@ def org_ticket_status(request, ticket_id):
     if not _is_org_admin_user(request, org):
         return JsonResponse({"error": "admin_only"}, status=403)
 
+    _purge_expired_closed_tickets(days=45)
     ticket = get_object_or_404(OrgSupportTicket, id=ticket_id, organization=org)
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -816,7 +840,8 @@ def org_ticket_status(request, ticket_id):
     if ticket.status == next_status:
         return JsonResponse({"status": "ok", "ticket": _serialize_ticket_detail(ticket)})
     ticket.status = next_status
-    ticket.save(update_fields=["status", "updated_at"])
+    ticket.closed_at = timezone.now() if next_status == "closed" else None
+    ticket.save(update_fields=["status", "closed_at", "updated_at"])
     OrgSupportTicketMessage.objects.create(
         ticket=ticket,
         author=request.user,

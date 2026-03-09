@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 
 const emptyState = {
   loading: true,
@@ -144,20 +145,15 @@ export default function SaasAdminProfilePage() {
                 />
               </div>
               <div className="mb-2">
-                <label className="form-label">Mobile Number</label>
-                <div className="input-group">
-                  <select
-                    className="form-select"
+              <label className="form-label">Mobile Number</label>
+              <div className="input-group">
+                  <PhoneCountryCodePicker
                     value={phoneCountry}
-                    onChange={(event) => setPhoneCountry(event.target.value)}
+                    onChange={(code) => setPhoneCountry(code)}
+                    options={phoneCountries}
                     style={{ maxWidth: "170px" }}
-                  >
-                    {phoneCountries.map((entry) => (
-                      <option key={`${entry.code}-${entry.label}`} value={entry.code}>
-                        {entry.label} {entry.code}
-                      </option>
-                    ))}
-                  </select>
+                    ariaLabel="SaaS admin phone country code"
+                  />
                   <input
                     type="tel"
                     className="form-control"

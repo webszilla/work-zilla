@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import TablePagination from "../components/TablePagination.jsx";
 import { setOrgTimezone as applyOrgTimezone } from "../lib/datetime.js";
 import { TIMEZONE_OPTIONS, getBrowserTimezone } from "../lib/timezones.js";
 import { createOrgTicket } from "../api/orgTickets.js";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const emptyState = {
   loading: true,
@@ -501,6 +503,7 @@ export default function ProfilePage() {
     }
     const fileError = validateTicketImages(ticketForm.files);
     if (fileError) {
+      showUploadAlert(fileError);
       setTicketState({ saving: false, error: fileError, success: "" });
       return;
     }
@@ -739,18 +742,13 @@ export default function ProfilePage() {
               <div className="mb-2">
                 <label className="form-label">Mobile Number</label>
                 <div className="input-group">
-                  <select
-                    className="form-select"
+                  <PhoneCountryCodePicker
                     value={phoneCountry}
-                    onChange={(event) => setPhoneCountry(event.target.value)}
+                    onChange={(code) => setPhoneCountry(code)}
+                    options={phoneCountries}
                     style={{ maxWidth: "170px" }}
-                  >
-                    {phoneCountries.map((entry) => (
-                      <option key={`${entry.code}-${entry.label}`} value={entry.code}>
-                        {entry.label} {entry.code}
-                      </option>
-                    ))}
-                  </select>
+                    ariaLabel="Profile phone country code"
+                  />
                   <input
                     type="tel"
                     className="form-control"

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
 import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
-import { htmlToWhatsappText, plainTextToHtml } from "../lib/whatsappFormatting.js";
+import { plainTextToHtml } from "../lib/whatsappFormatting.js";
 
 const RULE_REPLY_CHAR_LIMIT = 350;
 const RULE_KEYWORD_CHAR_LIMIT = 120;
@@ -171,8 +171,9 @@ export default function WhatsappAutomationDashboardPage() {
       return;
     }
     if (keywordInputRef.current) keywordInputRef.current.setCustomValidity("");
-    const whatsappReply = htmlToWhatsappText(ruleForm.reply_message);
-    if (!whatsappReply) {
+    const rawReplyHtml = String(ruleForm.reply_message || "");
+    const plainReply = rawReplyHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (!plainReply) {
       setError("Reply message is required.");
       return;
     }
@@ -183,7 +184,8 @@ export default function WhatsappAutomationDashboardPage() {
       await waApi.saveRule({
         ...ruleForm,
         keyword,
-        reply_message: whatsappReply.slice(0, RULE_REPLY_CHAR_LIMIT),
+        // Let backend handle HTML -> WhatsApp text conversion to preserve line breaks reliably.
+        reply_message: rawReplyHtml,
       });
       setRuleForm({ id: null, keyword: "", reply_message: "", is_default: false });
       const data = await waApi.getRules();

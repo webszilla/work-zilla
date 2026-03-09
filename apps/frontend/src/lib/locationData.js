@@ -34,18 +34,14 @@ export const DIAL_CODE_OPTIONS = Array.from(
 function preferredCountryNameForDialCode(code) {
   const normalized = String(code || "").trim();
   if (!normalized) {
-    return "";
+    return null;
   }
-  const matches = PHONE_COUNTRIES
-    .filter((item) => String(item?.code || "").trim() === normalized)
-    .map((item) => String(item?.label || "").trim())
-    .filter(Boolean);
+  const matches = PHONE_COUNTRIES.filter((item) => String(item?.code || "").trim() === normalized);
   if (!matches.length) {
-    return "";
+    return null;
   }
-  const unique = Array.from(new Set(matches));
-  const prioritized = unique.find((name) => PRIORITY_COUNTRIES.includes(name));
-  return prioritized || unique[0];
+  const prioritized = matches.find((item) => PRIORITY_COUNTRIES.includes(String(item?.label || "").trim()));
+  return prioritized || matches[0] || null;
 }
 
 export function getDialCodeDisplayLabel(code) {
@@ -54,12 +50,19 @@ export function getDialCodeDisplayLabel(code) {
     return "";
   }
   const country = preferredCountryNameForDialCode(normalized);
-  return country ? `${country} ${normalized}` : normalized;
+  if (!country) {
+    return `🌐 ${normalized}`;
+  }
+  const name = String(country?.label || "").trim();
+  const flag = String(country?.flag || "🌐");
+  return `${flag} ${name} ${normalized}`.trim();
 }
 
-export const DIAL_CODE_LABEL_OPTIONS = DIAL_CODE_OPTIONS.map((code) => ({
-  value: code,
-  label: getDialCodeDisplayLabel(code),
+export const DIAL_CODE_LABEL_OPTIONS = PHONE_COUNTRIES.map((entry) => ({
+  value: String(entry?.code || "").trim(),
+  label: `${String(entry?.flag || "🌐")} ${String(entry?.label || "").trim()} ${String(entry?.code || "").trim()}`.trim(),
+  flag: String(entry?.flag || "🌐"),
+  country: String(entry?.label || "").trim(),
 }));
 
 const STATE_OPTIONS_BY_COUNTRY = {

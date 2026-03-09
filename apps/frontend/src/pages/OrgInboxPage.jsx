@@ -13,9 +13,11 @@ import {
   replyOrgTicket,
   updateOrgTicketStatus,
 } from "../api/orgTickets.js";
+import { waApi } from "../api/whatsappAutomation.js";
 import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const emptyState = {
   loading: true,
@@ -26,6 +28,12 @@ const emptyState = {
 const TICKET_MAX_ATTACHMENTS = 5;
 const TICKET_MAX_BYTES = 2 * 1024 * 1024;
 const INBOX_RETENTION_NOTE = "Auto cleanup: Older inbox messages are automatically deleted when inbox exceeds 100 notifications (same rule for all products).";
+const ENQUIRY_STATUS_TABS = [
+  { key: "new", label: "New" },
+  { key: "following", label: "Following" },
+  { key: "completed", label: "Completed" },
+  { key: "all", label: "All" },
+];
 
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -101,11 +109,16 @@ function buildTicketFormData({ category, subject, message, priority, productSlug
   return formData;
 }
 
-export default function OrgInboxPage() {
+export default function OrgInboxPage({ productSlug = "" }) {
   const location = useLocation();
   const confirm = useConfirm();
   const PAGE_SIZE = 20;
-  const currentProductSlug = useMemo(() => resolveCurrentProductSlug(location.pathname), [location.pathname]);
+  const currentProductSlug = useMemo(() => {
+    const explicit = String(productSlug || "").trim().toLowerCase();
+    if (explicit) return explicit;
+    return resolveCurrentProductSlug(location.pathname);
+  }, [location.pathname, productSlug]);
+  const isWhatsappAutomationProduct = currentProductSlug === "whatsapp-automation";
 
   const [activeTab, setActiveTab] = useState("tickets");
 
@@ -139,6 +152,15 @@ export default function OrgInboxPage() {
   const [replyForm, setReplyForm] = useState({ message: "", files: [] });
   const [replyState, setReplyState] = useState({ saving: false, error: "", success: "" });
   const [statusSaving, setStatusSaving] = useState(false);
+  const [feedbackState, setFeedbackState] = useState(emptyState);
+  const [feedbackPage, setFeedbackPage] = useState(1);
+  const [selectedFeedbackId, setSelectedFeedbackId] = useState(null);
+  const [feedbackDeleteBusy, setFeedbackDeleteBusy] = useState(false);
+  const [enquiryState, setEnquiryState] = useState(emptyState);
+  const [enquiryPage, setEnquiryPage] = useState(1);
+  const [enquiryStatusTab, setEnquiryStatusTab] = useState("new");
+  const [selectedEnquiryId, setSelectedEnquiryId] = useState(null);
+  const [enquiryStatusSaving, setEnquiryStatusSaving] = useState(false);
 
   const inboxItems = inboxState.data?.results || [];
   const inboxTotalPages = inboxState.data?.total_pages || 1;
@@ -146,6 +168,18 @@ export default function OrgInboxPage() {
   const selectedInboxItem = useMemo(
     () => inboxItems.find((item) => item.id === selectedInboxId) || null,
     [inboxItems, selectedInboxId]
+  );
+  const feedbackItems = feedbackState.data?.items || [];
+  const feedbackTotalPages = feedbackState.data?.pagination?.total_pages || 1;
+  const selectedFeedbackItem = useMemo(
+    () => feedbackItems.find((item) => item.id === selectedFeedbackId) || null,
+    [feedbackItems, selectedFeedbackId]
+  );
+  const enquiryItems = enquiryState.data?.items || [];
+  const enquiryTotalPages = enquiryState.data?.pagination?.total_pages || 1;
+  const selectedEnquiryItem = useMemo(
+    () => enquiryItems.find((item) => item.id === selectedEnquiryId) || null,
+    [enquiryItems, selectedEnquiryId]
   );
 
   const ticketItems = ticketState.data?.results || [];
@@ -222,6 +256,46 @@ export default function OrgInboxPage() {
     }
   }
 
+  async function loadFeedbackInbox({ keepSelection = false } = {}) {
+    if (!isWhatsappAutomationProduct) return;
+    setFeedbackState((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      const data = await waApi.getDigitalCardFeedbackInbox({ page: feedbackPage, pageSize: PAGE_SIZE });
+      setFeedbackState({ loading: false, error: "", data });
+      if (!keepSelection) {
+        setSelectedFeedbackId(data?.items?.[0]?.id || null);
+      }
+    } catch (error) {
+      setFeedbackState({
+        loading: false,
+        error: error?.message || "Unable to load feedback inbox.",
+        data: null,
+      });
+    }
+  }
+
+  async function loadEnquiryInbox({ keepSelection = false } = {}) {
+    if (!isWhatsappAutomationProduct) return;
+    setEnquiryState((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      const data = await waApi.getDigitalCardEnquiryInbox({
+        page: enquiryPage,
+        pageSize: PAGE_SIZE,
+        status: enquiryStatusTab,
+      });
+      setEnquiryState({ loading: false, error: "", data });
+      if (!keepSelection) {
+        setSelectedEnquiryId(data?.items?.[0]?.id || null);
+      }
+    } catch (error) {
+      setEnquiryState({
+        loading: false,
+        error: error?.message || "Unable to load enquiry inbox.",
+        data: null,
+      });
+    }
+  }
+
   useEffect(() => {
     loadInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -249,11 +323,29 @@ export default function OrgInboxPage() {
   }, [ticketProductOptions, currentProductSlug]);
 
   useEffect(() => {
+    if (!isWhatsappAutomationProduct && (activeTab === "feedback" || activeTab === "enquiry")) {
+      setActiveTab("tickets");
+    }
+  }, [isWhatsappAutomationProduct, activeTab]);
+
+  useEffect(() => {
     if (!autoRefreshInbox || activeTab !== "inbox") return;
     const handle = setInterval(() => loadInbox({ keepSelection: true }), 30000);
     return () => clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefreshInbox, activeTab, currentProductSlug, inboxPage]);
+
+  useEffect(() => {
+    if (!isWhatsappAutomationProduct || activeTab !== "feedback") return;
+    loadFeedbackInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWhatsappAutomationProduct, activeTab, feedbackPage]);
+
+  useEffect(() => {
+    if (!isWhatsappAutomationProduct || activeTab !== "enquiry") return;
+    loadEnquiryInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWhatsappAutomationProduct, activeTab, enquiryPage, enquiryStatusTab]);
 
   useEffect(() => {
     if (!inboxItems.length) {
@@ -273,6 +365,24 @@ export default function OrgInboxPage() {
     if (selectedTicketId && ticketItems.some((item) => item.id === selectedTicketId)) return;
     setSelectedTicketId(ticketItems[0].id);
   }, [ticketItems, selectedTicketId]);
+
+  useEffect(() => {
+    if (!feedbackItems.length) {
+      setSelectedFeedbackId(null);
+      return;
+    }
+    if (selectedFeedbackId && feedbackItems.some((item) => item.id === selectedFeedbackId)) return;
+    setSelectedFeedbackId(feedbackItems[0].id);
+  }, [feedbackItems, selectedFeedbackId]);
+
+  useEffect(() => {
+    if (!enquiryItems.length) {
+      setSelectedEnquiryId(null);
+      return;
+    }
+    if (selectedEnquiryId && enquiryItems.some((item) => item.id === selectedEnquiryId)) return;
+    setSelectedEnquiryId(enquiryItems[0].id);
+  }, [enquiryItems, selectedEnquiryId]);
 
   useEffect(() => {
     loadTicketDetail(selectedTicketId);
@@ -331,6 +441,46 @@ export default function OrgInboxPage() {
     }
   }
 
+  async function handleDeleteFeedback(item) {
+    if (!item || feedbackDeleteBusy) return;
+    const confirmed = await confirm({
+      title: "Delete Feedback",
+      message: "Delete this feedback from inbox?",
+      confirmText: "Delete",
+      confirmVariant: "danger",
+    });
+    if (!confirmed) return;
+    setFeedbackDeleteBusy(true);
+    try {
+      await waApi.deleteDigitalCardFeedback(item.id);
+      await loadFeedbackInbox({ keepSelection: false });
+    } catch (error) {
+      setFeedbackState((prev) => ({ ...prev, error: error?.message || "Unable to delete feedback." }));
+    } finally {
+      setFeedbackDeleteBusy(false);
+    }
+  }
+
+  async function handleEnquiryStatusChange(nextStatus) {
+    if (!selectedEnquiryItem || !nextStatus) return;
+    setEnquiryStatusSaving(true);
+    try {
+      await waApi.updateDigitalCardEnquiryStatus(selectedEnquiryItem.id, nextStatus);
+      await loadEnquiryInbox({ keepSelection: true });
+    } catch (error) {
+      setEnquiryState((prev) => ({ ...prev, error: error?.message || "Unable to update enquiry status." }));
+    } finally {
+      setEnquiryStatusSaving(false);
+    }
+  }
+
+  function handleExportEnquiry() {
+    const url = waApi.getDigitalCardEnquiryExportUrl(enquiryStatusTab || "all");
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   async function handleComposeSubmit(event) {
     event.preventDefault();
     const title = String(composeForm.title || "").trim();
@@ -367,6 +517,7 @@ export default function OrgInboxPage() {
     }
     const fileError = validateImageFiles(createTicketForm.files);
     if (fileError) {
+      showUploadAlert(fileError);
       setCreateTicketState({ saving: false, error: fileError, success: "" });
       return;
     }
@@ -417,6 +568,7 @@ export default function OrgInboxPage() {
     }
     const fileError = validateImageFiles(replyForm.files);
     if (fileError) {
+      showUploadAlert(fileError);
       setReplyState({ saving: false, error: fileError, success: "" });
       return;
     }
@@ -472,6 +624,24 @@ export default function OrgInboxPage() {
     );
   }
 
+  if (activeTab === "feedback" && feedbackState.loading) {
+    return (
+      <div className="card p-4 text-center">
+        <div className="spinner" />
+        <p className="mb-0">Loading feedback...</p>
+      </div>
+    );
+  }
+
+  if (activeTab === "enquiry" && enquiryState.loading) {
+    return (
+      <div className="card p-4 text-center">
+        <div className="spinner" />
+        <p className="mb-0">Loading enquiries...</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -493,6 +663,26 @@ export default function OrgInboxPage() {
             Inbox
             <span className="ms-1 badge bg-dark">{inboxUnreadCount}</span>
           </button>
+          {isWhatsappAutomationProduct ? (
+            <>
+              <button
+                type="button"
+                className={`btn btn-sm ${activeTab === "feedback" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setActiveTab("feedback")}
+              >
+                Feedback
+                <span className="ms-1 badge bg-dark">{formatValue(feedbackState.data?.pagination?.total_items || 0)}</span>
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${activeTab === "enquiry" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setActiveTab("enquiry")}
+              >
+                Enquiry
+                <span className="ms-1 badge bg-dark">{formatValue(enquiryState.data?.counts?.new || 0)}</span>
+              </button>
+            </>
+          ) : null}
 
           {activeTab === "tickets" ? (
             <button
@@ -506,7 +696,7 @@ export default function OrgInboxPage() {
               <i className="bi bi-plus-lg me-1" aria-hidden="true" />
               Create Ticket
             </button>
-          ) : (
+          ) : activeTab === "inbox" ? (
             <>
               <button
                 type="button"
@@ -535,11 +725,26 @@ export default function OrgInboxPage() {
                 <span className="form-check-label">Auto-refresh (30s)</span>
               </label>
             </>
-          )}
+          ) : activeTab === "feedback" ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => loadFeedbackInbox({ keepSelection: true })}>
+              Refresh Feedback
+            </button>
+          ) : activeTab === "enquiry" ? (
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => loadEnquiryInbox({ keepSelection: true })}>
+                Refresh Enquiry
+              </button>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={handleExportEnquiry}>
+                Export Excel
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
       {activeTab === "inbox" ? <div className="small text-secondary mt-3">{INBOX_RETENTION_NOTE}</div> : null}
+      {activeTab === "feedback" ? <div className="small text-secondary mt-3">{feedbackState.data?.retention_note || "Only last 1 year feedback entries are maintained. Older entries are auto removed."}</div> : null}
+      {activeTab === "enquiry" ? <div className="small text-secondary mt-3">{enquiryState.data?.retention_note || "Only last 1 year enquiry entries are maintained. Older entries are auto removed."}</div> : null}
 
       {activeTab === "tickets" ? (
         <>
@@ -828,6 +1033,162 @@ export default function OrgInboxPage() {
                 </>
               ) : (
                 <div className="text-secondary p-4">Select a ticket to view details.</div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : activeTab === "feedback" ? (
+        <>
+          {feedbackState.error ? <div className="alert alert-danger mt-3">{feedbackState.error}</div> : null}
+          <div className="inbox-layout mt-3">
+            <div className="card inbox-list">
+              <div className="inbox-list-header">
+                <span>All Feedback</span>
+                <span className="text-secondary small">{formatValue(feedbackState.data?.pagination?.total_items || 0)} total</span>
+              </div>
+              <div className="inbox-list-body">
+                {feedbackItems.length ? (
+                  feedbackItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`inbox-item ${item.id === selectedFeedbackId ? "active" : ""}`}
+                      onClick={() => setSelectedFeedbackId(item.id)}
+                    >
+                      <div className="inbox-item-title">
+                        <span>{item.full_name || "Anonymous"}</span>
+                        <span className="inbox-item-date">{formatValue(item.created_at)}</span>
+                      </div>
+                      <div className="inbox-item-meta">
+                        <span>{item.public_slug || "-"}</span>
+                        <span className="inbox-item-type">{"★".repeat(Math.max(1, Math.min(5, Number(item.rating || 0))))}</span>
+                      </div>
+                      <div className="inbox-item-message">{truncate(item.message, 90)}</div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-secondary p-3">No feedback yet.</div>
+                )}
+              </div>
+              <div className="inbox-list-footer">
+                <TablePagination
+                  page={feedbackPage}
+                  totalPages={feedbackTotalPages}
+                  onPageChange={setFeedbackPage}
+                  showPageLinks
+                  showPageLabel={false}
+                  maxPageLinks={5}
+                />
+              </div>
+            </div>
+            <div className="card inbox-detail">
+              {selectedFeedbackItem ? (
+                <>
+                  <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
+                    <div>
+                      <h5 className="mb-1">{selectedFeedbackItem.full_name || "Anonymous"}</h5>
+                      <div className="text-secondary small">
+                        {formatValue(selectedFeedbackItem.created_at)} • {selectedFeedbackItem.public_slug || "-"}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDeleteFeedback(selectedFeedbackItem)} disabled={feedbackDeleteBusy}>
+                      {feedbackDeleteBusy ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                  <div className="mb-2 text-warning">{`Rating: ${"★".repeat(Math.max(1, Math.min(5, Number(selectedFeedbackItem.rating || 0))))}`}</div>
+                  <div className="inbox-detail-body">{selectedFeedbackItem.message || "-"}</div>
+                </>
+              ) : (
+                <div className="text-secondary p-4">Select feedback to view details.</div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : activeTab === "enquiry" ? (
+        <>
+          {enquiryState.error ? <div className="alert alert-danger mt-3">{enquiryState.error}</div> : null}
+          <div className="d-flex align-items-center gap-2 flex-wrap mt-3">
+            {ENQUIRY_STATUS_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`btn btn-sm ${enquiryStatusTab === tab.key ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => {
+                  setEnquiryStatusTab(tab.key);
+                  setEnquiryPage(1);
+                }}
+              >
+                {tab.label}
+                <span className="ms-1 badge bg-dark">{formatValue(enquiryState.data?.counts?.[tab.key] || 0)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="inbox-layout mt-3">
+            <div className="card inbox-list">
+              <div className="inbox-list-header">
+                <span>Enquiries</span>
+                <span className="text-secondary small">{formatValue(enquiryState.data?.pagination?.total_items || 0)} total</span>
+              </div>
+              <div className="inbox-list-body">
+                {enquiryItems.length ? (
+                  enquiryItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`inbox-item ${item.id === selectedEnquiryId ? "active" : ""}`}
+                      onClick={() => setSelectedEnquiryId(item.id)}
+                    >
+                      <div className="inbox-item-title">
+                        <span>{item.full_name || "-"}</span>
+                        <span className="inbox-item-date">{formatValue(item.created_at)}</span>
+                      </div>
+                      <div className="inbox-item-meta">
+                        <span>{item.phone_number || item.email || "-"}</span>
+                        <span className="inbox-item-type">{titleCase(item.status)}</span>
+                      </div>
+                      <div className="inbox-item-message">{truncate(item.message, 90)}</div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-secondary p-3">No enquiry yet.</div>
+                )}
+              </div>
+              <div className="inbox-list-footer">
+                <TablePagination
+                  page={enquiryPage}
+                  totalPages={enquiryTotalPages}
+                  onPageChange={setEnquiryPage}
+                  showPageLinks
+                  showPageLabel={false}
+                  maxPageLinks={5}
+                />
+              </div>
+            </div>
+            <div className="card inbox-detail">
+              {selectedEnquiryItem ? (
+                <>
+                  <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
+                    <div>
+                      <h5 className="mb-1">{selectedEnquiryItem.full_name || "-"}</h5>
+                      <div className="text-secondary small">{formatValue(selectedEnquiryItem.created_at)} • {selectedEnquiryItem.public_slug || "-"}</div>
+                    </div>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: "170px" }}
+                      value={selectedEnquiryItem.status || "new"}
+                      disabled={enquiryStatusSaving}
+                      onChange={(event) => handleEnquiryStatusChange(event.target.value)}
+                    >
+                      <option value="new">New</option>
+                      <option value="following">Following</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                  <div className="text-secondary small mb-2">{selectedEnquiryItem.phone_number || "-"} {selectedEnquiryItem.email ? `• ${selectedEnquiryItem.email}` : ""}</div>
+                  <div className="inbox-detail-body">{selectedEnquiryItem.message || "-"}</div>
+                </>
+              ) : (
+                <div className="text-secondary p-4">Select enquiry to view details.</div>
               )}
             </div>
           </div>

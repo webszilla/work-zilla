@@ -17,6 +17,7 @@ from .models import (
 )
 from .storage_backend import (
     build_storage_key,
+    storage_delete,
     storage_save,
     storage_open,
 )
@@ -216,7 +217,7 @@ def org_media_library(request):
             "owner_name": "WhatsApp Automation",
             "download_url": company_profile.logo.url,
             "view_url": company_profile.logo.url,
-            "can_delete": False,
+            "can_delete": True,
             "source": "whatsapp_automation",
         })
 
@@ -233,7 +234,7 @@ def org_media_library(request):
             "owner_name": f"Catalogue: {product.title}",
             "download_url": product.image.url,
             "view_url": product.image.url,
-            "can_delete": False,
+            "can_delete": True,
             "source": "whatsapp_automation",
         })
 
@@ -250,7 +251,7 @@ def org_media_library(request):
                 "owner_name": f"Digital Card: {card.card_title or card.person_name or card.public_slug}",
                 "download_url": card.logo_image_data,
                 "view_url": card.logo_image_data,
-                "can_delete": False,
+                "can_delete": True,
                 "source": "whatsapp_automation",
             })
         if card.hero_banner_image_data:
@@ -265,7 +266,7 @@ def org_media_library(request):
                 "owner_name": f"Digital Card Banner: {card.card_title or card.person_name or card.public_slug}",
                 "download_url": card.hero_banner_image_data,
                 "view_url": card.hero_banner_image_data,
-                "can_delete": False,
+                "can_delete": True,
                 "source": "whatsapp_automation",
             })
 
@@ -273,6 +274,75 @@ def org_media_library(request):
     return JsonResponse({
         "items": items
     })
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def org_media_library_delete_item(request, item_id):
+    org, error = _get_org_or_error(request)
+    if error:
+        return error
+    _, sub_error = _require_active_subscription(
+        org,
+        allow_readonly=False,
+        allow_product_slugs=("whatsapp-automation",),
+    )
+    if sub_error:
+        return sub_error
+    if not is_org_admin(request.user):
+        return _json_error("forbidden", status=403)
+
+    def _parse_item_pk(prefix):
+        if not item_id.startswith(prefix):
+            return None
+        try:
+            return int(item_id[len(prefix):])
+        except (TypeError, ValueError):
+            raise Http404
+
+    company_logo_id = _parse_item_pk("wa-company-logo-")
+    if company_logo_id is not None:
+        profile = get_object_or_404(CompanyProfile, organization=org, id=company_logo_id)
+        if profile.logo:
+            profile.logo.delete(save=False)
+        profile.logo = None
+        profile.save(update_fields=["logo", "updated_at"])
+        return JsonResponse({"ok": True})
+
+    catalogue_image_id = _parse_item_pk("wa-catalogue-image-")
+    if catalogue_image_id is not None:
+        product = get_object_or_404(CatalogueProduct, organization=org, id=catalogue_image_id)
+        if product.image:
+            product.image.delete(save=False)
+        product.image = None
+        product.save(update_fields=["image", "updated_at"])
+        return JsonResponse({"ok": True})
+
+    digital_logo_id = _parse_item_pk("wa-digital-card-logo-")
+    if digital_logo_id is not None:
+        card = get_object_or_404(DigitalCardEntry, organization=org, id=digital_logo_id)
+        storage_key = str(card.logo_storage_key or "").strip()
+        if storage_key:
+            storage_delete(storage_key)
+            StorageFile.objects.filter(organization=org, storage_key=storage_key).delete()
+        card.logo_storage_key = ""
+        card.logo_image_data = ""
+        card.save(update_fields=["logo_storage_key", "logo_image_data", "updated_at"])
+        return JsonResponse({"ok": True})
+
+    digital_banner_id = _parse_item_pk("wa-digital-card-banner-")
+    if digital_banner_id is not None:
+        card = get_object_or_404(DigitalCardEntry, organization=org, id=digital_banner_id)
+        storage_key = str(card.hero_banner_storage_key or "").strip()
+        if storage_key:
+            storage_delete(storage_key)
+            StorageFile.objects.filter(organization=org, storage_key=storage_key).delete()
+        card.hero_banner_storage_key = ""
+        card.hero_banner_image_data = ""
+        card.save(update_fields=["hero_banner_storage_key", "hero_banner_image_data", "updated_at"])
+        return JsonResponse({"ok": True})
+
+    raise Http404
 
 
 @login_required

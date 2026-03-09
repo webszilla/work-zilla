@@ -1,4 +1,5 @@
 import { API_BASE } from "./apiConfig.js";
+import { showUploadAlert } from "./uploadAlert.js";
 
 function buildApiUrl(url) {
   if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -60,6 +61,7 @@ export async function apiFetch(url, options = {}) {
   };
 
   const method = (fetchOptions.method || "GET").toUpperCase();
+  let isFormDataBody = false;
   if (typeof window !== "undefined" && window.__WZ_READ_ONLY__ && method !== "GET" && method !== "HEAD") {
     const err = new Error("read_only");
     err.status = 403;
@@ -70,7 +72,7 @@ export async function apiFetch(url, options = {}) {
     if (!getCsrfToken()) {
       await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
     }
-    const isFormDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+    isFormDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
     fetchOptions.headers = {
       ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
       "X-CSRFToken": getCsrfToken(),
@@ -91,6 +93,9 @@ export async function apiFetch(url, options = {}) {
 
   if (!response.ok) {
     const message = data?.error || data?.detail || `Request failed (${response.status})`;
+    if (isFormDataBody && /size|too large|max(?:imum)?|image|file/i.test(String(message || ""))) {
+      showUploadAlert(String(message));
+    }
     const err = new Error(message);
     err.status = response.status;
     err.data = data;

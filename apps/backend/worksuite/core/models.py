@@ -1365,6 +1365,7 @@ class OrgSupportTicket(models.Model):
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="support")
     subject = models.CharField(max_length=200)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open")
+    closed_at = models.DateTimeField(null=True, blank=True)
     last_message_at = models.DateTimeField(auto_now_add=True)
     last_read_by_org_at = models.DateTimeField(null=True, blank=True)
     last_read_by_saas_at = models.DateTimeField(null=True, blank=True)
@@ -1377,6 +1378,7 @@ class OrgSupportTicket(models.Model):
             models.Index(fields=["organization", "status"]),
             models.Index(fields=["organization", "product_slug"]),
             models.Index(fields=["category", "status"]),
+            models.Index(fields=["status", "closed_at"]),
         ]
 
     def __str__(self):

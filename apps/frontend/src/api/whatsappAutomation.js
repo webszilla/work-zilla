@@ -126,6 +126,15 @@ export const waApi = {
     const qs = search.toString();
     return apiFetch(`/api/whatsapp-automation/digital-cards${qs ? `?${qs}` : ""}`);
   },
+  getDigitalCardVisitorAnalytics(params = {}) {
+    const search = new URLSearchParams();
+    if (params.range) search.set("range", String(params.range));
+    if (params.q) search.set("q", String(params.q));
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("page_size", String(params.pageSize));
+    const qs = search.toString();
+    return apiFetch(`/api/whatsapp-automation/digital-cards/visitor-analytics${qs ? `?${qs}` : ""}`);
+  },
   saveDigitalCard(payload) {
     return apiFetch("/api/whatsapp-automation/digital-cards", {
       method: "POST",
@@ -144,5 +153,37 @@ export const waApi = {
   },
   deleteDigitalCard(id) {
     return apiFetch(`/api/whatsapp-automation/digital-cards/${id}`, { method: "DELETE" });
+  },
+  getDigitalCardFeedbackInbox(params = {}) {
+    const search = new URLSearchParams();
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("page_size", String(params.pageSize));
+    if (params.q) search.set("q", String(params.q));
+    const qs = search.toString();
+    return apiFetch(`/api/whatsapp-automation/digital-cards/feedback-inbox${qs ? `?${qs}` : ""}`);
+  },
+  deleteDigitalCardFeedback(id) {
+    return apiFetch(`/api/whatsapp-automation/digital-cards/feedback-inbox/${id}`, { method: "DELETE" });
+  },
+  getDigitalCardEnquiryInbox(params = {}) {
+    const search = new URLSearchParams();
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("page_size", String(params.pageSize));
+    if (params.status) search.set("status", String(params.status));
+    if (params.q) search.set("q", String(params.q));
+    const qs = search.toString();
+    return apiFetch(`/api/whatsapp-automation/digital-cards/enquiry-inbox${qs ? `?${qs}` : ""}`);
+  },
+  updateDigitalCardEnquiryStatus(id, status) {
+    return apiFetch(`/api/whatsapp-automation/digital-cards/enquiry-inbox/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  },
+  getDigitalCardEnquiryExportUrl(status = "all") {
+    const search = new URLSearchParams();
+    if (status) search.set("status", String(status));
+    const qs = search.toString();
+    return `/api/whatsapp-automation/digital-cards/enquiry-inbox/export${qs ? `?${qs}` : ""}`;
   },
 };

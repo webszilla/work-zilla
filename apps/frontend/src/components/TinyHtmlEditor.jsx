@@ -59,6 +59,8 @@ export default function TinyHtmlEditor({
 }) {
   const inputId = useId();
   const editorRef = useRef(null);
+  const sourceRef = useRef(null);
+  const pendingVisualHtmlRef = useRef(null);
   const validationRef = useRef(null);
   const statusId = useId();
   const [isCodeView, setIsCodeView] = useState(false);
@@ -74,9 +76,12 @@ export default function TinyHtmlEditor({
   const blockOptions = [
     { label: "Formatting", value: "" },
     { label: "Paragraph", value: "p" },
+    { label: "Heading 1", value: "h1" },
     { label: "Heading 2", value: "h2" },
     { label: "Heading 3", value: "h3" },
     { label: "Heading 4", value: "h4" },
+    { label: "Heading 5", value: "h5" },
+    { label: "Heading 6", value: "h6" },
   ];
   const fontSizeOptions = [
     { label: "Font size", value: "" },
@@ -156,15 +161,28 @@ export default function TinyHtmlEditor({
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor) {
+    if (!editor || isCodeView) {
       return;
     }
     const nextValue = value || "";
+    const pendingHtml = pendingVisualHtmlRef.current;
+    if (pendingHtml !== null) {
+      // Keep the just-toggled code HTML until parent state catches up.
+      if (nextValue === pendingHtml) {
+        pendingVisualHtmlRef.current = null;
+      } else {
+        if (getCleanHtml(editor) !== pendingHtml) {
+          editor.innerHTML = pendingHtml;
+        }
+        applyOverflowHighlight(editor, maxChars);
+        return;
+      }
+    }
     if (getCleanHtml(editor) !== nextValue) {
       editor.innerHTML = nextValue;
     }
     applyOverflowHighlight(editor, maxChars);
-  }, [value, maxChars]);
+  }, [value, maxChars, isCodeView]);
 
   useEffect(() => {
     if (!isCodeView) {
@@ -210,7 +228,7 @@ export default function TinyHtmlEditor({
       return;
     }
     focusEditor();
-    document.execCommand("formatBlock", false, "blockquote");
+    document.execCommand("formatBlock", false, "<blockquote>");
     emitChange();
   }
 
@@ -221,17 +239,24 @@ export default function TinyHtmlEditor({
       setIsCodeView(true);
       return;
     }
+    const nextSource = sourceRef.current ? String(sourceRef.current.value || "") : String(sourceValue || "");
+    pendingVisualHtmlRef.current = nextSource;
     const editor = editorRef.current;
     if (editor) {
-      editor.innerHTML = sourceValue || "";
+      editor.innerHTML = nextSource;
       applyOverflowHighlight(editor, maxChars);
     }
-    onChange(sourceValue || "");
+    setSourceValue(nextSource);
+    onChange(nextSource);
     setIsCodeView(false);
   }
 
   function handleSelectCommand(command, value) {
     if (!value) {
+      return;
+    }
+    if (command === "formatBlock") {
+      runCommand(command, `<${value}>`);
       return;
     }
     runCommand(command, value);
@@ -354,6 +379,7 @@ export default function TinyHtmlEditor({
         </div>
         {isCodeView ? (
           <textarea
+            ref={sourceRef}
             id={inputId}
             className={`tiny-html-editor__content ${isOverLimit ? "is-overlimit" : ""}`}
             style={{ minHeight, fontFamily: "'Courier New', monospace" }}
@@ -361,9 +387,12 @@ export default function TinyHtmlEditor({
             onChange={(event) => {
               const nextValue = event.target.value;
               setSourceValue(nextValue);
+            }}
+            onBlur={(event) => {
+              const nextValue = String(event.target.value || "");
+              setSourceValue(nextValue);
               onChange(nextValue);
             }}
-            onBlur={() => onChange(sourceValue)}
             placeholder={placeholder || "Edit raw HTML"}
             aria-describedby={statusId}
           />

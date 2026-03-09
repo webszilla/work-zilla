@@ -1,6 +1,23 @@
+import hashlib
+import re
+from datetime import timedelta
+from urllib.parse import quote
+
+from django.db import DatabaseError
+from django.utils import timezone
 from django.shortcuts import get_object_or_404, render
 
-from .models import CatalogueCategory, CataloguePage, CatalogueProduct, DigitalCard, DigitalCardEntry, WhatsappSettings
+from .models import (
+    CatalogueCategory,
+    CataloguePage,
+    CatalogueProduct,
+    DigitalCard,
+    DigitalCardEntry,
+    DigitalCardFeedback,
+    DigitalCardVisit,
+    WhatsappSettings,
+)
+from apps.backend.storage.storage_backend import storage_url
 
 
 def _normalize_external_url(raw):
@@ -51,6 +68,67 @@ def _normalize_social_links_items(raw):
     return items
 
 
+def _client_ip(request):
+    forwarded = str(request.META.get("HTTP_X_FORWARDED_FOR") or "").strip()
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    real_ip = str(request.META.get("HTTP_X_REAL_IP") or "").strip()
+    if real_ip:
+        return real_ip
+    return str(request.META.get("REMOTE_ADDR") or "").strip()
+
+
+def _visitor_country(request):
+    for key in ("HTTP_CF_IPCOUNTRY", "HTTP_X_COUNTRY_CODE", "GEOIP_COUNTRY_CODE"):
+        value = str(request.META.get(key) or "").strip()
+        if value:
+            return value[:120]
+    return "Unknown"
+
+
+def _track_card_visit(request, *, org, card_entry, public_slug):
+    if not org:
+        return
+    try:
+        cutoff = timezone.now() - timedelta(days=365)
+        DigitalCardVisit.objects.filter(organization=org, visited_at__lt=cutoff).delete()
+        ip = _client_ip(request)
+        user_agent = str(request.META.get("HTTP_USER_AGENT") or "").strip()
+        visitor_key = hashlib.sha1(f"{ip}|{user_agent}".encode("utf-8")).hexdigest() if (ip or user_agent) else ""
+        page_path = str(getattr(request, "path", "") or "")[:300]
+        page_url = str(request.build_absolute_uri() or "")[:2000]
+        DigitalCardVisit.objects.create(
+            organization=org,
+            card_entry=card_entry,
+            public_slug=str(public_slug or "")[:220],
+            visitor_ip=ip[:80],
+            visitor_country=_visitor_country(request),
+            visitor_key=visitor_key[:120],
+            user_agent=user_agent[:400],
+            page_path=page_path,
+            page_url=page_url,
+        )
+    except DatabaseError:
+        # Do not block public card rendering if analytics table is not ready.
+        return
+
+
+def _card_visit_count(*, org, card_entry, public_slug):
+    if not org:
+        return 0
+    try:
+        queryset = DigitalCardVisit.objects.filter(organization=org)
+        if card_entry:
+            queryset = queryset.filter(card_entry=card_entry)
+        else:
+            queryset = queryset.filter(public_slug=public_slug)
+        return queryset.count()
+    except DatabaseError:
+        return 0
+
+
 def public_digital_card(request, public_slug):
     card_entry = (
         DigitalCardEntry.objects.select_related("company_profile", "organization")
@@ -91,12 +169,47 @@ def public_digital_card(request, public_slug):
     company_social_links_items = _normalize_social_links_items(getattr(company_profile, "social_links", {}) or {})
     card_social_links_items = _normalize_social_links_items(getattr(card_entry, "social_links", {}) or {}) if card_entry else []
     social_links_items = company_social_links_items or card_social_links_items
+    gallery_items = []
+    if catalogue_page and isinstance(catalogue_page.gallery_items, list):
+        for row in catalogue_page.gallery_items:
+            if not isinstance(row, dict):
+                continue
+            storage_key = str(row.get("storage_key") or "").strip()
+            image_url = str(row.get("image_url") or "").strip()
+            if storage_key:
+                resolved = storage_url(storage_key)
+                if resolved:
+                    image_url = resolved
+            if not image_url:
+                continue
+            gallery_items.append({
+                "id": str(row.get("id") or ""),
+                "title": str(row.get("title") or "").strip(),
+                "image_url": image_url,
+            })
+    public_url = request.build_absolute_uri()
+    _track_card_visit(request, org=org, card_entry=card_entry, public_slug=public_slug)
+    view_count = _card_visit_count(org=org, card_entry=card_entry, public_slug=public_slug)
+    resolved_address = (
+        (card_entry.address if card_entry and card_entry.address else "")
+        or (company_profile.address if company_profile else "")
+    )
+    address_lines = [part.strip() for part in re.split(r"[\r\n]+", str(resolved_address or "")) if part.strip()]
+    address_details = [
+        {
+            "text": line,
+            "map_url": f"https://www.google.com/maps/search/?api=1&query={quote(line, safe='')}",
+        }
+        for line in address_lines
+    ]
     context = {
         "public_slug": public_slug,
         "company": company_profile,
         "digital_card": digital_card,
         "card_entry": card_entry,
         "card_owner_org": org,
+        "public_url": public_url,
+        "view_count": view_count,
         "catalogue_page": catalogue_page,
         "wa_settings": wa_settings,
         "highlights": ((company_profile.product_highlights if company_profile else []) or []) if isinstance((company_profile.product_highlights if company_profile else []), list) else [],
@@ -118,10 +231,26 @@ def public_digital_card(request, public_slug):
         ),
         "logo_radius_px": (getattr(card_entry, "logo_radius_px", 28) if card_entry else 28) or 28,
         "social_links_items": social_links_items,
+        "address_details": address_details,
         "website_url": _normalize_external_url(
             (card_entry.website if card_entry and card_entry.website else "")
             or (company_profile.website if company_profile else "")
         ),
+        "gallery_items": gallery_items,
+        "feedback_items": [
+            {
+                "full_name": item.full_name or "Anonymous",
+                "rating": max(1, min(5, int(item.rating or 0))),
+                "message": item.message or "",
+                "created_at": item.created_at,
+            }
+            for item in DigitalCardFeedback.objects.filter(
+                organization=org,
+                public_slug=public_slug,
+                is_approved=True,
+                is_deleted=False,
+            ).order_by("-created_at", "-id")[:8]
+        ],
     }
     return render(request, "whatsapp_automation/public_card.html", context)
 

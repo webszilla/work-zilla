@@ -4,6 +4,7 @@ import { useConfirm } from "../components/ConfirmDialog.jsx";
 import { COUNTRY_OPTIONS } from "../lib/countries.js";
 import { getStateOptions } from "../lib/locationOptions.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 
 const emptyState = {
   loading: true,
@@ -847,23 +848,18 @@ export default function PlansPage() {
             <div className="col-12 col-md-3">
               <label className="form-label">Phone</label>
               <div className="input-group">
-                <select
-                  className="form-select"
-                  style={{ maxWidth: "140px" }}
+                <PhoneCountryCodePicker
                   value={billingProfile.phone_country || "+91"}
-                  onChange={(event) =>
+                  onChange={(code) =>
                     setBillingProfile((prev) => ({
                       ...prev,
-                      phone_country: event.target.value
+                      phone_country: code
                     }))
                   }
-                >
-                  {PHONE_COUNTRIES.map((entry) => (
-                    <option key={`${entry.code}-${entry.label}`} value={entry.code}>
-                      {entry.code} ({entry.label})
-                    </option>
-                  ))}
-                </select>
+                  options={PHONE_COUNTRIES}
+                  style={{ maxWidth: "140px" }}
+                  ariaLabel="Billing phone country code"
+                />
                 <input
                   type="tel"
                   name="phone"

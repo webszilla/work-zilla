@@ -12,11 +12,13 @@ from datetime import timedelta
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db import DatabaseError
-from django.db.models import Q
-from django.http import HttpResponseForbidden, JsonResponse
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 
 from dashboard import views as dashboard_views
 from core.models import AdminNotification, Subscription, ThemeSettings, UserProfile
@@ -36,6 +38,9 @@ from .models import (
     CompanyProfile,
     DigitalCard,
     DigitalCardEntry,
+    DigitalCardEnquiry,
+    DigitalCardFeedback,
+    DigitalCardVisit,
     MarketingCampaign,
     MarketingCampaignDelivery,
     MarketingContact,
@@ -46,6 +51,17 @@ from apps.backend.common_auth.utils.whatsapp import send_whatsapp_message
 
 def _get_org(request):
     return dashboard_views.get_active_org(request)
+
+
+def _cleanup_old_digital_card_visits(org):
+    cutoff = timezone.now() - timedelta(days=365)
+    DigitalCardVisit.objects.filter(organization=org, visited_at__lt=cutoff).delete()
+
+
+def _cleanup_old_feedback_enquiries(org):
+    cutoff = timezone.now() - timedelta(days=365)
+    DigitalCardFeedback.objects.filter(organization=org, created_at__lt=cutoff).delete()
+    DigitalCardEnquiry.objects.filter(organization=org, created_at__lt=cutoff).delete()
 
 
 def _is_org_admin_user(user):
@@ -95,7 +111,10 @@ def _html_to_whatsapp_text(value):
         return ""
     text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", raw, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<\s*/\s*(p|div|section|article|h[1-6]|pre)\s*>", "\n", text, flags=re.IGNORECASE)
+    # Some contenteditable outputs keep the first line as plain text and wrap next lines in <div>/<p>.
+    # Converting opening block tags to newlines preserves Enter-based line breaks consistently.
+    text = re.sub(r"<\s*(p|div|section|article|h[1-6]|pre)\b[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/\s*(p|div|section|article|h[1-6]|pre)\s*>", "", text, flags=re.IGNORECASE)
 
     text = re.sub(
         r"<\s*a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)<\s*/\s*a\s*>",
@@ -560,6 +579,27 @@ def _catalogue_category_payload(obj, *, product_count=0, service_count=0):
 
 def _catalogue_page_payload(obj, company_profile=None):
     company_profile = company_profile or getattr(obj, "company_profile", None)
+    raw_gallery_items = getattr(obj, "gallery_items", []) if obj else []
+    gallery_items = []
+    if isinstance(raw_gallery_items, list):
+        for row in raw_gallery_items:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or "").strip()[:120]
+            storage_key = str(row.get("storage_key") or "").strip()
+            image_url = str(row.get("image_url") or "").strip()
+            if storage_key:
+                resolved_url = storage_url(storage_key)
+                if resolved_url:
+                    image_url = resolved_url
+            if not image_url:
+                continue
+            gallery_items.append({
+                "id": str(row.get("id") or uuid.uuid4().hex[:10]),
+                "title": title,
+                "image_url": image_url,
+                "storage_key": storage_key,
+            })
     return {
         "public_slug": obj.public_slug if obj else "",
         "is_active": bool(obj.is_active) if obj else True,
@@ -569,6 +609,8 @@ def _catalogue_page_payload(obj, company_profile=None):
         "services_content": (obj.services_content if obj else "") or "",
         "contact_title": (obj.contact_title if obj else "") or "Contact",
         "contact_note": (obj.contact_note if obj else "") or "",
+        "gallery_title": (obj.gallery_title if obj else "") or "Gallery",
+        "gallery_items": gallery_items,
         "contact": {
             "phone": (company_profile.phone if company_profile else "") or "",
             "whatsapp_number": (company_profile.whatsapp_number if company_profile else "") or "",
@@ -722,6 +764,7 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
             "role_title": source_entry.role_title or "",
             "phone": source_entry.phone or "",
             "whatsapp_number": source_entry.whatsapp_number or "",
+            "telephone_number": source_entry.telephone_number or "",
             "email": source_entry.email or "",
             "website": source_entry.website or "",
             "address": source_entry.address or "",
@@ -753,6 +796,7 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
         "role_title": "Business Owner",
         "phone": (company_profile.phone if company_profile else "") or "",
         "whatsapp_number": (company_profile.whatsapp_number if company_profile else "") or "",
+        "telephone_number": "",
         "email": (company_profile.email if company_profile else "") or "",
         "website": (company_profile.website if company_profile else "") or "",
         "address": (company_profile.address if company_profile else "") or "",
@@ -792,6 +836,7 @@ def _serialize_card_entry(obj):
         "role_title": obj.role_title or "",
         "phone": obj.phone or "",
         "whatsapp_number": obj.whatsapp_number or "",
+        "telephone_number": obj.telephone_number or "",
         "email": obj.email or "",
         "website": obj.website or "",
         "address": obj.address or "",
@@ -880,6 +925,7 @@ def _ensure_default_card_entry(org, company_profile=None, user=None):
         role_title=prefill["role_title"],
         phone=prefill["phone"],
         whatsapp_number=prefill["whatsapp_number"],
+        telephone_number=prefill["telephone_number"],
         email=prefill["email"],
         website=prefill["website"],
         address=prefill["address"],
@@ -1551,9 +1597,78 @@ def catalogue_page_settings_api(request):
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "invalid_json"}, status=400)
-    for field in ("about_title", "about_content", "services_title", "services_content", "contact_title", "contact_note"):
+    for field in ("about_title", "about_content", "services_title", "services_content", "contact_title", "contact_note", "gallery_title"):
         if field in data:
             setattr(catalogue_page, field, str(data.get(field) or "").strip())
+    if "gallery_items" in data:
+        incoming = data.get("gallery_items")
+        if not isinstance(incoming, list):
+            return JsonResponse({"gallery_items": ["invalid"]}, status=400)
+        if len(incoming) > 30:
+            return JsonResponse({"gallery_items": ["max_count_exceeded"], "message": "Maximum 30 gallery images allowed."}, status=400)
+        existing_items = catalogue_page.gallery_items if isinstance(catalogue_page.gallery_items, list) else []
+        existing_keys = {
+            str(row.get("storage_key") or "").strip()
+            for row in existing_items
+            if isinstance(row, dict) and str(row.get("storage_key") or "").strip()
+        }
+        next_items = []
+        kept_keys = set()
+        for row in incoming:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or "").strip()[:120]
+            row_id = str(row.get("id") or uuid.uuid4().hex[:10])
+            image_data_url = str(row.get("image_data_url") or "").strip()
+            storage_key = str(row.get("storage_key") or "").strip()
+            image_url = str(row.get("image_url") or "").strip()
+            if image_data_url:
+                try:
+                    saved = _save_card_asset_to_object_storage(
+                        org=org,
+                        owner=request.user,
+                        data_url=image_data_url,
+                        field_name="gallery_image",
+                        filename_prefix=f"{catalogue_page.public_slug or 'catalogue'}-gallery",
+                        max_bytes=1024 * 1024,
+                    )
+                except ValueError as exc:
+                    code = str(exc)
+                    message_map = {
+                        "unsupported_gallery_image_type": "Only image files (JPG, PNG, SVG, WEBP, GIF, AVIF) are allowed.",
+                        "gallery_image_too_large": "Gallery image size must be under 1 MB.",
+                        "invalid_gallery_image_data": "Invalid gallery image data.",
+                    }
+                    return JsonResponse({"gallery_items": [code], "message": message_map.get(code, "Invalid gallery image.")}, status=400)
+                except Exception:
+                    saved = None
+                if saved:
+                    # Keep storage key even when URL resolution is unavailable.
+                    # This ensures delete flow can permanently remove the file from
+                    # both local and object storage backends.
+                    storage_key = str(saved.get("storage_key") or "").strip()
+                    resolved_url = str(saved.get("url") or "").strip()
+                    image_url = resolved_url or image_data_url
+                else:
+                    image_url = image_data_url
+            elif storage_key:
+                resolved = storage_url(storage_key)
+                if resolved:
+                    image_url = resolved
+            if not image_url:
+                continue
+            if storage_key:
+                kept_keys.add(storage_key)
+            next_items.append({
+                "id": row_id,
+                "title": title,
+                "storage_key": storage_key,
+                "image_url": image_url,
+            })
+        removed_keys = existing_keys - kept_keys
+        for key in removed_keys:
+            _delete_object_storage_asset(org, key)
+        catalogue_page.gallery_items = next_items
     if "is_active" in data:
         catalogue_page.is_active = bool(data.get("is_active"))
     catalogue_page.save()
@@ -1761,6 +1876,7 @@ def digital_card_entries_api(request):
     row.role_title = str(data.get("role_title") or "").strip()
     row.phone = str(data.get("phone") or "").strip()
     row.whatsapp_number = str(data.get("whatsapp_number") or "").strip()
+    row.telephone_number = str(data.get("telephone_number") or "").strip()
     row.email = str(data.get("email") or "").strip()
     row.website = str(data.get("website") or "").strip()
     row.address = str(data.get("address") or "").strip()
@@ -1885,6 +2001,98 @@ def digital_card_entries_api(request):
 
 @login_required
 @require_http_methods(["GET"])
+def digital_card_visitor_analytics_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    _cleanup_old_digital_card_visits(org)
+    range_key = str(request.GET.get("range") or "week").strip().lower()
+    if range_key not in {"day", "week", "month"}:
+        range_key = "week"
+    days_map = {"day": 1, "week": 7, "month": 30}
+    now = timezone.now()
+    start_at = now - timedelta(days=days_map[range_key])
+
+    query = str(request.GET.get("q") or "").strip()
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size") or 10)
+    except (TypeError, ValueError):
+        page_size = 10
+    page_size = max(5, min(50, page_size))
+
+    base_qs = DigitalCardVisit.objects.filter(organization=org, visited_at__gte=start_at)
+    if query:
+        base_qs = base_qs.filter(
+            Q(visitor_country__icontains=query)
+            | Q(visitor_ip__icontains=query)
+            | Q(page_url__icontains=query)
+            | Q(page_path__icontains=query)
+            | Q(public_slug__icontains=query)
+        )
+
+    total_visits = base_qs.count()
+    unique_visitors = base_qs.exclude(visitor_key="").values("visitor_key").distinct().count()
+    if not unique_visitors:
+        unique_visitors = base_qs.exclude(visitor_ip="").values("visitor_ip").distinct().count()
+
+    chart_rows = (
+        base_qs
+        .annotate(day=TruncDate("visited_at"))
+        .values("day")
+        .annotate(visits=Count("id"))
+        .order_by("day")
+    )
+    chart = [
+        {
+            "day": row["day"].isoformat() if row.get("day") else "",
+            "label": row["day"].strftime("%d %b") if row.get("day") else "",
+            "visits": int(row.get("visits") or 0),
+        }
+        for row in chart_rows
+    ]
+
+    total = total_visits
+    start = (page - 1) * page_size
+    rows = list(base_qs.order_by("-visited_at", "-id")[start:start + page_size])
+    total_pages = (total + page_size - 1) // page_size if total else 1
+
+    return JsonResponse(
+        {
+            "summary": {
+                "range": range_key,
+                "days": days_map[range_key],
+                "total_visits": total_visits,
+                "unique_visitors": unique_visitors,
+            },
+            "chart": chart,
+            "items": [
+                {
+                    "id": row.id,
+                    "visited_at": row.visited_at.isoformat() if row.visited_at else "",
+                    "public_slug": row.public_slug or "",
+                    "visitor_country": row.visitor_country or "Unknown",
+                    "visitor_ip": row.visitor_ip or "",
+                    "page_path": row.page_path or "",
+                    "page_url": row.page_url or "",
+                }
+                for row in rows
+            ],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_items": total,
+                "total_pages": total_pages,
+            },
+        }
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
 def digital_card_slug_check_api(request):
     org = _get_org(request)
     if not org:
@@ -1954,3 +2162,265 @@ def digital_card_entry_detail_api(request, card_id):
             replacement.is_primary = True
             replacement.save(update_fields=["is_primary", "updated_at"])
     return JsonResponse({"status": "deleted", "limit": _digital_card_limit_payload(org)})
+
+
+def _serialize_card_feedback(row):
+    return {
+        "id": row.id,
+        "public_slug": row.public_slug or "",
+        "full_name": row.full_name or "Anonymous",
+        "rating": int(row.rating or 0),
+        "message": row.message or "",
+        "is_approved": bool(row.is_approved),
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def _serialize_card_enquiry(row):
+    return {
+        "id": row.id,
+        "public_slug": row.public_slug or "",
+        "full_name": row.full_name or "",
+        "phone_number": row.phone_number or "",
+        "email": row.email or "",
+        "message": row.message or "",
+        "status": row.status or "new",
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def public_card_feedback_submit_api(request):
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    public_slug = str(data.get("public_slug") or "").strip()
+    if not public_slug:
+        return JsonResponse({"error": "public_slug_required"}, status=400)
+    card_entry = DigitalCardEntry.objects.filter(public_slug=public_slug, is_active=True).select_related("organization").first()
+    if not card_entry or not card_entry.organization_id:
+        return JsonResponse({"error": "not_found"}, status=404)
+    full_name = str(data.get("full_name") or "").strip()[:160]
+    message = str(data.get("message") or "").strip()[:800]
+    try:
+        rating = int(data.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0
+    rating = max(1, min(5, rating))
+    if not message:
+        return JsonResponse({"error": "message_required"}, status=400)
+    row = DigitalCardFeedback.objects.create(
+        organization=card_entry.organization,
+        card_entry=card_entry,
+        public_slug=public_slug,
+        full_name=full_name,
+        rating=rating,
+        message=message,
+        is_approved=True,
+    )
+    return JsonResponse({"status": "ok", "item": _serialize_card_feedback(row)})
+
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def public_card_enquiry_submit_api(request):
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    public_slug = str(data.get("public_slug") or "").strip()
+    if not public_slug:
+        return JsonResponse({"error": "public_slug_required"}, status=400)
+    card_entry = DigitalCardEntry.objects.filter(public_slug=public_slug, is_active=True).select_related("organization").first()
+    if not card_entry or not card_entry.organization_id:
+        return JsonResponse({"error": "not_found"}, status=404)
+    full_name = str(data.get("full_name") or "").strip()[:160]
+    phone_number = str(data.get("phone_number") or "").strip()[:40]
+    email = str(data.get("email") or "").strip()[:254]
+    message = str(data.get("message") or "").strip()[:1200]
+    if not full_name:
+        return JsonResponse({"error": "name_required"}, status=400)
+    if not message:
+        return JsonResponse({"error": "message_required"}, status=400)
+    row = DigitalCardEnquiry.objects.create(
+        organization=card_entry.organization,
+        card_entry=card_entry,
+        public_slug=public_slug,
+        full_name=full_name,
+        phone_number=phone_number,
+        email=email,
+        message=message,
+        status=DigitalCardEnquiry.STATUS_NEW,
+    )
+    return JsonResponse({"status": "ok", "item": _serialize_card_enquiry(row)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def digital_card_feedback_inbox_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    _cleanup_old_feedback_enquiries(org)
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size") or 20)
+    except (TypeError, ValueError):
+        page_size = 20
+    page_size = max(5, min(50, page_size))
+    query = str(request.GET.get("q") or "").strip()
+    queryset = DigitalCardFeedback.objects.filter(organization=org, is_deleted=False)
+    if query:
+        queryset = queryset.filter(
+            Q(full_name__icontains=query) | Q(message__icontains=query) | Q(public_slug__icontains=query)
+        )
+    total = queryset.count()
+    start = (page - 1) * page_size
+    rows = list(queryset.order_by("-created_at", "-id")[start:start + page_size])
+    total_pages = (total + page_size - 1) // page_size if total else 1
+    return JsonResponse(
+        {
+            "items": [_serialize_card_feedback(row) for row in rows],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_items": total,
+                "total_pages": total_pages,
+            },
+            "retention_note": "Only last 1 year feedback entries are maintained. Older entries are auto removed.",
+        }
+    )
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def digital_card_feedback_detail_api(request, feedback_id):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    row = DigitalCardFeedback.objects.filter(id=feedback_id, organization=org).first()
+    if not row:
+        return JsonResponse({"error": "not_found"}, status=404)
+    row.is_deleted = True
+    row.save(update_fields=["is_deleted", "updated_at"])
+    return JsonResponse({"status": "deleted"})
+
+
+@login_required
+@require_http_methods(["GET"])
+def digital_card_enquiry_inbox_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    _cleanup_old_feedback_enquiries(org)
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size") or 20)
+    except (TypeError, ValueError):
+        page_size = 20
+    page_size = max(5, min(50, page_size))
+    status_filter = str(request.GET.get("status") or "all").strip().lower()
+    if status_filter not in {"all", "new", "following", "completed"}:
+        status_filter = "all"
+    query = str(request.GET.get("q") or "").strip()
+    queryset = DigitalCardEnquiry.objects.filter(organization=org, is_deleted=False)
+    if status_filter != "all":
+        queryset = queryset.filter(status=status_filter)
+    if query:
+        queryset = queryset.filter(
+            Q(full_name__icontains=query)
+            | Q(phone_number__icontains=query)
+            | Q(email__icontains=query)
+            | Q(message__icontains=query)
+            | Q(public_slug__icontains=query)
+        )
+    counts = {
+        "new": DigitalCardEnquiry.objects.filter(organization=org, is_deleted=False, status="new").count(),
+        "following": DigitalCardEnquiry.objects.filter(organization=org, is_deleted=False, status="following").count(),
+        "completed": DigitalCardEnquiry.objects.filter(organization=org, is_deleted=False, status="completed").count(),
+    }
+    counts["all"] = counts["new"] + counts["following"] + counts["completed"]
+    total = queryset.count()
+    start = (page - 1) * page_size
+    rows = list(queryset.order_by("-created_at", "-id")[start:start + page_size])
+    total_pages = (total + page_size - 1) // page_size if total else 1
+    return JsonResponse(
+        {
+            "items": [_serialize_card_enquiry(row) for row in rows],
+            "counts": counts,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_items": total,
+                "total_pages": total_pages,
+            },
+            "retention_note": "Only last 1 year enquiry entries are maintained. Older entries are auto removed.",
+        }
+    )
+
+
+@login_required
+@require_http_methods(["PATCH"])
+def digital_card_enquiry_status_api(request, enquiry_id):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    if not _is_org_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+    row = DigitalCardEnquiry.objects.filter(id=enquiry_id, organization=org, is_deleted=False).first()
+    if not row:
+        return JsonResponse({"error": "not_found"}, status=404)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    next_status = str(data.get("status") or "").strip().lower()
+    if next_status not in {"new", "following", "completed"}:
+        return JsonResponse({"error": "invalid_status"}, status=400)
+    row.status = next_status
+    row.save(update_fields=["status", "updated_at"])
+    return JsonResponse({"status": "ok", "item": _serialize_card_enquiry(row)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def digital_card_enquiry_export_api(request):
+    org = _get_org(request)
+    if not org:
+        return JsonResponse({"error": "organization_required", "redirect": "/select-organization/"}, status=403)
+    _cleanup_old_feedback_enquiries(org)
+    status_filter = str(request.GET.get("status") or "all").strip().lower()
+    if status_filter not in {"all", "new", "following", "completed"}:
+        status_filter = "all"
+    queryset = DigitalCardEnquiry.objects.filter(organization=org, is_deleted=False)
+    if status_filter != "all":
+        queryset = queryset.filter(status=status_filter)
+    rows = list(queryset.order_by("-created_at", "-id"))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Status", "Name", "Phone", "Email", "Message", "Card Slug"])
+    for row in rows:
+        writer.writerow(
+            [
+                row.created_at.isoformat() if row.created_at else "",
+                row.status,
+                row.full_name,
+                row.phone_number,
+                row.email,
+                row.message,
+                row.public_slug,
+            ]
+        )
+    csv_content = output.getvalue()
+    output.close()
+    response = HttpResponse(csv_content, content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="digital-card-enquiries-{status_filter}.csv"'
+    return response

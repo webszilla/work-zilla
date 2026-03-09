@@ -80,6 +80,7 @@ class DigitalCardEntry(models.Model):
     role_title = models.CharField(max_length=200, blank=True, default="")
     phone = models.CharField(max_length=40, blank=True, default="")
     whatsapp_number = models.CharField(max_length=40, blank=True, default="")
+    telephone_number = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
     website = models.URLField(blank=True, default="")
     address = models.TextField(blank=True, default="")
@@ -126,6 +127,36 @@ class DigitalCardEntry(models.Model):
         return f"{self.organization_id}:{self.public_slug}"
 
 
+class DigitalCardVisit(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_digital_card_visits")
+    card_entry = models.ForeignKey(
+        DigitalCardEntry,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="visits",
+    )
+    public_slug = models.SlugField(max_length=220, blank=True, default="")
+    visitor_ip = models.CharField(max_length=80, blank=True, default="")
+    visitor_country = models.CharField(max_length=120, blank=True, default="Unknown")
+    visitor_key = models.CharField(max_length=120, blank=True, default="")
+    user_agent = models.CharField(max_length=400, blank=True, default="")
+    page_path = models.CharField(max_length=300, blank=True, default="")
+    page_url = models.TextField(blank=True, default="")
+    visited_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-visited_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "visited_at"]),
+            models.Index(fields=["organization", "visitor_key", "visited_at"]),
+            models.Index(fields=["card_entry", "visited_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.public_slug}:{self.visited_at.isoformat()}"
+
+
 class CataloguePage(models.Model):
     company_profile = models.OneToOneField(CompanyProfile, on_delete=models.CASCADE, related_name="catalogue_page")
     public_slug = models.SlugField(max_length=220, unique=True)
@@ -135,6 +166,8 @@ class CataloguePage(models.Model):
     services_content = models.TextField(blank=True, default="")
     contact_title = models.CharField(max_length=120, blank=True, default="Contact")
     contact_note = models.TextField(blank=True, default="")
+    gallery_title = models.CharField(max_length=120, blank=True, default="Gallery")
+    gallery_items = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -336,6 +369,76 @@ class MarketingCampaignDelivery(models.Model):
 
     def __str__(self):
         return f"{self.organization_id}:{self.phone_number}:{self.status}"
+
+
+class DigitalCardFeedback(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_digital_card_feedbacks")
+    card_entry = models.ForeignKey(
+        DigitalCardEntry,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="feedbacks",
+    )
+    public_slug = models.SlugField(max_length=220, blank=True, default="")
+    full_name = models.CharField(max_length=160, blank=True, default="")
+    rating = models.PositiveSmallIntegerField(default=5)
+    message = models.TextField(blank=True, default="")
+    is_approved = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "created_at"]),
+            models.Index(fields=["organization", "is_approved", "is_deleted"]),
+            models.Index(fields=["public_slug", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.public_slug}:{self.id}"
+
+
+class DigitalCardEnquiry(models.Model):
+    STATUS_NEW = "new"
+    STATUS_FOLLOWING = "following"
+    STATUS_COMPLETED = "completed"
+    STATUS_CHOICES = (
+        (STATUS_NEW, "New"),
+        (STATUS_FOLLOWING, "Following"),
+        (STATUS_COMPLETED, "Completed"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="wa_digital_card_enquiries")
+    card_entry = models.ForeignKey(
+        DigitalCardEntry,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="enquiries",
+    )
+    public_slug = models.SlugField(max_length=220, blank=True, default="")
+    full_name = models.CharField(max_length=160, blank=True, default="")
+    phone_number = models.CharField(max_length=40, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    message = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "status", "created_at"]),
+            models.Index(fields=["organization", "is_deleted", "created_at"]),
+            models.Index(fields=["public_slug", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.public_slug}:{self.status}:{self.id}"
 
 
 def build_unique_public_slug(model_cls, base_text, fallback_prefix="page"):

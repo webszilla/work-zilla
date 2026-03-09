@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import TablePagination from "../components/TablePagination.jsx";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
@@ -10,6 +12,11 @@ const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const DEFAULT_TABLE_PAGE_SIZE = 5;
+const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
+  code: String(option?.value || "").trim(),
+  label: String(option?.country || option?.label || "").trim(),
+  flag: String(option?.flag || "🌐"),
+}));
 
 function normalizeCountryName(value) {
   return String(value || "").trim().toLowerCase();
@@ -1569,16 +1576,13 @@ function CrmOnePageModule() {
                         <label className="form-label small text-secondary mb-1">{field.label}</label>
                         {hasPhoneCountryCodeField && field.key === "phone" ? (
                           <div className="input-group">
-                            <select
-                              className="form-select"
-                              style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
+                            <PhoneCountryCodePicker
                               value={formValues.phoneCountryCode || "+91"}
-                              onChange={(event) => setField(sectionKey, "phoneCountryCode", event.target.value)}
-                            >
-                              {DIAL_CODE_LABEL_OPTIONS.map((option) => (
-                                <option key={`contact-phone-code-${option.value}`} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
+                              onChange={(code) => setField(sectionKey, "phoneCountryCode", code)}
+                              options={DIAL_COUNTRY_PICKER_OPTIONS}
+                              style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
+                              ariaLabel="CRM country code"
+                            />
                             <input
                               type="text"
                               className="form-control"
@@ -4306,6 +4310,11 @@ function AccountsErpModule() {
       return;
     }
     if (!String(file.type || "").startsWith("image/")) {
+      showUploadAlert("Please select an image file.");
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      showUploadAlert("Image size must be under 1 MB.");
       return;
     }
     const reader = new FileReader();
@@ -5470,16 +5479,13 @@ function AccountsErpModule() {
                 <div className="col-12 col-xl-6">
                   <label className="form-label small text-secondary mb-1">Phone Number</label>
                   <div className="d-flex gap-2">
-                    <select
-                      className="form-select"
-                      style={{ maxWidth: "220px" }}
+                    <PhoneCountryCodePicker
                       value={customerForm.phoneCountryCode || "+91"}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, phoneCountryCode: e.target.value }))}
-                    >
-                      {DIAL_CODE_LABEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
+                      onChange={(code) => setCustomerForm((p) => ({ ...p, phoneCountryCode: code }))}
+                      options={DIAL_COUNTRY_PICKER_OPTIONS}
+                      style={{ maxWidth: "220px" }}
+                      ariaLabel="Customer phone country code"
+                    />
                     <input className="form-control" value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
                     <button
                       type="button"
@@ -5533,19 +5539,18 @@ function AccountsErpModule() {
                 <div className="col-12">
                   {(customerForm.additionalPhones || []).map((row, index) => (
                     <div className="d-flex gap-2 mb-2" key={`phone-${index}`}>
-                      <select
-                        className="form-select"
-                        style={{ maxWidth: "220px" }}
+                      <PhoneCountryCodePicker
                         value={row.countryCode || "+91"}
-                        onChange={(e) => setCustomerForm((p) => ({
-                          ...p,
-                          additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: e.target.value } : item))
-                        }))}
-                      >
-                        {DIAL_CODE_LABEL_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
+                        onChange={(code) =>
+                          setCustomerForm((p) => ({
+                            ...p,
+                            additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
+                          }))
+                        }
+                        options={DIAL_COUNTRY_PICKER_OPTIONS}
+                        style={{ maxWidth: "220px" }}
+                        ariaLabel="Additional phone country code"
+                      />
                       <input
                         className="form-control"
                         value={row.number || ""}

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ company.company_name|default:public_slug }} - Digital Card</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <style>
     :root{
       --theme: {{ theme_color }};
@@ -22,14 +23,20 @@
       padding:24px 16px;
     }
     .card-shell{
-      width:min(100%, 380px);
+      width:485px;
+      max-width:100%;
       margin:0 auto;
+    }
+    @media (max-width: 576px){
+      .card-shell{
+        width:100%;
+      }
     }
     .card{
       min-height:720px;
       border-radius:36px;
       overflow:hidden;
-      border:1px solid rgba(148,163,184,0.18);
+      border:none;
       box-shadow:0 28px 60px rgba(2,6,23,0.34);
       position:relative;
       isolation:isolate;
@@ -54,6 +61,22 @@
       background-size:cover;
       background-position:center;
       position:relative;
+    }
+    .views-badge{
+      position:absolute;
+      top:16px;
+      right:14px;
+      z-index:4;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 10px;
+      border-radius:999px;
+      background:rgba(15, 23, 42, 0.8);
+      color:#ffffff;
+      font-size:0.82rem;
+      font-weight:700;
+      border:1px solid rgba(148,163,184,0.28);
     }
     .hero::after{
       content:"";
@@ -138,6 +161,7 @@
       margin-top:16px;
     }
     .social-link{
+      --social-icon-size:calc(var(--card-icon-pt, 14) * 1px);
       display:inline-flex;
       align-items:center;
       justify-content:center;
@@ -154,12 +178,22 @@
       display:block;
       border-radius:6px;
       object-fit:contain;
+      width:var(--social-icon-size);
+      height:var(--social-icon-size);
     }
     .social-link svg{
-      width:18px;
-      height:18px;
+      width:var(--social-icon-size);
+      height:var(--social-icon-size);
       display:block;
       fill:currentColor;
+    }
+    .social-link svg.social-icon--x{
+      width:var(--social-icon-size);
+      height:var(--social-icon-size);
+      fill:currentColor;
+      stroke:none;
+      transform:scale(0.9);
+      transform-origin:center;
     }
     .actions{
       display:grid;
@@ -285,6 +319,57 @@
       font-size:0.94rem;
       line-height:1.7;
     }
+    .scroll-html h1, .html-content h1{
+      font-size:1.18rem;
+      line-height:1.3;
+      margin:0 0 0.55em;
+      font-weight:800;
+    }
+    .scroll-html h2, .html-content h2{
+      font-size:1.08rem;
+      line-height:1.35;
+      margin:0 0 0.52em;
+      font-weight:780;
+    }
+    .scroll-html h3, .html-content h3{
+      font-size:1rem;
+      line-height:1.4;
+      margin:0 0 0.5em;
+      font-weight:760;
+    }
+    .scroll-html h4, .html-content h4{
+      font-size:0.95rem;
+      line-height:1.42;
+      margin:0 0 0.48em;
+      font-weight:740;
+    }
+    .scroll-html h5, .html-content h5{
+      font-size:0.9rem;
+      line-height:1.45;
+      margin:0 0 0.45em;
+      font-weight:720;
+    }
+    .scroll-html h6, .html-content h6{
+      font-size:0.85rem;
+      line-height:1.5;
+      margin:0 0 0.42em;
+      font-weight:700;
+    }
+    .contact-default-details{
+      margin-top:12px;
+      padding-top:10px;
+      border-top:1px solid rgba(148,163,184,0.2);
+      display:grid;
+      gap:4px;
+      font-size:0.9rem;
+      line-height:1.5;
+      color:#dbe5f3;
+    }
+    .contact-default-details__label{
+      font-weight:800;
+      color:#f8fafc;
+      margin-right:6px;
+    }
     .catalogue-group + .catalogue-group{
       margin-top:18px;
     }
@@ -351,6 +436,432 @@
       text-decoration:none;
       font-size:0.82rem;
       font-weight:700;
+    }
+    .gallery-grid{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:10px;
+    }
+    .gallery-tile{
+      margin:0;
+      border-radius:14px;
+      overflow:hidden;
+      border:1px solid rgba(148,163,184,0.14);
+      background:rgba(255,255,255,0.04);
+    }
+    .gallery-image{
+      display:block;
+      width:100%;
+      aspect-ratio: 1 / 1;
+      object-fit:cover;
+      background:rgba(15,23,42,0.35);
+      cursor:zoom-in;
+    }
+    .gallery-caption{display:none}
+    .gallery-lightbox{
+      position:fixed;
+      inset:0;
+      z-index:9999;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:rgba(2, 6, 23, 0.84);
+      backdrop-filter: blur(3px);
+    }
+    .gallery-lightbox.is-open{
+      display:flex;
+    }
+    .gallery-lightbox__panel{
+      width:min(92vw, 520px);
+      border-radius:16px;
+      background:rgba(15,23,42,0.96);
+      border:1px solid rgba(148,163,184,0.2);
+      box-shadow:0 24px 50px rgba(2,6,23,0.55);
+      overflow:hidden;
+    }
+    .gallery-lightbox__image{
+      width:100%;
+      max-height:70vh;
+      object-fit:contain;
+      display:block;
+      background:rgba(15,23,42,0.55);
+    }
+    .gallery-lightbox__footer{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:12px;
+      border-top:1px solid rgba(148,163,184,0.2);
+    }
+    .gallery-lightbox__title{
+      font-size:0.9rem;
+      font-weight:700;
+      margin:0;
+      color:#f8fafc;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .gallery-lightbox__actions{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-shrink:0;
+    }
+    .gallery-lightbox__btn{
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.35);
+      color:#f8fafc;
+      min-height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      font-size:0.82rem;
+      font-weight:700;
+      cursor:pointer;
+    }
+    .gallery-lightbox__btn:disabled{
+      opacity:0.45;
+      cursor:not-allowed;
+    }
+    .share-panel{
+      margin-top:22px;
+      padding:16px;
+      border-radius:20px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(148,163,184,0.14);
+    }
+    .card-form-panel{
+      margin-top:22px;
+      padding:16px;
+      border-radius:20px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(148,163,184,0.14);
+    }
+    .card-form-panel h3{
+      margin:0 0 12px;
+      font-size:1.08rem;
+      font-weight:800;
+    }
+    .card-feedback-list{
+      display:grid;
+      gap:10px;
+      margin-bottom:14px;
+    }
+    .card-feedback-item{
+      border:1px solid rgba(148,163,184,0.16);
+      border-radius:14px;
+      padding:10px 12px;
+      background:rgba(15,23,42,0.45);
+    }
+    .card-feedback-item__top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:4px;
+      font-size:0.84rem;
+      color:#cbd5e1;
+    }
+    .card-feedback-item__name{
+      font-weight:700;
+      color:#f8fafc;
+    }
+    .card-feedback-item__stars{
+      letter-spacing:1px;
+      color:#facc15;
+      font-size:0.86rem;
+      margin-bottom:4px;
+    }
+    .card-feedback-item__msg{
+      font-size:0.86rem;
+      color:#e2e8f0;
+      line-height:1.5;
+      margin:0;
+    }
+    .card-form-grid{
+      display:grid;
+      gap:10px;
+    }
+    .card-form-row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+    .card-input{
+      width:100%;
+      min-height:40px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.5);
+      color:#f8fafc;
+      padding:0 12px;
+      font-size:0.9rem;
+    }
+    .card-textarea{
+      width:100%;
+      min-height:96px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.5);
+      color:#f8fafc;
+      padding:10px 12px;
+      font-size:0.9rem;
+      resize:vertical;
+    }
+    .card-rating-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .card-star-btn{
+      border:1px solid rgba(148,163,184,0.32);
+      background:rgba(15,23,42,0.45);
+      color:#cbd5e1;
+      border-radius:10px;
+      min-height:34px;
+      min-width:34px;
+      cursor:pointer;
+      font-size:1rem;
+      line-height:1;
+    }
+    .card-star-btn.is-active{
+      color:#facc15;
+      border-color:#facc15;
+    }
+    .card-form-note{
+      margin:0;
+      font-size:0.78rem;
+      color:#94a3b8;
+    }
+    .card-form-status{
+      margin:0;
+      font-size:0.82rem;
+      color:#93c5fd;
+      min-height:1.1rem;
+    }
+    @media (max-width: 560px){
+      .card-form-row{
+        grid-template-columns:1fr;
+      }
+    }
+    .share-panel h3{
+      margin:0 0 12px;
+      font-size:1.08rem;
+      font-weight:800;
+    }
+    .share-url-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .share-url-input{
+      flex:1;
+      min-height:40px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.5);
+      color:#f8fafc;
+      padding:0 12px;
+      font-size:0.9rem;
+    }
+    .share-action-btn{
+      min-height:40px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.3);
+      background:rgba(15,23,42,0.45);
+      color:#f8fafc;
+      padding:0 14px;
+      font-size:0.86rem;
+      font-weight:700;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      white-space:nowrap;
+    }
+    .share-action-btn__icon{
+      width:16px;
+      height:16px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:0.95rem;
+      line-height:1;
+    }
+    .share-action-btn__icon i{
+      font-size:0.95rem;
+      line-height:1;
+    }
+    .share-panel-sub{
+      margin:20px 0 8px;
+      font-size:0.88rem;
+      color:#cbd5e1;
+    }
+    .share-qr-wrap{
+      display:flex;
+      justify-content:center;
+      margin-top:6px;
+    }
+    .share-qr-image{
+      width:min(150px, 52vw);
+      aspect-ratio:1 / 1;
+      object-fit:contain;
+      border-radius:12px;
+      border:2px solid rgba(148,163,184,0.22);
+      background:#ffffff;
+      padding:8px;
+    }
+    .share-btn-row{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:8px;
+      margin-top:12px;
+    }
+    .share-btn-row .share-action-btn{
+      width:100%;
+    }
+    .share-btn-row .share-action-btn__icon{
+      color:var(--theme);
+    }
+    .wa-share-row{
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .wa-country-picker{
+      position:relative;
+      flex:0 0 auto;
+      width:66px;
+    }
+    .wa-country-picker__trigger{
+      width:100%;
+      min-height:42px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.5);
+      color:#f8fafc;
+      padding:0 9px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:space-between;
+      cursor:pointer;
+    }
+    .wa-country-picker__flag{
+      font-size:1.6rem;
+      line-height:1;
+      width:1.34rem;
+      min-width:1.34rem;
+      text-align:center;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
+    }
+    .wa-country-picker__caret{
+      font-size:0.64rem;
+      opacity:0.88;
+    }
+    .wa-country-picker__dropdown{
+      position:absolute;
+      top:calc(100% + 6px);
+      left:0;
+      width:min(320px, 82vw);
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(2,6,23,0.98);
+      box-shadow:0 16px 40px rgba(2,6,23,0.55);
+      z-index:2400;
+      overflow:hidden;
+    }
+    .wa-country-picker__dropdown--up{
+      top:auto;
+      bottom:calc(100% + 6px);
+    }
+    .wa-country-picker__search-wrap{
+      padding:8px;
+      border-bottom:1px solid rgba(148,163,184,0.2);
+      background:rgba(15,23,42,0.7);
+    }
+    .wa-country-picker__search{
+      width:100%;
+      min-height:34px;
+      border-radius:8px;
+      border:1px solid rgba(148,163,184,0.25);
+      background:rgba(2,6,23,0.72);
+      color:#f8fafc;
+      padding:0 10px;
+      font-size:0.84rem;
+    }
+    .wa-country-picker__list{
+      max-height:220px;
+      overflow:auto;
+    }
+    .wa-country-picker__option{
+      width:100%;
+      border:none;
+      border-bottom:1px solid rgba(148,163,184,0.14);
+      background:transparent;
+      color:#f8fafc;
+      text-align:left;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:8px 10px;
+      cursor:pointer;
+      font-size:0.86rem;
+    }
+    .wa-country-picker__option-flag{
+      font-size:1.6rem;
+      line-height:1;
+      width:1.32rem;
+      min-width:1.32rem;
+      text-align:center;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
+    }
+    .wa-country-picker__option:hover,
+    .wa-country-picker__option.is-active{
+      background:rgba(37,99,235,0.18);
+    }
+    .wa-country-picker__country{
+      flex:1;
+      min-width:0;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .wa-country-picker__code{
+      color:#cbd5e1;
+      font-size:0.82rem;
+      font-weight:700;
+    }
+    .wa-country-picker__empty{
+      padding:10px;
+      color:#94a3b8;
+      font-size:0.82rem;
+    }
+    .wa-share-input{
+      flex:1;
+      min-height:40px;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.28);
+      background:rgba(15,23,42,0.5);
+      color:#f8fafc;
+      padding:0 12px;
+      font-size:0.9rem;
+    }
+    .wa-share-note{
+      margin-top:8px;
+      font-size:0.78rem;
+      color:#94a3b8;
     }
 
     .card.design1{
@@ -624,10 +1135,16 @@
       display:none;
     }
     .card.design4 .social-link{
+      width:46px;
+      height:46px;
       min-width:46px;
       min-height:46px;
+      max-width:46px;
+      max-height:46px;
       padding:0;
       border-radius:50%;
+      aspect-ratio:1 / 1;
+      justify-self:center;
       background:#ffffff;
       color:color-mix(in srgb, var(--theme) 90%, #d39b18);
       border:none;
@@ -721,6 +1238,62 @@
     }
     .card.design4 .greeting{
       background:rgba(255,255,255,0.82);
+    }
+    .card.design4 .section-title,
+    .card.design4 .greeting,
+    .card.design4 .scroll-section,
+    .card.design4 .card-form-panel,
+    .card.design4 .share-panel{
+      grid-column:1 / -1;
+      width:100%;
+    }
+    .card.design4 .contact-default-details{
+      border-top-color:rgba(43,47,58,0.14);
+      color:#5d6474;
+    }
+    .card.design4 .contact-default-details__label{
+      color:#2a2e38;
+    }
+    .card.design4 .contact-default-details a{
+      color:#3a4255;
+    }
+    .card.design4 .card-input,
+    .card.design4 .card-textarea,
+    .card.design4 .share-url-input,
+    .card.design4 .wa-share-input{
+      background:#ffffff;
+      color:#111827;
+      border:1px solid rgba(43,47,58,0.2);
+    }
+    .card.design4 .card-input::placeholder,
+    .card.design4 .card-textarea::placeholder,
+    .card.design4 .share-url-input::placeholder,
+    .card.design4 .wa-share-input::placeholder{
+      color:#6b7280;
+      opacity:1;
+    }
+    .card.design4 .card-feedback-item{
+      background:#ffffff;
+      border:1px solid rgba(43,47,58,0.16);
+    }
+    .card.design4 .card-feedback-item__top{
+      color:#6b7280;
+    }
+    .card.design4 .card-feedback-item__name,
+    .card.design4 .card-feedback-item__msg{
+      color:#111827;
+    }
+    .card.design4 .share-action-btn{
+      background:linear-gradient(135deg, var(--theme), color-mix(in srgb, var(--theme-secondary) 55%, #0f172a));
+      border:none;
+      color:#ffffff;
+    }
+    .card.design4 .share-action-btn__icon,
+    .card.design4 .share-btn-row .share-action-btn__icon{
+      color:#ffffff;
+    }
+    .card.design4 .share-action-btn:disabled{
+      opacity:0.72;
     }
 
     .card.design5{
@@ -973,6 +1546,24 @@
     .card.design7 .detail-icon{
       color:color-mix(in srgb, var(--theme) 92%, #efb726);
     }
+    .card.design7 .section-title,
+    .card.design7 .greeting,
+    .card.design7 .scroll-section,
+    .card.design7 .card-form-panel,
+    .card.design7 .share-panel{
+      grid-column:1 / -1;
+      width:100%;
+    }
+    .card.design7 .contact-default-details{
+      border-top-color:rgba(45,36,85,0.14);
+      color:#5d6079;
+    }
+    .card.design7 .contact-default-details__label{
+      color:#2d2455;
+    }
+    .card.design7 .contact-default-details a{
+      color:#464a67;
+    }
     .card.design8{
       background:#f4f4f4;
       color:#111827;
@@ -1173,11 +1764,41 @@
       font-weight:700 !important;
       text-decoration:none !important;
     }
-    /* Flat mode: keep template background same, make CTA chips solid primary. */
+    .card .social-link svg.social-icon--x{
+      width:var(--social-icon-size) !important;
+      height:var(--social-icon-size) !important;
+      fill:currentColor !important;
+      stroke:none !important;
+      transform:scale(0.9) !important;
+      transform-origin:center !important;
+    }
+    .card .social-link svg{
+      width:var(--social-icon-size) !important;
+      height:var(--social-icon-size) !important;
+    }
+    .card .social-link img{
+      width:var(--social-icon-size) !important;
+      height:var(--social-icon-size) !important;
+    }
+    /* Action mode sync: gradient mode => all quick actions gradient,
+       flat mode => all quick actions solid primary */
+    .card:not(.is-flat) .action{
+      background:linear-gradient(135deg, var(--theme), var(--theme-secondary)) !important;
+      border:none !important;
+      outline:none !important;
+      color:#f8fafc !important;
+      background-clip:padding-box !important;
+    }
+    .card:not(.is-flat) .template-badge{
+      background:linear-gradient(135deg, var(--theme), var(--theme-secondary)) !important;
+      border-color:transparent !important;
+      color:#f8fafc !important;
+    }
     .card.is-flat .template-badge,
-    .card.is-flat .action.is-primary{
+    .card.is-flat .action{
       background: var(--theme) !important;
-      border-color: var(--theme) !important;
+      border:none !important;
+      color:#f8fafc !important;
       box-shadow:none !important;
     }
   </style>
@@ -1185,7 +1806,9 @@
 <body>
   <div class="card-shell">
     <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %} {% if theme_mode == 'flat' %}is-flat{% endif %}">
-      <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}></div>
+      <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}>
+        <span class="views-badge" title="Total card views">👁 Views: {{ view_count|default:0 }}</span>
+      </div>
 
       <div class="content">
         <div class="avatar" style="border-radius:{% if logo_radius_px %}{{ logo_radius_px }}px{% else %}28px{% endif %};">
@@ -1211,7 +1834,7 @@
         {% if social_links_items %}
         <div class="socials">
             {% for link in social_links_items %}
-              <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer" aria-label="{{ link.label }}">
+              <a class="social-link" href="{{ link.url }}" target="_blank" rel="noreferrer" aria-label="{{ link.label }}" style="--social-icon-size:{% if link.icon_size %}{{ link.icon_size }}px{% else %}calc(var(--card-icon-pt, 14) * 1px){% endif %};">
                 {% if link.type == "custom" and link.custom_icon_data %}
                   <img src="{{ link.custom_icon_data }}" alt="{{ link.label }}" width="{{ link.icon_size }}" height="{{ link.icon_size }}">
                 {% else %}
@@ -1226,7 +1849,7 @@
                   {% elif link.icon == "youtube" %}
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.8 8s-.2-1.4-.8-2a2.9 2.9 0 0 0-2-0.8C16.2 5 12 5 12 5h0s-4.2 0-7 .2a2.9 2.9 0 0 0-2 .8c-.6.6-.8 2-.8 2S2 9.6 2 11.2v1.5C2 14.4 2.2 16 2.2 16s.2 1.4.8 2a3.4 3.4 0 0 0 2.2.8c1.6.2 6.8.2 6.8.2s4.2 0 7-.2a2.9 2.9 0 0 0 2-.8c.6-.6.8-2 .8-2s.2-1.6.2-3.3v-1.5C22 9.6 21.8 8 21.8 8zM9.8 15.2V8.9l6 3.2-6 3.1z"/></svg>
                   {% elif link.icon == "twitter" or link.icon == "x" %}
-                    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5L19 19"/><path d="M19 5L5 19"/></svg>
+                    <svg class="social-icon--x" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.294 6.928 14.357 1h-1.2L8.761 6.147 5.253 1H1.2l5.31 7.791L1.2 15h1.2l4.642-5.438L10.747 15H14.8L9.294 6.928Zm-1.643 1.925-.538-.775L2.83 1.91h1.845l3.458 4.98.538.775 4.493 6.467h-1.845l-3.68-5.279Z"/></svg>
                   {% elif link.icon == "telegram" %}
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.6c.3-1.4-1-2.5-2.3-1.9L3.3 9.1c-1.5.6-1.4 2.8.1 3.3l3.5 1 1.3 4.1c.4 1.3 2.1 1.6 2.9.5l2-2.6 3.8 2.8c1.1.8 2.6.2 2.9-1.1l2.1-12.5zM9 12.9l8.7-6.4-6.8 7.7-.3 3-1.6-4.3z"/></svg>
                   {% elif link.icon == "website" or link.icon == "globe" %}
@@ -1266,6 +1889,16 @@
             </span>
             <span>{{ card_entry.whatsapp_number|default:company.whatsapp_number|default:"-" }}</span>
           </a>
+          {% with tel_no=card_entry.telephone_number|default:'' %}
+          {% if tel_no %}
+          <a class="detail" href="tel:{{ tel_no }}">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.12 4.2 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </span>
+            <span>{{ tel_no }}</span>
+          </a>
+          {% endif %}
+          {% endwith %}
           <a class="detail" href="mailto:{{ card_entry.email|default:company.email|default:'' }}">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v.4l-10 6.25L2 7.4V7a2 2 0 0 1 2-2zm18 4.1V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.1l9.47 5.92a1 1 0 0 0 1.06 0z"/></svg>
@@ -1278,12 +1911,23 @@
             </span>
             <span>{{ card_entry.website|default:company.website|default:"-" }}</span>
           </a>
-          <a class="detail" href="https://www.google.com/maps/search/?api=1&amp;query={{ card_entry.address|default:company.address|default:''|urlencode }}" target="_blank" rel="noreferrer">
+          {% if address_details %}
+          {% for addr in address_details %}
+          <a class="detail" href="{{ addr.map_url }}" target="_blank" rel="noreferrer">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.5z"/></svg>
             </span>
-            <span>{{ card_entry.address|default:company.address|default:"-" }}</span>
+            <span>{{ addr.text }}</span>
           </a>
+          {% endfor %}
+          {% else %}
+          <div class="detail">
+            <span class="detail-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.5z"/></svg>
+            </span>
+            <span>-</span>
+          </div>
+          {% endif %}
         </div>
 
         {% if highlights_html or highlights %}
@@ -1350,58 +1994,161 @@
           </section>
         {% endif %}
 
+        {% if gallery_items %}
+          <section class="scroll-section">
+            <h3>{{ catalogue_page.gallery_title|default:"Gallery" }}</h3>
+            <div class="gallery-grid">
+              {% for image in gallery_items %}
+                <figure class="gallery-tile">
+                  <img class="gallery-image js-gallery-image" data-gallery-index="{{ forloop.counter0 }}" src="{{ image.image_url }}" alt="{{ image.title|default:'Gallery image' }}">
+                </figure>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+
         {% if catalogue_page and catalogue_page.contact_note %}
           <section class="scroll-section">
             <h3>{{ catalogue_page.contact_title|default:"Contact" }}</h3>
             <div class="scroll-html">{{ catalogue_page.contact_note|safe }}</div>
+            {% if company.company_name or card_entry.address|default:company.address or company.phone or company.email %}
+              <div class="contact-default-details">
+                {% if company.company_name %}
+                  <div><span class="contact-default-details__label">Company:</span>{{ company.company_name }}</div>
+                {% endif %}
+                {% if card_entry.address|default:company.address %}
+                  <div><span class="contact-default-details__label">Address:</span>{{ card_entry.address|default:company.address }}</div>
+                {% endif %}
+                {% if company.phone %}
+                  <div><span class="contact-default-details__label">Phone:</span>{{ company.phone }}</div>
+                {% endif %}
+                {% if company.email %}
+                  <div><span class="contact-default-details__label">Email:</span>{{ company.email }}</div>
+                {% endif %}
+              </div>
+            {% endif %}
           </section>
         {% endif %}
 
-        <div class="footer-actions">
-          <a class="footer-action" href="/auth/login/">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M10 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-2"/>
-              <path d="M14 12H3"/>
-              <path d="m7 8-4 4 4 4"/>
-            </svg>
-            <span>Login</span>
-          </a>
-          <a class="footer-action js-share-card" href="#">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="18" cy="5" r="2"/>
-              <circle cx="6" cy="12" r="2"/>
-              <circle cx="18" cy="19" r="2"/>
-              <path d="M8 11l8-5"/>
-              <path d="M8 13l8 5"/>
-            </svg>
-            <span>Share</span>
-          </a>
-          <a class="footer-action" href="sms:?body=Check%20my%20digital%20card%3A%20{{ request.build_absolute_uri|urlencode }}">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V7a2 2 0 0 1 2-2z"/>
-              <path d="M8 10h8"/>
-              <path d="M8 14h5"/>
-            </svg>
-            <span>SMS</span>
-          </a>
-          <a class="footer-action" href="/pricing/">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3v9"/>
-              <path d="m8 7 4-4 4 4"/>
-              <path d="M5 13h14"/>
-              <rect x="4" y="13" width="16" height="8" rx="2"/>
-            </svg>
-            <span>Upgrade</span>
-          </a>
-          <a class="footer-action" href="{% if card_entry.email|default:company.email %}mailto:{{ card_entry.email|default:company.email }}?subject=Enquiry{% elif card_entry.whatsapp_number|default:company.whatsapp_number %}https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry.{% else %}#{% endif %}">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-4 3v-3H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>
-              <path d="M8 12h8"/>
-              <path d="M8 9h5"/>
-            </svg>
-            <span>Enquiry</span>
-          </a>
-        </div>
+        <section class="card-form-panel" id="feedbackPanel">
+          <h3>Feedback</h3>
+          {% if feedback_items %}
+            <div class="card-feedback-list">
+              {% for item in feedback_items %}
+                <article class="card-feedback-item">
+                  <div class="card-feedback-item__top">
+                    <span class="card-feedback-item__name">{{ item.full_name }}</span>
+                    <span>{{ item.created_at|date:"M d, Y" }}</span>
+                  </div>
+                  <div class="card-feedback-item__stars">
+                    {% if item.rating >= 1 %}★{% else %}☆{% endif %}
+                    {% if item.rating >= 2 %}★{% else %}☆{% endif %}
+                    {% if item.rating >= 3 %}★{% else %}☆{% endif %}
+                    {% if item.rating >= 4 %}★{% else %}☆{% endif %}
+                    {% if item.rating >= 5 %}★{% else %}☆{% endif %}
+                  </div>
+                  <p class="card-feedback-item__msg">{{ item.message }}</p>
+                </article>
+              {% endfor %}
+            </div>
+          {% endif %}
+          <form class="card-form-grid" id="feedbackForm">
+            <input class="card-input" id="feedbackName" placeholder="Enter full name" maxlength="160">
+            <div class="card-rating-row">
+              <span class="card-form-note">Select rating:</span>
+              <button type="button" class="card-star-btn" data-rate="1">★</button>
+              <button type="button" class="card-star-btn" data-rate="2">★</button>
+              <button type="button" class="card-star-btn" data-rate="3">★</button>
+              <button type="button" class="card-star-btn is-active" data-rate="4">★</button>
+              <button type="button" class="card-star-btn is-active" data-rate="5">★</button>
+            </div>
+            <textarea class="card-textarea" id="feedbackMessage" placeholder="Enter feedback" maxlength="800"></textarea>
+            <p class="card-form-status" id="feedbackStatus"></p>
+            <button type="button" class="share-action-btn" id="feedbackSubmitBtn">Give Feedback</button>
+          </form>
+        </section>
+
+        <section class="card-form-panel" id="enquiryPanel">
+          <h3>Enquiry Form</h3>
+          <form class="card-form-grid" id="enquiryForm">
+            <input class="card-input" id="enquiryName" placeholder="Enter full name" maxlength="160">
+            <div class="card-form-row">
+              <input class="card-input" id="enquiryPhone" placeholder="Enter phone number" maxlength="40" inputmode="numeric">
+              <input class="card-input" id="enquiryEmail" placeholder="Enter email" maxlength="254">
+            </div>
+            <textarea class="card-textarea" id="enquiryMessage" placeholder="Enter message" maxlength="1200"></textarea>
+            <p class="card-form-status" id="enquiryStatus"></p>
+            <button type="button" class="share-action-btn" id="enquirySubmitBtn">Send Enquiry</button>
+          </form>
+        </section>
+
+        <section class="share-panel">
+          <h3>Share</h3>
+          <div class="share-url-row">
+            <input class="share-url-input" id="shareUrlInput" value="{{ public_url }}" readonly>
+            <button type="button" class="share-action-btn" id="copyUrlBtn">Copy URL</button>
+          </div>
+          <p class="share-panel-sub">Scan QR to open profile:</p>
+          <div class="share-qr-wrap">
+            <img
+              id="shareQrImage"
+              class="share-qr-image"
+              src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={{ public_url|urlencode }}"
+              alt="Digital card QR"
+            >
+          </div>
+          <div class="share-btn-row">
+            <button type="button" class="share-action-btn" id="shareProfileBtn">
+              <span class="share-action-btn__icon" aria-hidden="true">
+                <i class="bi bi-share-fill"></i>
+              </span>
+              <span>Share</span>
+            </button>
+            <button type="button" class="share-action-btn" id="saveQrBtn">
+              <span class="share-action-btn__icon" aria-hidden="true">
+                <i class="bi bi-download"></i>
+              </span>
+              <span>Save QR</span>
+            </button>
+            <a
+              class="share-action-btn"
+              id="saveContactBtn"
+              href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if website_url %}URL:{{ website_url|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
+              download="{% if card_entry and card_entry.person_name %}{{ card_entry.person_name|slugify }}{% else %}contact{% endif %}.vcf"
+            >
+              <span class="share-action-btn__icon" aria-hidden="true">
+                <i class="bi bi-person-vcard"></i>
+              </span>
+              <span>Save Contact</span>
+            </a>
+          </div>
+          <p class="share-panel-sub">Share profile to any WhatsApp number:</p>
+          <div class="wa-share-row">
+            <div class="wa-country-picker" id="waCountryPicker">
+              <button type="button" class="wa-country-picker__trigger" id="waCountryTrigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="wa-country-picker__flag" id="waCountryFlag">🇮🇳</span>
+                <span class="wa-country-picker__caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="wa-country-picker__dropdown" id="waCountryDropdown" hidden>
+                <div class="wa-country-picker__search-wrap">
+                  <input type="text" class="wa-country-picker__search" id="waCountrySearch" placeholder="Search country or code">
+                </div>
+                <div class="wa-country-picker__list" id="waCountryList" role="listbox"></div>
+              </div>
+            </div>
+            <input type="hidden" id="waShareCode" value="+91">
+            <input class="wa-share-input" id="waShareInput" placeholder="Enter WhatsApp number">
+            <button type="button" class="share-action-btn" id="waShareBtn">
+              <span class="share-action-btn__icon" aria-hidden="true">
+                <i class="bi bi-whatsapp"></i>
+              </span>
+              <span>Share</span>
+            </button>
+          </div>
+          <datalist id="waAllPhoneCountries" hidden>
+            {% include "partials/phone_country_options.html" %}
+          </datalist>
+        </section>
 
         <div class="footer-credit">
           This virtual card was designed with <a href="https://www.getworkzilla.com" target="_blank" rel="noreferrer">www.getworkzilla.com</a>
@@ -1410,23 +2157,528 @@
       </div>
     </div>
   </div>
+  {% if gallery_items %}
+    <div class="gallery-lightbox" id="galleryLightbox" aria-hidden="true">
+      <div class="gallery-lightbox__panel" role="dialog" aria-modal="true" aria-label="Gallery image preview">
+        <img id="galleryLightboxImage" class="gallery-lightbox__image" src="" alt="Gallery preview">
+        <div class="gallery-lightbox__footer">
+          <p id="galleryLightboxTitle" class="gallery-lightbox__title">Gallery Image</p>
+          <div class="gallery-lightbox__actions">
+            <button type="button" id="galleryPrevBtn" class="gallery-lightbox__btn">Previous</button>
+            <button type="button" id="galleryNextBtn" class="gallery-lightbox__btn">Next</button>
+            <button type="button" id="galleryCloseBtn" class="gallery-lightbox__btn">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
   <script>
     (function () {
-      var shareButton = document.querySelector(".js-share-card");
-      if (!shareButton) return;
-      shareButton.addEventListener("click", function (event) {
-        event.preventDefault();
-        var shareUrl = window.location.href;
-        if (navigator.share) {
-          navigator.share({
-            title: document.title,
-            text: "Check my digital card",
-            url: shareUrl
-          }).catch(function () {});
+      var copyUrlBtn = document.getElementById("copyUrlBtn");
+      var shareProfileBtn = document.getElementById("shareProfileBtn");
+      var saveQrBtn = document.getElementById("saveQrBtn");
+      var shareUrlInput = document.getElementById("shareUrlInput");
+      var shareQrImage = document.getElementById("shareQrImage");
+      var waShareCode = document.getElementById("waShareCode");
+      var waCountryPicker = document.getElementById("waCountryPicker");
+      var waCountryTrigger = document.getElementById("waCountryTrigger");
+      var waCountryFlag = document.getElementById("waCountryFlag");
+      var waCountryDropdown = document.getElementById("waCountryDropdown");
+      var waCountryList = document.getElementById("waCountryList");
+      var waCountrySearch = document.getElementById("waCountrySearch");
+      var waAllPhoneCountries = document.getElementById("waAllPhoneCountries");
+      var waShareInput = document.getElementById("waShareInput");
+      var waShareBtn = document.getElementById("waShareBtn");
+      var feedbackName = document.getElementById("feedbackName");
+      var feedbackMessage = document.getElementById("feedbackMessage");
+      var feedbackStatus = document.getElementById("feedbackStatus");
+      var feedbackSubmitBtn = document.getElementById("feedbackSubmitBtn");
+      var feedbackStarButtons = Array.prototype.slice.call(document.querySelectorAll(".card-star-btn[data-rate]"));
+      var enquiryName = document.getElementById("enquiryName");
+      var enquiryPhone = document.getElementById("enquiryPhone");
+      var enquiryEmail = document.getElementById("enquiryEmail");
+      var enquiryMessage = document.getElementById("enquiryMessage");
+      var enquiryStatus = document.getElementById("enquiryStatus");
+      var enquirySubmitBtn = document.getElementById("enquirySubmitBtn");
+      var shareUrl = (shareUrlInput && shareUrlInput.value) ? shareUrlInput.value : window.location.href;
+      var waCountryItems = [];
+      var waSelectedCountry = null;
+      var feedbackRating = 5;
+      var publicSlug = "{{ public_slug|escapejs }}";
+
+      function normalizeCountryLabel(value) {
+        return String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/&/g, " and ")
+          .replace(/[()]/g, " ")
+          .replace(/[^a-z0-9]+/gi, " ")
+          .trim()
+          .toLowerCase();
+      }
+
+      function flagFromIso2(iso2) {
+        var normalized = String(iso2 || "").trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(normalized)) return "🌐";
+        var first = normalized.codePointAt(0) - 65 + 0x1f1e6;
+        var second = normalized.codePointAt(1) - 65 + 0x1f1e6;
+        return String.fromCodePoint(first, second);
+      }
+
+      var manualIsoByLabel = {
+        "Aland Islands": "AX",
+        "American Samoa": "AS",
+        "Antarctica": "AQ",
+        "British Indian Ocean Territory": "IO",
+        "British Virgin Islands": "VG",
+        "Cocos Keeling Islands": "CC",
+        "Congo DRC": "CD",
+        "Congo Republic": "CG",
+        "Cote d Ivoire": "CI",
+        "Curacao": "CW",
+        "Eswatini": "SZ",
+        "Falkland Islands": "FK",
+        "Faroe Islands": "FO",
+        "French Guiana": "GF",
+        "French Polynesia": "PF",
+        "Guernsey": "GG",
+        "Isle of Man": "IM",
+        "Jersey": "JE",
+        "Kosovo": "XK",
+        "Macao": "MO",
+        "Micronesia": "FM",
+        "Palestine": "PS",
+        "Reunion": "RE",
+        "Saint Barthelemy": "BL",
+        "Saint Helena": "SH",
+        "Saint Kitts and Nevis": "KN",
+        "Saint Lucia": "LC",
+        "Saint Martin": "MF",
+        "Saint Pierre and Miquelon": "PM",
+        "Saint Vincent and the Grenadines": "VC",
+        "Sao Tome and Principe": "ST",
+        "South Korea": "KR",
+        "North Korea": "KP",
+        "Taiwan": "TW",
+        "Timor Leste": "TL",
+        "Turkey": "TR",
+        "United Kingdom": "GB",
+        "United States": "US",
+        "Vatican City": "VA",
+        "Wallis and Futuna": "WF",
+        "Western Sahara": "EH"
+      };
+      var normalizedManualIsoByLabel = {};
+      Object.keys(manualIsoByLabel).forEach(function (key) {
+        normalizedManualIsoByLabel[normalizeCountryLabel(key)] = manualIsoByLabel[key];
+      });
+
+      function buildIntlRegionMap() {
+        var map = {};
+        try {
+          if (typeof Intl === "undefined" || typeof Intl.DisplayNames !== "function") {
+            return map;
+          }
+          var display = new Intl.DisplayNames(["en"], { type: "region" });
+          // Generate all ISO2 combinations; supportedValuesOf("region") is invalid in browsers.
+          for (var first = 65; first <= 90; first += 1) {
+            for (var second = 65; second <= 90; second += 1) {
+              var iso2 = String.fromCharCode(first, second);
+              var name = "";
+              try {
+                name = display.of(iso2);
+              } catch (error) {
+                name = "";
+              }
+              if (!name || String(name).trim().toUpperCase() === iso2) continue;
+              var key = normalizeCountryLabel(name);
+              if (key && !map[key]) {
+                map[key] = iso2;
+              }
+            }
+          }
+        } catch (error) {
+          return map;
+        }
+        return map;
+      }
+      var intlRegionMap = buildIntlRegionMap();
+
+      function resolveIso2FromLabel(label) {
+        var normalized = normalizeCountryLabel(label);
+        if (!normalized) return "";
+        if (normalizedManualIsoByLabel[normalized]) return normalizedManualIsoByLabel[normalized];
+        return intlRegionMap[normalized] || "";
+      }
+
+      function parseCountryOption(optionNode) {
+        var code = String(optionNode && optionNode.value || "").trim();
+        var text = String(optionNode && optionNode.textContent || optionNode && optionNode.label || "").trim();
+        var explicitFlag = String(optionNode && optionNode.getAttribute && optionNode.getAttribute("data-flag") || "").trim();
+        if (!code) return null;
+        var label = text;
+        if (label.endsWith(code)) {
+          label = label.slice(0, label.length - code.length).trim();
+        }
+        if (!label) label = "Country";
+        var iso2 = resolveIso2FromLabel(label);
+        return {
+          code: code,
+          label: label,
+          flag: explicitFlag || flagFromIso2(iso2),
+          key: code + "__" + label,
+        };
+      }
+
+      function updateWaCountryDropdownPlacement() {
+        if (!waCountryPicker || !waCountryDropdown || !waCountryList || waCountryDropdown.hidden) return;
+        var pickerRect = waCountryPicker.getBoundingClientRect();
+        var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        var gap = 8;
+        var estimatedMenuHeight = 280;
+        var spaceBelow = Math.max(0, viewportHeight - pickerRect.bottom - gap);
+        var spaceAbove = Math.max(0, pickerRect.top - gap);
+        var openUp = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+        waCountryDropdown.classList.toggle("wa-country-picker__dropdown--up", openUp);
+        var available = openUp ? spaceAbove : spaceBelow;
+        var listHeight = Math.max(140, Math.min(300, Math.floor(available - 56)));
+        waCountryList.style.maxHeight = listHeight + "px";
+      }
+
+      function renderCountryOptions(query) {
+        if (!waCountryList) return;
+        var needle = normalizeCountryLabel(query || "");
+        var filtered = waCountryItems.filter(function (item) {
+          if (!needle) return true;
+          return normalizeCountryLabel(item.label + " " + item.code).indexOf(needle) !== -1;
+        });
+        waCountryList.innerHTML = "";
+        if (!filtered.length) {
+          var emptyNode = document.createElement("div");
+          emptyNode.className = "wa-country-picker__empty";
+          emptyNode.textContent = "No countries found";
+          waCountryList.appendChild(emptyNode);
           return;
         }
+        filtered.forEach(function (item) {
+          var button = document.createElement("button");
+          button.type = "button";
+          button.className = "wa-country-picker__option" + (waSelectedCountry && waSelectedCountry.key === item.key ? " is-active" : "");
+          button.setAttribute("data-country-key", item.key);
+          button.innerHTML =
+            '<span class="wa-country-picker__option-flag" aria-hidden="true">' + item.flag + '</span>' +
+            '<span class="wa-country-picker__country">' + item.label + '</span>' +
+            '<span class="wa-country-picker__code">' + item.code + '</span>';
+          button.addEventListener("click", function () {
+            waSelectedCountry = item;
+            if (waShareCode) waShareCode.value = item.code;
+            if (waCountryFlag) waCountryFlag.textContent = item.flag;
+            if (waCountryTrigger) waCountryTrigger.title = item.label + " " + item.code;
+            if (waCountryDropdown) waCountryDropdown.hidden = true;
+            if (waCountryTrigger) waCountryTrigger.setAttribute("aria-expanded", "false");
+            if (waCountrySearch) waCountrySearch.value = "";
+          });
+          waCountryList.appendChild(button);
+        });
+      }
+
+      function initWaCountryPicker() {
+        if (!waAllPhoneCountries || !waCountryList || !waCountryTrigger || !waCountryDropdown || !waShareCode) return;
+        waCountryItems = Array.prototype.slice.call(waAllPhoneCountries.querySelectorAll("option"))
+          .map(parseCountryOption)
+          .filter(function (item) { return !!item; });
+        var uniqueByKey = {};
+        waCountryItems = waCountryItems.filter(function (item) {
+          if (uniqueByKey[item.key]) return false;
+          uniqueByKey[item.key] = true;
+          return true;
+        });
+        var selectedCode = String(waShareCode.value || "+91").trim() || "+91";
+        waSelectedCountry = waCountryItems.find(function (item) {
+          return item.code === selectedCode && item.label.toLowerCase() === "india";
+        }) || waCountryItems.find(function (item) { return item.code === selectedCode; }) || waCountryItems[0];
+        if (waSelectedCountry) {
+          waShareCode.value = waSelectedCountry.code;
+          if (waCountryFlag) waCountryFlag.textContent = waSelectedCountry.flag;
+          waCountryTrigger.title = waSelectedCountry.label + " " + waSelectedCountry.code;
+        }
+        renderCountryOptions("");
+        waCountryTrigger.addEventListener("click", function () {
+          var willOpen = !!waCountryDropdown.hidden;
+          waCountryDropdown.hidden = !willOpen;
+          waCountryTrigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+          if (willOpen && waCountrySearch) {
+            updateWaCountryDropdownPlacement();
+            waCountrySearch.focus();
+          }
+        });
+        if (waCountrySearch) {
+          waCountrySearch.addEventListener("input", function () {
+            renderCountryOptions(waCountrySearch.value || "");
+          });
+        }
+        document.addEventListener("click", function (event) {
+          if (!waCountryPicker || waCountryDropdown.hidden) return;
+          if (!waCountryPicker.contains(event.target)) {
+            waCountryDropdown.hidden = true;
+            waCountryTrigger.setAttribute("aria-expanded", "false");
+          }
+        });
+        window.addEventListener("resize", updateWaCountryDropdownPlacement);
+        window.addEventListener("scroll", updateWaCountryDropdownPlacement, true);
+      }
+
+      function copyText(text) {
+        if (!text) return;
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(shareUrl).catch(function () {});
+          navigator.clipboard.writeText(text).catch(function () {});
+          return;
+        }
+        var helper = document.createElement("textarea");
+        helper.value = text;
+        helper.setAttribute("readonly", "readonly");
+        helper.style.position = "absolute";
+        helper.style.left = "-9999px";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        document.body.removeChild(helper);
+      }
+
+      function setFormStatus(node, message, isError) {
+        if (!node) return;
+        node.textContent = String(message || "");
+        node.style.color = isError ? "#fca5a5" : "#93c5fd";
+      }
+
+      if (copyUrlBtn) {
+        copyUrlBtn.addEventListener("click", function () {
+          copyText(shareUrl);
+          copyUrlBtn.textContent = "Copied";
+          window.setTimeout(function () { copyUrlBtn.textContent = "Copy URL"; }, 1200);
+        });
+      }
+
+      if (shareProfileBtn) {
+        shareProfileBtn.addEventListener("click", function () {
+          if (navigator.share) {
+            navigator.share({
+              title: document.title,
+              text: "Check this digital card",
+              url: shareUrl
+            }).catch(function () {});
+            return;
+          }
+          copyText(shareUrl);
+        });
+      }
+
+      if (saveQrBtn && shareQrImage) {
+        saveQrBtn.addEventListener("click", function () {
+          var qrUrl = shareQrImage.getAttribute("src") || "";
+          if (!qrUrl) return;
+          fetch(qrUrl)
+            .then(function (response) { return response.blob(); })
+            .then(function (blob) {
+              var objectUrl = URL.createObjectURL(blob);
+              var a = document.createElement("a");
+              a.href = objectUrl;
+              a.download = "digital-card-qr.png";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(objectUrl);
+            })
+            .catch(function () {});
+        });
+      }
+
+      initWaCountryPicker();
+
+      if (waShareBtn && waShareInput) {
+        waShareBtn.addEventListener("click", function () {
+          var raw = String(waShareInput.value || "").trim();
+          var localNumber = raw.replace(/[^0-9]/g, "");
+          if (!localNumber) {
+            waShareInput.focus();
+            return;
+          }
+          var dialCode = String((waShareCode && waShareCode.value) || "+91").replace(/[^0-9]/g, "");
+          var number = localNumber;
+          if (dialCode && !localNumber.startsWith(dialCode)) {
+            number = dialCode + localNumber;
+          }
+          var text = encodeURIComponent("Check this digital card: " + shareUrl);
+          window.open("https://wa.me/" + number + "?text=" + text, "_blank", "noopener,noreferrer");
+        });
+      }
+
+      if (feedbackStarButtons.length) {
+        function repaintStars() {
+          feedbackStarButtons.forEach(function (button) {
+            var score = Number(button.getAttribute("data-rate") || 0);
+            button.classList.toggle("is-active", score <= feedbackRating);
+          });
+        }
+        feedbackStarButtons.forEach(function (button) {
+          button.addEventListener("click", function () {
+            feedbackRating = Number(button.getAttribute("data-rate") || 5) || 5;
+            repaintStars();
+          });
+        });
+        repaintStars();
+      }
+
+      if (feedbackSubmitBtn) {
+        feedbackSubmitBtn.addEventListener("click", function () {
+          var payload = {
+            public_slug: publicSlug,
+            full_name: String((feedbackName && feedbackName.value) || "").trim(),
+            rating: feedbackRating,
+            message: String((feedbackMessage && feedbackMessage.value) || "").trim(),
+          };
+          if (!payload.message) {
+            setFormStatus(feedbackStatus, "Please enter feedback message.", true);
+            if (feedbackMessage) feedbackMessage.focus();
+            return;
+          }
+          feedbackSubmitBtn.disabled = true;
+          setFormStatus(feedbackStatus, "Submitting...", false);
+          fetch("/api/whatsapp-automation/digital-cards/public/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+            .then(function (response) {
+              if (!response.ok) throw new Error("submit_failed");
+              return response.json();
+            })
+            .then(function () {
+              setFormStatus(feedbackStatus, "Feedback submitted successfully.", false);
+              if (feedbackMessage) feedbackMessage.value = "";
+            })
+            .catch(function () {
+              setFormStatus(feedbackStatus, "Unable to submit feedback. Try again.", true);
+            })
+            .finally(function () {
+              feedbackSubmitBtn.disabled = false;
+            });
+        });
+      }
+
+      if (enquirySubmitBtn) {
+        enquirySubmitBtn.addEventListener("click", function () {
+          var payload = {
+            public_slug: publicSlug,
+            full_name: String((enquiryName && enquiryName.value) || "").trim(),
+            phone_number: String((enquiryPhone && enquiryPhone.value) || "").trim(),
+            email: String((enquiryEmail && enquiryEmail.value) || "").trim(),
+            message: String((enquiryMessage && enquiryMessage.value) || "").trim(),
+          };
+          if (!payload.full_name) {
+            setFormStatus(enquiryStatus, "Please enter full name.", true);
+            if (enquiryName) enquiryName.focus();
+            return;
+          }
+          if (!payload.message) {
+            setFormStatus(enquiryStatus, "Please enter enquiry message.", true);
+            if (enquiryMessage) enquiryMessage.focus();
+            return;
+          }
+          enquirySubmitBtn.disabled = true;
+          setFormStatus(enquiryStatus, "Submitting...", false);
+          fetch("/api/whatsapp-automation/digital-cards/public/enquiry", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+            .then(function (response) {
+              if (!response.ok) throw new Error("submit_failed");
+              return response.json();
+            })
+            .then(function () {
+              setFormStatus(enquiryStatus, "Enquiry submitted successfully.", false);
+              if (enquiryMessage) enquiryMessage.value = "";
+            })
+            .catch(function () {
+              setFormStatus(enquiryStatus, "Unable to submit enquiry. Try again.", true);
+            })
+            .finally(function () {
+              enquirySubmitBtn.disabled = false;
+            });
+        });
+      }
+    })();
+    (function () {
+      var imageNodes = document.querySelectorAll(".js-gallery-image");
+      var lightbox = document.getElementById("galleryLightbox");
+      var lightboxImage = document.getElementById("galleryLightboxImage");
+      var lightboxTitle = document.getElementById("galleryLightboxTitle");
+      var closeBtn = document.getElementById("galleryCloseBtn");
+      var prevBtn = document.getElementById("galleryPrevBtn");
+      var nextBtn = document.getElementById("galleryNextBtn");
+      if (!lightbox || !lightboxImage || !closeBtn || !prevBtn || !nextBtn || !imageNodes.length) {
+        return;
+      }
+      var items = Array.prototype.slice.call(imageNodes).map(function (node) {
+        return {
+          src: node.getAttribute("src") || "",
+          title: node.getAttribute("alt") || "Gallery Image",
+        };
+      }).filter(function (item) { return !!item.src; });
+      if (!items.length) return;
+      var currentIndex = 0;
+
+      function render(index) {
+        if (!items.length) return;
+        currentIndex = (index + items.length) % items.length;
+        var item = items[currentIndex];
+        lightboxImage.setAttribute("src", item.src);
+        lightboxImage.setAttribute("alt", item.title || "Gallery image");
+        lightboxTitle.textContent = item.title || "Gallery Image";
+        prevBtn.disabled = items.length <= 1;
+        nextBtn.disabled = items.length <= 1;
+      }
+
+      function open(index) {
+        render(index);
+        lightbox.classList.add("is-open");
+        lightbox.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+      }
+
+      function close() {
+        lightbox.classList.remove("is-open");
+        lightbox.setAttribute("aria-hidden", "true");
+        lightboxImage.setAttribute("src", "");
+        document.body.style.overflow = "";
+      }
+
+      imageNodes.forEach(function (node) {
+        node.addEventListener("click", function () {
+          var index = Number(node.getAttribute("data-gallery-index") || 0);
+          open(index);
+        });
+      });
+
+      closeBtn.addEventListener("click", close);
+      prevBtn.addEventListener("click", function () { render(currentIndex - 1); });
+      nextBtn.addEventListener("click", function () { render(currentIndex + 1); });
+      lightbox.addEventListener("click", function (event) {
+        if (event.target === lightbox) close();
+      });
+      document.addEventListener("keydown", function (event) {
+        if (!lightbox.classList.contains("is-open")) return;
+        if (event.key === "Escape") {
+          close();
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          render(currentIndex - 1);
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          render(currentIndex + 1);
         }
       });
     })();

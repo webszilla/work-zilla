@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const PAGE_SIZE = 10;
 const COUNTRY_CODE_OPTIONS = PHONE_COUNTRIES;
@@ -45,6 +47,17 @@ function combinePhoneValue(code, local) {
   const normalizedLocal = String(local || "").replace(/[^\d]/g, "");
   if (!normalizedLocal) return "";
   return `${normalizedCode}${normalizedLocal}`;
+}
+
+function splitAddressLines(rawValue) {
+  const raw = String(rawValue || "").replace(/\r/g, "");
+  const lines = raw.split("\n").map((line) => String(line || "").trim()).filter(Boolean);
+  return lines.length ? lines : [""];
+}
+
+function joinAddressLines(lines) {
+  if (!Array.isArray(lines)) return "";
+  return lines.map((line) => String(line || "").trim()).filter(Boolean).join("\n");
 }
 
 function limitText(value, max) {
@@ -97,6 +110,7 @@ function deriveFlatSecondary(primaryHex) {
 function emptyCardForm(prefill = {}) {
   const phoneParts = splitPhoneValue(prefill.phone || "");
   const whatsappParts = splitPhoneValue(prefill.whatsapp_number || "");
+  const telephoneParts = splitPhoneValue(prefill.telephone_number || "");
   const dnsSettings = prefill?.dns_settings && typeof prefill.dns_settings === "object" ? prefill.dns_settings : null;
   return {
     id: prefill.id ?? null,
@@ -110,9 +124,13 @@ function emptyCardForm(prefill = {}) {
     whatsapp_number: prefill.whatsapp_number || "",
     whatsapp_country_code: whatsappParts.code,
     whatsapp_local: whatsappParts.local,
+    telephone_number: prefill.telephone_number || "",
+    telephone_country_code: telephoneParts.code,
+    telephone_local: telephoneParts.local,
     email: prefill.email || "",
     website: prefill.website || "",
     address: prefill.address || "",
+    address_lines: splitAddressLines(prefill.address || ""),
     description: prefill.description || "",
     theme_color: prefill.theme_color || "#22c55e",
     theme_secondary_color: prefill.theme_secondary_color || "#0f172a",
@@ -183,9 +201,10 @@ function buildVCardDownload(form, company) {
   const role = String(form.role_title || "").trim();
   const phone = String(form.phone || "").trim();
   const whatsapp = String(form.whatsapp_number || "").trim();
+  const telephone = String(form.telephone_number || "").trim();
   const email = String(form.email || "").trim();
   const website = String(form.website || "").trim();
-  const address = String(form.address || "").replace(/\r?\n/g, ", ").trim();
+  const address = joinAddressLines(form.address_lines || splitAddressLines(form.address || "")).replace(/\r?\n/g, ", ").trim();
   const note = String(form.description || company?.description || "").replace(/\r?\n/g, " ").trim();
   const lines = [
     "BEGIN:VCARD",
@@ -195,6 +214,7 @@ function buildVCardDownload(form, company) {
     role ? `TITLE:${role}` : "",
     phone ? `TEL;TYPE=CELL:${phone}` : "",
     whatsapp && whatsapp !== phone ? `TEL;TYPE=WORK,VOICE:${whatsapp}` : "",
+    telephone && telephone !== phone && telephone !== whatsapp ? `TEL;TYPE=VOICE:${telephone}` : "",
     email ? `EMAIL:${email}` : "",
     website ? `URL:${website}` : "",
     address ? `ADR:;;${address};;;;` : "",
@@ -222,7 +242,7 @@ function getSocialIconClass(icon) {
       return "bi-youtube";
     case "twitter":
     case "x":
-      return "bi-twitter-x";
+      return "";
     case "telegram":
       return "bi-telegram";
     case "website":
@@ -231,6 +251,14 @@ function getSocialIconClass(icon) {
     default:
       return "bi-link-45deg";
   }
+}
+
+function SocialXIcon() {
+  return (
+    <svg className="social-icon--x" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M9.294 6.928 14.357 1h-1.2L8.761 6.147 5.253 1H1.2l5.31 7.791L1.2 15h1.2l4.642-5.438L10.747 15H14.8L9.294 6.928Zm-1.643 1.925-.538-.775L2.83 1.91h1.845l3.458 4.98.538.775 4.493 6.467h-1.845l-3.68-5.279Z" />
+    </svg>
+  );
 }
 
 function templateLabel(value) {
@@ -330,6 +358,8 @@ function DigitalCardPreview({ form, company }) {
   const displayRole = form.role_title || "Business / Professional";
   const displayTitle = form.card_title || company?.company_name || "Company Name";
   const displayDescription = form.description || company?.description || "Digital business card preview";
+  const addressText = joinAddressLines(form.address_lines || splitAddressLines(form.address || ""));
+  const addressRows = splitAddressLines(addressText).filter((line) => String(line || "").trim());
   const quickActions = [
     form.phone ? { label: "Call", href: `tel:${form.phone}` } : null,
     form.website ? { label: "Website", href: toExternalHref(form.website) } : null,
@@ -340,9 +370,12 @@ function DigitalCardPreview({ form, company }) {
   const infoRows = [
     { icon: "bi-telephone", value: form.phone || "-", href: form.phone ? `tel:${form.phone}` : "" },
     { icon: "bi-whatsapp", value: form.whatsapp_number || "-", href: form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` : "" },
+    { icon: "bi-telephone-forward", value: form.telephone_number || "-", href: form.telephone_number ? `tel:${form.telephone_number}` : "" },
     { icon: "bi-envelope", value: form.email || "-", href: form.email ? `mailto:${form.email}` : "" },
     { icon: "bi-globe", value: form.website || "-", href: toWebHref(form.website) },
-    { icon: "bi-geo-alt", value: form.address || "-", href: toMapsHref(form.address) },
+    ...(addressRows.length
+      ? addressRows.map((line) => ({ icon: "bi-geo-alt", value: line, href: toMapsHref(line) }))
+      : [{ icon: "bi-geo-alt", value: "-", href: "" }]),
   ];
   const contactCard = buildVCardDownload(form, company);
   const publicCardUrl = form.public_slug && typeof window !== "undefined"
@@ -419,6 +452,8 @@ function DigitalCardPreview({ form, company }) {
               >
                 {item.type === "custom" && item.custom_icon_data ? (
                   <img src={item.custom_icon_data} alt={item.label || "Social"} width="18" height="18" style={{ display: "block", objectFit: "contain" }} />
+                ) : String(item.icon || "").toLowerCase() === "twitter" || String(item.icon || "").toLowerCase() === "x" ? (
+                  <SocialXIcon />
                 ) : (
                   <i className={`bi ${getSocialIconClass(item.icon)}`} aria-hidden="true" />
                 )}
@@ -445,10 +480,10 @@ function DigitalCardPreview({ form, company }) {
         </div>
 
         <div className="digital-card-preview__details">
-          {infoRows.map((item) => (
+          {infoRows.map((item, idx) => (
             item.href ? (
               <a
-                key={`${item.icon}-${item.value}`}
+                key={`${item.icon}-${item.value}-${idx}`}
                 className="digital-card-preview__detail-row"
                 href={item.href}
                 target={item.href.startsWith("http") ? "_blank" : undefined}
@@ -458,7 +493,7 @@ function DigitalCardPreview({ form, company }) {
                 <span>{item.value}</span>
               </a>
             ) : (
-              <div key={`${item.icon}-${item.value}`} className="digital-card-preview__detail-row">
+              <div key={`${item.icon}-${item.value}-${idx}`} className="digital-card-preview__detail-row">
                 <i className={`bi ${item.icon}`} />
                 <span>{item.value}</span>
               </div>
@@ -585,11 +620,22 @@ export default function DigitalBusinessCardDashboardPage() {
     setForm((prev) => {
       const normalizedValue = key.endsWith("_local") ? digitsOnly(value, LIMITS.phoneLocal) : value;
       const next = { ...prev, [key]: normalizedValue };
-      const code = prefix === "phone" ? next.phone_country_code : next.whatsapp_country_code;
-      const local = prefix === "phone" ? next.phone_local : next.whatsapp_local;
+      const code =
+        prefix === "phone"
+          ? next.phone_country_code
+          : prefix === "whatsapp"
+            ? next.whatsapp_country_code
+            : next.telephone_country_code;
+      const local =
+        prefix === "phone"
+          ? next.phone_local
+          : prefix === "whatsapp"
+            ? next.whatsapp_local
+            : next.telephone_local;
       const full = combinePhoneValue(code, local);
       if (prefix === "phone") next.phone = full;
       if (prefix === "whatsapp") next.whatsapp_number = full;
+      if (prefix === "telephone") next.telephone_number = full;
       return next;
     });
   }
@@ -597,11 +643,15 @@ export default function DigitalBusinessCardDashboardPage() {
   async function onImagePick(field, file, maxKb) {
     if (!file) return;
     if (!String(file.type || "").startsWith("image/")) {
-      setError("Please select an image file.");
+      const message = "Please select an image file.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     if (file.size > maxKb * 1024) {
-      setError(`Image size must be under ${maxKb} KB.`);
+      const message = `Image size must be under ${maxKb} KB.`;
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     try {
@@ -622,6 +672,8 @@ export default function DigitalBusinessCardDashboardPage() {
         ...form,
         phone: combinePhoneValue(form.phone_country_code, form.phone_local),
         whatsapp_number: combinePhoneValue(form.whatsapp_country_code, form.whatsapp_local),
+        telephone_number: combinePhoneValue(form.telephone_country_code, form.telephone_local),
+        address: joinAddressLines(form.address_lines || []),
         social_links_items: Array.isArray(form.social_links_items) ? form.social_links_items : (defaultPrefill.social_links_items || []),
       };
       const res = await waApi.saveDigitalCard(payload);
@@ -958,16 +1010,13 @@ export default function DigitalBusinessCardDashboardPage() {
               <div className="col-12 col-md-6">
                 <label className="form-label">Phone</label>
                 <div className="input-group">
-                  <select
-                    className="form-select"
-                    style={{ maxWidth: 220 }}
+                  <PhoneCountryCodePicker
                     value={form.phone_country_code || "+91"}
-                    onChange={(e) => setPhoneField("phone", "phone_country_code", e.target.value)}
-                  >
-                    {COUNTRY_CODE_OPTIONS.map((opt) => (
-                      <option key={`${opt.code}-${opt.label}`} value={opt.code}>{opt.label} {opt.code}</option>
-                    ))}
-                  </select>
+                    onChange={(code) => setPhoneField("phone", "phone_country_code", code)}
+                    options={COUNTRY_CODE_OPTIONS}
+                    style={{ maxWidth: 220 }}
+                    ariaLabel="Phone country code"
+                  />
                   <input
                     className="form-control"
                     value={form.phone_local || ""}
@@ -982,21 +1031,39 @@ export default function DigitalBusinessCardDashboardPage() {
               <div className="col-12 col-md-6">
                 <label className="form-label">WhatsApp Number</label>
                 <div className="input-group">
-                  <select
-                    className="form-select"
-                    style={{ maxWidth: 220 }}
+                  <PhoneCountryCodePicker
                     value={form.whatsapp_country_code || "+91"}
-                    onChange={(e) => setPhoneField("whatsapp", "whatsapp_country_code", e.target.value)}
-                  >
-                    {COUNTRY_CODE_OPTIONS.map((opt) => (
-                      <option key={`wa-${opt.code}-${opt.label}`} value={opt.code}>{opt.label} {opt.code}</option>
-                    ))}
-                  </select>
+                    onChange={(code) => setPhoneField("whatsapp", "whatsapp_country_code", code)}
+                    options={COUNTRY_CODE_OPTIONS}
+                    style={{ maxWidth: 220 }}
+                    ariaLabel="WhatsApp country code"
+                  />
                   <input
                     className="form-control"
                     value={form.whatsapp_local || ""}
                     onChange={(e) => setPhoneField("whatsapp", "whatsapp_local", e.target.value)}
                     placeholder="WhatsApp number"
+                    inputMode="numeric"
+                    maxLength={LIMITS.phoneLocal}
+                  />
+                </div>
+              </div>
+
+              <div className="col-12 col-md-6">
+                <label className="form-label">Telephone Number</label>
+                <div className="input-group">
+                  <PhoneCountryCodePicker
+                    value={form.telephone_country_code || "+91"}
+                    onChange={(code) => setPhoneField("telephone", "telephone_country_code", code)}
+                    options={COUNTRY_CODE_OPTIONS}
+                    style={{ maxWidth: 220 }}
+                    ariaLabel="Telephone country code"
+                  />
+                  <input
+                    className="form-control"
+                    value={form.telephone_local || ""}
+                    onChange={(e) => setPhoneField("telephone", "telephone_local", e.target.value)}
+                    placeholder="Telephone number"
                     inputMode="numeric"
                     maxLength={LIMITS.phoneLocal}
                   />
@@ -1032,25 +1099,50 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
-              <div className="col-12 col-md-6">
-                <div className="form-check mt-4">
-                  <input
-                    className="form-check-input"
-                    id="wa-card-custom-domain-active"
-                    type="checkbox"
-                    checked={Boolean(form.custom_domain_active)}
-                    onChange={(e) => setField("custom_domain_active", e.target.checked)}
-                    disabled={!form.custom_domain}
-                  />
-                  <label className="form-check-label" htmlFor="wa-card-custom-domain-active">
-                    Enable custom domain mapping
-                  </label>
-                </div>
-              </div>
-
               <div className="col-12">
                 <label className="form-label">Address</label>
-                <textarea className="form-control" rows="2" maxLength={LIMITS.address} value={form.address || ""} onChange={(e) => setField("address", limitText(e.target.value, LIMITS.address))} />
+                <div className="d-grid gap-2">
+                  {(Array.isArray(form.address_lines) ? form.address_lines : [""]).map((line, idx) => (
+                    <div className="input-group" key={`address-line-${idx}`}>
+                      <input
+                        className="form-control"
+                        value={line}
+                        maxLength={LIMITS.address}
+                        placeholder={idx === 0 ? "Primary address" : "Additional location"}
+                        onChange={(e) => {
+                          const nextLines = [...(Array.isArray(form.address_lines) ? form.address_lines : [""])];
+                          nextLines[idx] = limitText(e.target.value, LIMITS.address);
+                          setForm((prev) => ({ ...prev, address_lines: nextLines, address: joinAddressLines(nextLines) }));
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light"
+                        title="Add location"
+                        onClick={() => {
+                          const nextLines = [...(Array.isArray(form.address_lines) ? form.address_lines : [""]), ""];
+                          setForm((prev) => ({ ...prev, address_lines: nextLines, address: joinAddressLines(nextLines) }));
+                        }}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger"
+                        title="Remove location"
+                        disabled={(form.address_lines || []).length <= 1}
+                        onClick={() => {
+                          const current = Array.isArray(form.address_lines) ? form.address_lines : [""];
+                          const nextLines = current.filter((_, lineIdx) => lineIdx !== idx);
+                          const safeLines = nextLines.length ? nextLines : [""];
+                          setForm((prev) => ({ ...prev, address_lines: safeLines, address: joinAddressLines(safeLines) }));
+                        }}
+                      >
+                        x
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="col-12">
@@ -1088,6 +1180,19 @@ export default function DigitalBusinessCardDashboardPage() {
                   <div className="form-check">
                     <input className="form-check-input" id="wa-card-active" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setField("is_active", e.target.checked)} />
                     <label className="form-check-label" htmlFor="wa-card-active">Active card</label>
+                  </div>
+                  <div className="form-check">
+                    <input
+                      className="form-check-input"
+                      id="wa-card-custom-domain-active"
+                      type="checkbox"
+                      checked={Boolean(form.custom_domain_active)}
+                      onChange={(e) => setField("custom_domain_active", e.target.checked)}
+                      disabled={!form.custom_domain}
+                    />
+                    <label className="form-check-label" htmlFor="wa-card-custom-domain-active">
+                      Enable custom domain mapping
+                    </label>
                   </div>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "./PhoneCountryCodePicker.jsx";
 
 function parsePhone(phoneStr) {
   if (!phoneStr) {
@@ -122,25 +123,17 @@ export default function EditAgentModal({ agent, onClose, onSuccess, onError }) {
               <div className="col-md-6">
                 <label className="form-label">Phone</label>
                 <div className="input-group">
-                  <select
-                    className="form-select wz-phone-country-select"
+                  <PhoneCountryCodePicker
                     value={form.phoneCountry}
-                    onChange={(event) =>
+                    onChange={(code) =>
                       setForm((prev) => ({
                         ...prev,
-                        phoneCountry: event.target.value
+                        phoneCountry: code
                       }))
                     }
-                  >
-                    {PHONE_COUNTRIES.map((entry) => (
-                      <option
-                        key={`${entry.code}-${entry.label}`}
-                        value={entry.code}
-                      >
-                        {entry.label} {entry.code}
-                      </option>
-                    ))}
-                  </select>
+                    options={PHONE_COUNTRIES}
+                    ariaLabel="Agent edit country code"
+                  />
                   <input
                     type="text"
                     className="form-control"

@@ -85,7 +85,10 @@ export default function OrgMediaLibraryPage() {
 
     setDeletingId(item.id);
     try {
-      await apiFetch(`/api/storage/files/${item.id}/delete`, {
+      const target = item?.source === "whatsapp_automation"
+        ? `/api/storage/media-library/${encodeURIComponent(item.id)}/delete`
+        : `/api/storage/files/${item.id}/delete`;
+      await apiFetch(target, {
         method: "DELETE",
       });
       setState((prev) => ({

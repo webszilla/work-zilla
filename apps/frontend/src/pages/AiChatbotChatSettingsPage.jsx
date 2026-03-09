@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch, getCsrfToken } from "../lib/api.js";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import { formatDeviceDateTime } from "../lib/datetime.js";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const emptySettings = {
   loading: true,
@@ -280,10 +281,12 @@ export default function AiChatbotChatSettingsPage() {
       return;
     }
     if (file.size && file.size > 2 * 1024 * 1024) {
+      const message = "File too large. Maximum upload size is 2MB.";
       setMedia((prev) => ({
         ...prev,
-        error: "File too large. Maximum upload size is 2MB."
+        error: message
       }));
+      showUploadAlert(message);
       return;
     }
     setDocUploading(true);

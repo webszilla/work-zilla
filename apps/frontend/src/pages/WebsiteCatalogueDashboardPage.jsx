@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { waApi } from "../api/whatsappAutomation.js";
 import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
+import { showUploadAlert } from "../lib/uploadAlert.js";
 
 const emptyForm = {
   id: null,
@@ -19,8 +20,11 @@ const emptyForm = {
 };
 
 const PAGE_SIZE = 10;
+const GALLERY_PAGE_SIZE = 8;
+const AUTO_SAVE_DELAY_MS = 900;
 const LIMITS = {
   sectionTitle: 80,
+  imageTitle: 80,
   categoryName: 60,
   itemTitle: 120,
   price: 40,
@@ -56,9 +60,53 @@ function titleCase(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function makeLocalId(prefix = "id") {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function fileNameToTitle(name) {
+  const raw = String(name || "").replace(/\.[^.]+$/, "");
+  return raw.trim().slice(0, LIMITS.imageTitle) || "Gallery Image";
+}
+
+function mapGalleryItems(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row) => row && (row.image_url || row.image_data_url))
+    .map((row) => ({
+      id: String(row.id || makeLocalId("gallery")),
+      title: limitText(row.title || "", LIMITS.imageTitle),
+      image_url: String(row.image_url || ""),
+      image_data_url: String(row.image_data_url || ""),
+      storage_key: String(row.storage_key || ""),
+    }));
+}
+
+function buildWebsitePayload(form) {
+  return {
+    about_title: String(form?.about_title || ""),
+    about_content: String(form?.about_content || ""),
+    services_title: String(form?.services_title || ""),
+    services_content: String(form?.services_content || ""),
+    contact_title: String(form?.contact_title || ""),
+    contact_note: String(form?.contact_note || ""),
+    gallery_title: String(form?.gallery_title || "Gallery"),
+    is_active: form?.is_active !== false,
+    gallery_items: mapGalleryItems(form?.gallery_items || []).map((row) => ({
+      id: String(row.id || ""),
+      title: String(row.title || ""),
+      image_data_url: String(row.image_data_url || ""),
+      image_url: String(row.image_url || ""),
+      storage_key: String(row.storage_key || ""),
+    })),
+  };
+}
+
 export default function WebsiteCatalogueDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingWebsite, setSavingWebsite] = useState(false);
+  const [websiteAutoSaveStatus, setWebsiteAutoSaveStatus] = useState("Auto-save enabled");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [items, setItems] = useState([]);
@@ -73,6 +121,8 @@ export default function WebsiteCatalogueDashboardPage() {
     services_content: "",
     contact_title: "Contact",
     contact_note: "",
+    gallery_title: "Gallery",
+    gallery_items: [],
     is_active: true,
   });
   const [form, setForm] = useState(emptyForm);
@@ -81,6 +131,20 @@ export default function WebsiteCatalogueDashboardPage() {
   const [page, setPage] = useState(1);
   const [categorySearch, setCategorySearch] = useState("");
   const [categoryPage, setCategoryPage] = useState(1);
+  const [galleryForm, setGalleryForm] = useState({
+    id: null,
+    title: "",
+    image_data_url: "",
+    image_url: "",
+    storage_key: "",
+  });
+  const [galleryFormErrors, setGalleryFormErrors] = useState({ title: "", image: "" });
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryPage, setGalleryPage] = useState(1);
+  const [galleryPreview, setGalleryPreview] = useState({ open: false, src: "", title: "" });
+  const websiteAutoSaveReadyRef = useRef(false);
+  const websiteAutoSaveTimerRef = useRef(null);
+  const lastSavedWebsitePayloadRef = useRef("");
 
   async function loadItems() {
     setLoading(true);
@@ -98,16 +162,23 @@ export default function WebsiteCatalogueDashboardPage() {
       const resolvedPage = pageRes?.catalogue_page || null;
       setCataloguePage(resolvedPage);
       if (resolvedPage) {
-        setCataloguePageForm({
+        const nextWebsiteForm = {
           about_title: resolvedPage.about_title || "About Us",
           about_content: resolvedPage.about_content || "",
           services_title: resolvedPage.services_title || "Services",
           services_content: resolvedPage.services_content || "",
           contact_title: resolvedPage.contact_title || "Contact",
           contact_note: resolvedPage.contact_note || "",
+          gallery_title: resolvedPage.gallery_title || "Gallery",
+          gallery_items: mapGalleryItems(resolvedPage.gallery_items || []),
           is_active: resolvedPage.is_active !== false,
-        });
+        };
+        setCataloguePageForm(nextWebsiteForm);
+        lastSavedWebsitePayloadRef.current = JSON.stringify(buildWebsitePayload(nextWebsiteForm));
+      } else {
+        lastSavedWebsitePayloadRef.current = JSON.stringify(buildWebsitePayload(cataloguePageForm));
       }
+      websiteAutoSaveReadyRef.current = true;
     } catch (err) {
       setError(err?.message || "Unable to load website and catalogue data.");
     } finally {
@@ -127,6 +198,10 @@ export default function WebsiteCatalogueDashboardPage() {
     setCategoryPage(1);
   }, [categorySearch]);
 
+  useEffect(() => {
+    setGalleryPage(1);
+  }, [gallerySearch]);
+
   function switchTab(nextTab) {
     setActiveTab(nextTab);
     if (typeof window !== "undefined") {
@@ -135,20 +210,69 @@ export default function WebsiteCatalogueDashboardPage() {
     }
   }
 
-  async function saveCataloguePageSettings() {
-    setSaving(true);
+  async function saveCataloguePageSettings(payload = cataloguePageForm, options = {}) {
+    const auto = Boolean(options.auto);
+    setSavingWebsite(true);
     setError("");
-    setNotice("");
+    if (auto) {
+      setWebsiteAutoSaveStatus("Auto-saving...");
+    } else {
+      setNotice("");
+    }
     try {
-      const res = await waApi.saveCataloguePage(cataloguePageForm);
-      setCataloguePage(res?.catalogue_page || null);
-      setNotice("Website section details saved.");
+      const res = await waApi.saveCataloguePage(payload);
+      const savedPage = res?.catalogue_page || null;
+      setCataloguePage(savedPage);
+      if (savedPage) {
+        const nextWebsiteForm = {
+          ...payload,
+          about_title: savedPage.about_title || payload.about_title || "About Us",
+          about_content: savedPage.about_content || payload.about_content || "",
+          services_title: savedPage.services_title || payload.services_title || "Services",
+          services_content: savedPage.services_content || payload.services_content || "",
+          contact_title: savedPage.contact_title || payload.contact_title || "Contact",
+          contact_note: savedPage.contact_note || payload.contact_note || "",
+          gallery_title: savedPage.gallery_title || "Gallery",
+          gallery_items: mapGalleryItems(savedPage.gallery_items || []),
+          is_active: savedPage.is_active !== false,
+        };
+        setCataloguePageForm((prev) => ({ ...prev, ...nextWebsiteForm }));
+        lastSavedWebsitePayloadRef.current = JSON.stringify(buildWebsitePayload(nextWebsiteForm));
+      }
+      if (auto) {
+        setWebsiteAutoSaveStatus("Auto-saved");
+      } else {
+        setNotice("Website section details saved.");
+      }
     } catch (err) {
+      if (auto) {
+        setWebsiteAutoSaveStatus("Auto-save failed");
+      }
       setError(err?.message || "Unable to save website sections.");
     } finally {
-      setSaving(false);
+      setSavingWebsite(false);
     }
   }
+
+  useEffect(() => {
+    if (!websiteAutoSaveReadyRef.current) return undefined;
+    const payload = buildWebsitePayload(cataloguePageForm);
+    const serialized = JSON.stringify(payload);
+    if (!serialized || serialized === lastSavedWebsitePayloadRef.current) {
+      return undefined;
+    }
+    if (websiteAutoSaveTimerRef.current) {
+      clearTimeout(websiteAutoSaveTimerRef.current);
+    }
+    websiteAutoSaveTimerRef.current = setTimeout(() => {
+      saveCataloguePageSettings(payload, { auto: true });
+    }, AUTO_SAVE_DELAY_MS);
+    return () => {
+      if (websiteAutoSaveTimerRef.current) {
+        clearTimeout(websiteAutoSaveTimerRef.current);
+      }
+    };
+  }, [cataloguePageForm]);
 
   async function saveCategory() {
     const name = String(categoryForm.name || "").trim();
@@ -239,11 +363,15 @@ export default function WebsiteCatalogueDashboardPage() {
   async function onItemImagePick(file) {
     if (!file) return;
     if (!String(file.type || "").startsWith("image/")) {
-      setError("Only image files are allowed.");
+      const message = "Only image files are allowed.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     if (file.size > 1024 * 1024) {
-      setError("Image size must be under 1 MB.");
+      const message = "Image size must be under 1 MB.";
+      setError(message);
+      showUploadAlert(message);
       return;
     }
     try {
@@ -253,6 +381,120 @@ export default function WebsiteCatalogueDashboardPage() {
     } catch (err) {
       setError(err?.message || "Unable to read selected image.");
     }
+  }
+
+  async function onGalleryImagePick(file) {
+    if (!file) return;
+    if (!String(file.type || "").startsWith("image/")) {
+      const message = "Only image files are allowed in gallery.";
+      setError(message);
+      showUploadAlert(message);
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      const message = "Gallery image size must be under 1 MB.";
+      setError(message);
+      showUploadAlert(message);
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setGalleryForm((prev) => ({
+        ...prev,
+        image_data_url: dataUrl,
+        image_url: "",
+      }));
+      setGalleryFormErrors((prev) => ({ ...prev, image: "" }));
+      if (!String(galleryForm.title || "").trim()) {
+        setGalleryForm((prev) => ({ ...prev, title: fileNameToTitle(file.name) }));
+      }
+      setError("");
+    } catch (err) {
+      setError(err?.message || "Unable to read selected gallery image.");
+    }
+  }
+
+  function resetGalleryForm() {
+    setGalleryForm({
+      id: null,
+      title: "",
+      image_data_url: "",
+      image_url: "",
+      storage_key: "",
+    });
+    setGalleryFormErrors({ title: "", image: "" });
+  }
+
+  function submitGalleryItem() {
+    const title = String(galleryForm.title || "").trim();
+    let hasError = false;
+    const nextErrors = { title: "", image: "" };
+    if (!title) {
+      nextErrors.title = "Image title is required.";
+      hasError = true;
+    }
+    const currentItems = cataloguePageForm.gallery_items || [];
+    const isEdit = Boolean(galleryForm.id);
+    if (!isEdit && currentItems.length >= 30) {
+      setError("Maximum 30 gallery images allowed.");
+      return;
+    }
+    const hasImage = Boolean(galleryForm.image_data_url || galleryForm.image_url || galleryForm.storage_key);
+    if (!hasImage) {
+      nextErrors.image = "Image is required.";
+      hasError = true;
+    }
+    setGalleryFormErrors(nextErrors);
+    if (hasError) {
+      setError("Please fill required gallery fields.");
+      return;
+    }
+    const nextRow = {
+      id: galleryForm.id || makeLocalId("gallery"),
+      title: limitText(title, LIMITS.imageTitle),
+      image_data_url: galleryForm.image_data_url || "",
+      image_url: galleryForm.image_url || "",
+      storage_key: galleryForm.storage_key || "",
+    };
+    setCataloguePageForm((prev) => {
+      const rows = prev.gallery_items || [];
+      if (isEdit) {
+        return {
+          ...prev,
+          gallery_items: rows.map((row) => (String(row.id) === String(galleryForm.id) ? nextRow : row)),
+        };
+      }
+      return {
+        ...prev,
+        gallery_items: [...rows, nextRow],
+      };
+    });
+    setNotice(isEdit ? "Gallery row updated." : "Gallery row added.");
+    setError("");
+    resetGalleryForm();
+  }
+
+  function editGalleryItem(row) {
+    setGalleryForm({
+      id: row.id || makeLocalId("gallery"),
+      title: row.title || "",
+      image_data_url: "",
+      image_url: row.image_url || "",
+      storage_key: row.storage_key || "",
+    });
+    setError("");
+  }
+
+  function deleteGalleryItem(rowId) {
+    setCataloguePageForm((prev) => ({
+      ...prev,
+      gallery_items: (prev.gallery_items || []).filter((row) => String(row.id) !== String(rowId)),
+    }));
+    if (String(galleryForm.id || "") === String(rowId)) {
+      resetGalleryForm();
+    }
+    setNotice("Gallery row removed.");
+    setError("");
   }
 
   const availableCategories = useMemo(() => {
@@ -286,6 +528,17 @@ export default function WebsiteCatalogueDashboardPage() {
     return categories.filter((row) => String(row?.name || "").toLowerCase().includes(q));
   }, [categories, categorySearch]);
 
+  const filteredGalleryItems = useMemo(() => {
+    const q = gallerySearch.trim().toLowerCase();
+    const rows = cataloguePageForm.gallery_items || [];
+    if (!q) return rows;
+    return rows.filter((row, index) => {
+      const title = String(row?.title || "").toLowerCase();
+      const seq = String(index + 1);
+      return title.includes(q) || seq.includes(q);
+    });
+  }, [cataloguePageForm.gallery_items, gallerySearch]);
+
   const categoryTotalPages = Math.max(1, Math.ceil(filteredCategories.length / PAGE_SIZE));
   const currentCategoryPage = Math.min(categoryPage, categoryTotalPages);
   const pagedCategories = filteredCategories.slice((currentCategoryPage - 1) * PAGE_SIZE, currentCategoryPage * PAGE_SIZE);
@@ -294,6 +547,12 @@ export default function WebsiteCatalogueDashboardPage() {
   const currentPage = Math.min(page, totalPages);
   const pagedItems = filteredItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const currentItemLabel = form.item_type === "service" ? "Service" : "Product";
+  const galleryTotalPages = Math.max(1, Math.ceil(filteredGalleryItems.length / GALLERY_PAGE_SIZE));
+  const currentGalleryPage = Math.min(galleryPage, galleryTotalPages);
+  const pagedGalleryItems = filteredGalleryItems.slice(
+    (currentGalleryPage - 1) * GALLERY_PAGE_SIZE,
+    currentGalleryPage * GALLERY_PAGE_SIZE,
+  );
 
   if (loading) {
     return (
@@ -348,9 +607,7 @@ export default function WebsiteCatalogueDashboardPage() {
         <section className="wa-flat-section">
           <div className="d-flex align-items-center justify-content-between mb-3">
             <h4 className="mb-0">Website Sections</h4>
-            <button type="button" className="btn btn-outline-light btn-sm" onClick={saveCataloguePageSettings} disabled={saving}>
-              {saving ? "Saving..." : "Save Website"}
-            </button>
+            <small className="text-secondary">{savingWebsite ? "Auto-saving..." : websiteAutoSaveStatus}</small>
           </div>
           <div className="row g-3 wa-catalogue-website-grid">
             <div className="col-12 col-xl-4">
@@ -362,6 +619,7 @@ export default function WebsiteCatalogueDashboardPage() {
                   value={cataloguePageForm.about_content}
                   onChange={(next) => setCataloguePageForm((p) => ({ ...p, about_content: next }))}
                   placeholder="Write about your business..."
+                  maxWords={250}
                 />
               </div>
             </div>
@@ -374,6 +632,7 @@ export default function WebsiteCatalogueDashboardPage() {
                   value={cataloguePageForm.services_content}
                   onChange={(next) => setCataloguePageForm((p) => ({ ...p, services_content: next }))}
                   placeholder="Add your services, highlights, and bullet points."
+                  maxWords={250}
                 />
               </div>
             </div>
@@ -394,6 +653,145 @@ export default function WebsiteCatalogueDashboardPage() {
                 Contact info auto-loads from Company Profile:
                 {" "}
                 {company?.phone || "-"} / {company?.whatsapp_number || "-"} / {company?.email || "-"}
+              </div>
+            </div>
+            <div className="col-12">
+              <div className="wa-catalogue-website-column">
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                  <h5 className="mb-0">Image Gallery</h5>
+                  <small className="text-secondary">Max 30 images | 1 MB each</small>
+                </div>
+                <label className="form-label">Gallery Section Title</label>
+                <input
+                  className="form-control"
+                  maxLength={LIMITS.sectionTitle}
+                  value={cataloguePageForm.gallery_title}
+                  onChange={(e) => setCataloguePageForm((p) => ({ ...p, gallery_title: limitText(e.target.value, LIMITS.sectionTitle) }))}
+                  placeholder="Gallery"
+                />
+                <div className="row g-3 mt-1">
+                  <div className="col-12 col-xl-3">
+                    <div className="wa-gallery-editor-card">
+                      <label className="form-label">Image Title</label>
+                      <input
+                        className={`form-control ${galleryFormErrors.title ? "is-invalid" : ""}`}
+                        maxLength={LIMITS.imageTitle}
+                        value={galleryForm.title}
+                        onChange={(e) => {
+                          setGalleryForm((prev) => ({ ...prev, title: limitText(e.target.value, LIMITS.imageTitle) }));
+                          setGalleryFormErrors((prev) => ({ ...prev, title: "" }));
+                        }}
+                        placeholder="Gallery image title"
+                      />
+                      {galleryFormErrors.title ? <div className="invalid-feedback d-block">{galleryFormErrors.title}</div> : null}
+                      <label className="form-label mt-2">Upload Image</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className={`form-control ${galleryFormErrors.image ? "is-invalid" : ""}`}
+                        onChange={(e) => {
+                          onGalleryImagePick(e.target.files?.[0]);
+                          e.target.value = "";
+                        }}
+                      />
+                      {galleryFormErrors.image ? <div className="invalid-feedback d-block">{galleryFormErrors.image}</div> : null}
+                      <div className="small text-secondary mt-1">1 MB max per image</div>
+                      {(galleryForm.image_data_url || galleryForm.image_url) ? (
+                        <img
+                          src={galleryForm.image_data_url || galleryForm.image_url}
+                          alt={galleryForm.title || "Preview"}
+                          className="wa-gallery-form-preview"
+                        />
+                      ) : null}
+                      <div className="d-flex gap-2 mt-2">
+                        <button type="button" className="btn btn-primary btn-sm" onClick={submitGalleryItem}>
+                          {galleryForm.id ? "Update" : "Submit"}
+                        </button>
+                        {galleryForm.id ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={resetGalleryForm}>
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="small text-secondary mt-2">
+                        {(cataloguePageForm.gallery_items || []).length}/30 uploaded
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-12 col-xl-9">
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                      <h6 className="mb-0">Image Gallery Table</h6>
+                      <label className="table-search mb-0" htmlFor="wa-gallery-search">
+                        <input
+                          id="wa-gallery-search"
+                          type="search"
+                          placeholder="Search gallery"
+                          value={gallerySearch}
+                          onChange={(e) => setGallerySearch(limitText(e.target.value, LIMITS.search))}
+                          maxLength={LIMITS.search}
+                        />
+                      </label>
+                    </div>
+                    <div className="table-responsive">
+                      <table className="table table-dark table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "64px" }}>Image</th>
+                            <th>Title</th>
+                            <th className="text-end" style={{ width: "170px" }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagedGalleryItems.length ? pagedGalleryItems.map((row) => (
+                            <tr key={row.id}>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="wa-gallery-thumb-btn"
+                                  onClick={() => setGalleryPreview({
+                                    open: true,
+                                    src: row.image_data_url || row.image_url || "",
+                                    title: row.title || "Gallery Image",
+                                  })}
+                                  aria-label="Open image preview"
+                                >
+                                  <img
+                                    src={row.image_data_url || row.image_url}
+                                    alt={row.title || "Gallery"}
+                                    style={{ width: 42, height: 42, borderRadius: 8, objectFit: "cover", border: "1px solid rgba(148,163,184,0.25)" }}
+                                  />
+                                </button>
+                              </td>
+                              <td>{row.title || "-"}</td>
+                              <td className="text-end">
+                                <div className="d-flex justify-content-end gap-2">
+                                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => editGalleryItem(row)}>Edit</button>
+                                  <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGalleryItem(row.id)}>Delete</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan="3" className="text-secondary">No gallery images found.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+                      <small className="text-secondary">
+                        Showing {pagedGalleryItems.length ? ((currentGalleryPage - 1) * GALLERY_PAGE_SIZE) + 1 : 0}
+                        {" "}to {((currentGalleryPage - 1) * GALLERY_PAGE_SIZE) + pagedGalleryItems.length}
+                        {" "}of {filteredGalleryItems.length}
+                      </small>
+                      <div className="d-flex gap-2">
+                        <button type="button" className="btn btn-outline-light btn-sm" disabled={currentGalleryPage <= 1} onClick={() => setGalleryPage((prev) => Math.max(1, prev - 1))}>Prev</button>
+                        <span className="btn btn-outline-light btn-sm disabled">Page {currentGalleryPage} / {galleryTotalPages}</span>
+                        <button type="button" className="btn btn-outline-light btn-sm" disabled={currentGalleryPage >= galleryTotalPages} onClick={() => setGalleryPage((prev) => Math.min(galleryTotalPages, prev + 1))}>Next</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -660,6 +1058,23 @@ export default function WebsiteCatalogueDashboardPage() {
           </section>
         </div>
       )}
+      {galleryPreview.open ? (
+        <div className="wa-gallery-preview-backdrop" onClick={() => setGalleryPreview({ open: false, src: "", title: "" })}>
+          <div className="wa-gallery-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+              <h6 className="mb-0">{galleryPreview.title || "Image Preview"}</h6>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={() => setGalleryPreview({ open: false, src: "", title: "" })}
+              >
+                Close
+              </button>
+            </div>
+            <img src={galleryPreview.src} alt={galleryPreview.title || "Preview"} className="wa-gallery-preview-image" />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

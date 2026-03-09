@@ -1,4 +1,4 @@
-export const PHONE_COUNTRIES = [
+const RAW_PHONE_COUNTRIES = [
   { code: "+93", label: "Afghanistan" },
   { code: "+355", label: "Albania" },
   { code: "+213", label: "Algeria" },
@@ -239,3 +239,133 @@ export const PHONE_COUNTRIES = [
   { code: "+358", label: "Aland Islands" },
   { code: "+383", label: "Kosovo" }
 ];
+
+const MANUAL_ISO_BY_LABEL = {
+  "Aland Islands": "AX",
+  "American Samoa": "AS",
+  "Antarctica": "AQ",
+  "British Indian Ocean Territory": "IO",
+  "British Virgin Islands": "VG",
+  "Cocos (Keeling) Islands": "CC",
+  "Congo (DRC)": "CD",
+  "Congo (Republic)": "CG",
+  "Cote d'Ivoire": "CI",
+  Curacao: "CW",
+  Eswatini: "SZ",
+  "Falkland Islands": "FK",
+  "Faroe Islands": "FO",
+  "French Guiana": "GF",
+  "French Polynesia": "PF",
+  Guernsey: "GG",
+  "Isle of Man": "IM",
+  Jersey: "JE",
+  Kosovo: "XK",
+  Laos: "LA",
+  Macao: "MO",
+  Micronesia: "FM",
+  Moldova: "MD",
+  Palestine: "PS",
+  Reunion: "RE",
+  Russia: "RU",
+  "Saint Barthelemy": "BL",
+  "Saint Helena": "SH",
+  "Saint Kitts and Nevis": "KN",
+  "Saint Lucia": "LC",
+  "Saint Martin": "MF",
+  "Saint Pierre and Miquelon": "PM",
+  "Saint Vincent and the Grenadines": "VC",
+  "Sao Tome and Principe": "ST",
+  "South Korea": "KR",
+  "North Korea": "KP",
+  Taiwan: "TW",
+  "Timor-Leste": "TL",
+  Turkey: "TR",
+  "United Kingdom": "GB",
+  "United States": "US",
+  "Vatican City": "VA",
+  "Wallis and Futuna": "WF",
+  "Western Sahara": "EH",
+};
+
+function normalizeCountryLabel(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[()]/g, " ")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function flagFromIso2(iso2) {
+  const normalized = String(iso2 || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(normalized)) {
+    return "🌐";
+  }
+  const first = normalized.codePointAt(0) - 65 + 0x1f1e6;
+  const second = normalized.codePointAt(1) - 65 + 0x1f1e6;
+  return String.fromCodePoint(first, second);
+}
+
+const NORMALIZED_MANUAL_ISO_BY_LABEL = Object.entries(MANUAL_ISO_BY_LABEL).reduce((acc, [label, iso2]) => {
+  acc[normalizeCountryLabel(label)] = String(iso2 || "").trim().toUpperCase();
+  return acc;
+}, {});
+
+function buildIntlRegionMap() {
+  const map = {};
+  try {
+    if (typeof Intl === "undefined" || typeof Intl.DisplayNames !== "function") {
+      return map;
+    }
+    const display = new Intl.DisplayNames(["en"], { type: "region" });
+    // Generate all ISO2 combinations; supportedValuesOf("region") is invalid in browsers.
+    for (let first = 65; first <= 90; first += 1) {
+      for (let second = 65; second <= 90; second += 1) {
+        const iso2 = String.fromCharCode(first, second);
+        let name = "";
+        try {
+          name = display.of(iso2);
+        } catch {
+          name = "";
+        }
+        if (!name || String(name).trim().toUpperCase() === iso2) continue;
+        const key = normalizeCountryLabel(name);
+        if (key && !map[key]) map[key] = iso2;
+      }
+    }
+  } catch {
+    return map;
+  }
+  return map;
+}
+
+const INTL_REGION_MAP = buildIntlRegionMap();
+
+function resolveIso2FromLabel(label) {
+  const key = normalizeCountryLabel(label);
+  if (!key) return "";
+  if (NORMALIZED_MANUAL_ISO_BY_LABEL[key]) return NORMALIZED_MANUAL_ISO_BY_LABEL[key];
+  return INTL_REGION_MAP[key] || "";
+}
+
+export const PHONE_COUNTRIES = RAW_PHONE_COUNTRIES.map((entry) => {
+  const iso2 = resolveIso2FromLabel(entry.label);
+  const flag = flagFromIso2(iso2);
+  return {
+    ...entry,
+    iso2,
+    flag,
+  };
+});
+
+export function formatPhoneCountryOption(entry, { codeFirst = false } = {}) {
+  const flag = String(entry?.flag || "🌐");
+  const label = String(entry?.label || "").trim();
+  const code = String(entry?.code || "").trim();
+  if (codeFirst) {
+    return `${flag} ${code} ${label}`.trim();
+  }
+  return `${flag} ${label} ${code}`.trim();
+}

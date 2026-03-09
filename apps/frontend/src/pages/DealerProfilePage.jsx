@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PHONE_COUNTRIES } from "../lib/phoneCountries.js";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { COUNTRY_OPTIONS } from "../lib/countries.js";
 
 const emptyState = {
@@ -243,19 +244,13 @@ export default function DealerProfilePage() {
             <div className="mb-2">
               <label className="form-label">Phone Number</label>
               <div className="input-group">
-                <select
-                  className="form-select"
+                <PhoneCountryCodePicker
                   value={phoneCountry}
-                  onChange={(event) => setPhoneCountry(event.target.value)}
+                  onChange={(code) => setPhoneCountry(code)}
+                  options={phoneCountries}
                   style={{ maxWidth: "170px" }}
-                  form="dealer-profile-form"
-                >
-                  {phoneCountries.map((entry) => (
-                    <option key={`${entry.code}-${entry.label}`} value={entry.code}>
-                      {entry.label} {entry.code}
-                    </option>
-                  ))}
-                </select>
+                  ariaLabel="Dealer phone country code"
+                />
                 <input
                   type="tel"
                   className="form-control"
