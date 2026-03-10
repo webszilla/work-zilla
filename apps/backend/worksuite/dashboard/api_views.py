@@ -4,9 +4,11 @@ from datetime import timedelta
 import datetime
 import ipaddress
 import json
+import logging
 import math
 import os
 import re
+import threading
 from types import SimpleNamespace
 
 from django.contrib.auth import update_session_auth_hash, get_user_model
@@ -14,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import models, transaction
 from django.db.models import Max, Value, Q
@@ -68,6 +71,7 @@ from apps.backend.storage.models import OrgSubscription as StorageOrgSubscriptio
 
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_ALLOWED_INTERVALS = [1, 2, 3, 5, 10, 15, 20, 30]
@@ -95,6 +99,72 @@ PRODUCT_LABEL_OVERRIDES = {
 
 def _normalize_text(value):
     return " ".join(str(value or "").strip().split())
+
+
+def _start_screenshot_storage_cleanup(image_names, action_label):
+    names = [str(name or "").strip() for name in image_names or [] if str(name or "").strip()]
+    if not names:
+        return
+
+    def _worker():
+        seen = set()
+        deleted = 0
+        for name in names:
+            if name in seen:
+                continue
+            seen.add(name)
+            try:
+                default_storage.delete(name)
+                deleted += 1
+            except Exception as exc:
+                logger.warning(
+                    "Screenshot storage cleanup failed for %s during %s: %s",
+                    name,
+                    action_label,
+                    exc,
+                )
+        logger.info(
+            "Screenshot storage cleanup finished for %s (deleted=%s, queued=%s)",
+            action_label,
+            deleted,
+            len(seen),
+        )
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _fast_delete_screenshots(queryset, action_label):
+    records = list(
+        queryset.values_list("id", "image", "employee__name")
+    )
+    if not records:
+        return {
+            "count": 0,
+            "employee_names": set(),
+            "cleanup_queued": False,
+        }
+
+    ids = []
+    image_names = []
+    employee_names = set()
+    for shot_id, image_name, employee_name in records:
+        ids.append(shot_id)
+        if image_name:
+            image_names.append(image_name)
+        if employee_name:
+            employee_names.add(employee_name)
+
+    # Clear image path before delete so Screenshot pre_delete signal does not
+    # synchronously hit object storage for each row.
+    Screenshot.objects.filter(id__in=ids).update(image="")
+    Screenshot.objects.filter(id__in=ids).delete()
+    _start_screenshot_storage_cleanup(image_names, action_label)
+
+    return {
+        "count": len(ids),
+        "employee_names": employee_names,
+        "cleanup_queued": bool(image_names),
+    }
 
 
 def _normalize_domain_host(value):
@@ -2395,10 +2465,17 @@ def screenshots_delete(request, shot_id):
         request=request,
     )
 
-    if shot.image:
-        shot.image.delete(save=False)
-    shot.delete()
-    return JsonResponse({"deleted": True})
+    result = _fast_delete_screenshots(
+        Screenshot.objects.filter(id=shot.id),
+        action_label="delete_single",
+    )
+    return JsonResponse(
+        {
+            "deleted": True,
+            "count": result["count"],
+            "storage_cleanup_queued": result["cleanup_queued"],
+        }
+    )
 
 
 @login_required
@@ -2408,16 +2485,11 @@ def screenshots_delete_all(request):
     if error:
         return error
 
-    shots = Screenshot.objects.filter(employee__org=org)
-    deleted_count = 0
-    for shot in shots:
-        try:
-            if shot.image:
-                shot.image.delete(save=False)
-                deleted_count += 1
-        except Exception:
-            pass
-    shots.delete()
+    result = _fast_delete_screenshots(
+        Screenshot.objects.filter(employee__org=org),
+        action_label=f"delete_all_org_{org.id}",
+    )
+    deleted_count = result["count"]
 
     dashboard_views.log_admin_activity(
         request.user,
@@ -2426,7 +2498,13 @@ def screenshots_delete_all(request):
         request=request,
     )
 
-    return JsonResponse({"deleted": True, "count": deleted_count})
+    return JsonResponse(
+        {
+            "deleted": True,
+            "count": deleted_count,
+            "storage_cleanup_queued": result["cleanup_queued"],
+        }
+    )
 
 
 @login_required
@@ -2446,16 +2524,11 @@ def screenshots_delete_employee(request):
     if not employee:
         return _json_error("employee_not_found", status=404)
 
-    shots = Screenshot.objects.filter(employee=employee)
-    deleted_count = 0
-    for shot in shots:
-        try:
-            if shot.image:
-                shot.image.delete(save=False)
-                deleted_count += 1
-        except Exception:
-            pass
-    shots.delete()
+    result = _fast_delete_screenshots(
+        Screenshot.objects.filter(employee=employee),
+        action_label=f"delete_employee_{employee.id}",
+    )
+    deleted_count = result["count"]
 
     dashboard_views.log_admin_activity(
         request.user,
@@ -2464,7 +2537,13 @@ def screenshots_delete_employee(request):
         request=request,
     )
 
-    return JsonResponse({"deleted": True, "count": deleted_count})
+    return JsonResponse(
+        {
+            "deleted": True,
+            "count": deleted_count,
+            "storage_cleanup_queued": result["cleanup_queued"],
+        }
+    )
 
 
 @login_required
@@ -2490,18 +2569,12 @@ def screenshots_delete_selected(request):
     if not shots.exists():
         return JsonResponse({"deleted": False, "count": 0})
 
-    deleted_count = 0
-    employee_names = set()
-    for shot in shots:
-        try:
-            if shot.image:
-                shot.image.delete(save=False)
-            deleted_count += 1
-            if shot.employee_id:
-                employee_names.add(shot.employee.name)
-        except Exception:
-            pass
-    shots.delete()
+    result = _fast_delete_screenshots(
+        shots,
+        action_label=f"delete_selected_org_{org.id}",
+    )
+    deleted_count = result["count"]
+    employee_names = result["employee_names"]
 
     if deleted_count:
         if len(employee_names) == 1:
@@ -2522,7 +2595,13 @@ def screenshots_delete_selected(request):
             request=request,
         )
 
-    return JsonResponse({"deleted": True, "count": deleted_count})
+    return JsonResponse(
+        {
+            "deleted": True,
+            "count": deleted_count,
+            "storage_cleanup_queued": result["cleanup_queued"],
+        }
+    )
 
 
 @login_required
