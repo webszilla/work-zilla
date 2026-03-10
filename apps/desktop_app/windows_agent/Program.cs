@@ -238,11 +238,11 @@ internal static class Program
 
     private sealed class AgentOptions
     {
-        public bool CaptureOnce { get; init; }
-        public int IntervalSeconds { get; init; }
-        public bool Tray { get; init; }
-        public bool InstallStartup { get; init; }
-        public bool RemoveStartup { get; init; }
+        public bool CaptureOnce { get; set; }
+        public int IntervalSeconds { get; set; }
+        public bool Tray { get; set; }
+        public bool InstallStartup { get; set; }
+        public bool RemoveStartup { get; set; }
 
         public static AgentOptions FromArgs(string[] args)
         {
