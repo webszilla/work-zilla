@@ -653,13 +653,9 @@ def _should_blur_screenshot(patterns, url, app_name, window_title):
         if not pattern:
             continue
         if target_type == "url":
+            # URL scoped patterns must match only the active tab/page URL.
+            # Do not infer from title/app text, which can over-blur browser screenshots.
             targets = url_targets
-            if not any(targets):
-                targets = []
-                if title_target:
-                    targets.append(title_target)
-                if app_target:
-                    targets.append(app_target)
         elif target_type == "app":
             targets = [app_target]
         elif target_type in ("title", "window"):
@@ -676,9 +672,6 @@ def _should_blur_screenshot(patterns, url, app_name, window_title):
         if target_type != "app" and target_type not in ("title", "window"):
             if _url_pattern_matches(pattern, url_targets):
                 return True
-            if not url_targets and _looks_like_url_pattern(pattern):
-                if _url_keyword_matches(pattern, title_target, app_target):
-                    return True
     return False
 
 
