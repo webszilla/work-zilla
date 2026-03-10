@@ -21,10 +21,7 @@ jobs:
       - name: Clone repository
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/${{ github.repository }}.git repo
-          cd repo
-          git fetch --depth 1 origin ${{ github.sha }}
-          git checkout ${{ github.sha }}
+          git clone --depth 1 --branch ${{ github.ref_name }} https://github.com/${{ github.repository }}.git repo
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
