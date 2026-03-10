@@ -18,10 +18,13 @@ jobs:
       - name: Enable Git long paths
         run: git config --system core.longpaths true
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true
+      - name: Clone repository
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository }}.git repo
+          cd repo
+          git fetch --depth 1 origin ${{ github.sha }}
+          git checkout ${{ github.sha }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -29,15 +32,15 @@ jobs:
           dotnet-version: "6.0.x"
 
       - name: Build
-        run: dotnet build apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release
+        run: dotnet build repo/apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release
 
       - name: Publish single-file
-        run: dotnet publish apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release -r win-x64 -p:PublishSingleFile=true -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true
+        run: dotnet publish repo/apps/desktop_app/windows_agent/WorkZilla.WindowsAgent.csproj -c Release -r win-x64 -p:PublishSingleFile=true -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true
 
       - name: Prepare artifact
         run: |
           mkdir -p artifacts
-          copy apps\desktop_app\windows_agent\bin\Release\net6.0-windows\win-x64\publish\employee_agent.exe artifacts\WorkZillaAgentSetup.exe
+          copy repo\apps\desktop_app\windows_agent\bin\Release\net6.0-windows\win-x64\publish\employee_agent.exe artifacts\WorkZillaAgentSetup.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -58,12 +61,14 @@ jobs:
       - name: Commit artifact to repo
         shell: pwsh
         run: |
+          cd repo
           $targetDir = "apps/backend/static/downloads"
           New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-          Copy-Item artifacts/WorkZillaAgentSetup.exe "$targetDir/WorkZillaAgentSetup.exe" -Force
+          Copy-Item ../artifacts/WorkZillaAgentSetup.exe "$targetDir/WorkZillaAgentSetup.exe" -Force
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git add "$targetDir/WorkZillaAgentSetup.exe"
 
           $status = git status --porcelain
