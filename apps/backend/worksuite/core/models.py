@@ -16,6 +16,8 @@ def _generate_chat_code():
     return secrets.token_hex(8)
 
 
+
+
 def _chat_attachment_upload_to(instance, filename):
     safe_name = os.path.basename(filename or "attachment")
     stamp = timezone.now().strftime("%Y%m%d%H%M%S")
@@ -1378,7 +1380,7 @@ class OrgSupportTicket(models.Model):
             models.Index(fields=["organization", "status"]),
             models.Index(fields=["organization", "product_slug"]),
             models.Index(fields=["category", "status"]),
-            models.Index(fields=["status", "closed_at"]),
+            models.Index(fields=["status", "closed_at"], name="core_orgsup_status_3000da_idx"),
         ]
 
     def __str__(self):
@@ -1478,6 +1480,3 @@ def log_admin_activity(user, action, details="", product_slug="", request=None):
     )
     if old_ids:
         AdminActivity.objects.filter(id__in=old_ids).delete()
-
-def _generate_chat_code():
-    return secrets.token_hex(8)
