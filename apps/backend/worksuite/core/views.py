@@ -410,13 +410,63 @@ def _url_keyword_from_pattern(pattern):
     return _compact_alnum(keyword)
 
 
+def _url_keywords_from_pattern(pattern):
+    common_tokens = {
+        "com",
+        "net",
+        "org",
+        "gov",
+        "edu",
+        "co",
+        "in",
+        "uk",
+        "us",
+        "au",
+        "io",
+        "app",
+        "bank",
+        "www",
+        "www2",
+        "m",
+        "home",
+        "login",
+        "secure",
+    }
+    norm = _normalize_url_value(pattern)
+    if not norm:
+        return []
+    host = norm.split("/", 1)[0].lstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    parts = []
+    for raw in host.split("."):
+        token = _compact_alnum(raw)
+        if not token or token in common_tokens:
+            continue
+        parts.append(token)
+    return parts
+
+
 def _url_keyword_matches(pattern, title, app_name):
     keyword = _url_keyword_from_pattern(pattern)
-    if not keyword:
-        return False
     title_key = _compact_alnum(title)
     app_key = _compact_alnum(app_name)
-    return (title_key and keyword in title_key) or (app_key and keyword in app_key)
+    combined = f"{title_key} {app_key}".strip()
+    if keyword and ((title_key and keyword in title_key) or (app_key and keyword in app_key)):
+        return True
+    if not combined:
+        return False
+
+    tokens = _url_keywords_from_pattern(pattern)
+    if not tokens:
+        return False
+    strong_tokens = [token for token in tokens if len(token) >= 4]
+    if not strong_tokens:
+        strong_tokens = tokens
+    matched = [token for token in strong_tokens if token and token in combined]
+    if len(strong_tokens) == 1:
+        return len(matched) == 1
+    return len(matched) >= 2
 
 
 def _url_pattern_matches(pattern, url_targets):
@@ -469,11 +519,13 @@ def _url_pattern_matches(pattern, url_targets):
 def _is_browser_app(app_name):
     if not app_name:
         return False
+    app = app_name.strip().lower()
     browsers = {
         "chrome.exe",
         "chrome",
         "msedge.exe",
         "msedge",
+        "msedgewebview2",
         "brave.exe",
         "brave",
         "firefox.exe",
@@ -488,7 +540,21 @@ def _is_browser_app(app_name):
         "mozilla firefox",
         "safari",
     }
-    return app_name.strip().lower() in browsers
+    if app in browsers:
+        return True
+    browser_markers = (
+        "chrome",
+        "msedge",
+        "edge",
+        "firefox",
+        "brave",
+        "opera",
+        "iexplore",
+        "safari",
+        "browser",
+        "vivaldi",
+    )
+    return any(marker in app for marker in browser_markers)
 
 
 def _is_monitor_placeholder(app_name, window_title):
