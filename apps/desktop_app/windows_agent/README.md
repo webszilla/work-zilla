@@ -81,3 +81,4 @@ Logs are written to:
 - Uses `System.Drawing` capture (Windows only).
 - Screenshot filenames include timestamp and GUID; server also renames on upload.
 - Tray app provides quick actions and keeps agent running in background.
+- Build pipeline note: GitHub Actions `Build Windows Agent` runs on changes under this folder.
