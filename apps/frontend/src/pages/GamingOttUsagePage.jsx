@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { formatDeviceDate, formatDeviceTimeWithDateAmPm } from "../lib/datetime.js";
 import TablePagination from "../components/TablePagination.jsx";
 
 const emptyState = {
@@ -305,7 +306,7 @@ export default function GamingOttUsagePage() {
                     pagedRows.map((row, index) => (
                       <tr key={`${row.employee}-${row.date}-${index}`}>
                         <td>{row.employee}</td>
-                        <td>{row.date}</td>
+                        <td>{formatDeviceDate(row.date)}</td>
                         <td>{row.app}</td>
                         <td className="text-truncate" style={{ maxWidth: "320px" }} title={row.detail}>
                           {row.detail ? (
@@ -329,8 +330,8 @@ export default function GamingOttUsagePage() {
                             "-"
                           )}
                         </td>
-                        <td>{row.start}</td>
-                        <td>{row.end}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(row.start, row.date)}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(row.end, row.date)}</td>
                         <td>{row.duration}</td>
                       </tr>
                     ))

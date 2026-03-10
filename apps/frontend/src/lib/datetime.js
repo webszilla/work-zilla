@@ -152,6 +152,20 @@ export function formatDeviceDateTime(value, fallback = "-") {
   return parsed.toLocaleString(undefined, { timeZone: getOrgTimezone() });
 }
 
+export function formatDeviceDateTimeAmPm(value, fallback = "-") {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = parseDateTimeAsUtc(value);
+  if (!parsed) {
+    return value;
+  }
+  return parsed.toLocaleString(undefined, {
+    timeZone: getOrgTimezone(),
+    hour12: true,
+  });
+}
+
 export function formatDeviceTimeWithDate(timeValue, dateValue, fallback = "-") {
   if (!timeValue) {
     return fallback;
@@ -183,6 +197,42 @@ export function formatDeviceTimeWithDate(timeValue, dateValue, fallback = "-") {
     return timeText;
   }
   return parsed.toLocaleTimeString(undefined, { timeZone: getOrgTimezone() });
+}
+
+export function formatDeviceTimeWithDateAmPm(timeValue, dateValue, fallback = "-") {
+  if (!timeValue) {
+    return fallback;
+  }
+  const timeText = String(timeValue || "").trim();
+  if (!TIME_ONLY_RE.test(timeText)) {
+    return timeText || fallback;
+  }
+
+  const dateMatch = DATE_ONLY_RE.exec(String(dateValue || "").trim());
+  if (!dateMatch) {
+    return timeText;
+  }
+
+  const [, year, month, day] = dateMatch;
+  const [, hour, minute, second = "00"] = TIME_ONLY_RE.exec(timeText) || [];
+  const parsed = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ),
+  );
+
+  if (Number.isNaN(parsed.getTime())) {
+    return timeText;
+  }
+  return parsed.toLocaleTimeString(undefined, {
+    timeZone: getOrgTimezone(),
+    hour12: true,
+  });
 }
 
 installOrgTimezoneDateLocalePatch();

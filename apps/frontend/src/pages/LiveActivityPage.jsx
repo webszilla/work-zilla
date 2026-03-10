@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { formatDeviceDateTime } from "../lib/datetime.js";
+import { formatDeviceDateTimeAmPm } from "../lib/datetime.js";
 import TablePagination from "../components/TablePagination.jsx";
 
 const URL_LIMIT = 80;
@@ -401,7 +401,7 @@ export default function LiveActivityPage() {
                             </span>
                           )}
                         </td>
-                        <td>{formatDeviceDateTime(row.start)}</td>
+                        <td>{formatDeviceDateTimeAmPm(row.start)}</td>
                       </tr>
                     );
                   })

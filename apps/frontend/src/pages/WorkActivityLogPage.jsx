@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import {
   formatDeviceDate,
-  formatDeviceTimeWithDate,
+  formatDeviceTimeWithDateAmPm,
 } from "../lib/datetime.js";
 import TablePagination from "../components/TablePagination.jsx";
 
@@ -313,8 +313,8 @@ export default function WorkActivityLogPage() {
                       <tr key={`${row.employee}-${row.date}-${index}`}>
                         <td>{row.employee}</td>
                         <td>{formatDeviceDate(row.date)}</td>
-                        <td>{formatDeviceTimeWithDate(row.on_time, row.date)}</td>
-                        <td>{formatDeviceTimeWithDate(row.off_time, row.date)}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(row.on_time, row.date)}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(row.off_time, row.date)}</td>
                         <td>{row.stop_reason || "-"}</td>
                         <td>{row.event || "-"}</td>
                         <td>
@@ -376,8 +376,8 @@ export default function WorkActivityLogPage() {
                     historyModal.rows.map((entry, idx) => (
                       <tr key={`${entry.on}-${idx}`}>
                         <td>{idx + 1}</td>
-                        <td>{formatDeviceTimeWithDate(entry.on, historyModal.baseDate)}</td>
-                        <td>{formatDeviceTimeWithDate(entry.off, historyModal.baseDate)}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(entry.on, historyModal.baseDate)}</td>
+                        <td>{formatDeviceTimeWithDateAmPm(entry.off, historyModal.baseDate)}</td>
                         <td>{entry.stop_reason || "-"}</td>
                         <td>{entry.event || "-"}</td>
                         <td>{entry.duration}</td>
