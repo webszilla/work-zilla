@@ -21,6 +21,9 @@ internal static class Program
     private const int MinimumScreenshotIntervalSeconds = 15;
     private const int HeartbeatIntervalSeconds = 60;
     private static readonly SemaphoreSlim CaptureLock = new(1, 1);
+    private static readonly object ActiveWindowLock = new();
+    private static string _lastActiveWindowTitle = "";
+    private static string _lastActiveWindowAppName = "";
 
     [STAThread]
     private static async Task<int> Main(string[] args)
@@ -107,39 +110,100 @@ internal static class Program
         }
     }
 
-    private static string GetActiveWindowTitle()
+    private static string GetActiveWindowTitle() => GetActiveWindowMetadata().WindowTitle;
+
+    private static string GetActiveWindowAppName() => GetActiveWindowMetadata().AppName;
+
+    private static (string AppName, string WindowTitle) GetActiveWindowMetadata()
     {
-        var handle = GetForegroundWindow();
-        if (handle == IntPtr.Zero)
+        string fallbackApp = "";
+        string fallbackTitle = "";
+
+        for (var i = 0; i < 6; i++)
         {
-            return "";
+            var handle = GetForegroundWindow();
+            if (handle == IntPtr.Zero)
+            {
+                Thread.Sleep(120);
+                continue;
+            }
+
+            var sb = new System.Text.StringBuilder(1024);
+            _ = GetWindowText(handle, sb, sb.Capacity);
+            var title = (sb.ToString() ?? "").Trim();
+
+            _ = GetWindowThreadProcessId(handle, out var pid);
+            var app = "";
+            if (pid != 0)
+            {
+                try
+                {
+                    using var process = Process.GetProcessById((int)pid);
+                    app = (process.ProcessName ?? "").Trim();
+                }
+                catch
+                {
+                    app = "";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(fallbackTitle) && !string.IsNullOrWhiteSpace(title))
+            {
+                fallbackTitle = title;
+                fallbackApp = app;
+            }
+
+            if (IsMeaningfulWindowMetadata(app, title))
+            {
+                lock (ActiveWindowLock)
+                {
+                    _lastActiveWindowAppName = app;
+                    _lastActiveWindowTitle = title;
+                }
+                return (app, title);
+            }
+
+            Thread.Sleep(120);
         }
-        var sb = new System.Text.StringBuilder(256);
-        _ = GetWindowText(handle, sb, sb.Capacity);
-        return sb.ToString();
+
+        lock (ActiveWindowLock)
+        {
+            if (IsMeaningfulWindowMetadata(_lastActiveWindowAppName, _lastActiveWindowTitle))
+            {
+                return (_lastActiveWindowAppName, _lastActiveWindowTitle);
+            }
+        }
+
+        return (fallbackApp, fallbackTitle);
     }
 
-    private static string GetActiveWindowAppName()
+    private static bool IsMeaningfulWindowMetadata(string appName, string windowTitle)
     {
-        var handle = GetForegroundWindow();
-        if (handle == IntPtr.Zero)
+        var app = (appName ?? "").Trim().ToLowerInvariant();
+        var title = (windowTitle ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title))
         {
-            return "";
+            return false;
         }
-        _ = GetWindowThreadProcessId(handle, out var pid);
-        if (pid == 0)
+        if (title.Equals("Program Manager", StringComparison.OrdinalIgnoreCase))
         {
-            return "";
+            return false;
         }
-        try
+        if (title.Equals("Monitor Active", StringComparison.OrdinalIgnoreCase))
         {
-            using var process = Process.GetProcessById((int)pid);
-            return process.ProcessName ?? "";
+            return false;
         }
-        catch
+        if (
+            app == "powershell"
+            || app == "pwsh"
+            || app == "conhost"
+            || app == "cmd"
+            || app == "work zilla agent"
+        )
         {
-            return "";
+            return false;
         }
+        return true;
     }
 
     [DllImport("user32.dll")]
