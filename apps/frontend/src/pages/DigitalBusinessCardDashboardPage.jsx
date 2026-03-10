@@ -17,6 +17,8 @@ const LIMITS = {
   phoneLocal: 20,
   address: 260,
   description: 160,
+  seoTitle: 60,
+  seoDescription: 160,
   search: 80,
 };
 const COUNTRY_CODES_DESC = Array.from(new Set(PHONE_COUNTRIES.map((x) => x.code))).sort((a, b) => b.length - a.length);
@@ -78,33 +80,33 @@ function normalizeHexColor(value, fallback = "#22c55e") {
   return fallback;
 }
 
-function toRgb(hex) {
-  const safe = normalizeHexColor(hex).slice(1);
-  return {
-    r: parseInt(safe.slice(0, 2), 16),
-    g: parseInt(safe.slice(2, 4), 16),
-    b: parseInt(safe.slice(4, 6), 16),
-  };
+function normalizeCardThemeMode(value, fallback = "auto") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "dark" || raw === "light" || raw === "auto") return raw;
+  if (raw === "gradient" || raw === "flat") return fallback;
+  return fallback;
 }
 
-function toHex({ r, g, b }) {
-  const clamp = (n) => Math.max(0, Math.min(255, Math.round(n)));
-  return `#${[clamp(r), clamp(g), clamp(b)].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+function readAdminThemeMode() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wz_theme");
+      if (stored === "light" || stored === "dark") return stored;
+    } catch {
+      // ignore localStorage access issues and fall back to DOM state
+    }
+  }
+  if (typeof document !== "undefined") {
+    const htmlMode = String(document.documentElement?.dataset?.theme || "").trim().toLowerCase();
+    if (htmlMode === "light" || htmlMode === "dark") return htmlMode;
+  }
+  return "dark";
 }
 
-function mixColor(baseHex, mixHex, ratio = 0.2) {
-  const base = toRgb(baseHex);
-  const mix = toRgb(mixHex);
-  const t = Math.max(0, Math.min(1, ratio));
-  return toHex({
-    r: (base.r * (1 - t)) + (mix.r * t),
-    g: (base.g * (1 - t)) + (mix.g * t),
-    b: (base.b * (1 - t)) + (mix.b * t),
-  });
-}
-
-function deriveFlatSecondary(primaryHex) {
-  return mixColor(normalizeHexColor(primaryHex), "#0f172a", 0.18);
+function resolveCardThemeMode(modeValue) {
+  const mode = normalizeCardThemeMode(modeValue, "auto");
+  if (mode === "light" || mode === "dark") return mode;
+  return readAdminThemeMode();
 }
 
 function emptyCardForm(prefill = {}) {
@@ -132,9 +134,11 @@ function emptyCardForm(prefill = {}) {
     address: prefill.address || "",
     address_lines: splitAddressLines(prefill.address || ""),
     description: prefill.description || "",
+    seo_title: prefill.seo_title || "",
+    seo_description: prefill.seo_description || "",
     theme_color: prefill.theme_color || "#22c55e",
     theme_secondary_color: prefill.theme_secondary_color || "#0f172a",
-    theme_mode: prefill.theme_mode === "flat" ? "flat" : "gradient",
+    theme_mode: normalizeCardThemeMode(prefill.theme_mode, "auto"),
     template_style: prefill.template_style || "design1",
     custom_domain: prefill.custom_domain || "",
     custom_domain_active: Boolean(prefill.custom_domain_active),
@@ -306,6 +310,15 @@ function FooterActionIcon({ name }) {
       </svg>
     );
   }
+  if (name === "menu") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h16" />
+        <path d="M4 12h16" />
+        <path d="M4 17h16" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8l-4 3v-3H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
@@ -337,8 +350,9 @@ function toMapsHref(value) {
 }
 
 function DigitalCardPreview({ form, company }) {
+  const [footerMenuOpen, setFooterMenuOpen] = useState(false);
   const theme = form.theme_color || company?.theme_color || "#22c55e";
-  const themeMode = form.theme_mode === "flat" ? "flat" : "gradient";
+  const themeMode = resolveCardThemeMode(form.theme_mode);
   const secondaryTheme = form.theme_secondary_color || "#0f172a";
   const socialSource = Array.isArray(form.social_links_items) && form.social_links_items.length
     ? form.social_links_items
@@ -368,29 +382,40 @@ function DigitalCardPreview({ form, company }) {
       : null,
   ].filter(Boolean);
   const infoRows = [
-    { icon: "bi-telephone", value: form.phone || "-", href: form.phone ? `tel:${form.phone}` : "" },
-    { icon: "bi-whatsapp", value: form.whatsapp_number || "-", href: form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` : "" },
-    { icon: "bi-telephone-forward", value: form.telephone_number || "-", href: form.telephone_number ? `tel:${form.telephone_number}` : "" },
-    { icon: "bi-envelope", value: form.email || "-", href: form.email ? `mailto:${form.email}` : "" },
-    { icon: "bi-globe", value: form.website || "-", href: toWebHref(form.website) },
+    { kind: "phone", icon: "bi-telephone", value: form.phone || "-", href: form.phone ? `tel:${form.phone}` : "" },
+    { kind: "whatsapp", icon: "bi-whatsapp", value: form.whatsapp_number || "-", href: form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}` : "" },
+    { kind: "telephone", icon: "bi-telephone-forward", value: form.telephone_number || "-", href: form.telephone_number ? `tel:${form.telephone_number}` : "" },
+    { kind: "email", icon: "bi-envelope", value: form.email || "-", href: form.email ? `mailto:${form.email}` : "" },
+    { kind: "website", icon: "bi-globe", value: form.website || "-", href: toWebHref(form.website) },
     ...(addressRows.length
-      ? addressRows.map((line) => ({ icon: "bi-geo-alt", value: line, href: toMapsHref(line) }))
-      : [{ icon: "bi-geo-alt", value: "-", href: "" }]),
+      ? addressRows.map((line) => ({ kind: "address", icon: "bi-geo-alt", value: line, href: toMapsHref(line) }))
+      : [{ kind: "address", icon: "bi-geo-alt", value: "-", href: "" }]),
   ];
   const contactCard = buildVCardDownload(form, company);
   const publicCardUrl = form.public_slug && typeof window !== "undefined"
     ? `${window.location.origin}/card/${form.public_slug}/`
     : "";
   const smsBody = encodeURIComponent(`Check my digital card: ${publicCardUrl || (form.website || "")}`.trim());
-  const enquiryHref = form.email
-    ? `mailto:${form.email}?subject=${encodeURIComponent("Enquiry")}`
-    : (form.whatsapp_number ? `https://wa.me/${String(form.whatsapp_number).replace(/\+/g, "")}?text=${encodeURIComponent("Hi, I have an enquiry.")}` : "");
+  const previewSectionIds = {
+    home: "digitalCardPreviewHome",
+    about: "digitalCardPreviewAbout",
+    services: "digitalCardPreviewServices",
+    gallery: "digitalCardPreviewGallery",
+    enquiry: "digitalCardPreviewEnquiry",
+  };
+  const footerMenuItems = [
+    { label: "Home", targetId: previewSectionIds.home },
+    { label: "About Us", targetId: previewSectionIds.about },
+    { label: "Services", targetId: previewSectionIds.services },
+    { label: "Gallery", targetId: previewSectionIds.gallery },
+    { label: "Enquiry", targetId: previewSectionIds.enquiry },
+  ];
   const bottomActions = [
     { label: "Login", icon: "login", href: "/auth/login/" },
     { label: "Share", icon: "share", action: "share" },
     { label: "SMS", icon: "sms", href: `sms:?body=${smsBody}` },
     { label: "Upgrade", icon: "upgrade", href: "/pricing/" },
-    { label: "Enquiry", icon: "enquiry", href: enquiryHref },
+    { label: "Menu", icon: "menu", action: "menu" },
   ];
 
   function onShareClick(e) {
@@ -405,10 +430,24 @@ function DigitalCardPreview({ form, company }) {
     }
   }
 
+  function onFooterMenuItemClick(targetId) {
+    setFooterMenuOpen(false);
+    if (typeof document === "undefined") return;
+    const node = document.getElementById(targetId);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <div
-      className={`digital-card-preview digital-card-preview--${templateStyle}${themeMode === "flat" ? " is-flat" : ""}`}
-      style={{ "--card-theme": theme, "--card-secondary": secondaryTheme, "--card-font-pt": fontPt, "--card-icon-pt": iconPt }}
+      className={`digital-card-preview digital-card-preview--${templateStyle} ${themeMode === "light" ? "is-theme-light" : "is-theme-dark"}`}
+      style={{
+        "--card-theme": theme,
+        "--card-secondary": secondaryTheme,
+        "--card-theme-secondary": secondaryTheme,
+        "--card-font-pt": fontPt,
+        "--card-icon-pt": iconPt,
+      }}
     >
       <div
         className="digital-card-preview__hero"
@@ -418,7 +457,7 @@ function DigitalCardPreview({ form, company }) {
             : undefined,
         }}
       />
-      <div className="digital-card-preview__body">
+      <div className="digital-card-preview__body" id={previewSectionIds.home}>
         <div
           className="digital-card-preview__avatar"
           style={{ width: `${logoSize}px`, height: `${logoSize}px`, borderRadius: `${logoRadius}px` }}
@@ -463,13 +502,13 @@ function DigitalCardPreview({ form, company }) {
         ) : null}
 
         <div className="digital-card-preview__title">{displayTitle}</div>
-        <p className="digital-card-preview__description" data-company-title={displayTitle}>{displayDescription}</p>
+        <p className="digital-card-preview__description" id={previewSectionIds.about} data-company-title={displayTitle}>{displayDescription}</p>
 
-        <div className="digital-card-preview__actions">
+        <div className="digital-card-preview__actions" id={previewSectionIds.services}>
           {quickActions.map((item, idx) => (
             <a
               key={item.label}
-              className={`digital-card-preview__action${idx === 0 ? " is-primary" : ""}`}
+              className={`digital-card-preview__action${idx === 0 ? " is-primary" : " is-secondary"}`}
               href={item.href}
               target={item.href.startsWith("http") ? "_blank" : undefined}
               rel={item.href.startsWith("http") ? "noreferrer" : undefined}
@@ -479,12 +518,13 @@ function DigitalCardPreview({ form, company }) {
           ))}
         </div>
 
-        <div className="digital-card-preview__details">
-          {infoRows.map((item, idx) => (
-            item.href ? (
+        <div className="digital-card-preview__details" id={previewSectionIds.gallery}>
+          {infoRows.map((item, idx) => {
+            const rowClassName = `digital-card-preview__detail-row${item.kind ? ` digital-card-preview__detail-row--${item.kind}` : ""}`;
+            return item.href ? (
               <a
                 key={`${item.icon}-${item.value}-${idx}`}
-                className="digital-card-preview__detail-row"
+                className={rowClassName}
                 href={item.href}
                 target={item.href.startsWith("http") ? "_blank" : undefined}
                 rel={item.href.startsWith("http") ? "noreferrer" : undefined}
@@ -493,21 +533,32 @@ function DigitalCardPreview({ form, company }) {
                 <span>{item.value}</span>
               </a>
             ) : (
-              <div key={`${item.icon}-${item.value}-${idx}`} className="digital-card-preview__detail-row">
+              <div key={`${item.icon}-${item.value}-${idx}`} className={rowClassName}>
                 <i className={`bi ${item.icon}`} />
                 <span>{item.value}</span>
               </div>
-            )
-          ))}
+            );
+          })}
         </div>
 
-        <div className="digital-card-preview__footer-actions">
+        <div className="digital-card-preview__footer-actions" id={previewSectionIds.enquiry}>
           {bottomActions.map((item) => (
             item.action === "share" ? (
               <a key={item.label} className="digital-card-preview__footer-action" href={publicCardUrl || "#"} onClick={onShareClick}>
                 <FooterActionIcon name={item.icon} />
                 <span>{item.label}</span>
               </a>
+            ) : item.action === "menu" ? (
+              <button
+                key={item.label}
+                type="button"
+                className="digital-card-preview__footer-action"
+                onClick={() => setFooterMenuOpen((value) => !value)}
+                aria-expanded={footerMenuOpen ? "true" : "false"}
+              >
+                <FooterActionIcon name={item.icon} />
+                <span>{item.label}</span>
+              </button>
             ) : (
               <a
                 key={item.label}
@@ -515,12 +566,28 @@ function DigitalCardPreview({ form, company }) {
                 href={item.href || "#"}
                 target={item.href?.startsWith("http") ? "_blank" : undefined}
                 rel={item.href?.startsWith("http") ? "noreferrer" : undefined}
+                onClick={() => setFooterMenuOpen(false)}
               >
                 <FooterActionIcon name={item.icon} />
                 <span>{item.label}</span>
               </a>
             )
           ))}
+          {footerMenuOpen ? (
+            <div className="digital-card-preview__footer-menu">
+              <div className="digital-card-preview__footer-menu-title">Quick Menu</div>
+              {footerMenuItems.map((item) => (
+                <button
+                  key={item.targetId}
+                  type="button"
+                  className="digital-card-preview__footer-menu-item"
+                  onClick={() => onFooterMenuItemClick(item.targetId)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="digital-card-preview__credit">
@@ -796,6 +863,7 @@ export default function DigitalBusinessCardDashboardPage() {
   const dnsRows = Array.isArray(form?.dns_settings?.records) ? form.dns_settings.records : buildDnsRows(form.custom_domain, dnsDefaults);
   const page = pagination.page || 1;
   const totalPages = pagination.total_pages || 1;
+  const selectedThemeMode = resolveCardThemeMode(form.theme_mode);
 
   return (
     <div className="d-flex flex-column gap-3 digital-card-dashboard">
@@ -949,16 +1017,24 @@ export default function DigitalBusinessCardDashboardPage() {
                         />
                       </div>
 
-                      <div className="col-12 col-md-2">
-                        <label className="form-label">Fill</label>
-                        <select
-                          className="form-select"
-                          value={form.theme_mode || "gradient"}
-                          onChange={(e) => setField("theme_mode", e.target.value === "flat" ? "flat" : "gradient")}
-                        >
-                          <option value="gradient">Gradient</option>
-                          <option value="flat">Flat</option>
-                        </select>
+                      <div className="col-12 col-md-4">
+                        <label className="form-label">Theme</label>
+                        <div className="d-flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${selectedThemeMode === "dark" ? "btn-primary" : "btn-outline-light"}`}
+                            onClick={() => setField("theme_mode", "dark")}
+                          >
+                            <i className="bi bi-moon-stars me-1" />Dark
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${selectedThemeMode === "light" ? "btn-primary" : "btn-outline-light"}`}
+                            onClick={() => setField("theme_mode", "light")}
+                          >
+                            <i className="bi bi-sun me-1" />Light
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <div className="d-flex justify-content-end mt-3">
@@ -973,7 +1049,7 @@ export default function DigitalBusinessCardDashboardPage() {
               {!showTemplateOptions ? (
                 <>
               {[
-                ["card_title", "Card / Company Title"],
+                ["card_title", "Company or Contact Person"],
                 ["person_name", "Person Name"],
                 ["role_title", "Role / Designation"],
                 ["email", "Email"],
@@ -1099,6 +1175,24 @@ export default function DigitalBusinessCardDashboardPage() {
                 </div>
               </div>
 
+              <div className="col-12 col-md-6">
+                <label className="form-label">Profile Logo</label>
+                <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("logo_image_data", e.target.files?.[0], 500)} />
+                <div className="text-secondary small mt-1">Recommended: 512 x 512 px (square), max 500 KB.</div>
+                <div className="d-flex gap-2 mt-2">
+                  {form.logo_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("logo_image_data", "")}>Remove Logo</button> : null}
+                </div>
+              </div>
+
+              <div className="col-12 col-md-6">
+                <label className="form-label">Hero Banner (small)</label>
+                <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("hero_banner_image_data", e.target.files?.[0], 1500)} />
+                <div className="text-secondary small mt-1">Recommended: 1200 x 400 px, max 1.5 MB.</div>
+                <div className="d-flex gap-2 mt-2">
+                  {form.hero_banner_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("hero_banner_image_data", "")}>Remove Banner</button> : null}
+                </div>
+              </div>
+
               <div className="col-12">
                 <label className="form-label">Address</label>
                 <div className="d-grid gap-2">
@@ -1154,20 +1248,31 @@ export default function DigitalBusinessCardDashboardPage() {
               </div>
 
               <div className="col-12 col-md-6">
-                <label className="form-label">Profile Logo</label>
-                <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("logo_image_data", e.target.files?.[0], 500)} />
-                <div className="text-secondary small mt-1">Recommended: 512 x 512 px (square), max 500 KB.</div>
-                <div className="d-flex gap-2 mt-2">
-                  {form.logo_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("logo_image_data", "")}>Remove Logo</button> : null}
+                <label className="form-label">SEO Title</label>
+                <input
+                  className="form-control"
+                  value={form.seo_title || ""}
+                  maxLength={LIMITS.seoTitle}
+                  placeholder="Search result title"
+                  onChange={(e) => setField("seo_title", limitText(e.target.value, LIMITS.seoTitle))}
+                />
+                <div className="text-secondary small text-end mt-1">
+                  {String(form.seo_title || "").length}/{LIMITS.seoTitle}
                 </div>
               </div>
 
               <div className="col-12 col-md-6">
-                <label className="form-label">Hero Banner (small)</label>
-                <input type="file" accept="image/*" className="form-control" onChange={(e) => onImagePick("hero_banner_image_data", e.target.files?.[0], 1500)} />
-                <div className="text-secondary small mt-1">Recommended: 1200 x 400 px, max 1.5 MB.</div>
-                <div className="d-flex gap-2 mt-2">
-                  {form.hero_banner_image_data ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setField("hero_banner_image_data", "")}>Remove Banner</button> : null}
+                <label className="form-label">SEO Description</label>
+                <textarea
+                  className="form-control"
+                  rows="3"
+                  value={form.seo_description || ""}
+                  maxLength={LIMITS.seoDescription}
+                  placeholder="Search result description"
+                  onChange={(e) => setField("seo_description", limitText(e.target.value, LIMITS.seoDescription))}
+                />
+                <div className="text-secondary small text-end mt-1">
+                  {String(form.seo_description || "").length}/{LIMITS.seoDescription}
                 </div>
               </div>
 

@@ -938,24 +938,24 @@ export default function WebsiteCatalogueDashboardPage() {
                   placeholder={`Write the ${currentItemLabel.toLowerCase()} description, highlights, and pricing notes.`}
                 />
               </div>
-              <div className="col-12 d-flex flex-wrap gap-3">
-                <div className="form-check">
+              <div className="col-12 d-flex flex-wrap gap-3 align-items-center wa-catalogue-toggles">
+                <div className="form-check wa-catalogue-toggles__item">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.order_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, order_button_enabled: e.target.checked }))} id="waCatalogueOrderBtn" />
                   <label className="form-check-label" htmlFor="waCatalogueOrderBtn">Order Button</label>
                 </div>
-                <div className="form-check">
+                <div className="form-check wa-catalogue-toggles__item">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.call_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, call_button_enabled: e.target.checked }))} id="waCatalogueCallBtn" />
                   <label className="form-check-label" htmlFor="waCatalogueCallBtn">Call Button</label>
                 </div>
-                <div className="form-check">
+                <div className="form-check wa-catalogue-toggles__item">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.whatsapp_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_button_enabled: e.target.checked }))} id="waCatalogueWhatsappBtn" />
                   <label className="form-check-label" htmlFor="waCatalogueWhatsappBtn">WhatsApp Button</label>
                 </div>
-                <div className="form-check">
+                <div className="form-check wa-catalogue-toggles__item">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.enquiry_button_enabled)} onChange={(e) => setForm((prev) => ({ ...prev, enquiry_button_enabled: e.target.checked }))} id="waCatalogueEnquiryBtn" />
                   <label className="form-check-label" htmlFor="waCatalogueEnquiryBtn">Enquiry Button</label>
                 </div>
-                <div className="form-check">
+                <div className="form-check wa-catalogue-toggles__item">
                   <input className="form-check-input" type="checkbox" checked={Boolean(form.is_active)} onChange={(e) => setForm((prev) => ({ ...prev, is_active: e.target.checked }))} id="waCatalogueActive" />
                   <label className="form-check-label" htmlFor="waCatalogueActive">Active</label>
                 </div>
@@ -1007,7 +1007,7 @@ export default function WebsiteCatalogueDashboardPage() {
                       <td>{titleCase(row.item_type || "product")}</td>
                       <td>{row.category || "-"}</td>
                       <td>{row.price || "-"}</td>
-                      <td>{row.is_active ? <span className="badge bg-success">Active</span> : <span className="badge bg-secondary">Disabled</span>}</td>
+                      <td className="wa-status-cell">{row.is_active ? <span className="badge bg-success">Active</span> : <span className="badge bg-secondary">Disabled</span>}</td>
                       <td className="text-end">
                         <div className="d-flex justify-content-end gap-2">
                           <button

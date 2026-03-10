@@ -754,6 +754,16 @@ def _build_unique_card_entry_slug(base_text):
     return candidate
 
 
+def _normalize_card_theme_mode(value, fallback="auto"):
+    raw = str(value or "").strip().lower()
+    if raw in ("auto", "dark", "light"):
+        return raw
+    # Backward compatibility with old values used before dark/light modes.
+    if raw in ("gradient", "flat"):
+        return fallback
+    return fallback
+
+
 def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
     social_links_items = _normalize_social_links_items(getattr(company_profile, "social_links", {}) or {}) if company_profile else []
     if source_entry:
@@ -769,9 +779,11 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
             "website": source_entry.website or "",
             "address": source_entry.address or "",
             "description": source_entry.description or "",
+            "seo_title": (getattr(source_entry, "seo_title", "") or ""),
+            "seo_description": (getattr(source_entry, "seo_description", "") or ""),
             "theme_color": source_entry.theme_color or "#22c55e",
             "theme_secondary_color": getattr(source_entry, "theme_secondary_color", "") or "#0f172a",
-            "theme_mode": (getattr(source_entry, "theme_mode", "") or "gradient"),
+            "theme_mode": _normalize_card_theme_mode(getattr(source_entry, "theme_mode", ""), "auto"),
             "template_style": getattr(source_entry, "template_style", "") or "design1",
             "social_links_items": _normalize_social_links_items(source_entry.social_links or {}),
             "logo_image_data": _resolve_card_asset_url(
@@ -801,9 +813,11 @@ def _card_entry_prefill(company_profile, default_slug="", source_entry=None):
         "website": (company_profile.website if company_profile else "") or "",
         "address": (company_profile.address if company_profile else "") or "",
         "description": (company_profile.description if company_profile else "") or "",
+        "seo_title": (company_profile.company_name if company_profile else "") or "",
+        "seo_description": (company_profile.description if company_profile else "") or "",
         "theme_color": (company_profile.theme_color if company_profile else "") or "#22c55e",
         "theme_secondary_color": "#0f172a",
-        "theme_mode": "gradient",
+        "theme_mode": "auto",
         "template_style": "design1",
         "social_links_items": social_links_items,
         "logo_image_data": "",
@@ -841,9 +855,11 @@ def _serialize_card_entry(obj):
         "website": obj.website or "",
         "address": obj.address or "",
         "description": obj.description or "",
+        "seo_title": (getattr(obj, "seo_title", "") or ""),
+        "seo_description": (getattr(obj, "seo_description", "") or ""),
         "theme_color": obj.theme_color or "#22c55e",
         "theme_secondary_color": getattr(obj, "theme_secondary_color", "") or "#0f172a",
-        "theme_mode": (getattr(obj, "theme_mode", "") or "gradient"),
+        "theme_mode": _normalize_card_theme_mode(getattr(obj, "theme_mode", ""), "auto"),
         "template_style": (getattr(obj, "template_style", "") or "design1"),
         "social_links_items": _normalize_social_links_items(obj.social_links or {}),
         "logo_image_data": logo_image_url,
@@ -852,6 +868,7 @@ def _serialize_card_entry(obj):
         "logo_radius_px": int(getattr(obj, "logo_radius_px", 28) or 28),
         "icon_size_pt": int(getattr(obj, "icon_size_pt", 14) or 14),
         "font_size_pt": int(getattr(obj, "font_size_pt", 16) or 16),
+        "save_contact_count": int(getattr(obj, "save_contact_count", 0) or 0),
         "is_primary": bool(getattr(obj, "is_primary", False)),
         "is_active": bool(obj.is_active),
         "sort_order": int(obj.sort_order or 0),
@@ -930,10 +947,12 @@ def _ensure_default_card_entry(org, company_profile=None, user=None):
         website=prefill["website"],
         address=prefill["address"],
         description=prefill["description"],
+        seo_title=prefill.get("seo_title", ""),
+        seo_description=prefill.get("seo_description", ""),
         social_links={"items": prefill["social_links_items"]},
         theme_color=prefill["theme_color"],
         theme_secondary_color=prefill["theme_secondary_color"],
-        theme_mode=prefill.get("theme_mode") or "gradient",
+        theme_mode=_normalize_card_theme_mode(prefill.get("theme_mode"), "auto"),
         logo_radius_px=prefill["logo_radius_px"],
         is_primary=True,
         created_by=user,
@@ -1881,12 +1900,11 @@ def digital_card_entries_api(request):
     row.website = str(data.get("website") or "").strip()
     row.address = str(data.get("address") or "").strip()
     row.description = str(data.get("description") or "").strip()
+    row.seo_title = str(data.get("seo_title") or "").strip()[:60]
+    row.seo_description = str(data.get("seo_description") or "").strip()[:160]
     row.theme_color = str(data.get("theme_color") or "#22c55e").strip() or "#22c55e"
     row.theme_secondary_color = str(data.get("theme_secondary_color") or "#0f172a").strip() or "#0f172a"
-    theme_mode = str(data.get("theme_mode") or "gradient").strip().lower()
-    if theme_mode not in ("gradient", "flat"):
-        theme_mode = "gradient"
-    row.theme_mode = theme_mode
+    row.theme_mode = _normalize_card_theme_mode(data.get("theme_mode"), "auto")
     template_style = str(data.get("template_style") or "design1").strip().lower()
     if template_style not in ("design1", "design2", "design3", "design4", "design5", "design6", "design7", "design8"):
         template_style = "design1"
@@ -1915,6 +1933,10 @@ def digital_card_entries_api(request):
     except (TypeError, ValueError):
         row.font_size_pt = 16
     row.is_primary = bool(data.get("is_primary", False))
+    try:
+        row.save_contact_count = max(0, int(data.get("save_contact_count") or getattr(row, "save_contact_count", 0) or 0))
+    except (TypeError, ValueError):
+        row.save_contact_count = int(getattr(row, "save_contact_count", 0) or 0)
     incoming_logo_image = str(data.get("logo_image_data") or "").strip()
     incoming_banner_image = str(data.get("hero_banner_image_data") or "").strip()
     previous_logo_key = str(getattr(row, "logo_storage_key", "") or "").strip()
@@ -2254,6 +2276,24 @@ def public_card_enquiry_submit_api(request):
         status=DigitalCardEnquiry.STATUS_NEW,
     )
     return JsonResponse({"status": "ok", "item": _serialize_card_enquiry(row)})
+
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def public_card_save_contact_api(request):
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "invalid_json"}, status=400)
+    public_slug = str(data.get("public_slug") or "").strip()
+    if not public_slug:
+        return JsonResponse({"error": "public_slug_required"}, status=400)
+    card_entry = DigitalCardEntry.objects.filter(public_slug=public_slug, is_active=True).first()
+    if not card_entry:
+        return JsonResponse({"error": "not_found"}, status=404)
+    current = int(getattr(card_entry, "save_contact_count", 0) or 0)
+    card_entry.save_contact_count = current + 1
+    card_entry.save(update_fields=["save_contact_count", "updated_at"])
+    return JsonResponse({"status": "ok", "save_contact_count": int(card_entry.save_contact_count or 0)})
 
 
 @login_required

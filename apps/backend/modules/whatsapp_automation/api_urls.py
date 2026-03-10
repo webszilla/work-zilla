@@ -26,6 +26,7 @@ urlpatterns = [
     path("digital-cards/slug-check", api_views.digital_card_slug_check_api, name="wa_digital_card_slug_check_api"),
     path("digital-cards/public/feedback", api_views.public_card_feedback_submit_api, name="wa_public_card_feedback_submit_api"),
     path("digital-cards/public/enquiry", api_views.public_card_enquiry_submit_api, name="wa_public_card_enquiry_submit_api"),
+    path("digital-cards/public/save-contact", api_views.public_card_save_contact_api, name="wa_public_card_save_contact_api"),
     path("digital-cards/feedback-inbox", api_views.digital_card_feedback_inbox_api, name="wa_digital_card_feedback_inbox_api"),
     path("digital-cards/feedback-inbox/<int:feedback_id>", api_views.digital_card_feedback_detail_api, name="wa_digital_card_feedback_detail_api"),
     path("digital-cards/enquiry-inbox", api_views.digital_card_enquiry_inbox_api, name="wa_digital_card_enquiry_inbox_api"),

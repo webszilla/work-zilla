@@ -40,6 +40,15 @@ def _normalize_external_url(raw):
     return f"https://{value}"
 
 
+def _normalize_card_theme_mode(value, fallback="auto"):
+    raw = str(value or "").strip().lower()
+    if raw in ("auto", "dark", "light"):
+        return raw
+    if raw in ("gradient", "flat"):
+        return fallback
+    return fallback
+
+
 def _normalize_social_links_items(raw):
     if isinstance(raw, dict):
         source = raw.get("items") if isinstance(raw.get("items"), list) else [
@@ -210,6 +219,7 @@ def public_digital_card(request, public_slug):
         "card_owner_org": org,
         "public_url": public_url,
         "view_count": view_count,
+        "save_contact_count": int(getattr(card_entry, "save_contact_count", 0) or 0) if card_entry else 0,
         "catalogue_page": catalogue_page,
         "wa_settings": wa_settings,
         "highlights": ((company_profile.product_highlights if company_profile else []) or []) if isinstance((company_profile.product_highlights if company_profile else []), list) else [],
@@ -225,10 +235,7 @@ def public_digital_card(request, public_slug):
             (getattr(card_entry, "theme_secondary_color", "") if card_entry else "")
             or "#0f172a"
         ),
-        "theme_mode": (
-            (getattr(card_entry, "theme_mode", "") if card_entry else "")
-            or "gradient"
-        ),
+        "theme_mode": _normalize_card_theme_mode((getattr(card_entry, "theme_mode", "") if card_entry else ""), "auto"),
         "logo_radius_px": (getattr(card_entry, "logo_radius_px", 28) if card_entry else 28) or 28,
         "social_links_items": social_links_items,
         "address_details": address_details,

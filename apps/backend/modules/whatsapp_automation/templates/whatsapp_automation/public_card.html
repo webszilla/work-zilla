@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ company.company_name|default:public_slug }} - Digital Card</title>
+  <title>{% if card_entry and card_entry.seo_title %}{{ card_entry.seo_title }}{% else %}{{ company.company_name|default:public_slug }} - Digital Card{% endif %}</title>
+  <meta name="description" content="{% if card_entry and card_entry.seo_description %}{{ card_entry.seo_description }}{% elif card_entry and card_entry.description %}{{ card_entry.description }}{% elif company and company.description %}{{ company.description }}{% else %}Digital business card{% endif %}">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <style>
     :root{
@@ -77,6 +78,15 @@
       font-size:0.82rem;
       font-weight:700;
       border:1px solid rgba(148,163,184,0.28);
+    }
+    .save-contact-badge{
+      top:52px;
+      text-decoration:none;
+      cursor:pointer;
+    }
+    .save-contact-badge i{
+      font-size:0.8rem;
+      line-height:1;
     }
     .hero::after{
       content:"";
@@ -244,9 +254,12 @@
       background:#080808;
       color:#ffffff;
       text-decoration:none;
+      border:0;
       border-right:1px solid rgba(255,255,255,0.08);
       font-size:0.95rem;
       font-weight:500;
+      cursor:pointer;
+      font-family:inherit;
     }
     .footer-action:last-child{
       border-right:none;
@@ -256,6 +269,103 @@
       height:22px;
       display:block;
       fill:currentColor;
+    }
+    .footer-nav-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(2,6,23,0.58);
+      z-index:80;
+      opacity:0;
+      visibility:hidden;
+      transition:opacity 0.24s ease;
+      pointer-events:none;
+    }
+    .footer-nav-backdrop.is-open{
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+    }
+    .footer-nav-menu{
+      position:fixed;
+      left:50%;
+      top:50%;
+      transform:translate(
+        calc(-50% + var(--menu-from-x, 0px)),
+        calc(-50% + var(--menu-from-y, 0px))
+      ) scale(0.82);
+      width:min(420px, calc(100% - 24px));
+      border-radius:18px;
+      border:1px solid rgba(148,163,184,0.32);
+      background:rgba(15,23,42,0.96);
+      color:#f8fafc;
+      padding:8px 0;
+      z-index:81;
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+      overflow:hidden;
+      transition:transform 0.28s cubic-bezier(0.2, 0.9, 0.2, 1), opacity 0.2s ease;
+    }
+    .footer-nav-menu.is-open{
+      transform:translate(-50%, -50%) scale(1);
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+    }
+    .footer-nav-menu__title{
+      display:none;
+    }
+    .footer-nav-menu__item{
+      width:100%;
+      display:flex;
+      align-items:center;
+      position:relative;
+      text-align:left;
+      border:0;
+      background:transparent;
+      color:inherit;
+      border-radius:0;
+      min-height:46px;
+      height:46px;
+      box-sizing:border-box;
+      padding:0 14px 0 38px;
+      font-size:0.9rem;
+      font-weight:500;
+      margin-top:0;
+      cursor:pointer;
+    }
+    .footer-nav-menu__item::before{
+      content:"";
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      position:absolute;
+      left:14px;
+      top:50%;
+      transform:translateY(-50%);
+      background:var(--btn-primary, #22c55e);
+    }
+    .footer-nav-menu__item::after{
+      content:"";
+      position:absolute;
+      left:38px;
+      right:0;
+      bottom:0;
+      border-bottom:1px solid rgba(148,163,184,0.24);
+    }
+    .footer-nav-menu__item:last-of-type::after{
+      border-bottom:0;
+    }
+    .footer-nav-menu__item:first-of-type{
+      border-top-left-radius:16px;
+      border-top-right-radius:16px;
+    }
+    .footer-nav-menu__item:last-of-type{
+      border-bottom-left-radius:16px;
+      border-bottom-right-radius:16px;
+    }
+    .footer-nav-menu__item:hover{
+      background:rgba(148,163,184,0.09);
     }
     .footer-credit{
       margin:0 -22px -24px;
@@ -309,6 +419,15 @@
       border-radius:20px;
       background:rgba(255,255,255,0.04);
       border:1px solid rgba(148,163,184,0.14);
+    }
+    .scroll-section--catalogue{
+      padding:0;
+      border:none;
+      background:transparent;
+      border-radius:0;
+    }
+    .scroll-section--catalogue h3{
+      margin:0 0 12px;
     }
     .scroll-section h3{
       margin:0 0 12px;
@@ -370,6 +489,11 @@
       color:#f8fafc;
       margin-right:6px;
     }
+    .contact-default-details__company{
+      font-weight:800;
+      color:#f8fafc;
+      margin-bottom:2px;
+    }
     .catalogue-group + .catalogue-group{
       margin-top:18px;
     }
@@ -388,6 +512,19 @@
       border-radius:16px;
       background:rgba(255,255,255,0.04);
       border:1px solid rgba(148,163,184,0.12);
+    }
+    .catalogue-item-media{
+      margin:0 0 10px;
+    }
+    .catalogue-item-image{
+      display:block;
+      width:100%;
+      max-height:220px;
+      object-fit:cover;
+      border-radius:12px;
+      border:1px solid rgba(148,163,184,0.18);
+      background:rgba(15,23,42,0.36);
+      cursor:zoom-in;
     }
     .catalogue-item-head{
       display:flex;
@@ -428,6 +565,7 @@
       display:inline-flex;
       align-items:center;
       justify-content:center;
+      gap:6px;
       min-height:32px;
       padding:0 12px;
       border-radius:999px;
@@ -436,6 +574,21 @@
       text-decoration:none;
       font-size:0.82rem;
       font-weight:700;
+    }
+    .catalogue-item-action--icon{
+      width:34px;
+      min-width:34px;
+      height:34px;
+      min-height:34px;
+      padding:0;
+      gap:0;
+    }
+    .catalogue-item-action--enquiry{
+      padding:0 12px;
+    }
+    .catalogue-item-action i{
+      font-size:0.86rem;
+      line-height:1;
     }
     .gallery-grid{
       display:grid;
@@ -1160,9 +1313,9 @@
       display:grid;
       grid-template-columns:repeat(6, minmax(0, 1fr));
       gap:14px;
-      margin-top:10px;
-      padding:18px 18px 12px;
-      border-radius:0 0 28px 28px;
+      margin:16px 0 14px;
+      padding:16px 18px;
+      border-radius:28px;
       background:linear-gradient(180deg, color-mix(in srgb, var(--theme) 92%, #f4b52d), color-mix(in srgb, var(--theme) 82%, #f0b62e));
       box-shadow:0 24px 44px rgba(176,124,22,0.18);
     }
@@ -1699,7 +1852,12 @@
     .card .avatar,
     .card .identity h1,
     .card .template-badge,
+    .card .socials,
+    .card .socials::before,
+    .card .socials::after,
     .card .social-link,
+    .card .social-link::before,
+    .card .social-link::after,
     .card .action,
     .card .action::after,
     .card .detail,
@@ -1780,37 +1938,301 @@
       width:var(--social-icon-size) !important;
       height:var(--social-icon-size) !important;
     }
-    /* Action mode sync: gradient mode => all quick actions gradient,
-       flat mode => all quick actions solid primary */
-    .card:not(.is-flat) .action{
-      background:linear-gradient(135deg, var(--theme), var(--theme-secondary)) !important;
-      border:none !important;
-      outline:none !important;
-      color:#f8fafc !important;
-      background-clip:padding-box !important;
+    /* Unified look for all templates:
+       only buttons use primary/secondary colors, other UI uses dark/light surface palette. */
+    .card{
+      --surface-bg:#0b1220;
+      --surface-panel:rgba(15,23,42,0.62);
+      --surface-panel-strong:rgba(15,23,42,0.78);
+      --surface-border:rgba(148,163,184,0.24);
+      --surface-text:#f8fafc;
+      --surface-muted:#cbd5e1;
+      --surface-soft:#94a3b8;
+      --surface-hero:
+        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 26%),
+        linear-gradient(135deg, #162235 0%, #0b1220 100%);
+      --surface-input-bg:rgba(15,23,42,0.52);
+      --surface-input-text:#f8fafc;
+      --surface-input-border:rgba(148,163,184,0.28);
+      --btn-primary:var(--theme);
+      --btn-secondary:var(--theme-secondary);
+      --btn-text:#ffffff;
     }
-    .card:not(.is-flat) .template-badge{
-      background:linear-gradient(135deg, var(--theme), var(--theme-secondary)) !important;
+    .card.is-theme-light{
+      --surface-bg:#f8fafc;
+      --surface-panel:#ffffff;
+      --surface-panel-strong:#f1f5f9;
+      --surface-border:rgba(148,163,184,0.34);
+      --surface-text:#0f172a;
+      --surface-muted:#334155;
+      --surface-soft:#64748b;
+      --surface-hero:
+        linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.9)),
+        linear-gradient(135deg, #e2e8f0 0%, #f8fafc 100%);
+      --surface-input-bg:#ffffff;
+      --surface-input-text:#111827;
+      --surface-input-border:rgba(148,163,184,0.38);
+      --btn-text:#ffffff;
+    }
+    .card.is-theme-dark{
+      --surface-bg:#0b1220;
+      --surface-panel:rgba(15,23,42,0.62);
+      --surface-panel-strong:rgba(15,23,42,0.78);
+      --surface-border:rgba(148,163,184,0.24);
+      --surface-text:#f8fafc;
+      --surface-muted:#cbd5e1;
+      --surface-soft:#94a3b8;
+      --surface-input-bg:rgba(15,23,42,0.52);
+      --surface-input-text:#f8fafc;
+      --surface-input-border:rgba(148,163,184,0.28);
+    }
+    .card[class*="design"]{
+      background:var(--surface-bg) !important;
+      color:var(--surface-text) !important;
+      border-color:var(--surface-border) !important;
+    }
+    .card[class*="design"] .hero{
+      height:188px !important;
+      background:var(--surface-hero);
+    }
+    .card[class*="design"] .content{
+      display:block !important;
+      grid-template-columns:none !important;
+      gap:0 !important;
+      padding:0 22px 24px !important;
+      align-items:initial !important;
+    }
+    .card[class*="design"] .avatar{
+      margin:-68px auto 14px !important;
+      border-radius:28px !important;
+      border:4px solid rgba(255,255,255,0.92) !important;
+      background:var(--surface-panel) !important;
+      width:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %} !important;
+      height:{% if card_entry and card_entry.logo_size %}{{ card_entry.logo_size }}px{% else %}96px{% endif %} !important;
+    }
+    .card.is-theme-light .avatar{
+      border-color:rgba(148,163,184,0.35) !important;
+    }
+    .card[class*="design"] .identity{
+      text-align:center !important;
+      margin-top:0 !important;
+      padding:0 !important;
+      grid-column:auto !important;
+      background:transparent !important;
+    }
+    .card[class*="design"] .identity h1{
+      color:var(--surface-text) !important;
+      font-size:calc(var(--card-font-pt, 16) * 1px + 13px) !important;
+      line-height:1.15 !important;
+    }
+    .card .role,
+    .card .description,
+    .card .detail,
+    .card .card-feedback-item__top,
+    .card .wa-country-picker__code{
+      color:var(--surface-muted) !important;
+    }
+    .card .title,
+    .card .section-title,
+    .card .scroll-section h3,
+    .card .catalogue-item-title,
+    .card .card-form-panel h3,
+    .card .share-panel h3{
+      color:var(--surface-text) !important;
+    }
+    .card .description::before,
+    .card .socials::before{
+      color:var(--surface-text) !important;
+    }
+    .card .socials,
+    .card .actions,
+    .card .details,
+    .card .share-panel,
+    .card .card-form-panel,
+    .card .scroll-section,
+    .card .catalogue-item,
+    .card .gallery-tile,
+    .card .detail{
+      background:var(--surface-panel) !important;
+      border-color:var(--surface-border) !important;
+    }
+    .card .social-link{
+      background:var(--surface-panel-strong) !important;
+      border-color:var(--surface-border) !important;
+      color:var(--surface-text) !important;
+      min-width:34px !important;
+      min-height:34px !important;
+      border-radius:999px !important;
+    }
+    .card .detail-icon{
+      color:var(--btn-primary) !important;
+    }
+    .card .catalogue-item-price,
+    .card .share-btn-row .share-action-btn__icon{
+      color:var(--surface-soft) !important;
+    }
+    .card .detail,
+    .card .catalogue-item,
+    .card .card-feedback-item{
+      background:var(--surface-panel-strong) !important;
+      border:1px solid var(--surface-border) !important;
+    }
+    .card .scroll-section--catalogue{
+      background:transparent !important;
+      border:none !important;
+      padding:0 !important;
+    }
+    .card .card-feedback-item__name,
+    .card .card-feedback-item__msg{
+      color:var(--surface-text) !important;
+    }
+    .card .card-input,
+    .card .card-textarea,
+    .card .share-url-input,
+    .card .wa-share-input,
+    .card .wa-country-picker__trigger,
+    .card .wa-country-picker__search{
+      background:var(--surface-input-bg) !important;
+      color:var(--surface-input-text) !important;
+      border:1px solid var(--surface-input-border) !important;
+    }
+    .card .card-input::placeholder,
+    .card .card-textarea::placeholder,
+    .card .share-url-input::placeholder,
+    .card .wa-share-input::placeholder{
+      color:var(--surface-soft) !important;
+      opacity:1;
+    }
+    .card .wa-country-picker__dropdown,
+    .card .gallery-lightbox__panel{
+      background:var(--surface-panel-strong) !important;
+      border-color:var(--surface-border) !important;
+    }
+    .card .wa-country-picker__option{
+      color:var(--surface-text) !important;
+      border-bottom-color:var(--surface-border) !important;
+    }
+    .card .wa-country-picker__option:hover,
+    .card .wa-country-picker__option.is-active{
+      background:color-mix(in srgb, var(--surface-panel-strong) 72%, #3b82f6 28%) !important;
+    }
+    .card .template-badge,
+    .card .action.is-primary,
+    .card .catalogue-item-action{
+      background:var(--btn-primary) !important;
+      border:1px solid var(--btn-primary) !important;
+      color:var(--btn-text) !important;
+    }
+    .card .action.is-secondary,
+    .card .share-action-btn,
+    .card .gallery-lightbox__btn{
+      background:var(--btn-secondary) !important;
+      border:1px solid var(--btn-secondary) !important;
+      color:var(--btn-text) !important;
+    }
+    .card .catalogue-item-action--enquiry{
+      background:var(--btn-secondary) !important;
+      border:1px solid var(--btn-secondary) !important;
+      color:var(--btn-text) !important;
+    }
+    .card #copyUrlBtn,
+    .card #waShareBtn{
+      background:var(--btn-primary) !important;
+      border:1px solid var(--btn-primary) !important;
+      color:var(--btn-text) !important;
+    }
+    .card .action{
+      border-radius:14px !important;
+      min-height:48px !important;
+      padding:0 14px !important;
+      justify-content:center !important;
+      font-weight:700 !important;
+    }
+    .card .action::after{
+      content:none !important;
+      display:none !important;
+    }
+    .card .share-action-btn__icon,
+    .card .share-btn-row .share-action-btn__icon{
+      color:var(--btn-text) !important;
+    }
+    .card .contact-default-details{
+      border-top-color:var(--surface-border) !important;
+      color:var(--surface-muted) !important;
+    }
+    .card .contact-default-details__label{
+      color:var(--surface-text) !important;
+    }
+    .card .contact-default-details__company{
+      color:var(--surface-text) !important;
+    }
+    .card .share-panel-sub{
+      color:var(--surface-muted) !important;
+      opacity:1 !important;
+      font-weight:600 !important;
+    }
+    .card.design1 .socials{
+      background:transparent !important;
       border-color:transparent !important;
-      color:#f8fafc !important;
+      padding:0 !important;
     }
-    .card.is-flat .template-badge,
-    .card.is-flat .action{
-      background: var(--theme) !important;
-      border:none !important;
-      color:#f8fafc !important;
-      box-shadow:none !important;
+    .card.design1 .social-link{
+      width:calc(var(--social-icon-size) + 20px) !important;
+      height:calc(var(--social-icon-size) + 20px) !important;
+      min-width:calc(var(--social-icon-size) + 20px) !important;
+      min-height:calc(var(--social-icon-size) + 20px) !important;
+      padding:0 !important;
+      border-radius:999px !important;
+    }
+    .card.design1 .detail--phone .detail-icon,
+    .card.design1 .detail--telephone .detail-icon,
+    .card.design1 .detail--whatsapp .detail-icon,
+    .card.design1 .detail--email .detail-icon,
+    .card.design1 .detail--website .detail-icon,
+    .card.design1 .detail--address .detail-icon{
+      color:var(--btn-primary) !important;
+    }
+    .card .footer-nav-menu{
+      background:var(--surface-panel-strong) !important;
+      border-color:var(--surface-border) !important;
+      color:var(--surface-text) !important;
+    }
+    .card .footer-nav-menu__title{
+      color:var(--surface-muted) !important;
+    }
+    .card .footer-nav-menu__item{
+      background:transparent !important;
+      color:var(--surface-text) !important;
+    }
+    .card .footer-nav-menu__item::after{
+      border-bottom-color:var(--surface-border) !important;
+    }
+    .card .footer-nav-menu__item::before{
+      background:var(--btn-primary) !important;
+    }
+    .card .footer-nav-menu__item:hover{
+      background:color-mix(in srgb, var(--surface-panel) 86%, transparent) !important;
+    }
+    .card.is-theme-light .footer-nav-backdrop{
+      background:rgba(15,23,42,0.34) !important;
     }
   </style>
 </head>
 <body>
   <div class="card-shell">
-    <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %} {% if theme_mode == 'flat' %}is-flat{% endif %}">
+    <div class="card {% if card_entry and card_entry.template_style %}{{ card_entry.template_style }}{% else %}design1{% endif %}" data-theme-mode="{{ theme_mode|default:'auto' }}">
       <div class="hero" {% if card_entry and card_entry.hero_banner_image_data %}style="background-image:url('{{ card_entry.hero_banner_image_data }}')"{% endif %}>
         <span class="views-badge" title="Total card views">👁 Views: {{ view_count|default:0 }}</span>
+        <a
+          class="views-badge save-contact-badge"
+          id="heroSaveContactBtn"
+          title="Save contact"
+          href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if website_url %}URL:{{ website_url|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
+          download="{% if card_entry and card_entry.person_name %}{{ card_entry.person_name|slugify }}{% else %}contact{% endif %}.vcf"
+        ><i class="bi bi-person-vcard" aria-hidden="true"></i>Save Contact: <span id="heroSaveContactCount">{{ save_contact_count|default:0 }}</span></a>
       </div>
 
-      <div class="content">
+      <div class="content" id="homeSection">
         <div class="avatar" style="border-radius:{% if logo_radius_px %}{{ logo_radius_px }}px{% else %}28px{% endif %};">
           {% if card_entry and card_entry.logo_image_data %}
             <img src="{{ card_entry.logo_image_data }}" alt="Logo">
@@ -1824,11 +2246,6 @@
         <div class="identity">
           <h1>{% if card_entry and card_entry.person_name %}{{ card_entry.person_name }}{% else %}{{ company.company_name|default:public_slug }}{% endif %}</h1>
           <p class="role">{% if card_entry and card_entry.role_title %}{{ card_entry.role_title }}{% else %}Business / Professional{% endif %}</p>
-          <a
-            class="template-badge"
-            href="data:text/vcard;charset=utf-8,{% spaceless %}BEGIN:VCARD%0AVERSION:3.0%0AFN:{{ card_entry.person_name|default:company.company_name|default:'Contact'|urlencode }}%0A{% if card_entry.card_title|default:company.company_name %}ORG:{{ card_entry.card_title|default:company.company_name|urlencode }}%0A{% endif %}{% if card_entry.role_title %}TITLE:{{ card_entry.role_title|urlencode }}%0A{% endif %}{% if card_entry.phone|default:company.phone %}TEL;TYPE=CELL:{{ card_entry.phone|default:company.phone|urlencode }}%0A{% endif %}{% if card_entry.whatsapp_number|default:company.whatsapp_number %}TEL;TYPE=WORK,VOICE:{{ card_entry.whatsapp_number|default:company.whatsapp_number|urlencode }}%0A{% endif %}{% if card_entry.email|default:company.email %}EMAIL:{{ card_entry.email|default:company.email|urlencode }}%0A{% endif %}{% if website_url %}URL:{{ website_url|urlencode }}%0A{% endif %}{% if card_entry.address|default:company.address %}ADR:;;{{ card_entry.address|default:company.address|urlencode }};;;;%0A{% endif %}{% if card_entry.description|default:company.description %}NOTE:{{ card_entry.description|default:company.description|urlencode }}%0A{% endif %}END:VCARD{% endspaceless %}"
-            download="{% if card_entry and card_entry.person_name %}{{ card_entry.person_name|slugify }}{% else %}contact{% endif %}.vcf"
-          >Save This Contact</a>
         </div>
 
         {% if social_links_items %}
@@ -1870,20 +2287,20 @@
           {% with phone=card_entry.phone|default:company.phone %}
           {% if phone %}<a class="action is-primary" href="tel:{{ phone }}">Call</a>{% endif %}
           {% endwith %}
-          {% if website_url %}<a class="action" href="{{ website_url }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
+          {% if website_url %}<a class="action is-secondary" href="{{ website_url }}" target="_blank" rel="noreferrer">Website</a>{% endif %}
           {% with wa_no=card_entry.whatsapp_number|default:company.whatsapp_number %}
-          {% if wa_no %}<a class="action" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
+          {% if wa_no %}<a class="action is-secondary" href="https://wa.me/{{ wa_no|cut:'+' }}" target="_blank" rel="noreferrer">WhatsApp</a>{% endif %}
           {% endwith %}
         </div>
 
         <div class="details">
-          <a class="detail" href="tel:{{ card_entry.phone|default:company.phone|default:'' }}">
+          <a class="detail detail--phone" href="tel:{{ card_entry.phone|default:company.phone|default:'' }}">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.2 11.2 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.2 11.2 0 0 0 .56 3.5 1 1 0 0 1-.24 1z"/></svg>
             </span>
             <span>{{ card_entry.phone|default:company.phone|default:"-" }}</span>
           </a>
-          <a class="detail" href="https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|default:''|cut:'+' }}" target="_blank" rel="noreferrer">
+          <a class="detail detail--whatsapp" href="https://wa.me/{{ card_entry.whatsapp_number|default:company.whatsapp_number|default:''|cut:'+' }}" target="_blank" rel="noreferrer">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M20.52 3.48A11.83 11.83 0 0 0 12.1.01C5.58.01.28 5.31.28 11.83A11.7 11.7 0 0 0 1.87 17.7L0 24l6.47-1.7a11.79 11.79 0 0 0 5.63 1.43h.01c6.52 0 11.82-5.3 11.82-11.82a11.75 11.75 0 0 0-3.41-8.43zM12.11 21.7a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.84 1.01 1.02-3.74-.24-.39a9.83 9.83 0 1 1 8.45 4.71zm5.4-7.36c-.29-.15-1.73-.85-2-1s-.47-.15-.67.15-.77 1-.95 1.2-.35.22-.64.07a8.02 8.02 0 0 1-2.36-1.45 8.92 8.92 0 0 1-1.63-2.04c-.17-.29 0-.44.13-.59.13-.13.29-.35.44-.52a2.06 2.06 0 0 0 .29-.49.54.54 0 0 0 0-.51c-.08-.15-.67-1.62-.92-2.22-.24-.58-.48-.5-.67-.51h-.57a1.09 1.09 0 0 0-.79.37 3.31 3.31 0 0 0-1 2.46 5.76 5.76 0 0 0 1.2 3.06 13.25 13.25 0 0 0 5.06 4.47 17.17 17.17 0 0 0 1.69.62 4.1 4.1 0 0 0 1.88.12 3.08 3.08 0 0 0 2.02-1.42 2.48 2.48 0 0 0 .17-1.42c-.07-.11-.26-.18-.55-.33z"/></svg>
             </span>
@@ -1891,7 +2308,7 @@
           </a>
           {% with tel_no=card_entry.telephone_number|default:'' %}
           {% if tel_no %}
-          <a class="detail" href="tel:{{ tel_no }}">
+          <a class="detail detail--telephone" href="tel:{{ tel_no }}">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.12 4.2 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
             </span>
@@ -1899,13 +2316,13 @@
           </a>
           {% endif %}
           {% endwith %}
-          <a class="detail" href="mailto:{{ card_entry.email|default:company.email|default:'' }}">
+          <a class="detail detail--email" href="mailto:{{ card_entry.email|default:company.email|default:'' }}">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v.4l-10 6.25L2 7.4V7a2 2 0 0 1 2-2zm18 4.1V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.1l9.47 5.92a1 1 0 0 0 1.06 0z"/></svg>
             </span>
             <span>{{ card_entry.email|default:company.email|default:"-" }}</span>
           </a>
-          <a class="detail" href="{{ website_url }}" target="_blank" rel="noreferrer">
+          <a class="detail detail--website" href="{{ website_url }}" target="_blank" rel="noreferrer">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm7.9 9h-3.2a15.7 15.7 0 0 0-1.2-5A8 8 0 0 1 19.9 11zM12 4a13.7 13.7 0 0 1 1.9 7h-3.8A13.7 13.7 0 0 1 12 4zM8.5 6a15.7 15.7 0 0 0-1.2 5H4.1A8 8 0 0 1 8.5 6zM4.1 13h3.2a15.7 15.7 0 0 0 1.2 5A8 8 0 0 1 4.1 13zM12 20a13.7 13.7 0 0 1-1.9-7h3.8A13.7 13.7 0 0 1 12 20zm3.5-2a15.7 15.7 0 0 0 1.2-5h3.2a8 8 0 0 1-4.4 5z"/></svg>
             </span>
@@ -1913,7 +2330,7 @@
           </a>
           {% if address_details %}
           {% for addr in address_details %}
-          <a class="detail" href="{{ addr.map_url }}" target="_blank" rel="noreferrer">
+          <a class="detail detail--address" href="{{ addr.map_url }}" target="_blank" rel="noreferrer">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.5z"/></svg>
             </span>
@@ -1921,7 +2338,7 @@
           </a>
           {% endfor %}
           {% else %}
-          <div class="detail">
+          <div class="detail detail--address">
             <span class="detail-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.5z"/></svg>
             </span>
@@ -1942,21 +2359,21 @@
         {% endif %}
 
         {% if catalogue_page and catalogue_page.about_content %}
-          <section class="scroll-section">
+          <section class="scroll-section" id="aboutSection">
             <h3>{{ catalogue_page.about_title|default:"About Us" }}</h3>
             <div class="scroll-html">{{ catalogue_page.about_content|safe }}</div>
           </section>
         {% endif %}
 
         {% if catalogue_page and catalogue_page.services_content %}
-          <section class="scroll-section">
+          <section class="scroll-section" id="servicesSection">
             <h3>{{ catalogue_page.services_title|default:"Services" }}</h3>
             <div class="scroll-html">{{ catalogue_page.services_content|safe }}</div>
           </section>
         {% endif %}
 
         {% if grouped_items %}
-          <section class="scroll-section">
+          <section class="scroll-section scroll-section--catalogue">
             <h3>Products &amp; Services</h3>
             {% for group in grouped_items %}
               <div class="catalogue-group">
@@ -1964,6 +2381,11 @@
                 <div class="catalogue-list">
                   {% for item in group.items %}
                     <div class="catalogue-item">
+                      {% if item.image %}
+                        <div class="catalogue-item-media">
+                          <img class="catalogue-item-image js-gallery-image" src="{{ item.image.url }}" alt="{{ item.title|default:'Catalogue image' }}">
+                        </div>
+                      {% endif %}
                       <div class="catalogue-item-head">
                         <div class="catalogue-item-title">{{ item.title }}</div>
                         {% if item.price %}<div class="catalogue-item-price">{{ item.price }}</div>{% endif %}
@@ -1973,16 +2395,16 @@
                       {% if item.order_button_enabled and company.whatsapp_number or item.call_button_enabled and company.phone or item.whatsapp_button_enabled and company.whatsapp_number or item.enquiry_button_enabled %}
                         <div class="catalogue-item-actions">
                           {% if item.order_button_enabled and company.whatsapp_number %}
-                            <a class="catalogue-item-action" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}" target="_blank" rel="noreferrer">Order</a>
+                            <a class="catalogue-item-action catalogue-item-action--icon" aria-label="Order" title="Order" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text={{ item.title|urlencode }}" target="_blank" rel="noreferrer"><i class="bi bi-bag-check-fill" aria-hidden="true"></i></a>
                           {% endif %}
                           {% if item.call_button_enabled and company.phone %}
-                            <a class="catalogue-item-action" href="tel:{{ company.phone }}">Call</a>
+                            <a class="catalogue-item-action catalogue-item-action--icon" aria-label="Call" title="Call" href="tel:{{ company.phone }}"><i class="bi bi-telephone-fill" aria-hidden="true"></i></a>
                           {% endif %}
                           {% if item.whatsapp_button_enabled and company.whatsapp_number %}
-                            <a class="catalogue-item-action" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20need%20details%20about%20{{ item.title|urlencode }}" target="_blank" rel="noreferrer">WhatsApp</a>
+                            <a class="catalogue-item-action catalogue-item-action--icon" aria-label="WhatsApp" title="WhatsApp" href="https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20need%20details%20about%20{{ item.title|urlencode }}" target="_blank" rel="noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i></a>
                           {% endif %}
                           {% if item.enquiry_button_enabled %}
-                            <a class="catalogue-item-action" href="{% if company.email %}mailto:{{ company.email }}?subject=Enquiry%20-%20{{ item.title|urlencode }}{% elif company.whatsapp_number %}https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry%20about%20{{ item.title|urlencode }}.{% else %}#{% endif %}">Enquiry</a>
+                            <a class="catalogue-item-action catalogue-item-action--enquiry" href="{% if company.email %}mailto:{{ company.email }}?subject=Enquiry%20-%20{{ item.title|urlencode }}{% elif company.whatsapp_number %}https://wa.me/{{ company.whatsapp_number|cut:'+' }}?text=Hi%2C%20I%20have%20an%20enquiry%20about%20{{ item.title|urlencode }}.{% else %}#{% endif %}"><i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span>Enquiry</span></a>
                           {% endif %}
                         </div>
                       {% endif %}
@@ -1995,7 +2417,7 @@
         {% endif %}
 
         {% if gallery_items %}
-          <section class="scroll-section">
+          <section class="scroll-section" id="gallerySection">
             <h3>{{ catalogue_page.gallery_title|default:"Gallery" }}</h3>
             <div class="gallery-grid">
               {% for image in gallery_items %}
@@ -2014,7 +2436,7 @@
             {% if company.company_name or card_entry.address|default:company.address or company.phone or company.email %}
               <div class="contact-default-details">
                 {% if company.company_name %}
-                  <div><span class="contact-default-details__label">Company:</span>{{ company.company_name }}</div>
+                  <div class="contact-default-details__company">{{ company.company_name }}</div>
                 {% endif %}
                 {% if card_entry.address|default:company.address %}
                   <div><span class="contact-default-details__label">Address:</span>{{ card_entry.address|default:company.address }}</div>
@@ -2150,6 +2572,39 @@
           </datalist>
         </section>
 
+        <div class="footer-actions">
+          <a class="footer-action" href="/auth/login/">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-2"/><path d="M14 12H3"/><path d="m7 8-4 4 4 4"/></svg>
+            <span>Login</span>
+          </a>
+          <button type="button" class="footer-action" id="footerShareBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="18" cy="19" r="2"/><path d="M8 11l8-5"/><path d="M8 13l8 5"/></svg>
+            <span>Share</span>
+          </button>
+          <a class="footer-action" id="footerSmsBtn" href="#">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V7a2 2 0 0 1 2-2z"/><path d="M8 10h8"/><path d="M8 14h5"/></svg>
+            <span>SMS</span>
+          </a>
+          <a class="footer-action" href="/pricing/">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"/><path d="m8 7 4-4 4 4"/><path d="M5 13h14"/><rect x="4" y="13" width="16" height="8" rx="2"/></svg>
+            <span>Upgrade</span>
+          </a>
+          <button type="button" class="footer-action" id="footerMenuBtn" aria-expanded="false" aria-controls="footerNavMenu" aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
+            <span>Menu</span>
+          </button>
+        </div>
+
+        <div class="footer-nav-backdrop" id="footerNavBackdrop" hidden></div>
+        <div class="footer-nav-menu" id="footerNavMenu" hidden>
+          <div class="footer-nav-menu__title">Quick Menu</div>
+          <button type="button" class="footer-nav-menu__item" data-scroll-target="homeSection">Home</button>
+          <button type="button" class="footer-nav-menu__item" data-scroll-target="aboutSection">About Us</button>
+          <button type="button" class="footer-nav-menu__item" data-scroll-target="servicesSection">Services</button>
+          <button type="button" class="footer-nav-menu__item" data-scroll-target="gallerySection">Gallery</button>
+          <button type="button" class="footer-nav-menu__item" data-scroll-target="enquiryPanel">Enquiry</button>
+        </div>
+
         <div class="footer-credit">
           This virtual card was designed with <a href="https://www.getworkzilla.com" target="_blank" rel="noreferrer">www.getworkzilla.com</a>
         </div>
@@ -2157,7 +2612,7 @@
       </div>
     </div>
   </div>
-  {% if gallery_items %}
+  {% if gallery_items or grouped_items %}
     <div class="gallery-lightbox" id="galleryLightbox" aria-hidden="true">
       <div class="gallery-lightbox__panel" role="dialog" aria-modal="true" aria-label="Gallery image preview">
         <img id="galleryLightboxImage" class="gallery-lightbox__image" src="" alt="Gallery preview">
@@ -2174,6 +2629,10 @@
   {% endif %}
   <script>
     (function () {
+      var card = document.querySelector(".card");
+      var heroSaveContactBtn = document.getElementById("heroSaveContactBtn");
+      var heroSaveContactCount = document.getElementById("heroSaveContactCount");
+      var saveContactBtn = document.getElementById("saveContactBtn");
       var copyUrlBtn = document.getElementById("copyUrlBtn");
       var shareProfileBtn = document.getElementById("shareProfileBtn");
       var saveQrBtn = document.getElementById("saveQrBtn");
@@ -2189,6 +2648,12 @@
       var waAllPhoneCountries = document.getElementById("waAllPhoneCountries");
       var waShareInput = document.getElementById("waShareInput");
       var waShareBtn = document.getElementById("waShareBtn");
+      var footerShareBtn = document.getElementById("footerShareBtn");
+      var footerSmsBtn = document.getElementById("footerSmsBtn");
+      var footerMenuBtn = document.getElementById("footerMenuBtn");
+      var footerNavBackdrop = document.getElementById("footerNavBackdrop");
+      var footerNavMenu = document.getElementById("footerNavMenu");
+      var footerNavItems = Array.prototype.slice.call(document.querySelectorAll(".footer-nav-menu__item[data-scroll-target]"));
       var feedbackName = document.getElementById("feedbackName");
       var feedbackMessage = document.getElementById("feedbackMessage");
       var feedbackStatus = document.getElementById("feedbackStatus");
@@ -2204,7 +2669,31 @@
       var waCountryItems = [];
       var waSelectedCountry = null;
       var feedbackRating = 5;
+      var footerMenuCloseTimer = null;
       var publicSlug = "{{ public_slug|escapejs }}";
+      var smsBody = encodeURIComponent("Check this digital card: " + shareUrl);
+
+      function resolveCardThemeMode(modeValue) {
+        var raw = String(modeValue || "").trim().toLowerCase();
+        if (raw === "dark" || raw === "light") return raw;
+        try {
+          var stored = window.localStorage.getItem("wz_theme");
+          if (stored === "dark" || stored === "light") return stored;
+        } catch (error) {
+          // Ignore localStorage read failures and fall back to document theme.
+        }
+        var htmlTheme = String(document.documentElement && document.documentElement.getAttribute("data-theme") || "").trim().toLowerCase();
+        return htmlTheme === "light" ? "light" : "dark";
+      }
+
+      function applyCardThemeMode() {
+        if (!card) return;
+        var mode = resolveCardThemeMode(card.getAttribute("data-theme-mode"));
+        card.classList.remove("is-theme-dark", "is-theme-light");
+        card.classList.add(mode === "light" ? "is-theme-light" : "is-theme-dark");
+      }
+
+      applyCardThemeMode();
 
       function normalizeCountryLabel(value) {
         return String(value || "")
@@ -2451,6 +2940,93 @@
         node.style.color = isError ? "#fca5a5" : "#93c5fd";
       }
 
+      function shareDigitalCard() {
+        if (navigator.share) {
+          navigator.share({
+            title: document.title,
+            text: "Check this digital card",
+            url: shareUrl
+          }).catch(function () {});
+          return;
+        }
+        copyText(shareUrl);
+      }
+
+      function trackSaveContactClick() {
+        if (!publicSlug) return;
+        fetch("/api/whatsapp-automation/digital-cards/public/save-contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ public_slug: publicSlug }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("save_contact_count_failed");
+            return response.json();
+          })
+          .then(function (data) {
+            if (!data || typeof data.save_contact_count !== "number") return;
+            if (heroSaveContactCount) {
+              heroSaveContactCount.textContent = String(data.save_contact_count);
+            }
+          })
+          .catch(function () {});
+      }
+
+      function updateFooterMenuOrigin() {
+        if (!footerNavMenu || !footerMenuBtn) return;
+        var buttonRect = footerMenuBtn.getBoundingClientRect();
+        var menuRect = footerNavMenu.getBoundingClientRect();
+        if (!menuRect.width || !menuRect.height) return;
+        var fromX = (buttonRect.left + (buttonRect.width / 2)) - (menuRect.left + (menuRect.width / 2));
+        var fromY = (buttonRect.top + (buttonRect.height / 2)) - (menuRect.top + (menuRect.height / 2));
+        footerNavMenu.style.setProperty("--menu-from-x", fromX + "px");
+        footerNavMenu.style.setProperty("--menu-from-y", fromY + "px");
+      }
+
+      function closeFooterMenu(immediate) {
+        if (footerMenuCloseTimer) {
+          window.clearTimeout(footerMenuCloseTimer);
+          footerMenuCloseTimer = null;
+        }
+        if (footerNavMenu) footerNavMenu.classList.remove("is-open");
+        if (footerNavBackdrop) footerNavBackdrop.classList.remove("is-open");
+        if (footerMenuBtn) footerMenuBtn.setAttribute("aria-expanded", "false");
+        var finish = function () {
+          if (footerNavMenu) footerNavMenu.hidden = true;
+          if (footerNavBackdrop) footerNavBackdrop.hidden = true;
+        };
+        if (immediate) {
+          finish();
+          return;
+        }
+        footerMenuCloseTimer = window.setTimeout(function () {
+          finish();
+          footerMenuCloseTimer = null;
+        }, 260);
+      }
+
+      function openFooterMenu() {
+        if (!footerNavMenu || !footerNavBackdrop) return;
+        if (footerMenuCloseTimer) {
+          window.clearTimeout(footerMenuCloseTimer);
+          footerMenuCloseTimer = null;
+        }
+        footerNavMenu.hidden = false;
+        footerNavBackdrop.hidden = false;
+        updateFooterMenuOrigin();
+        window.requestAnimationFrame(function () {
+          footerNavMenu.classList.add("is-open");
+          footerNavBackdrop.classList.add("is-open");
+        });
+        if (footerMenuBtn) footerMenuBtn.setAttribute("aria-expanded", "true");
+      }
+
+      function scrollToSection(targetId) {
+        var section = document.getElementById(String(targetId || "").trim());
+        if (!section) return;
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
       if (copyUrlBtn) {
         copyUrlBtn.addEventListener("click", function () {
           copyText(shareUrl);
@@ -2461,17 +3037,60 @@
 
       if (shareProfileBtn) {
         shareProfileBtn.addEventListener("click", function () {
-          if (navigator.share) {
-            navigator.share({
-              title: document.title,
-              text: "Check this digital card",
-              url: shareUrl
-            }).catch(function () {});
-            return;
-          }
-          copyText(shareUrl);
+          shareDigitalCard();
         });
       }
+
+      if (heroSaveContactBtn) {
+        heroSaveContactBtn.addEventListener("click", trackSaveContactClick);
+      }
+
+      if (saveContactBtn) {
+        saveContactBtn.addEventListener("click", trackSaveContactClick);
+      }
+
+      if (footerShareBtn) {
+        footerShareBtn.addEventListener("click", function () {
+          shareDigitalCard();
+        });
+      }
+
+      if (footerSmsBtn) {
+        footerSmsBtn.setAttribute("href", "sms:?body=" + smsBody);
+      }
+
+      if (footerMenuBtn) {
+        footerMenuBtn.addEventListener("click", function () {
+          if (footerNavMenu && !footerNavMenu.hidden) {
+            closeFooterMenu();
+            return;
+          }
+          openFooterMenu();
+        });
+      }
+
+      if (footerNavBackdrop) {
+        footerNavBackdrop.addEventListener("click", closeFooterMenu);
+      }
+
+      if (footerNavItems.length) {
+        footerNavItems.forEach(function (item) {
+          item.addEventListener("click", function () {
+            var targetId = item.getAttribute("data-scroll-target");
+            closeFooterMenu();
+            scrollToSection(targetId);
+          });
+        });
+      }
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeFooterMenu();
+      });
+      window.addEventListener("resize", function () {
+        if (footerNavMenu && !footerNavMenu.hidden) {
+          closeFooterMenu(true);
+        }
+      });
 
       if (saveQrBtn && shareQrImage) {
         saveQrBtn.addEventListener("click", function () {
@@ -2610,7 +3229,7 @@
       }
     })();
     (function () {
-      var imageNodes = document.querySelectorAll(".js-gallery-image");
+      var imageNodes = Array.prototype.slice.call(document.querySelectorAll(".js-gallery-image"));
       var lightbox = document.getElementById("galleryLightbox");
       var lightboxImage = document.getElementById("galleryLightboxImage");
       var lightboxTitle = document.getElementById("galleryLightboxTitle");
@@ -2620,8 +3239,9 @@
       if (!lightbox || !lightboxImage || !closeBtn || !prevBtn || !nextBtn || !imageNodes.length) {
         return;
       }
-      var items = Array.prototype.slice.call(imageNodes).map(function (node) {
+      var items = imageNodes.map(function (node) {
         return {
+          node: node,
           src: node.getAttribute("src") || "",
           title: node.getAttribute("alt") || "Gallery Image",
         };
@@ -2654,9 +3274,8 @@
         document.body.style.overflow = "";
       }
 
-      imageNodes.forEach(function (node) {
-        node.addEventListener("click", function () {
-          var index = Number(node.getAttribute("data-gallery-index") || 0);
+      items.forEach(function (item, index) {
+        item.node.addEventListener("click", function () {
           open(index);
         });
       });
