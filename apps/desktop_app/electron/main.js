@@ -1140,6 +1140,40 @@ ipcMain.handle("storage:download-bulk", async (_event, payload) => {
   }
 });
 
+ipcMain.handle("file:save-bytes", async (_event, payload) => {
+  try {
+    const bytes = payload?.bytes;
+    if (!bytes) {
+      return { ok: false, error: "missing_bytes" };
+    }
+
+    let targetPath = String(payload?.targetPath || "").trim();
+    const defaultFileName = String(payload?.defaultFileName || "output.pdf").trim() || "output.pdf";
+    const title = String(payload?.title || "Save File");
+    const filters = Array.isArray(payload?.filters) ? payload.filters : [{ name: "All Files", extensions: ["*"] }];
+
+    if (!targetPath) {
+      const selection = await dialog.showSaveDialog(mainWindow, {
+        title,
+        defaultPath: path.join(app.getPath("downloads"), defaultFileName),
+        filters
+      });
+      if (selection.canceled || !selection.filePath) {
+        return { ok: false, cancelled: true, error: "save_cancelled" };
+      }
+      targetPath = selection.filePath;
+    }
+
+    const data = bytes instanceof Uint8Array
+      ? bytes
+      : (bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : Uint8Array.from(bytes));
+    await fs.promises.writeFile(targetPath, Buffer.from(data));
+    return { ok: true, path: targetPath };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || "save_failed") };
+  }
+});
+
 ipcMain.handle("monitor:start", async () => {
   if (!connectivityState.online) {
     return { ok: false, error: "offline" };

@@ -2118,23 +2118,37 @@ input::placeholder {
 
 .idcard-overlay {
   position: absolute;
-  border: 1px dashed rgba(52, 211, 153, 0.9);
-  background: rgba(16, 185, 129, 0.18);
-  color: #d1fae5;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
   font-size: 11px;
-  font-weight: 700;
-  border-radius: 8px;
+  font-weight: 400;
+  border-radius: 4px;
   overflow: hidden;
-  display: grid;
-  place-items: center;
-  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.7);
+  display: block;
+  text-shadow: none;
   cursor: pointer;
 }
 
 .idcard-overlay.active {
-  border-color: rgba(14, 165, 233, 0.9);
-  background: rgba(14, 165, 233, 0.28);
-  color: #e0f2fe;
+  border-color: rgba(96, 165, 250, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.4);
+}
+
+.idcard-overlay:hover {
+  border-color: transparent;
+}
+
+.idcard-overlay-text {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.2;
+  pointer-events: none;
 }
 
 .idcard-overlay-image {
@@ -2145,26 +2159,19 @@ input::placeholder {
   display: block;
 }
 
-.idcard-overlay-text {
-  width: 100%;
-  height: 100%;
-  padding: 4px 6px;
-  overflow: hidden;
-  display: grid;
-  align-items: start;
-}
-
 .idcard-inline-text-editor {
   width: 100%;
   height: 100%;
-  border: 1px solid rgba(14, 165, 233, 0.7);
-  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.9);
+  border-radius: 4px;
   resize: none;
-  padding: 4px 6px;
-  background: rgba(2, 6, 23, 0.82);
-  color: #e2e8f0;
-  font-size: 12px;
-  line-height: 1.3;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  line-height: 1.2;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .wzid-hidden-file-input {
@@ -2530,6 +2537,34 @@ input::placeholder {
   font-weight: 600;
 }
 
+.wzid-field-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wzid-field-item {
+  display: grid;
+  gap: 2px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.62);
+  padding: 8px;
+}
+
+.wzid-field-item strong {
+  font-size: 12px;
+  color: #67e8f9;
+  letter-spacing: 0.02em;
+}
+
+.wzid-field-item span {
+  font-size: 12px;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 :root[data-theme="light"] .imposition-app-shell {
   background:
     radial-gradient(circle at top left, rgba(22, 163, 74, 0.08), transparent 24%),
@@ -2682,9 +2717,9 @@ input::placeholder {
 }
 
 :root[data-theme="light"] .idcard-inline-text-editor {
-  background: rgba(255, 255, 255, 0.96);
+  background: transparent;
   color: #0f172a;
-  border-color: rgba(14, 165, 233, 0.55);
+  border-color: rgba(37, 99, 235, 0.6);
 }
 
 :root[data-theme="light"] .idcard-empty-state,

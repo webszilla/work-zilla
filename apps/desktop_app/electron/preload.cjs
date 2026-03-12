@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   createStorageUser: (payload) => ipcRenderer.invoke("storage:org:users:create", payload),
   downloadFile: (payload) => ipcRenderer.invoke("storage:download", payload),
   downloadBulk: (payload) => ipcRenderer.invoke("storage:download-bulk", payload),
+  saveFileBytes: (payload) => ipcRenderer.invoke("file:save-bytes", payload),
   getPlatform: () => process.platform,
   getMonitorPermissions: () => ipcRenderer.invoke("monitor:permissions"),
   requestMonitorPermissions: () => ipcRenderer.invoke("monitor:request-permissions"),

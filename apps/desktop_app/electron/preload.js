@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   exportImpositionBulk: (payload) => ipcRenderer.invoke("imposition:bulk-export", payload),
   downloadFile: (payload) => ipcRenderer.invoke("storage:download", payload),
   downloadBulk: (payload) => ipcRenderer.invoke("storage:download-bulk", payload),
+  saveFileBytes: (payload) => ipcRenderer.invoke("file:save-bytes", payload),
   getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),

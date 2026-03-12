@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import JSZip from "jszip";
+import * as XLSX from "xlsx";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfjsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
@@ -60,6 +61,35 @@ function sanitizeFileName(value, fallback) {
   return cleaned || fallback;
 }
 
+function normalizeKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeFieldKey(value) {
+  return normalizeKey(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeFontFamily(value) {
+  const raw = String(value || "").replace(/^[A-Z]{6}\+/, "").trim();
+  if (!raw) {
+    return "Arial";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("helvetica")) {
+    return "Helvetica";
+  }
+  if (lower.includes("times")) {
+    return "Times New Roman";
+  }
+  if (lower.includes("courier")) {
+    return "Courier New";
+  }
+  if (lower.includes("arial")) {
+    return "Arial";
+  }
+  return raw.split(",")[0] || "Arial";
+}
+
 function createTextElement({ x, y }) {
   return {
     id: crypto.randomUUID(),
@@ -71,19 +101,9 @@ function createTextElement({ x, y }) {
     text: "Member Name",
     fontSize: 22,
     color: "#0f172a",
-  };
-}
-
-function createImageElement({ x, y, imageDataUrl }) {
-  return {
-    id: crypto.randomUUID(),
-    type: "image",
-    x,
-    y,
-    width: 170,
-    height: 210,
-    imageDataUrl,
-    fit: "cover",
+    fontFamily: "Arial",
+    fontWeight: 400,
+    fontStyle: "normal",
   };
 }
 
@@ -108,35 +128,6 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function sampleAverageColor(ctx, x, y, width, height) {
-  const safeX = Math.floor(Math.max(0, x));
-  const safeY = Math.floor(Math.max(0, y));
-  const safeWidth = Math.floor(Math.max(1, width));
-  const safeHeight = Math.floor(Math.max(1, height));
-  try {
-    const imageData = ctx.getImageData(safeX, safeY, safeWidth, safeHeight).data;
-    if (!imageData.length) {
-      return "#ffffff";
-    }
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    let count = 0;
-    for (let i = 0; i < imageData.length; i += 4) {
-      r += imageData[i];
-      g += imageData[i + 1];
-      b += imageData[i + 2];
-      count += 1;
-    }
-    if (!count) {
-      return "#ffffff";
-    }
-    return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
-  } catch (_error) {
-    return "#ffffff";
-  }
-}
-
 function createCoverCropDataUrl(sourceCanvas, rect) {
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
@@ -150,9 +141,52 @@ function createCoverCropDataUrl(sourceCanvas, rect) {
   return canvas.toDataURL("image/png", 1);
 }
 
+function sampleTextColor(ctx, x, y, width, height) {
+  const safeX = Math.floor(Math.max(0, x));
+  const safeY = Math.floor(Math.max(0, y));
+  const safeWidth = Math.floor(Math.max(1, width));
+  const safeHeight = Math.floor(Math.max(1, height));
+  try {
+    const pixels = ctx.getImageData(safeX, safeY, safeWidth, safeHeight).data;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const red = pixels[i];
+      const green = pixels[i + 1];
+      const blue = pixels[i + 2];
+      const alpha = pixels[i + 3];
+      if (alpha < 18) {
+        continue;
+      }
+      const max = Math.max(red, green, blue);
+      const min = Math.min(red, green, blue);
+      const saturation = max === 0 ? 0 : (max - min) / max;
+      const brightness = (red + green + blue) / 3;
+      if (brightness > 244 && saturation < 0.06) {
+        continue;
+      }
+      if (brightness < 245 || saturation > 0.07) {
+        r += red;
+        g += green;
+        b += blue;
+        count += 1;
+      }
+    }
+    if (!count) {
+      return "#0f172a";
+    }
+    return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
+  } catch (_error) {
+    return "#0f172a";
+  }
+}
+
 async function detectPdfTextElements(page, viewport, ctx, pageWidth, pageHeight) {
   const content = await page.getTextContent();
-  const elements = [];
+  const styleMap = content.styles || {};
+  const fragments = [];
   for (const item of content.items || []) {
     const textValue = String(item?.str || "").trim();
     if (!textValue) {
@@ -164,22 +198,63 @@ async function detectPdfTextElements(page, viewport, ctx, pageWidth, pageHeight)
     const y = clamp(Math.round(tx[5] - fontSize), 0, Math.max(0, pageHeight - 2));
     const width = clamp(Math.round((item.width || textValue.length * fontSize * 0.5) * viewport.scale), 40, pageWidth - x);
     const height = clamp(Math.round(fontSize * 1.35), 18, pageHeight - y);
-    const bgColor = sampleAverageColor(ctx, x, y, width, height);
-    elements.push({
-      id: crypto.randomUUID(),
-      type: "text",
+    const itemStyle = styleMap[item.fontName] || {};
+    const fontName = String(item.fontName || itemStyle.fontFamily || "");
+    const fontFamily = normalizeFontFamily(itemStyle.fontFamily || fontName);
+    const fontWeight = /bold|black|heavy|semibold|demibold/i.test(fontName) ? 700 : 400;
+    const fontStyle = /italic|oblique/i.test(fontName) ? "italic" : "normal";
+    fragments.push({
       x,
       y,
       width,
       height,
-      text: textValue,
+      text: textValue.trim(),
       fontSize: Math.round(fontSize),
-      color: "#0f172a",
-      backgroundColor: bgColor,
-      source: "pdf",
+      fontFamily,
+      fontWeight,
+      fontStyle,
     });
   }
-  return elements;
+
+  fragments.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const merged = [];
+  for (const part of fragments) {
+    const prev = merged[merged.length - 1];
+    const sameLine = prev && Math.abs(part.y - prev.y) <= Math.max(4, Math.min(prev.height, part.height) * 0.45);
+    const gap = prev ? (part.x - (prev.x + prev.width)) : Infinity;
+    const closeEnough = gap <= Math.max(12, part.fontSize * 1.2);
+    if (sameLine && closeEnough) {
+      const joinedText = `${prev.text} ${part.text}`.replace(/\s+/g, " ").trim();
+      prev.text = joinedText;
+      prev.width = Math.max(prev.width, (part.x + part.width) - prev.x);
+      prev.height = Math.max(prev.height, part.height);
+      prev.fontSize = Math.round((prev.fontSize + part.fontSize) / 2);
+      prev.fontFamily = prev.fontFamily || part.fontFamily;
+      prev.fontWeight = Math.max(prev.fontWeight || 400, part.fontWeight || 400);
+      prev.fontStyle = prev.fontStyle === "italic" || part.fontStyle === "italic" ? "italic" : "normal";
+      continue;
+    }
+    merged.push({ ...part });
+  }
+
+  return merged
+    .filter((item) => item.text.length > 1)
+    .map((item) => ({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: Math.max(item.height, Math.round(item.fontSize * 1.35)),
+      text: item.text,
+      fontSize: item.fontSize,
+      color: sampleTextColor(ctx, item.x, item.y, item.width, item.height),
+      fontFamily: item.fontFamily || "Arial",
+      fontWeight: item.fontWeight || 400,
+      fontStyle: item.fontStyle || "normal",
+      source: "pdf",
+      inputName: "",
+    }));
 }
 
 function detectPrimaryPhotoRect(canvas) {
@@ -316,6 +391,7 @@ async function renderPdfPreviewPages(file, maxPages = 2) {
       imageDataUrl: createCoverCropDataUrl(canvas, imageRect),
       fit: "cover",
       source: "pdf",
+      role: "employee_photo",
     }] : [];
 
     pages.push({
@@ -331,33 +407,17 @@ async function renderPdfPreviewPages(file, maxPages = 2) {
   return pages;
 }
 
-function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxHeight) {
-  const value = String(text || "").trim();
-  if (!value) {
+function drawTextElement(ctx, element) {
+  const value = String(element?.text || "");
+  if (!value.trim()) {
     return;
   }
-
-  const words = value.split(/\s+/);
-  let line = "";
-  let lineIndex = 0;
-
-  for (let index = 0; index < words.length; index += 1) {
-    const testLine = line ? `${line} ${words[index]}` : words[index];
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && line) {
-      if ((lineIndex + 1) * lineHeight > maxHeight) {
-        break;
-      }
-      ctx.fillText(line, x, y + lineIndex * lineHeight);
-      line = words[index];
-      lineIndex += 1;
-    } else {
-      line = testLine;
-    }
-  }
-
-  if ((lineIndex + 1) * lineHeight <= maxHeight) {
-    ctx.fillText(line, x, y + lineIndex * lineHeight);
+  const lines = value.split(/\r?\n/);
+  const fontSize = Math.max(8, Number(element?.fontSize || 20));
+  const lineHeight = fontSize * 1.2;
+  const maxLines = Math.max(1, Math.floor((element?.height || fontSize * 1.4) / lineHeight));
+  for (let lineIndex = 0; lineIndex < Math.min(lines.length, maxLines); lineIndex += 1) {
+    ctx.fillText(lines[lineIndex], element.x, element.y + lineIndex * lineHeight);
   }
 }
 
@@ -390,13 +450,16 @@ function drawImageCover(ctx, image, x, y, width, height) {
   );
 }
 
+function getEmployeePhotoElement(page) {
+  return (page?.elements || []).find((item) => item.type === "image" && item.role === "employee_photo") || null;
+}
+
 export default function IdCardStudioPanel() {
   const [pages, setPages] = useState([]);
   const [selectedPageId, setSelectedPageId] = useState("");
   const [selectedElementId, setSelectedElementId] = useState("");
-  const [activeTool, setActiveTool] = useState("select");
-  const [pendingImageDataUrl, setPendingImageDataUrl] = useState("");
   const [uploadName, setUploadName] = useState("");
+  const [uploadFilePath, setUploadFilePath] = useState("");
   const [dragPageId, setDragPageId] = useState("");
   const [dragState, setDragState] = useState(null);
   const [zoom, setZoom] = useState(100);
@@ -404,10 +467,18 @@ export default function IdCardStudioPanel() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
   const [pageMenu, setPageMenu] = useState({ open: false, x: 0, y: 0, pageId: "" });
   const [inlineTextEdit, setInlineTextEdit] = useState({ pageId: "", elementId: "" });
-  const [pendingImagePlacement, setPendingImagePlacement] = useState(null);
-  const [historyVersion, setHistoryVersion] = useState(0);
+  const [pendingPhotoSlotPageId, setPendingPhotoSlotPageId] = useState("");
+  const [excelColumns, setExcelColumns] = useState([]);
+  const [excelRows, setExcelRows] = useState([]);
+  const [excelFileName, setExcelFileName] = useState("");
+  const [photoColumn, setPhotoColumn] = useState("");
+  const [imageFolderName, setImageFolderName] = useState("");
+  const [batchFormat, setBatchFormat] = useState("pdf");
+  const imageFileMapRef = useRef(new Map());
+  const imageDataCacheRef = useRef(new Map());
 
   const pageRefs = useRef(new Map());
   const quickReplaceInputRef = useRef(null);
@@ -426,6 +497,29 @@ export default function IdCardStudioPanel() {
     () => selectedPage?.elements?.find((item) => item.id === selectedElementId) || null,
     [selectedElementId, selectedPage]
   );
+  const selectedPageEmployeePhoto = useMemo(
+    () => getEmployeePhotoElement(selectedPage),
+    [selectedPage]
+  );
+  const selectedPageMappedFields = useMemo(
+    () => (selectedPage?.elements || []).filter((item) => item.type === "text" && String(item.inputName || "").trim()),
+    [selectedPage]
+  );
+  const templateMappedFields = useMemo(() => {
+    const keys = new Set();
+    for (const page of pages) {
+      for (const element of page.elements || []) {
+        if (element.type !== "text") {
+          continue;
+        }
+        const key = String(element.inputName || "").trim();
+        if (key) {
+          keys.add(key);
+        }
+      }
+    }
+    return Array.from(keys);
+  }, [pages]);
 
   useEffect(() => {
     if (!pageMenu.open) {
@@ -451,7 +545,6 @@ export default function IdCardStudioPanel() {
       }
       historyFutureRef.current = [];
       previousPagesRef.current = clonePagesSnapshot(pages);
-      setHistoryVersion((value) => value + 1);
     }
   }, [pages]);
 
@@ -469,7 +562,6 @@ export default function IdCardStudioPanel() {
     setSelectedElementId("");
     setInlineTextEdit({ pageId: "", elementId: "" });
     setMessage("Undo applied.");
-    setHistoryVersion((value) => value + 1);
   }
 
   function performRedo() {
@@ -483,7 +575,6 @@ export default function IdCardStudioPanel() {
     setSelectedElementId("");
     setInlineTextEdit({ pageId: "", elementId: "" });
     setMessage("Redo applied.");
-    setHistoryVersion((value) => value + 1);
   }
 
   function applyPagePatch(pageId, patcher) {
@@ -501,6 +592,7 @@ export default function IdCardStudioPanel() {
 
       const fileName = String(file.name || "design");
       const isPdf = fileName.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+      const sourcePath = String(file.path || "").trim();
 
       let nextPages = [];
       if (isPdf) {
@@ -529,27 +621,11 @@ export default function IdCardStudioPanel() {
       setSelectedPageId(nextPages[0].id);
       setSelectedElementId("");
       setEditorEnabled(false);
-      setPendingImagePlacement(null);
       setUploadName(fileName);
+      setUploadFilePath(sourcePath);
       setMessage(`Loaded ${nextPages.length} page(s). Enable Editor Mode to edit text/image layers.`);
-      setHistoryVersion((value) => value + 1);
     } catch (uploadError) {
       setError(String(uploadError?.message || "Unable to load design preview."));
-    }
-  }
-
-  async function handleImageSourceUpload(event) {
-    try {
-      const file = event.target.files?.[0];
-      if (!file) {
-        return;
-      }
-      const dataUrl = await readFileAsDataUrl(file);
-      setPendingImageDataUrl(dataUrl);
-      setMessage("Image source loaded. Click the workspace to place it.");
-      setError("");
-    } catch (imageError) {
-      setError(String(imageError?.message || "Unable to load image source."));
     }
   }
 
@@ -594,7 +670,7 @@ export default function IdCardStudioPanel() {
     };
   }
 
-  function handleWorkspaceClick(pageId, event) {
+  async function handleWorkspaceClick(pageId, event) {
     const page = pages.find((item) => item.id === pageId);
     if (!page) {
       return;
@@ -609,30 +685,50 @@ export default function IdCardStudioPanel() {
       return;
     }
 
-    if (activeTool === "text") {
-      const element = createTextElement(point);
-      applyPagePatch(page.id, (item) => ({ ...item, elements: [...item.elements, element] }));
-      setSelectedElementId(element.id);
-      setInlineTextEdit({ pageId: page.id, elementId: element.id });
-      setMessage("Text element added.");
-      return;
-    }
-
-    if (activeTool === "image") {
-      if (!pendingImageDataUrl) {
-        if (quickReplaceInputRef.current) {
-          setQuickReplaceTarget({ pageId: page.id, elementId: "" });
-          setPendingImagePlacement({ pageId: page.id, x: point.x, y: point.y });
-          quickReplaceInputRef.current.click();
-          setMessage("Choose image to place.");
-          setError("");
-        }
-        return;
+    if (pendingPhotoSlotPageId === page.id) {
+      try {
+        const slotWidth = 170;
+        const slotHeight = 210;
+        const slotX = clamp(Math.round(point.x - slotWidth / 2), 0, Math.max(0, page.width - slotWidth));
+        const slotY = clamp(Math.round(point.y - slotHeight / 2), 0, Math.max(0, page.height - slotHeight));
+        const previewCrop = createCoverCropDataUrl(
+          await (async () => {
+            const bg = await loadImage(page.backgroundDataUrl);
+            const buffer = document.createElement("canvas");
+            buffer.width = page.width;
+            buffer.height = page.height;
+            const bgCtx = buffer.getContext("2d");
+            bgCtx.drawImage(bg, 0, 0, page.width, page.height);
+            return buffer;
+          })(),
+          { x: slotX, y: slotY, width: slotWidth, height: slotHeight }
+        );
+        const element = {
+          id: crypto.randomUUID(),
+          type: "image",
+          x: slotX,
+          y: slotY,
+          width: slotWidth,
+          height: slotHeight,
+          imageDataUrl: previewCrop,
+          fit: "cover",
+          role: "employee_photo",
+        };
+        applyPagePatch(page.id, (item) => ({
+          ...item,
+          elements: [
+            ...item.elements.filter((entry) => !(entry.type === "image" && entry.role === "employee_photo")),
+            element,
+          ],
+        }));
+        setPendingPhotoSlotPageId("");
+        setSelectedElementId(element.id);
+        setMessage("Employee photo slot added. Double click the photo to replace.");
+        setError("");
+      } catch (photoSlotError) {
+        setError(String(photoSlotError?.message || "Unable to tag employee photo."));
       }
-      const element = createImageElement({ ...point, imageDataUrl: pendingImageDataUrl });
-      applyPagePatch(page.id, (item) => ({ ...item, elements: [...item.elements, element] }));
-      setSelectedElementId(element.id);
-      setMessage("Image element added.");
+      return;
     }
   }
 
@@ -728,14 +824,21 @@ export default function IdCardStudioPanel() {
     previousPagesRef.current = [];
     setSelectedPageId("");
     setSelectedElementId("");
-    setPendingImageDataUrl("");
     setUploadName("");
+    setUploadFilePath("");
     setDragPageId("");
     setDragState(null);
     setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
     setInlineTextEdit({ pageId: "", elementId: "" });
     setQuickReplaceTarget({ pageId: "", elementId: "" });
-    setPendingImagePlacement(null);
+    setPendingPhotoSlotPageId("");
+    setExcelColumns([]);
+    setExcelRows([]);
+    setExcelFileName("");
+    setPhotoColumn("");
+    setImageFolderName("");
+    imageFileMapRef.current = new Map();
+    imageDataCacheRef.current = new Map();
     setEditorEnabled(false);
     setMessage("Current PDF closed.");
     setError("");
@@ -750,6 +853,7 @@ export default function IdCardStudioPanel() {
       if (!next.length) {
         setSelectedPageId("");
         setUploadName("");
+        setUploadFilePath("");
       } else if (!next.find((item) => item.id === selectedPageId)) {
         setSelectedPageId(next[0].id);
       }
@@ -757,14 +861,16 @@ export default function IdCardStudioPanel() {
     });
     setSelectedElementId("");
     setInlineTextEdit({ pageId: "", elementId: "" });
+    setPendingPhotoSlotPageId("");
     setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
     setMessage("Page deleted.");
   }
 
-  async function handleQuickReplaceImage(event) {
+  async function handleQuickReplaceImage(event, forcedTarget = null) {
     try {
       const file = event.target.files?.[0];
-      const { pageId, elementId } = quickReplaceTarget;
+      const target = forcedTarget || quickReplaceTarget;
+      const { pageId, elementId } = target;
       if (!file || !pageId) {
         return;
       }
@@ -779,19 +885,6 @@ export default function IdCardStudioPanel() {
         setSelectedPageId(pageId);
         setSelectedElementId(elementId);
         setMessage("Photo replaced.");
-      } else if (pendingImagePlacement?.pageId === pageId) {
-        const element = createImageElement({
-          x: pendingImagePlacement.x,
-          y: pendingImagePlacement.y,
-          imageDataUrl: dataUrl,
-        });
-        applyPagePatch(pageId, (page) => ({
-          ...page,
-          elements: [...page.elements, element],
-        }));
-        setSelectedPageId(pageId);
-        setSelectedElementId(element.id);
-        setMessage("Image added.");
       }
       setError("");
     } catch (replaceError) {
@@ -801,7 +894,197 @@ export default function IdCardStudioPanel() {
         event.target.value = "";
       }
       setQuickReplaceTarget({ pageId: "", elementId: "" });
-      setPendingImagePlacement(null);
+    }
+  }
+
+  function getRowValue(row, key) {
+    if (!row || !key) {
+      return "";
+    }
+    const direct = row[key];
+    if (direct !== undefined && direct !== null && String(direct).trim() !== "") {
+      return String(direct);
+    }
+    const target = normalizeFieldKey(key);
+    for (const column of Object.keys(row)) {
+      if (normalizeFieldKey(column) === target) {
+        const value = row[column];
+        if (value !== undefined && value !== null) {
+          return String(value);
+        }
+      }
+    }
+    return "";
+  }
+
+  async function handleExcelUpload(event) {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames?.[0];
+      if (!sheetName) {
+        throw new Error("No sheet found in Excel file.");
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+      const columns = rows.length ? Object.keys(rows[0]) : [];
+      setExcelRows(rows);
+      setExcelColumns(columns);
+      setExcelFileName(file.name || "sheet.xlsx");
+      if (columns.length) {
+        const preferred = columns.find((item) => normalizeFieldKey(item).includes("image"))
+          || columns.find((item) => normalizeFieldKey(item).includes("photo"))
+          || columns[0];
+        setPhotoColumn(preferred || "");
+      } else {
+        setPhotoColumn("");
+      }
+      setMessage(`Excel loaded: ${rows.length} row(s).`);
+      setError("");
+    } catch (excelError) {
+      setError(String(excelError?.message || "Unable to read Excel file."));
+    } finally {
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  }
+
+  function handleImageFolderUpload(event) {
+    const files = Array.from(event.target.files || []);
+    const next = new Map();
+    for (const file of files) {
+      const name = String(file.name || "").trim();
+      if (!name) {
+        continue;
+      }
+      next.set(normalizeKey(name), file);
+      const dot = name.lastIndexOf(".");
+      if (dot > 0) {
+        next.set(normalizeKey(name.slice(0, dot)), file);
+      }
+    }
+    imageFileMapRef.current = next;
+    imageDataCacheRef.current = new Map();
+    const folderPath = files[0]?.webkitRelativePath || "";
+    const folderName = folderPath ? folderPath.split("/")[0] : "";
+    setImageFolderName(folderName || (files.length ? "Selected" : ""));
+    setMessage(`Image folder loaded: ${files.length} file(s).`);
+    setError("");
+    if (event.target) {
+      event.target.value = "";
+    }
+  }
+
+  async function resolvePhotoDataUrlForRow(row) {
+    const source = getRowValue(row, photoColumn);
+    const token = String(source || "").trim();
+    if (!token) {
+      return "";
+    }
+    const key = normalizeKey(token.replace(/\\/g, "/").split("/").pop() || token);
+    const baseKey = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : key;
+    const file = imageFileMapRef.current.get(key)
+      || imageFileMapRef.current.get(baseKey);
+    if (!file) {
+      return "";
+    }
+    const cacheKey = normalizeKey(file.name || key);
+    if (imageDataCacheRef.current.has(cacheKey)) {
+      return imageDataCacheRef.current.get(cacheKey) || "";
+    }
+    const dataUrl = await readFileAsDataUrl(file);
+    imageDataCacheRef.current.set(cacheKey, dataUrl);
+    return dataUrl;
+  }
+
+  async function buildPagesForRow(row) {
+    const photoDataUrl = await resolvePhotoDataUrlForRow(row);
+    return pages.map((page) => ({
+      ...page,
+      elements: page.elements.map((element) => {
+        if (element.type === "text") {
+          const key = String(element.inputName || "").trim();
+          if (key) {
+            return { ...element, text: getRowValue(row, key) };
+          }
+        }
+        if (element.type === "image" && element.role === "employee_photo" && photoDataUrl) {
+          return { ...element, imageDataUrl: photoDataUrl, fit: "cover" };
+        }
+        return { ...element };
+      }),
+    }));
+  }
+
+  async function exportBatch() {
+    try {
+      if (!pages.length) {
+        throw new Error("Upload template PDF first.");
+      }
+      if (!excelRows.length) {
+        throw new Error("Upload Excel data before batch export.");
+      }
+      if (!templateMappedFields.length) {
+        throw new Error("Map at least one text field using Input Name.");
+      }
+      setBatchExporting(true);
+      setError("");
+      setMessage("");
+      const zip = new JSZip();
+
+      for (let rowIndex = 0; rowIndex < excelRows.length; rowIndex += 1) {
+        const row = excelRows[rowIndex];
+        const rowPages = await buildPagesForRow(row);
+        const rowName = getRowValue(row, "employee_name")
+          || getRowValue(row, "name")
+          || `member_${rowIndex + 1}`;
+        const safeRow = sanitizeFileName(rowName, `member_${rowIndex + 1}`);
+
+        if (batchFormat === "pdf") {
+          const first = rowPages[0];
+          const doc = new jsPDF({
+            orientation: first.width >= first.height ? "landscape" : "portrait",
+            unit: "px",
+            format: [first.width, first.height],
+          });
+          for (let pageIndex = 0; pageIndex < rowPages.length; pageIndex += 1) {
+            const page = rowPages[pageIndex];
+            const canvas = await renderPageCanvas(page);
+            const imageData = canvas.toDataURL("image/jpeg", 0.96);
+            if (pageIndex > 0) {
+              doc.addPage([page.width, page.height], page.width >= page.height ? "landscape" : "portrait");
+            }
+            doc.addImage(imageData, "JPEG", 0, 0, page.width, page.height);
+          }
+          const pdfBytes = new Uint8Array(doc.output("arraybuffer"));
+          zip.file(`${safeRow}.pdf`, pdfBytes);
+        } else {
+          for (let pageIndex = 0; pageIndex < rowPages.length; pageIndex += 1) {
+            const page = rowPages[pageIndex];
+            const canvas = await renderPageCanvas(page);
+            const base64 = canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
+            zip.file(`${safeRow}-p${pageIndex + 1}.jpg`, base64, { base64: true });
+          }
+        }
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = batchFormat === "pdf" ? "id-cards-batch-pdf.zip" : "id-cards-batch-jpg.zip";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMessage(`Batch export completed: ${excelRows.length} record(s).`);
+    } catch (batchError) {
+      setError(String(batchError?.message || "Unable to export batch files."));
+    } finally {
+      setBatchExporting(false);
     }
   }
 
@@ -944,22 +1227,10 @@ export default function IdCardStudioPanel() {
         }
       }
       if (element.type === "text") {
-        if (element.backgroundColor) {
-          ctx.fillStyle = element.backgroundColor;
-          ctx.fillRect(element.x, element.y, element.width || 260, element.height || 40);
-        }
         ctx.fillStyle = element.color || "#0f172a";
-        ctx.font = `${element.fontSize || 20}px ${element.fontFamily || "Arial"}`;
+        ctx.font = `${element.fontStyle || "normal"} ${element.fontWeight || 400} ${element.fontSize || 20}px ${element.fontFamily || "Arial"}`;
         ctx.textBaseline = "top";
-        wrapText(
-          ctx,
-          element.text || "",
-          element.x,
-          element.y,
-          element.width || 260,
-          (element.fontSize || 20) + 4,
-          element.height || 240
-        );
+        drawTextElement(ctx, element);
       }
     }
 
@@ -997,8 +1268,33 @@ export default function IdCardStudioPanel() {
         doc.addImage(imageData, "JPEG", 0, 0, page.width, page.height);
       }
 
-      doc.save("id-card-edited.pdf");
-      setMessage("PDF saved successfully.");
+      const fileName = uploadName && uploadName.toLowerCase().endsWith(".pdf")
+        ? uploadName
+        : "id-card-edited.pdf";
+      const output = doc.output("arraybuffer");
+      if (window.storageApi?.saveFileBytes) {
+        const result = await window.storageApi.saveFileBytes({
+          bytes: new Uint8Array(output),
+          targetPath: uploadFilePath && uploadFilePath.toLowerCase().endsWith(".pdf") ? uploadFilePath : "",
+          defaultFileName: fileName,
+          title: uploadFilePath ? "Save PDF" : "Save PDF As",
+          filters: [{ name: "PDF Files", extensions: ["pdf"] }],
+        });
+        if (!result?.ok) {
+          if (result?.cancelled) {
+            setMessage("Save cancelled.");
+            return;
+          }
+          throw new Error(result?.error || "Unable to save PDF file.");
+        }
+        setMessage(`PDF saved: ${result.path}`);
+        if (result.path) {
+          setUploadFilePath(result.path);
+        }
+      } else {
+        doc.save(fileName);
+        setMessage("PDF saved successfully.");
+      }
     } catch (saveError) {
       setError(String(saveError?.message || "Unable to save PDF."));
     } finally {
@@ -1072,8 +1368,11 @@ export default function IdCardStudioPanel() {
                 type="button"
                 className={`btn ${editorEnabled ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => {
-                  setEditorEnabled((current) => !current);
-                  setMessage((current) => (editorEnabled ? "Editor mode disabled." : "Editor mode enabled."));
+                  setEditorEnabled((current) => {
+                    const next = !current;
+                    setMessage(next ? "Editor mode enabled." : "Editor mode disabled.");
+                    return next;
+                  });
                 }}
               >
                 {editorEnabled ? "Disable Editor Mode" : "Enable Editor Mode"}
@@ -1116,15 +1415,19 @@ export default function IdCardStudioPanel() {
                           aspectRatio: `${page.width} / ${page.height}`,
                           width: `${getDisplayWidth(page)}px`,
                         }}
-                        onClick={(event) => handleWorkspaceClick(page.id, event)}
+                        onClick={(event) => {
+                          setInlineTextEdit({ pageId: "", elementId: "" });
+                          setSelectedElementId("");
+                          handleWorkspaceClick(page.id, event);
+                        }}
                         role="button"
                         tabIndex={0}
                         aria-label={`${page.label} editor workspace`}
                       >
-                        {editorEnabled ? overlays.map((item) => (
+                        {editorEnabled && selectedPageId === page.id ? overlays.map((item) => (
                           <div
                             key={item.id}
-                            className={`idcard-overlay ${selectedElementId === item.id ? "active" : ""}`}
+                            className={`idcard-overlay idcard-overlay-${item.type} ${selectedElementId === item.id ? "active" : ""}`}
                             style={{
                               left: `${item.leftPct}%`,
                               top: `${item.topPct}%`,
@@ -1139,9 +1442,7 @@ export default function IdCardStudioPanel() {
                               }
                               setSelectedPageId(page.id);
                               setSelectedElementId(item.id);
-                              if (item.type === "text" && activeTool === "select") {
-                                setInlineTextEdit({ pageId: page.id, elementId: item.id });
-                              }
+                              setInlineTextEdit({ pageId: "", elementId: "" });
                             }}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
@@ -1167,6 +1468,13 @@ export default function IdCardStudioPanel() {
                                   className="idcard-inline-text-editor"
                                   autoFocus
                                   value={item.text || ""}
+                                  style={{
+                                    fontSize: `${item.fontSize || 20}px`,
+                                    fontFamily: item.fontFamily || "Arial",
+                                    fontWeight: item.fontWeight || 400,
+                                    fontStyle: item.fontStyle || "normal",
+                                    color: item.color || "#0f172a",
+                                  }}
                                   onChange={(event) => {
                                     applyPagePatch(page.id, (pageItem) => ({
                                       ...pageItem,
@@ -1178,7 +1486,18 @@ export default function IdCardStudioPanel() {
                                   onBlur={() => setInlineTextEdit({ pageId: "", elementId: "" })}
                                 />
                               ) : (
-                                <span className="idcard-overlay-text">{item.text}</span>
+                                <span
+                                  className="idcard-overlay-text"
+                                  style={{
+                                    fontSize: `${item.fontSize || 20}px`,
+                                    fontFamily: item.fontFamily || "Arial",
+                                    fontWeight: item.fontWeight || 400,
+                                    fontStyle: item.fontStyle || "normal",
+                                    color: item.color || "#0f172a",
+                                  }}
+                                >
+                                  {item.text}
+                                </span>
                               )
                             ) : null}
                           </div>
@@ -1203,14 +1522,57 @@ export default function IdCardStudioPanel() {
               <span>Manual editing</span>
             </div>
             <div className="wzid-tool-row">
-              <button type="button" className={`btn btn-secondary ${activeTool === "select" ? "is-active" : ""}`} onClick={() => setActiveTool("select")} disabled={!editorEnabled}>Select</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "text" ? "is-active" : ""}`} onClick={() => setActiveTool("text")} disabled={!editorEnabled}>Text</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "image" ? "is-active" : ""}`} onClick={() => setActiveTool("image")} disabled={!editorEnabled}>Image</button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!editorEnabled || !selectedPage}
+                onClick={() => {
+                  if (!selectedPage) {
+                    return;
+                  }
+                  const element = createTextElement({
+                    x: Math.round(selectedPage.width * 0.2),
+                    y: Math.round(selectedPage.height * 0.2),
+                  });
+                  applyPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, element] }));
+                  setSelectedElementId(element.id);
+                  setInlineTextEdit({ pageId: selectedPage.id, elementId: element.id });
+                  setMessage("Text box added.");
+                }}
+              >
+                Add Text Box
+              </button>
+              <button
+                type="button"
+                className={`btn btn-secondary ${pendingPhotoSlotPageId ? "is-active" : ""}`}
+                disabled={!editorEnabled || !selectedPage}
+                onClick={() => {
+                  if (!selectedPage) {
+                    return;
+                  }
+                  const next = pendingPhotoSlotPageId === selectedPage.id ? "" : selectedPage.id;
+                  setPendingPhotoSlotPageId(next);
+                  setMessage(next ? "Click workspace to tag employee photo area." : "Employee photo tagging cancelled.");
+                }}
+              >
+                Tag Employee Photo
+              </button>
             </div>
-            <label className="imposition-field">
-              <span>Image Source</span>
-              <input type="file" accept=".png,.jpg,.jpeg" onChange={handleImageSourceUpload} disabled={!editorEnabled} />
-            </label>
+            {selectedPageEmployeePhoto ? (
+              <label className="imposition-field">
+                <span>Replace Employee Photo</span>
+                <input
+                  type="file"
+                  accept=".png,.jpg,.jpeg"
+                  onChange={(event) => {
+                    handleQuickReplaceImage(event, { pageId: selectedPage.id, elementId: selectedPageEmployeePhoto.id });
+                  }}
+                  disabled={!editorEnabled}
+                />
+              </label>
+            ) : (
+              <div className="imposition-muted-copy">Employee photo not detected. Click `Tag Employee Photo`, then click the photo area in the page.</div>
+            )}
           </section>
 
           <section className="wzid-card">
@@ -1266,7 +1628,15 @@ export default function IdCardStudioPanel() {
                 {selectedElement.type === "text" ? (
                   <>
                     <label className="imposition-field">
-                      <span>Text</span>
+                      <span>Input Name (Excel Column)</span>
+                      <input
+                        placeholder="employee_name"
+                        value={selectedElement.inputName || ""}
+                        onChange={(event) => updateSelectedElement({ inputName: event.target.value })}
+                      />
+                    </label>
+                    <label className="imposition-field">
+                      <span>Input Value</span>
                       <input value={selectedElement.text || ""} onChange={(event) => updateSelectedElement({ text: event.target.value })} />
                     </label>
                     <label className="imposition-field">
@@ -1289,10 +1659,83 @@ export default function IdCardStudioPanel() {
                   <input type="number" value={selectedElement.height} onChange={(event) => updateSelectedElement({ height: Number(event.target.value) })} />
                 </label>
                 <button type="button" className="btn btn-secondary" onClick={deleteSelectedElement}>Delete Layer</button>
+                {selectedElement.type === "image" ? (
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${selectedElement.role === "employee_photo" ? "is-active" : ""}`}
+                    onClick={() => updateSelectedElement({ role: "employee_photo" })}
+                  >
+                    Mark as Employee Photo
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div className="imposition-muted-copy">Select a layer to edit details.</div>
             )}
+          </section>
+
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Dynamic Fields</h3>
+              <span>Excel mapping</span>
+            </div>
+            {selectedPageMappedFields.length ? (
+              <div className="wzid-field-list">
+                {selectedPageMappedFields.map((entry) => (
+                  <div key={entry.id} className="wzid-field-item">
+                    <strong>{entry.inputName}</strong>
+                    <span>{entry.text}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="imposition-muted-copy">Select a text layer and set `Input Name` to map this template field.</div>
+            )}
+          </section>
+
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Bulk Data</h3>
+              <span>ID card automation</span>
+            </div>
+            <div className="imposition-muted-copy">
+              Mapped fields: {templateMappedFields.length ? templateMappedFields.join(", ") : "None"}
+            </div>
+            <label className="imposition-field">
+              <span>Import Excel</span>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExcelUpload} />
+            </label>
+            <div className="imposition-muted-copy">
+              {excelFileName ? `${excelFileName} (${excelRows.length} rows)` : "No Excel file loaded."}
+            </div>
+            <label className="imposition-field">
+              <span>Photo Column</span>
+              <select value={photoColumn} onChange={(event) => setPhotoColumn(event.target.value)} disabled={!excelColumns.length}>
+                <option value="">Select column</option>
+                {excelColumns.map((column) => (
+                  <option key={column} value={column}>{column}</option>
+                ))}
+              </select>
+            </label>
+            <label className="imposition-field">
+              <span>Select Image Folder</span>
+              <input type="file" accept=".png,.jpg,.jpeg" multiple webkitdirectory="true" directory="" onChange={handleImageFolderUpload} />
+            </label>
+            <div className="imposition-muted-copy">
+              {imageFolderName ? `Image folder: ${imageFolderName}` : "No image folder selected."}
+            </div>
+            <label className="imposition-field">
+              <span>Batch Output</span>
+              <select value={batchFormat} onChange={(event) => setBatchFormat(event.target.value)}>
+                <option value="pdf">PDF (per member)</option>
+                <option value="jpg">JPG (per page)</option>
+              </select>
+            </label>
+            <div className="wzid-tool-row">
+              <button type="button" className="btn btn-primary" onClick={exportBatch} disabled={batchExporting}>
+                {batchExporting ? "Generating..." : "Generate Batch"}
+              </button>
+            </div>
           </section>
 
           <section className="wzid-card">
