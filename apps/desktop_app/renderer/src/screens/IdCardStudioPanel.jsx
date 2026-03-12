@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import JSZip from "jszip";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -83,6 +83,23 @@ function createImageElement({ x, y, imageDataUrl }) {
     width: 170,
     height: 210,
     imageDataUrl,
+  };
+}
+
+function createBlankPage({ label = "Blank Page", width = 720, height = 1040 }) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  return {
+    id: crypto.randomUUID(),
+    label,
+    width,
+    height,
+    backgroundDataUrl: canvas.toDataURL("image/png", 1),
+    elements: [],
   };
 }
 
@@ -178,9 +195,11 @@ export default function IdCardStudioPanel() {
   const [dragPageId, setDragPageId] = useState("");
   const [dragState, setDragState] = useState(null);
   const [zoom, setZoom] = useState(100);
+  const [editorEnabled, setEditorEnabled] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [pageMenu, setPageMenu] = useState({ open: false, x: 0, y: 0, pageId: "" });
 
   const pageRefs = useRef(new Map());
 
@@ -193,6 +212,17 @@ export default function IdCardStudioPanel() {
     () => selectedPage?.elements?.find((item) => item.id === selectedElementId) || null,
     [selectedElementId, selectedPage]
   );
+
+  useEffect(() => {
+    if (!pageMenu.open) {
+      return undefined;
+    }
+    function handleClose() {
+      setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+    }
+    window.addEventListener("click", handleClose);
+    return () => window.removeEventListener("click", handleClose);
+  }, [pageMenu.open]);
 
   function applyPagePatch(pageId, patcher) {
     setPages((current) => current.map((page) => (page.id === pageId ? patcher(page) : page)));
@@ -233,8 +263,9 @@ export default function IdCardStudioPanel() {
       setPages(nextPages);
       setSelectedPageId(nextPages[0].id);
       setSelectedElementId("");
+      setEditorEnabled(false);
       setUploadName(fileName);
-      setMessage(`Loaded ${nextPages.length} page(s). You can now edit manually.`);
+      setMessage(`Loaded ${nextPages.length} page(s). Enable Editor Mode to edit text/image layers.`);
     } catch (uploadError) {
       setError(String(uploadError?.message || "Unable to load design preview."));
     }
@@ -302,6 +333,9 @@ export default function IdCardStudioPanel() {
       return;
     }
     setSelectedPageId(pageId);
+    if (!editorEnabled) {
+      return;
+    }
 
     const point = getPagePoint(pageId, event);
     if (!point) {
@@ -402,6 +436,31 @@ export default function IdCardStudioPanel() {
     setDragState(null);
   }
 
+  function openPageContextMenu(pageId, event) {
+    event.preventDefault();
+    setSelectedPageId(pageId);
+    setPageMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      pageId,
+    });
+  }
+
+  function closeCurrentPdf() {
+    setPages([]);
+    setSelectedPageId("");
+    setSelectedElementId("");
+    setPendingImageDataUrl("");
+    setUploadName("");
+    setDragPageId("");
+    setDragState(null);
+    setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+    setEditorEnabled(false);
+    setMessage("Current PDF closed.");
+    setError("");
+  }
+
   function updateSelectedElement(patch) {
     if (!selectedPage || !selectedElement) {
       return;
@@ -451,6 +510,57 @@ export default function IdCardStudioPanel() {
     setSelectedPageId(copy.id);
     setSelectedElementId("");
     setMessage("Page duplicated.");
+    setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+  }
+
+  function addBlankPageAfter(pageId) {
+    const referencePage = pages.find((item) => item.id === pageId) || pages[pages.length - 1] || null;
+    const blank = createBlankPage({
+      label: `Page ${pages.length + 1}`,
+      width: referencePage?.width || 720,
+      height: referencePage?.height || 1040,
+    });
+    setPages((current) => {
+      if (!current.length) {
+        return [blank];
+      }
+      const sourceIndex = current.findIndex((item) => item.id === pageId);
+      if (sourceIndex < 0) {
+        return [...current, blank];
+      }
+      const next = [...current];
+      next.splice(sourceIndex + 1, 0, blank);
+      return next;
+    });
+    setSelectedPageId(blank.id);
+    setSelectedElementId("");
+    setMessage("Blank page added.");
+    setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+  }
+
+  async function replacePageBackground(event) {
+    try {
+      if (!selectedPage) {
+        return;
+      }
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      const image = await loadImage(dataUrl);
+      applyPagePatch(selectedPage.id, (page) => ({
+        ...page,
+        width: image.width,
+        height: image.height,
+        backgroundDataUrl: dataUrl,
+      }));
+      setSelectedElementId("");
+      setMessage("Page background replaced.");
+      setError("");
+    } catch (replaceError) {
+      setError(String(replaceError?.message || "Unable to replace page image."));
+    }
   }
 
   function reorderPages(fromId, toId) {
@@ -592,6 +702,21 @@ export default function IdCardStudioPanel() {
               <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleDesignUpload} />
               <span>{uploadName ? `Loaded: ${uploadName}` : "Upload PDF / Image"}</span>
             </label>
+            <div className="wzid-toolbar-actions">
+              <button
+                type="button"
+                className={`btn ${editorEnabled ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => {
+                  setEditorEnabled((current) => !current);
+                  setMessage((current) => (editorEnabled ? "Editor mode disabled." : "Editor mode enabled."));
+                }}
+              >
+                {editorEnabled ? "Disable Editor Mode" : "Enable Editor Mode"}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={closeCurrentPdf} disabled={!pages.length}>
+                Close Current PDF
+              </button>
+            </div>
             <div className="wzid-zoom-group">
               {ZOOM_OPTIONS.map((value) => (
                 <button
@@ -615,6 +740,7 @@ export default function IdCardStudioPanel() {
                     <article
                       key={page.id}
                       className={`wzid-page-canvas-shell ${selectedPageId === page.id ? "active" : ""}`}
+                      onContextMenu={(event) => openPageContextMenu(page.id, event)}
                     >
                       <header className="wzid-page-canvas-head">{page.label}</header>
                       <div
@@ -630,7 +756,7 @@ export default function IdCardStudioPanel() {
                         tabIndex={0}
                         aria-label={`${page.label} editor workspace`}
                       >
-                        {overlays.map((item) => (
+                        {editorEnabled ? overlays.map((item) => (
                           <button
                             key={item.id}
                             type="button"
@@ -644,13 +770,16 @@ export default function IdCardStudioPanel() {
                             onMouseDown={(event) => startElementDrag(page.id, event, item.id)}
                             onClick={(event) => {
                               event.stopPropagation();
+                              if (!editorEnabled) {
+                                return;
+                              }
                               setSelectedPageId(page.id);
                               setSelectedElementId(item.id);
                             }}
                           >
                             {item.type === "text" ? item.text : "Image"}
                           </button>
-                        ))}
+                        )) : null}
                       </div>
                     </article>
                   );
@@ -671,13 +800,13 @@ export default function IdCardStudioPanel() {
               <span>Manual editing</span>
             </div>
             <div className="wzid-tool-row">
-              <button type="button" className={`btn btn-secondary ${activeTool === "select" ? "is-active" : ""}`} onClick={() => setActiveTool("select")}>Select</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "text" ? "is-active" : ""}`} onClick={() => setActiveTool("text")}>Text</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "image" ? "is-active" : ""}`} onClick={() => setActiveTool("image")}>Image</button>
+              <button type="button" className={`btn btn-secondary ${activeTool === "select" ? "is-active" : ""}`} onClick={() => setActiveTool("select")} disabled={!editorEnabled}>Select</button>
+              <button type="button" className={`btn btn-secondary ${activeTool === "text" ? "is-active" : ""}`} onClick={() => setActiveTool("text")} disabled={!editorEnabled}>Text</button>
+              <button type="button" className={`btn btn-secondary ${activeTool === "image" ? "is-active" : ""}`} onClick={() => setActiveTool("image")} disabled={!editorEnabled}>Image</button>
             </div>
             <label className="imposition-field">
               <span>Image Source</span>
-              <input type="file" accept=".png,.jpg,.jpeg" onChange={handleImageSourceUpload} />
+              <input type="file" accept=".png,.jpg,.jpeg" onChange={handleImageSourceUpload} disabled={!editorEnabled} />
             </label>
           </section>
 
@@ -685,6 +814,11 @@ export default function IdCardStudioPanel() {
             <div className="imposition-panel-heading">
               <h3>Pages</h3>
               <span>Duplicate and reorder</span>
+            </div>
+            <div className="wzid-tool-row">
+              <button type="button" className="btn btn-secondary" onClick={() => addBlankPageAfter(selectedPageId || pages[pages.length - 1]?.id || "")} disabled={!pages.length}>
+                New Blank Page
+              </button>
             </div>
             <div className="wzid-page-list">
               {pages.length === 0 ? (
@@ -695,6 +829,7 @@ export default function IdCardStudioPanel() {
                     key={page.id}
                     className={`wzid-page-item ${selectedPageId === page.id ? "active" : ""}`}
                     draggable
+                    onContextMenu={(event) => openPageContextMenu(page.id, event)}
                     onDragStart={() => setDragPageId(page.id)}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={() => {
@@ -717,6 +852,12 @@ export default function IdCardStudioPanel() {
               <h3>Element Editor</h3>
               <span>Text and image properties</span>
             </div>
+            {selectedPage ? (
+              <label className="imposition-field">
+                <span>Replace Page Image</span>
+                <input type="file" accept=".png,.jpg,.jpeg" onChange={replacePageBackground} />
+              </label>
+            ) : null}
             {selectedElement ? (
               <div className="imposition-form-grid imposition-form-grid-tight">
                 {selectedElement.type === "text" ? (
@@ -763,6 +904,20 @@ export default function IdCardStudioPanel() {
           </section>
         </aside>
       </div>
+
+      {pageMenu.open ? (
+        <div className="wzid-context-menu" style={{ left: `${pageMenu.x}px`, top: `${pageMenu.y}px` }} role="menu">
+          <button type="button" className="wzid-context-btn" onClick={() => duplicatePage(pageMenu.pageId)}>
+            Duplicate Page
+          </button>
+          <button type="button" className="wzid-context-btn" onClick={() => addBlankPageAfter(pageMenu.pageId)}>
+            Add Blank Page
+          </button>
+          <button type="button" className="wzid-context-btn is-danger" onClick={closeCurrentPdf}>
+            Close Current PDF
+          </button>
+        </div>
+      ) : null}
 
       {message ? <div className="alert alert-info mt-3">{message}</div> : null}
       {error ? <div className="alert alert-danger mt-3">{error}</div> : null}
