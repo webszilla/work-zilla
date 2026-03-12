@@ -104,6 +104,168 @@ function createBlankPage({ label = "Blank Page", width = 720, height = 1040 }) {
   };
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function sampleAverageColor(ctx, x, y, width, height) {
+  const safeX = Math.floor(Math.max(0, x));
+  const safeY = Math.floor(Math.max(0, y));
+  const safeWidth = Math.floor(Math.max(1, width));
+  const safeHeight = Math.floor(Math.max(1, height));
+  try {
+    const imageData = ctx.getImageData(safeX, safeY, safeWidth, safeHeight).data;
+    if (!imageData.length) {
+      return "#ffffff";
+    }
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    for (let i = 0; i < imageData.length; i += 4) {
+      r += imageData[i];
+      g += imageData[i + 1];
+      b += imageData[i + 2];
+      count += 1;
+    }
+    if (!count) {
+      return "#ffffff";
+    }
+    return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
+  } catch (_error) {
+    return "#ffffff";
+  }
+}
+
+function createCoverCropDataUrl(sourceCanvas, rect) {
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+  const x = Math.max(0, Math.floor(rect.x));
+  const y = Math.max(0, Math.floor(rect.y));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(sourceCanvas, x, y, width, height, 0, 0, width, height);
+  return canvas.toDataURL("image/png", 1);
+}
+
+async function detectPdfTextElements(page, viewport, ctx, pageWidth, pageHeight) {
+  const content = await page.getTextContent();
+  const elements = [];
+  for (const item of content.items || []) {
+    const textValue = String(item?.str || "").trim();
+    if (!textValue) {
+      continue;
+    }
+    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const fontSize = clamp(Math.hypot(tx[2], tx[3]), 10, 72);
+    const x = clamp(Math.round(tx[4]), 0, Math.max(0, pageWidth - 2));
+    const y = clamp(Math.round(tx[5] - fontSize), 0, Math.max(0, pageHeight - 2));
+    const width = clamp(Math.round((item.width || textValue.length * fontSize * 0.5) * viewport.scale), 40, pageWidth - x);
+    const height = clamp(Math.round(fontSize * 1.35), 18, pageHeight - y);
+    const bgColor = sampleAverageColor(ctx, x, y, width, height);
+    elements.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x,
+      y,
+      width,
+      height,
+      text: textValue,
+      fontSize: Math.round(fontSize),
+      color: "#0f172a",
+      backgroundColor: bgColor,
+      source: "pdf",
+    });
+  }
+  return elements;
+}
+
+function detectPrimaryPhotoRect(canvas) {
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  if (!ctx || width < 120 || height < 120) {
+    return null;
+  }
+
+  const step = 2;
+  const sw = Math.max(1, Math.floor(width / step));
+  const sh = Math.max(1, Math.floor(height / step));
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  const integral = new Uint32Array((sw + 1) * (sh + 1));
+
+  for (let y = 1; y <= sh; y += 1) {
+    let rowSum = 0;
+    for (let x = 1; x <= sw; x += 1) {
+      const px = (x - 1) * step;
+      const py = (y - 1) * step;
+      const index = (py * width + px) * 4;
+      const r = pixels[index];
+      const g = pixels[index + 1];
+      const b = pixels[index + 2];
+      const alpha = pixels[index + 3];
+      const isNonWhite = alpha > 12 && !(r > 244 && g > 244 && b > 244);
+      rowSum += isNonWhite ? 1 : 0;
+      integral[y * (sw + 1) + x] = integral[(y - 1) * (sw + 1) + x] + rowSum;
+    }
+  }
+
+  function sumRect(x0, y0, w0, h0) {
+    const x1 = x0 + w0;
+    const y1 = y0 + h0;
+    return integral[y1 * (sw + 1) + x1]
+      - integral[y0 * (sw + 1) + x1]
+      - integral[y1 * (sw + 1) + x0]
+      + integral[y0 * (sw + 1) + x0];
+  }
+
+  let best = null;
+  const candidateWidths = [0.14, 0.18, 0.22, 0.26, 0.3].map((f) => Math.max(24, Math.floor(sw * f)));
+
+  for (const cw of candidateWidths) {
+    for (const ratio of [1.2, 1.35, 1.5]) {
+      const ch = Math.max(24, Math.floor(cw * ratio));
+      const yStart = Math.floor(sh * 0.03);
+      const yEnd = Math.floor(sh * 0.62);
+      const xEnd = Math.max(1, sw - cw - 1);
+      for (let y = yStart; y <= yEnd; y += Math.max(2, Math.floor(sh * 0.03))) {
+        for (let x = 1; x <= xEnd; x += Math.max(2, Math.floor(sw * 0.03))) {
+          const area = cw * ch;
+          const filled = sumRect(x, y, cw, ch);
+          const density = filled / area;
+          if (density < 0.32) {
+            continue;
+          }
+          const centerPenalty = Math.abs((x + cw / 2) - sw / 2) / sw;
+          const score = density - centerPenalty * 0.12;
+          if (!best || score > best.score) {
+            best = { score, x, y, width: cw, height: ch };
+          }
+        }
+      }
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+  return {
+    x: clamp(Math.floor(best.x * step), 0, width - 1),
+    y: clamp(Math.floor(best.y * step), 0, height - 1),
+    width: clamp(Math.floor(best.width * step), 24, width),
+    height: clamp(Math.floor(best.height * step), 24, height),
+  };
+}
+
+function clonePagesSnapshot(items) {
+  return (items || []).map((page) => ({
+    ...page,
+    elements: (page.elements || []).map((item) => ({ ...item })),
+  }));
+}
+
 async function renderPdfPreviewPages(file, maxPages = 2) {
   const buffer = await file.arrayBuffer();
   await ensurePdfWorkerReady();
@@ -142,6 +304,19 @@ async function renderPdfPreviewPages(file, maxPages = 2) {
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
     await page.render({ canvasContext: context, viewport }).promise;
+    const textElements = await detectPdfTextElements(page, viewport, context, canvas.width, canvas.height);
+    const imageRect = detectPrimaryPhotoRect(canvas);
+    const imageElements = imageRect ? [{
+      id: crypto.randomUUID(),
+      type: "image",
+      x: imageRect.x,
+      y: imageRect.y,
+      width: imageRect.width,
+      height: imageRect.height,
+      imageDataUrl: createCoverCropDataUrl(canvas, imageRect),
+      fit: "cover",
+      source: "pdf",
+    }] : [];
 
     pages.push({
       id: crypto.randomUUID(),
@@ -149,7 +324,7 @@ async function renderPdfPreviewPages(file, maxPages = 2) {
       width: canvas.width,
       height: canvas.height,
       backgroundDataUrl: canvas.toDataURL("image/png", 1),
-      elements: [],
+      elements: [...imageElements, ...textElements],
     });
   }
 
@@ -232,10 +407,15 @@ export default function IdCardStudioPanel() {
   const [pageMenu, setPageMenu] = useState({ open: false, x: 0, y: 0, pageId: "" });
   const [inlineTextEdit, setInlineTextEdit] = useState({ pageId: "", elementId: "" });
   const [pendingImagePlacement, setPendingImagePlacement] = useState(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   const pageRefs = useRef(new Map());
   const quickReplaceInputRef = useRef(null);
   const [quickReplaceTarget, setQuickReplaceTarget] = useState({ pageId: "", elementId: "" });
+  const historyPastRef = useRef([]);
+  const historyFutureRef = useRef([]);
+  const ignoreHistoryRef = useRef(false);
+  const previousPagesRef = useRef(pages);
 
   const selectedPage = useMemo(
     () => pages.find((item) => item.id === selectedPageId) || null,
@@ -257,6 +437,54 @@ export default function IdCardStudioPanel() {
     window.addEventListener("click", handleClose);
     return () => window.removeEventListener("click", handleClose);
   }, [pageMenu.open]);
+
+  useEffect(() => {
+    if (ignoreHistoryRef.current) {
+      ignoreHistoryRef.current = false;
+      previousPagesRef.current = clonePagesSnapshot(pages);
+      return;
+    }
+    if (previousPagesRef.current !== pages) {
+      historyPastRef.current.push(clonePagesSnapshot(previousPagesRef.current));
+      if (historyPastRef.current.length > 80) {
+        historyPastRef.current.shift();
+      }
+      historyFutureRef.current = [];
+      previousPagesRef.current = clonePagesSnapshot(pages);
+      setHistoryVersion((value) => value + 1);
+    }
+  }, [pages]);
+
+  const canUndo = historyPastRef.current.length > 0;
+  const canRedo = historyFutureRef.current.length > 0;
+
+  function performUndo() {
+    if (!historyPastRef.current.length) {
+      return;
+    }
+    const previous = historyPastRef.current.pop();
+    historyFutureRef.current.push(clonePagesSnapshot(pages));
+    ignoreHistoryRef.current = true;
+    setPages(clonePagesSnapshot(previous));
+    setSelectedElementId("");
+    setInlineTextEdit({ pageId: "", elementId: "" });
+    setMessage("Undo applied.");
+    setHistoryVersion((value) => value + 1);
+  }
+
+  function performRedo() {
+    if (!historyFutureRef.current.length) {
+      return;
+    }
+    const next = historyFutureRef.current.pop();
+    historyPastRef.current.push(clonePagesSnapshot(pages));
+    ignoreHistoryRef.current = true;
+    setPages(clonePagesSnapshot(next));
+    setSelectedElementId("");
+    setInlineTextEdit({ pageId: "", elementId: "" });
+    setMessage("Redo applied.");
+    setHistoryVersion((value) => value + 1);
+  }
 
   function applyPagePatch(pageId, patcher) {
     setPages((current) => current.map((page) => (page.id === pageId ? patcher(page) : page)));
@@ -295,12 +523,16 @@ export default function IdCardStudioPanel() {
       }
 
       setPages(nextPages);
+      historyPastRef.current = [];
+      historyFutureRef.current = [];
+      previousPagesRef.current = nextPages;
       setSelectedPageId(nextPages[0].id);
       setSelectedElementId("");
       setEditorEnabled(false);
       setPendingImagePlacement(null);
       setUploadName(fileName);
       setMessage(`Loaded ${nextPages.length} page(s). Enable Editor Mode to edit text/image layers.`);
+      setHistoryVersion((value) => value + 1);
     } catch (uploadError) {
       setError(String(uploadError?.message || "Unable to load design preview."));
     }
@@ -491,6 +723,9 @@ export default function IdCardStudioPanel() {
 
   function closeCurrentPdf() {
     setPages([]);
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    previousPagesRef.current = [];
     setSelectedPageId("");
     setSelectedElementId("");
     setPendingImageDataUrl("");
@@ -709,8 +944,12 @@ export default function IdCardStudioPanel() {
         }
       }
       if (element.type === "text") {
+        if (element.backgroundColor) {
+          ctx.fillStyle = element.backgroundColor;
+          ctx.fillRect(element.x, element.y, element.width || 260, element.height || 40);
+        }
         ctx.fillStyle = element.color || "#0f172a";
-        ctx.font = `${element.fontSize || 20}px Arial`;
+        ctx.font = `${element.fontSize || 20}px ${element.fontFamily || "Arial"}`;
         ctx.textBaseline = "top";
         wrapText(
           ctx,
@@ -823,6 +1062,12 @@ export default function IdCardStudioPanel() {
               <span>{uploadName ? `Loaded: ${uploadName}` : "Upload PDF / Image"}</span>
             </label>
             <div className="wzid-toolbar-actions">
+              <button type="button" className="btn btn-secondary" onClick={performUndo} disabled={!canUndo || !pages.length}>
+                Undo
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={performRedo} disabled={!canRedo || !pages.length}>
+                Redo
+              </button>
               <button
                 type="button"
                 className={`btn ${editorEnabled ? "btn-primary" : "btn-secondary"}`}
@@ -894,6 +1139,9 @@ export default function IdCardStudioPanel() {
                               }
                               setSelectedPageId(page.id);
                               setSelectedElementId(item.id);
+                              if (item.type === "text" && activeTool === "select") {
+                                setInlineTextEdit({ pageId: page.id, elementId: item.id });
+                              }
                             }}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
