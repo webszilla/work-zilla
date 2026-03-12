@@ -212,22 +212,19 @@ async function finalizeDownloadedInstaller(tempPath, targetPath) {
 function detectInstallerName(productKey, downloadUrl) {
   const platform = getPlatformKey();
   const defaultSuffix = platform === "windows" ? ".exe" : ".dmg";
+  const meta = SUPPORTED_PRODUCTS[productKey] || {};
+  const preferredBase = sanitizeFilename(meta.packageBasename?.[platform] || `${productKey}-installer`);
+  let suffix = defaultSuffix;
   try {
     const parsed = new URL(downloadUrl);
-    const base = path.basename(parsed.pathname) || "";
-    if (base) {
-      const safe = sanitizeFilename(base);
-      if (path.extname(safe)) {
-        return safe;
-      }
-      return `${safe}${defaultSuffix}`;
+    const ext = path.extname(path.basename(parsed.pathname) || "");
+    if (ext) {
+      suffix = ext;
     }
   } catch (_err) {
     // no-op
   }
-  const meta = SUPPORTED_PRODUCTS[productKey] || {};
-  const preferredBase = meta.packageBasename?.[platform] || productKey;
-  return `${preferredBase}-${Date.now()}${defaultSuffix}`;
+  return `${preferredBase}${suffix}`;
 }
 
 function extractVersionFromText(value) {
