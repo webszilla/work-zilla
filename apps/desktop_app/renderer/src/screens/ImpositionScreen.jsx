@@ -21,7 +21,7 @@ const MENU_ITEMS = [
   { id: "sheet", label: "Sheet Setup", icon: "▭" },
   { id: "templates", label: "Templates", icon: "◩" },
   { id: "data-import", label: "Data Import", icon: "⇪" },
-  { id: "id-card-studio", label: "ID Card Studio", icon: "🪪" },
+  { id: "id-card-studio", label: "ID Card Studio", icon: "ID" },
   { id: "qr", label: "QR / Barcode", icon: "⌘" },
   { id: "serial", label: "Serial Generator", icon: "#" },
   { id: "hot-folder", label: "Hot Folder", icon: "↓" },
@@ -548,8 +548,8 @@ export default function ImpositionScreen({ onBack }) {
     }
     if (activeMenu === "id-card-studio") {
       return {
-        title: "ID Card Studio",
-        subtitle: "Map template fields with Excel columns and generate member cards in batch.",
+        title: "Card UPS Workspace",
+        subtitle: "Manual ID card PDF editing with page arrange, duplicate, text/image replace, and export.",
         itemLabel: "ID Card",
       };
     }

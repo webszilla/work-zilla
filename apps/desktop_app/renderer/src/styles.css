@@ -2150,6 +2150,127 @@ input::placeholder {
   margin-bottom: 10px;
 }
 
+.idcard-panel-root {
+  padding: 16px;
+}
+
+.idcard-studio-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
+  gap: 14px;
+}
+
+.idcard-studio-center {
+  border-radius: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  background: rgba(5, 10, 21, 0.45);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.idcard-upload-row {
+  display: grid;
+}
+
+.idcard-manual-canvas {
+  position: relative;
+  width: 100%;
+  min-height: 560px;
+  border-radius: 16px;
+  border: 1px solid rgba(14, 165, 233, 0.4);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-color: rgba(2, 6, 23, 0.72);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.idcard-empty-state {
+  min-height: 560px;
+  border-radius: 16px;
+  border: 1px dashed rgba(96, 165, 250, 0.35);
+  display: grid;
+  place-items: center;
+  color: #bfdbfe;
+  font-weight: 600;
+  background: rgba(2, 6, 23, 0.5);
+}
+
+.idcard-studio-right {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.idcard-side-card {
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(7, 14, 27, 0.72);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.idcard-side-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.idcard-side-head strong {
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.idcard-side-head span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.idcard-tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn.btn-secondary.is-active {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(16, 185, 129, 0.2));
+  border-color: rgba(14, 165, 233, 0.44);
+  color: #ecfeff;
+}
+
+.idcard-page-list {
+  display: grid;
+  gap: 8px;
+}
+
+.idcard-page-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  background: rgba(15, 23, 42, 0.58);
+  padding: 8px;
+}
+
+.idcard-page-item.active {
+  border-color: rgba(14, 165, 233, 0.52);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.idcard-page-select {
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: #e2e8f0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 :root[data-theme="light"] .imposition-app-shell {
   background:
     radial-gradient(circle at top left, rgba(22, 163, 74, 0.08), transparent 24%),
@@ -2258,6 +2379,23 @@ input::placeholder {
   border-color: rgba(22, 163, 74, 0.16);
 }
 
+:root[data-theme="light"] .idcard-studio-center,
+:root[data-theme="light"] .idcard-side-card {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(22, 163, 74, 0.16);
+}
+
+:root[data-theme="light"] .idcard-empty-state,
+:root[data-theme="light"] .idcard-page-item {
+  background: rgba(22, 163, 74, 0.05);
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .idcard-page-select,
+:root[data-theme="light"] .idcard-side-head strong {
+  color: #0f172a;
+}
+
 :root[data-theme="light"] .idcard-step-card strong,
 :root[data-theme="light"] .idcard-folder-picker span {
   color: #15803d;
@@ -2342,7 +2480,8 @@ input::placeholder {
   .imposition-serial-grid,
   .imposition-kpi-strip,
   .idcard-step-grid,
-  .idcard-editor-grid {
+  .idcard-editor-grid,
+  .idcard-studio-shell {
     grid-template-columns: 1fr;
   }
 
