@@ -9,6 +9,7 @@ import {
   optimizeSheetLayout,
   resolveSheet,
 } from "../lib/impositionEngine.js";
+import IdCardStudioPanel from "./IdCardStudioPanel.jsx";
 
 const MENU_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -20,6 +21,7 @@ const MENU_ITEMS = [
   { id: "sheet", label: "Sheet Setup", icon: "▭" },
   { id: "templates", label: "Templates", icon: "◩" },
   { id: "data-import", label: "Data Import", icon: "⇪" },
+  { id: "id-card-studio", label: "ID Card Studio", icon: "🪪" },
   { id: "qr", label: "QR / Barcode", icon: "⌘" },
   { id: "serial", label: "Serial Generator", icon: "#" },
   { id: "hot-folder", label: "Hot Folder", icon: "↓" },
@@ -392,6 +394,7 @@ export default function ImpositionScreen({ onBack }) {
   const [policy, setPolicy] = useState(null);
   const [exportQueue, setExportQueue] = useState([]);
   const [designFile, setDesignFile] = useState(null);
+  const isIdCardStudio = activeMenu === "id-card-studio";
 
   useEffect(() => {
     let mounted = true;
@@ -485,6 +488,9 @@ export default function ImpositionScreen({ onBack }) {
   );
 
   const currentLayout = useMemo(() => {
+    if (activeMenu === "id-card-studio") {
+      return businessCardLayout;
+    }
     if (activeMenu === "book") {
       return bookPlan.layout;
     }
@@ -498,6 +504,9 @@ export default function ImpositionScreen({ onBack }) {
   }, [activeMenu, bookPlan, businessCardLayout, labelLayout, stickerLayout]);
 
   const currentJobName = useMemo(() => {
+    if (activeMenu === "id-card-studio") {
+      return "ID Card Batch";
+    }
     if (activeMenu === "book") {
       return book.title;
     }
@@ -535,6 +544,13 @@ export default function ImpositionScreen({ onBack }) {
         title: "Label UPS Workspace",
         subtitle: "Roll label or sheet label optimization with compact production settings.",
         itemLabel: "Label",
+      };
+    }
+    if (activeMenu === "id-card-studio") {
+      return {
+        title: "ID Card Studio",
+        subtitle: "Map template fields with Excel columns and generate member cards in batch.",
+        itemLabel: "ID Card",
       };
     }
     return {
@@ -1003,6 +1019,9 @@ export default function ImpositionScreen({ onBack }) {
     if (activeMenu === "data-import") {
       return renderDataImport();
     }
+    if (activeMenu === "id-card-studio") {
+      return <IdCardStudioPanel />;
+    }
     if (activeMenu === "qr") {
       return renderQr();
     }
@@ -1096,105 +1115,117 @@ export default function ImpositionScreen({ onBack }) {
             <SectionNote>{currentModuleMeta.subtitle}</SectionNote>
           </div>
           <div className="imposition-toolbar-actions">
-            <div className="imposition-zoom-group">
-              {ZOOM_OPTIONS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`imposition-toolbar-chip ${zoom === value ? "active" : ""}`}
-                  onClick={() => setZoom(value)}
-                >
-                  {value === 140 ? "Fit" : `${value}%`}
+            {!isIdCardStudio ? (
+              <>
+                <div className="imposition-zoom-group">
+                  {ZOOM_OPTIONS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`imposition-toolbar-chip ${zoom === value ? "active" : ""}`}
+                      onClick={() => setZoom(value)}
+                    >
+                      {value === 140 ? "Fit" : `${value}%`}
+                    </button>
+                  ))}
+                </div>
+                <SelectInput
+                  label="Format"
+                  value={exportOptions.format}
+                  onChange={(value) => setExportOptions((current) => ({ ...current, format: value }))}
+                  options={[
+                    { value: "pdf", label: "PDF" },
+                    { value: "png", label: "PNG" },
+                    { value: "tiff", label: "TIFF" },
+                  ]}
+                />
+                <SelectInput
+                  label="DPI"
+                  value={String(exportOptions.dpi)}
+                  onChange={(value) => setExportOptions((current) => ({ ...current, dpi: Number(value) }))}
+                  options={[
+                    { value: "300", label: "300 DPI" },
+                    { value: "600", label: "600 DPI" },
+                  ]}
+                />
+                <button type="button" className="btn btn-primary" onClick={queueExport}>
+                  Export {exportOptions.format.toUpperCase()}
                 </button>
-              ))}
-            </div>
-            <SelectInput
-              label="Format"
-              value={exportOptions.format}
-              onChange={(value) => setExportOptions((current) => ({ ...current, format: value }))}
-              options={[
-                { value: "pdf", label: "PDF" },
-                { value: "png", label: "PNG" },
-                { value: "tiff", label: "TIFF" },
-              ]}
-            />
-            <SelectInput
-              label="DPI"
-              value={String(exportOptions.dpi)}
-              onChange={(value) => setExportOptions((current) => ({ ...current, dpi: Number(value) }))}
-              options={[
-                { value: "300", label: "300 DPI" },
-                { value: "600", label: "600 DPI" },
-              ]}
-            />
-            <button type="button" className="btn btn-primary" onClick={queueExport}>
-              Export {exportOptions.format.toUpperCase()}
-            </button>
+              </>
+            ) : null}
           </div>
         </header>
 
         <div className="imposition-main-grid">
-          <div className="imposition-canvas-column">
-            {renderCanvasSummary()}
-            <CanvasPreview layout={currentLayout} bookPlan={activeMenu === "book" ? bookPlan : null} zoom={zoom} />
-            <div className="imposition-canvas-footer">
-              <span>Sheet Preview + Auto Arranged Items Grid</span>
-              <span>{activeSheet.label} | {currentLayout.summary.itemCount} UPS | {currentLayout.summary.sheetCount} sheets</span>
+          {!isIdCardStudio ? (
+            <div className="imposition-canvas-column">
+              {renderCanvasSummary()}
+              <CanvasPreview layout={currentLayout} bookPlan={activeMenu === "book" ? bookPlan : null} zoom={zoom} />
+              <div className="imposition-canvas-footer">
+                <span>Sheet Preview + Auto Arranged Items Grid</span>
+                <span>{activeSheet.label} | {currentLayout.summary.itemCount} UPS | {currentLayout.summary.sheetCount} sheets</span>
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="imposition-inspector-column">
-            {renderArtworkPanel()}
-            {renderSheetSetup()}
-            {renderActiveSettingsPanel()}
-            <ResultSummary
-              title="2. Auto UPS Result"
-              layout={currentLayout}
-              suffix={`${currentModuleMeta.itemLabel} fit on ${activeSheet.label}`}
-            />
+            {!isIdCardStudio ? (
+              <>
+                {renderArtworkPanel()}
+                {renderSheetSetup()}
+                {renderActiveSettingsPanel()}
+                <ResultSummary
+                  title="2. Auto UPS Result"
+                  layout={currentLayout}
+                  suffix={`${currentModuleMeta.itemLabel} fit on ${activeSheet.label}`}
+                />
+              </>
+            ) : null}
             {renderUtilityPanel()}
-            <section className="imposition-panel">
-              <div className="imposition-panel-heading">
-                <h3>3. Export</h3>
-                <span>PDF / PNG / TIFF</span>
-              </div>
-              <label className="imposition-check">
-                <input
-                  type="checkbox"
-                  checked={exportOptions.cropMarks}
-                  onChange={(event) => setExportOptions((current) => ({ ...current, cropMarks: event.target.checked }))}
-                />
-                <span>Crop marks</span>
-              </label>
-              <label className="imposition-check">
-                <input
-                  type="checkbox"
-                  checked={exportOptions.bleedMarks}
-                  onChange={(event) => setExportOptions((current) => ({ ...current, bleedMarks: event.target.checked }))}
-                />
-                <span>Bleed marks</span>
-              </label>
-              <label className="imposition-check">
-                <input
-                  type="checkbox"
-                  checked={exportOptions.registrationMarks}
-                  onChange={(event) => setExportOptions((current) => ({ ...current, registrationMarks: event.target.checked }))}
-                />
-                <span>Registration marks</span>
-              </label>
-              <div className="imposition-export-queue">
-                {exportQueue.length === 0 ? (
-                  <div className="imposition-muted-copy">No export jobs queued yet.</div>
-                ) : (
-                  exportQueue.map((job) => (
-                    <article key={job.id} className="imposition-export-card">
-                      <strong>{job.jobName}</strong>
-                      <span>{job.format} | {job.dpi} DPI</span>
-                      <span>{job.sheetCount} sheets | est. {job.estimatedMb} MB</span>
-                    </article>
-                  ))
-                )}
-              </div>
-            </section>
+            {!isIdCardStudio ? (
+              <section className="imposition-panel">
+                <div className="imposition-panel-heading">
+                  <h3>3. Export</h3>
+                  <span>PDF / PNG / TIFF</span>
+                </div>
+                <label className="imposition-check">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions.cropMarks}
+                    onChange={(event) => setExportOptions((current) => ({ ...current, cropMarks: event.target.checked }))}
+                  />
+                  <span>Crop marks</span>
+                </label>
+                <label className="imposition-check">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions.bleedMarks}
+                    onChange={(event) => setExportOptions((current) => ({ ...current, bleedMarks: event.target.checked }))}
+                  />
+                  <span>Bleed marks</span>
+                </label>
+                <label className="imposition-check">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions.registrationMarks}
+                    onChange={(event) => setExportOptions((current) => ({ ...current, registrationMarks: event.target.checked }))}
+                  />
+                  <span>Registration marks</span>
+                </label>
+                <div className="imposition-export-queue">
+                  {exportQueue.length === 0 ? (
+                    <div className="imposition-muted-copy">No export jobs queued yet.</div>
+                  ) : (
+                    exportQueue.map((job) => (
+                      <article key={job.id} className="imposition-export-card">
+                        <strong>{job.jobName}</strong>
+                        <span>{job.format} | {job.dpi} DPI</span>
+                        <span>{job.sheetCount} sheets | est. {job.estimatedMb} MB</span>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
       </section>

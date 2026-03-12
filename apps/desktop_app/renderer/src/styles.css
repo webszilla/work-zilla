@@ -2024,6 +2024,132 @@ input::placeholder {
   margin-top: 14px;
 }
 
+.idcard-step-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.idcard-step-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.idcard-step-card strong {
+  color: #c7d2fe;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.idcard-step-card span {
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.idcard-step-card small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.idcard-step-card input[type="file"] {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  background: rgba(8, 15, 29, 0.9);
+  color: #dbeafe;
+  padding: 10px;
+}
+
+.idcard-folder-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.idcard-folder-picker span {
+  color: #bfdbfe;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.idcard-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.idcard-canvas-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.idcard-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-color: rgba(2, 6, 23, 0.55);
+  cursor: crosshair;
+  overflow: hidden;
+}
+
+.idcard-overlay {
+  position: absolute;
+  border: 1px dashed rgba(52, 211, 153, 0.9);
+  background: rgba(16, 185, 129, 0.18);
+  color: #d1fae5;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.7);
+}
+
+.idcard-overlay.active {
+  border-color: rgba(14, 165, 233, 0.9);
+  background: rgba(14, 165, 233, 0.28);
+  color: #e0f2fe;
+}
+
+.idcard-editor-side {
+  display: grid;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.56);
+  padding: 12px;
+}
+
+.idcard-export-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.idcard-preview-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  background: rgba(14, 165, 233, 0.12);
+  color: #dbeafe;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
 :root[data-theme="light"] .imposition-app-shell {
   background:
     radial-gradient(circle at top left, rgba(22, 163, 74, 0.08), transparent 24%),
@@ -2126,6 +2252,28 @@ input::placeholder {
   border-color: rgba(22, 163, 74, 0.24);
 }
 
+:root[data-theme="light"] .idcard-step-card,
+:root[data-theme="light"] .idcard-editor-side {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(22, 163, 74, 0.16);
+}
+
+:root[data-theme="light"] .idcard-step-card strong,
+:root[data-theme="light"] .idcard-folder-picker span {
+  color: #15803d;
+}
+
+:root[data-theme="light"] .idcard-step-card span,
+:root[data-theme="light"] .idcard-preview-note {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .idcard-step-card input[type="file"] {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(22, 163, 74, 0.24);
+}
+
 :root[data-theme="light"] .imposition-field input:focus,
 :root[data-theme="light"] .imposition-field select:focus {
   border-color: rgba(22, 163, 74, 0.52);
@@ -2192,7 +2340,9 @@ input::placeholder {
   .imposition-template-grid,
   .imposition-stats-grid,
   .imposition-serial-grid,
-  .imposition-kpi-strip {
+  .imposition-kpi-strip,
+  .idcard-step-grid,
+  .idcard-editor-grid {
     grid-template-columns: 1fr;
   }
 
