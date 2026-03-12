@@ -59,7 +59,25 @@ function createImageElement({ x, y, imageDataUrl }) {
 
 async function renderPdfPreviewPages(file, maxPages = 2) {
   const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let pdf = null;
+  let firstError = null;
+  try {
+    pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  } catch (error) {
+    firstError = error;
+  }
+
+  // Electron production builds can fail to load the worker from packaged assets.
+  // Fallback to worker-less mode so PDF preview still works.
+  if (!pdf) {
+    try {
+      pdf = await pdfjsLib.getDocument({ data: buffer, disableWorker: true }).promise;
+    } catch (fallbackError) {
+      const primaryMessage = String(firstError?.message || firstError || "worker_load_failed");
+      const fallbackMessage = String(fallbackError?.message || fallbackError || "fallback_failed");
+      throw new Error(`Unable to render PDF preview. ${primaryMessage}; ${fallbackMessage}`);
+    }
+  }
   const count = Math.min(pdf.numPages, maxPages);
   const pages = [];
 
