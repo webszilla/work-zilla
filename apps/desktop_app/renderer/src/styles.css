@@ -2350,6 +2350,50 @@ input::placeholder {
   overflow: hidden;
 }
 
+.wzid-scroll-view {
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.36);
+  height: 690px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.wzid-page-stack {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 2px 0 8px;
+}
+
+.wzid-page-canvas-shell {
+  width: min(100%, 760px);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.wzid-page-canvas-shell.active {
+  border-color: rgba(14, 165, 233, 0.5);
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.22);
+}
+
+.wzid-page-canvas-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.wzid-page-canvas {
+  min-height: auto;
+}
+
 .wzid-empty-workspace {
   min-height: 620px;
   border-radius: 16px;
@@ -2536,6 +2580,16 @@ input::placeholder {
 :root[data-theme="light"] .wzid-page-item {
   background-color: rgba(241, 245, 249, 0.92);
   color: #0f172a;
+}
+
+:root[data-theme="light"] .wzid-scroll-view,
+:root[data-theme="light"] .wzid-page-canvas-shell {
+  background-color: rgba(241, 245, 249, 0.92);
+  border-color: rgba(22, 163, 74, 0.18);
+}
+
+:root[data-theme="light"] .wzid-page-canvas-head {
+  color: #0369a1;
 }
 
 :root[data-theme="light"] .wzid-page-select {

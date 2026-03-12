@@ -182,7 +182,7 @@ export default function IdCardStudioPanel() {
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
 
-  const canvasRef = useRef(null);
+  const pageRefs = useRef(new Map());
 
   const selectedPage = useMemo(
     () => pages.find((item) => item.id === selectedPageId) || null,
@@ -278,35 +278,39 @@ export default function IdCardStudioPanel() {
     }
   }
 
-  function getCanvasPoint(event) {
-    if (!canvasRef.current || !selectedPage) {
+  function getPagePoint(pageId, event) {
+    const page = pages.find((item) => item.id === pageId);
+    const pageNode = pageRefs.current.get(pageId);
+    if (!page || !pageNode) {
       return null;
     }
-    const rect = canvasRef.current.getBoundingClientRect();
+    const rect = pageNode.getBoundingClientRect();
     if (!rect.width || !rect.height) {
       return null;
     }
-    const x = ((event.clientX - rect.left) / rect.width) * selectedPage.width;
-    const y = ((event.clientY - rect.top) / rect.height) * selectedPage.height;
+    const x = ((event.clientX - rect.left) / rect.width) * page.width;
+    const y = ((event.clientY - rect.top) / rect.height) * page.height;
     return {
       x: Math.max(0, Math.round(x)),
       y: Math.max(0, Math.round(y)),
     };
   }
 
-  function handleWorkspaceClick(event) {
-    if (!selectedPage) {
+  function handleWorkspaceClick(pageId, event) {
+    const page = pages.find((item) => item.id === pageId);
+    if (!page) {
       return;
     }
+    setSelectedPageId(pageId);
 
-    const point = getCanvasPoint(event);
+    const point = getPagePoint(pageId, event);
     if (!point) {
       return;
     }
 
     if (activeTool === "text") {
       const element = createTextElement(point);
-      applyPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, element] }));
+      applyPagePatch(page.id, (item) => ({ ...item, elements: [...item.elements, element] }));
       setSelectedElementId(element.id);
       setMessage("Text element added.");
       return;
@@ -318,27 +322,30 @@ export default function IdCardStudioPanel() {
         return;
       }
       const element = createImageElement({ ...point, imageDataUrl: pendingImageDataUrl });
-      applyPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, element] }));
+      applyPagePatch(page.id, (item) => ({ ...item, elements: [...item.elements, element] }));
       setSelectedElementId(element.id);
       setMessage("Image element added.");
     }
   }
 
-  function startElementDrag(event, elementId) {
-    if (!selectedPage) {
+  function startElementDrag(pageId, event, elementId) {
+    const page = pages.find((item) => item.id === pageId);
+    if (!page) {
       return;
     }
     event.stopPropagation();
-    const point = getCanvasPoint(event);
+    const point = getPagePoint(pageId, event);
     if (!point) {
       return;
     }
-    const element = selectedPage.elements.find((item) => item.id === elementId);
+    const element = page.elements.find((item) => item.id === elementId);
     if (!element) {
       return;
     }
+    setSelectedPageId(pageId);
     setSelectedElementId(element.id);
     setDragState({
+      pageId,
       elementId,
       offsetX: point.x - element.x,
       offsetY: point.y - element.y,
@@ -346,21 +353,48 @@ export default function IdCardStudioPanel() {
   }
 
   function handleElementDrag(event) {
-    if (!selectedPage || !dragState) {
+    if (!dragState) {
       return;
     }
-    const point = getCanvasPoint(event);
+    const page = pages.find((item) => item.id === dragState.pageId);
+    if (!page) {
+      return;
+    }
+    const point = getPagePoint(dragState.pageId, event);
     if (!point) {
       return;
     }
     const nextX = Math.max(0, Math.round(point.x - dragState.offsetX));
     const nextY = Math.max(0, Math.round(point.y - dragState.offsetY));
 
-    applyPagePatch(selectedPage.id, (page) => ({
-      ...page,
-      elements: page.elements.map((item) => (
-        item.id === dragState.elementId ? { ...item, x: nextX, y: nextY } : item
+    applyPagePatch(page.id, (item) => ({
+      ...item,
+      elements: item.elements.map((entry) => (
+        entry.id === dragState.elementId ? { ...entry, x: nextX, y: nextY } : entry
       )),
+    }));
+  }
+
+  function getDisplayWidth(page) {
+    const baseWidth = Math.min(680, Math.max(260, Math.round(page.width * 0.62)));
+    return Math.max(220, Math.round((baseWidth * zoom) / 100));
+  }
+
+  function setPageRef(pageId, node) {
+    if (node) {
+      pageRefs.current.set(pageId, node);
+    } else {
+      pageRefs.current.delete(pageId);
+    }
+  }
+
+  function getOverlayEntries(page) {
+    return (page?.elements || []).map((item) => ({
+      ...item,
+      leftPct: (item.x / page.width) * 100,
+      topPct: (item.y / page.height) * 100,
+      widthPct: (item.width / page.width) * 100,
+      heightPct: (item.height / page.height) * 100,
     }));
   }
 
@@ -544,14 +578,6 @@ export default function IdCardStudioPanel() {
     }
   }
 
-  const overlays = (selectedPage?.elements || []).map((item) => ({
-    ...item,
-    leftPct: (item.x / selectedPage.width) * 100,
-    topPct: (item.y / selectedPage.height) * 100,
-    widthPct: (item.width / selectedPage.width) * 100,
-    heightPct: (item.height / selectedPage.height) * 100,
-  }));
-
   return (
     <section className="imposition-panel wzid-root-panel">
       <div className="imposition-panel-heading">
@@ -580,43 +606,56 @@ export default function IdCardStudioPanel() {
             </div>
           </div>
 
-          {selectedPage ? (
-            <div
-              ref={canvasRef}
-              className="wzid-workspace"
-              style={{
-                backgroundImage: `url(${selectedPage.backgroundDataUrl})`,
-                aspectRatio: `${selectedPage.width} / ${selectedPage.height}`,
-                width: `${zoom}%`,
-              }}
-              onClick={handleWorkspaceClick}
-              onMouseMove={handleElementDrag}
-              onMouseUp={stopElementDrag}
-              onMouseLeave={stopElementDrag}
-              role="button"
-              tabIndex={0}
-              aria-label="ID Card editor workspace"
-            >
-              {overlays.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`idcard-overlay ${selectedElementId === item.id ? "active" : ""}`}
-                  style={{
-                    left: `${item.leftPct}%`,
-                    top: `${item.topPct}%`,
-                    width: `${item.widthPct}%`,
-                    height: `${item.heightPct}%`,
-                  }}
-                  onMouseDown={(event) => startElementDrag(event, item.id)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedElementId(item.id);
-                  }}
-                >
-                  {item.type === "text" ? item.text : "Image"}
-                </button>
-              ))}
+          {pages.length ? (
+            <div className="wzid-scroll-view" onMouseMove={handleElementDrag} onMouseUp={stopElementDrag} onMouseLeave={stopElementDrag}>
+              <div className="wzid-page-stack">
+                {pages.map((page) => {
+                  const overlays = getOverlayEntries(page);
+                  return (
+                    <article
+                      key={page.id}
+                      className={`wzid-page-canvas-shell ${selectedPageId === page.id ? "active" : ""}`}
+                    >
+                      <header className="wzid-page-canvas-head">{page.label}</header>
+                      <div
+                        ref={(node) => setPageRef(page.id, node)}
+                        className="wzid-workspace wzid-page-canvas"
+                        style={{
+                          backgroundImage: `url(${page.backgroundDataUrl})`,
+                          aspectRatio: `${page.width} / ${page.height}`,
+                          width: `${getDisplayWidth(page)}px`,
+                        }}
+                        onClick={(event) => handleWorkspaceClick(page.id, event)}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${page.label} editor workspace`}
+                      >
+                        {overlays.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`idcard-overlay ${selectedElementId === item.id ? "active" : ""}`}
+                            style={{
+                              left: `${item.leftPct}%`,
+                              top: `${item.topPct}%`,
+                              width: `${item.widthPct}%`,
+                              height: `${item.heightPct}%`,
+                            }}
+                            onMouseDown={(event) => startElementDrag(page.id, event, item.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedPageId(page.id);
+                              setSelectedElementId(item.id);
+                            }}
+                          >
+                            {item.type === "text" ? item.text : "Image"}
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="wzid-empty-workspace">
