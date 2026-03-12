@@ -4465,6 +4465,7 @@ def _serialize_application_download_item(item):
     return {
         "family": item.get("family") or "other",
         "filename": item.get("filename") or "",
+        "version": item.get("version") or "",
         "relative_key": item.get("relative_key") or "",
         "product": item.get("product") or "",
         "platform": item.get("platform") or "",

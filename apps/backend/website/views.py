@@ -194,6 +194,7 @@ def download_windows_agent(request):
     return _redirect_to_latest_static_download(
         request,
         "Work Zilla Installer-win-x64-*.exe",
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Installer-win-*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
@@ -208,6 +209,7 @@ def download_windows_product_agent(request):
     _prune_download_variants("Work Zilla Agent Setup *.exe")
     return _redirect_to_latest_static_download(
         request,
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
@@ -220,6 +222,7 @@ def download_windows_monitor_product_agent(request):
     _prune_download_variants("Work Zilla Agent Setup *.exe")
     return _redirect_to_latest_static_download(
         request,
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
@@ -232,9 +235,12 @@ def download_windows_storage_product_agent(request):
     _prune_download_variants("Work Zilla Storage Setup *.exe", "Work Zilla Storage Agent Setup *.exe")
     return _redirect_to_latest_static_download(
         request,
+        "Work Zilla Storage Setup *x64*.exe",
+        "Work Zilla Storage Agent Setup *x64*.exe",
         "Work Zilla Storage Setup *.exe",
         "Work Zilla Storage Agent Setup *.exe",
         "Work Zilla Storage Setup.exe",
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
         "WorkZillaAgentSetup.exe",
@@ -386,7 +392,9 @@ def download_windows_imposition_product_agent(request):
     _prune_download_variants("Work Zilla Imposition Setup *.exe", "Work Zilla Installer-win-*.exe", "Work Zilla Agent Setup *.exe")
     return _redirect_to_latest_static_download(
         request,
+        "Work Zilla Imposition Setup *x64*.exe",
         "Work Zilla Imposition Setup *.exe",
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
         "WorkZillaAgentSetup.exe",
         "Work Zilla Installer-win-x64-*.exe",
@@ -449,6 +457,7 @@ def download_mac_imposition_product_agent(request):
 def bootstrap_products_config(request):
     monitor_windows_url = _build_latest_static_download_url(
         request,
+        "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
         "Work Zilla Installer-win-x64-*.exe",
         "Work Zilla Installer-win-*.exe",
@@ -466,6 +475,8 @@ def bootstrap_products_config(request):
     )
     storage_windows_url = _build_latest_static_download_url(
         request,
+        "Work Zilla Storage Setup *x64*.exe",
+        "Work Zilla Storage Agent Setup *x64*.exe",
         "Work Zilla Storage Setup *.exe",
         "Work Zilla Storage Agent Setup *.exe",
         fallback_path="/downloads/windows-storage-product-agent/",
@@ -478,6 +489,7 @@ def bootstrap_products_config(request):
     )
     imposition_windows_url = _build_latest_static_download_url(
         request,
+        "Work Zilla Imposition Setup *x64*.exe",
         "Work Zilla Imposition Setup *.exe",
         fallback_path="/downloads/windows-imposition-product-agent/",
     )

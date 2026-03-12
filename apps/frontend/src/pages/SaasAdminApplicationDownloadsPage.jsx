@@ -92,6 +92,12 @@ function formatBytes(bytes) {
   return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function inferVersion(filename) {
+  const value = String(filename || "");
+  const match = value.match(/(\d+\.\d+\.\d+(?:\.\d+)?)/);
+  return match ? match[1] : "";
+}
+
 export default function SaasAdminApplicationDownloadsPage() {
   const [state, setState] = useState(emptyState);
   const [busyKey, setBusyKey] = useState("");
@@ -142,6 +148,7 @@ export default function SaasAdminApplicationDownloadsPage() {
         return {
           family: "route",
           filename: route.label || route.path || "Download Route",
+          version: inferVersion(macReference?.filename || ""),
           relative_key: route.path || "",
           product: macReference?.product || routeProduct,
           platform: platformTab === "mac" ? "macOS" : "Windows",
@@ -279,6 +286,7 @@ export default function SaasAdminApplicationDownloadsPage() {
             <thead>
               <tr>
                 <th>File</th>
+                <th>Version</th>
                 <th>Product</th>
                 <th>Platform</th>
                 <th>Arch</th>
@@ -298,6 +306,7 @@ export default function SaasAdminApplicationDownloadsPage() {
                       {item.filename}
                     </span>
                   </td>
+                  <td>{item.version || inferVersion(item.filename) || "-"}</td>
                   <td>{item.product || "-"}</td>
                   <td>
                     {item.platform || (detectPlatformKey(item) === "mac" ? "macOS" : detectPlatformKey(item) === "windows" ? "Windows" : "-")}
@@ -328,7 +337,7 @@ export default function SaasAdminApplicationDownloadsPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan="7" className="text-center text-secondary">
+                  <td colSpan="8" className="text-center text-secondary">
                     No {platformTab === "mac" ? "macOS" : "Windows"} installer files found.
                   </td>
                 </tr>

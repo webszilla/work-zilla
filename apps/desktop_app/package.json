@@ -10,9 +10,10 @@
     "preview": "vite preview --config renderer/vite.config.js",
     "electron": "electron .",
     "start": "concurrently -k \"npm:dev\" \"wait-on tcp:5173 && electron .\"",
-    "dist": "npm run build && electron-builder -w --x64",
+    "dist": "npm run build && electron-builder -w --x64 --ia32",
     "dist:mac": "npm run build && electron-builder -m --x64",
-    "dist:win": "npm run build && electron-builder -w --x64"
+    "dist:win": "npm run build && electron-builder -w --x64 --ia32",
+    "dist:win32": "npm run build && electron-builder -w --ia32"
   },
   "dependencies": {
     "better-sqlite3": "^11.6.0",
@@ -79,11 +80,13 @@
       "scripts": "electron/pkg-scripts"
     },
     "win": {
+      "artifactName": "Work Zilla Agent Setup ${version}-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "ia32"
           ]
         }
       ]

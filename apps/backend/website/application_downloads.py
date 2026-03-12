@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import glob
 import os
+import re
 from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 
@@ -22,8 +23,10 @@ DOWNLOAD_CLASSIFIERS = [
         "label": "Bootstrap Installer",
         "product": "Bootstrap Installer",
         "platform": "Windows",
-        "arch": "x64",
+        "arch": "",
         "patterns": [
+            "Work Zilla Installer-win-x86-*.exe",
+            "Work Zilla Installer-win-ia32-*.exe",
             "Work Zilla Installer-win-x64-*.exe",
             "Work Zilla Installer-win-*.exe",
         ],
@@ -55,8 +58,11 @@ DOWNLOAD_CLASSIFIERS = [
         "label": "Work Suite Agent",
         "product": "Work Suite",
         "platform": "Windows",
-        "arch": "x64",
+        "arch": "",
         "patterns": [
+            "Work Zilla Agent Setup *x86*.exe",
+            "Work Zilla Agent Setup *ia32*.exe",
+            "Work Zilla Agent Setup *x64*.exe",
             "Work Zilla Agent Setup *.exe",
             "WorkZillaInstallerSetup.exe",
             "WorkZillaAgentSetup.exe",
@@ -94,8 +100,12 @@ DOWNLOAD_CLASSIFIERS = [
         "label": "Online Storage Agent",
         "product": "Online Storage",
         "platform": "Windows",
-        "arch": "x64",
+        "arch": "",
         "patterns": [
+            "Work Zilla Storage Setup *x86*.exe",
+            "Work Zilla Storage Setup *ia32*.exe",
+            "Work Zilla Storage Agent Setup *x86*.exe",
+            "Work Zilla Storage Agent Setup *ia32*.exe",
             "Work Zilla Storage Setup *.exe",
             "Work Zilla Storage Agent Setup *.exe",
         ],
@@ -129,8 +139,11 @@ DOWNLOAD_CLASSIFIERS = [
         "label": "Imposition Installer",
         "product": "Print Marks",
         "platform": "Windows",
-        "arch": "x64",
+        "arch": "",
         "patterns": [
+            "Work Zilla Imposition Setup *x86*.exe",
+            "Work Zilla Imposition Setup *ia32*.exe",
+            "Work Zilla Imposition Setup *x64*.exe",
             "Work Zilla Imposition Setup *.exe",
         ],
     },
@@ -162,6 +175,8 @@ DOWNLOAD_CLASSIFIERS = [
 
 LOCAL_SOURCE_GLOBS = [
     ("bootstrap_windows", "apps/bootstrap_installer/dist/Work Zilla Installer-win-x64-*.exe"),
+    ("bootstrap_windows", "apps/bootstrap_installer/dist/Work Zilla Installer-win-x86-*.exe"),
+    ("bootstrap_windows", "apps/bootstrap_installer/dist/Work Zilla Installer-win-ia32-*.exe"),
     ("bootstrap_mac_arm64", "apps/bootstrap_installer/dist/Work Zilla Installer-mac-arm64-*.*"),
     ("bootstrap_mac_x64", "apps/bootstrap_installer/dist/Work Zilla Installer-mac-x64-*.*"),
     ("monitor_windows", "apps/desktop_app/dist/Work Zilla Agent Setup *.exe"),
@@ -221,6 +236,25 @@ def _classify_filename(filename):
     }
 
 
+def _infer_arch_from_filename(filename):
+    value = str(filename or "").lower()
+    if any(token in value for token in ("arm64", "aarch64")):
+        return "arm64"
+    if any(token in value for token in ("x86", "ia32", "i386", "32bit", "32-bit", "win32")):
+        return "x86"
+    if any(token in value for token in ("x64", "amd64", "x86_64", "win64")):
+        return "x64"
+    if value.endswith(".exe"):
+        return "x64"
+    return ""
+
+
+def _extract_version_from_filename(filename):
+    value = str(filename or "")
+    match = re.search(r"(\d+\.\d+\.\d+(?:\.\d+)?)", value)
+    return match.group(1) if match else ""
+
+
 def _iter_local_matches(pattern):
     full_pattern = str(_repo_root() / pattern)
     for path in glob.glob(full_pattern):
@@ -242,6 +276,7 @@ def list_local_application_downloads():
             seen_paths.add(path)
             filename = os.path.basename(path)
             classifier = _classify_filename(filename)
+            inferred_arch = _infer_arch_from_filename(filename)
             stat = os.stat(path)
             items.append({
                 "source": "local",
@@ -253,7 +288,8 @@ def list_local_application_downloads():
                 "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=dt_timezone.utc),
                 "product": classifier["product"],
                 "platform": classifier["platform"],
-                "arch": classifier["arch"],
+                "arch": inferred_arch or classifier["arch"],
+                "version": _extract_version_from_filename(filename),
                 "label": classifier["label"],
                 "download_url": None,
             })
@@ -281,6 +317,7 @@ def list_remote_application_downloads(expires=SIGNED_URL_TTL_SECONDS):
         for obj in page["items"]:
             filename = obj["filename"]
             classifier = _classify_filename(filename)
+            inferred_arch = _infer_arch_from_filename(filename)
             last_modified = obj.get("last_modified")
             items.append({
                 "source": "object",
@@ -292,7 +329,8 @@ def list_remote_application_downloads(expires=SIGNED_URL_TTL_SECONDS):
                 "last_modified": last_modified,
                 "product": classifier["product"],
                 "platform": classifier["platform"],
-                "arch": classifier["arch"],
+                "arch": inferred_arch or classifier["arch"],
+                "version": _extract_version_from_filename(filename),
                 "label": classifier["label"],
                 "download_url": media_services.generate_signed_url(context, obj["key"], expires=expires),
             })
@@ -366,7 +404,8 @@ def sync_local_application_downloads(delete_local=False):
     existing_items = list_remote_application_downloads(expires=SIGNED_URL_TTL_SECONDS)
     existing_by_family = {}
     for item in existing_items:
-        existing_by_family.setdefault(item["family"], []).append(item)
+        family_key = f"{item.get('family') or 'other'}::{item.get('arch') or '-'}"
+        existing_by_family.setdefault(family_key, []).append(item)
 
     uploaded = []
     deleted_remote = []
@@ -374,9 +413,11 @@ def sync_local_application_downloads(delete_local=False):
     local_items = list_local_application_downloads()
     local_by_family = {}
     for item in local_items:
-        local_by_family.setdefault(item["family"], []).append(item)
+        family_key = f"{item.get('family') or 'other'}::{item.get('arch') or '-'}"
+        local_by_family.setdefault(family_key, []).append(item)
 
-    for family, family_items in local_by_family.items():
+    for family_key, family_items in local_by_family.items():
+        family_label = family_items[0].get("family", "other") if family_items else "other"
         selected_items = [
             max(
                 family_items,
@@ -388,8 +429,8 @@ def sync_local_application_downloads(delete_local=False):
             key = f"{context.base_prefix}{item['filename']}" if context.base_prefix else item["filename"]
             with open(item["storage_key"], "rb") as handle:
                 client.upload_fileobj(handle, context.settings_obj.bucket_name, key)
-            uploaded.append({"filename": item["filename"], "storage_key": key, "family": family})
-        for item in existing_by_family.get(family, []):
+            uploaded.append({"filename": item["filename"], "storage_key": key, "family": family_label, "arch": item.get("arch") or ""})
+        for item in existing_by_family.get(family_key, []):
             if item["filename"] in keep_filenames:
                 continue
             media_services.delete_objects(context, [item["storage_key"]])
