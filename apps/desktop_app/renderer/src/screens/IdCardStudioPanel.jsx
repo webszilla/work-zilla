@@ -231,6 +231,7 @@ export default function IdCardStudioPanel() {
   const [exporting, setExporting] = useState(false);
   const [pageMenu, setPageMenu] = useState({ open: false, x: 0, y: 0, pageId: "" });
   const [inlineTextEdit, setInlineTextEdit] = useState({ pageId: "", elementId: "" });
+  const [pendingImagePlacement, setPendingImagePlacement] = useState(null);
 
   const pageRefs = useRef(new Map());
   const quickReplaceInputRef = useRef(null);
@@ -297,6 +298,7 @@ export default function IdCardStudioPanel() {
       setSelectedPageId(nextPages[0].id);
       setSelectedElementId("");
       setEditorEnabled(false);
+      setPendingImagePlacement(null);
       setUploadName(fileName);
       setMessage(`Loaded ${nextPages.length} page(s). Enable Editor Mode to edit text/image layers.`);
     } catch (uploadError) {
@@ -379,13 +381,20 @@ export default function IdCardStudioPanel() {
       const element = createTextElement(point);
       applyPagePatch(page.id, (item) => ({ ...item, elements: [...item.elements, element] }));
       setSelectedElementId(element.id);
+      setInlineTextEdit({ pageId: page.id, elementId: element.id });
       setMessage("Text element added.");
       return;
     }
 
     if (activeTool === "image") {
       if (!pendingImageDataUrl) {
-        setError("Choose an image source first.");
+        if (quickReplaceInputRef.current) {
+          setQuickReplaceTarget({ pageId: page.id, elementId: "" });
+          setPendingImagePlacement({ pageId: page.id, x: point.x, y: point.y });
+          quickReplaceInputRef.current.click();
+          setMessage("Choose image to place.");
+          setError("");
+        }
         return;
       }
       const element = createImageElement({ ...point, imageDataUrl: pendingImageDataUrl });
@@ -491,6 +500,7 @@ export default function IdCardStudioPanel() {
     setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
     setInlineTextEdit({ pageId: "", elementId: "" });
     setQuickReplaceTarget({ pageId: "", elementId: "" });
+    setPendingImagePlacement(null);
     setEditorEnabled(false);
     setMessage("Current PDF closed.");
     setError("");
@@ -520,19 +530,34 @@ export default function IdCardStudioPanel() {
     try {
       const file = event.target.files?.[0];
       const { pageId, elementId } = quickReplaceTarget;
-      if (!file || !pageId || !elementId) {
+      if (!file || !pageId) {
         return;
       }
       const dataUrl = await readFileAsDataUrl(file);
-      applyPagePatch(pageId, (page) => ({
-        ...page,
-        elements: page.elements.map((item) => (
-          item.id === elementId ? { ...item, imageDataUrl: dataUrl, fit: "cover" } : item
-        )),
-      }));
-      setSelectedPageId(pageId);
-      setSelectedElementId(elementId);
-      setMessage("Photo replaced.");
+      if (elementId) {
+        applyPagePatch(pageId, (page) => ({
+          ...page,
+          elements: page.elements.map((item) => (
+            item.id === elementId ? { ...item, imageDataUrl: dataUrl, fit: "cover" } : item
+          )),
+        }));
+        setSelectedPageId(pageId);
+        setSelectedElementId(elementId);
+        setMessage("Photo replaced.");
+      } else if (pendingImagePlacement?.pageId === pageId) {
+        const element = createImageElement({
+          x: pendingImagePlacement.x,
+          y: pendingImagePlacement.y,
+          imageDataUrl: dataUrl,
+        });
+        applyPagePatch(pageId, (page) => ({
+          ...page,
+          elements: [...page.elements, element],
+        }));
+        setSelectedPageId(pageId);
+        setSelectedElementId(element.id);
+        setMessage("Image added.");
+      }
       setError("");
     } catch (replaceError) {
       setError(String(replaceError?.message || "Unable to replace selected image."));
@@ -540,6 +565,8 @@ export default function IdCardStudioPanel() {
       if (event.target) {
         event.target.value = "";
       }
+      setQuickReplaceTarget({ pageId: "", elementId: "" });
+      setPendingImagePlacement(null);
     }
   }
 
@@ -867,15 +894,15 @@ export default function IdCardStudioPanel() {
                               }
                               setSelectedPageId(page.id);
                               setSelectedElementId(item.id);
-                              if (item.type === "image" && activeTool === "select" && quickReplaceInputRef.current) {
-                                setQuickReplaceTarget({ pageId: page.id, elementId: item.id });
-                                quickReplaceInputRef.current.click();
-                              }
                             }}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
                               if (item.type === "text" && editorEnabled) {
                                 setInlineTextEdit({ pageId: page.id, elementId: item.id });
+                              }
+                              if (item.type === "image" && editorEnabled && quickReplaceInputRef.current) {
+                                setQuickReplaceTarget({ pageId: page.id, elementId: item.id });
+                                quickReplaceInputRef.current.click();
                               }
                             }}
                           >
