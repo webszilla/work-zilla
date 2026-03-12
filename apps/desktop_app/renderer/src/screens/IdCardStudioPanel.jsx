@@ -6,11 +6,13 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+const ZOOM_OPTIONS = [50, 75, 100, 125, 150];
+
 function loadImage(url) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Image load failed."));
+    image.onerror = () => reject(new Error("Unable to load image."));
     image.src = url;
   });
 }
@@ -19,7 +21,7 @@ function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("File read failed."));
+    reader.onerror = () => reject(new Error("Unable to read file."));
     reader.readAsDataURL(file);
   });
 }
@@ -36,7 +38,7 @@ function createTextElement({ x, y }) {
     x,
     y,
     width: 260,
-    height: 42,
+    height: 44,
     text: "Member Name",
     fontSize: 22,
     color: "#0f172a",
@@ -49,8 +51,8 @@ function createImageElement({ x, y, imageDataUrl }) {
     type: "image",
     x,
     y,
-    width: 180,
-    height: 220,
+    width: 170,
+    height: 210,
     imageDataUrl,
   };
 }
@@ -60,24 +62,57 @@ async function renderPdfPreviewPages(file, maxPages = 2) {
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const count = Math.min(pdf.numPages, maxPages);
   const pages = [];
-  for (let index = 1; index <= count; index += 1) {
-    const page = await pdf.getPage(index);
-    const viewport = page.getViewport({ scale: 1.8 });
+
+  for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
     await page.render({ canvasContext: context, viewport }).promise;
+
     pages.push({
       id: crypto.randomUUID(),
-      label: `Page ${index}`,
-      backgroundDataUrl: canvas.toDataURL("image/png", 1),
+      label: `Page ${pageNumber}`,
       width: canvas.width,
       height: canvas.height,
+      backgroundDataUrl: canvas.toDataURL("image/png", 1),
       elements: [],
     });
   }
+
   return pages;
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxHeight) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return;
+  }
+
+  const words = value.split(/\s+/);
+  let line = "";
+  let lineIndex = 0;
+
+  for (let index = 0; index < words.length; index += 1) {
+    const testLine = line ? `${line} ${words[index]}` : words[index];
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && line) {
+      if ((lineIndex + 1) * lineHeight > maxHeight) {
+        break;
+      }
+      ctx.fillText(line, x, y + lineIndex * lineHeight);
+      line = words[index];
+      lineIndex += 1;
+    } else {
+      line = testLine;
+    }
+  }
+
+  if ((lineIndex + 1) * lineHeight <= maxHeight) {
+    ctx.fillText(line, x, y + lineIndex * lineHeight);
+  }
 }
 
 export default function IdCardStudioPanel() {
@@ -85,17 +120,19 @@ export default function IdCardStudioPanel() {
   const [selectedPageId, setSelectedPageId] = useState("");
   const [selectedElementId, setSelectedElementId] = useState("");
   const [activeTool, setActiveTool] = useState("select");
+  const [pendingImageDataUrl, setPendingImageDataUrl] = useState("");
+  const [uploadName, setUploadName] = useState("");
+  const [dragPageId, setDragPageId] = useState("");
+  const [dragState, setDragState] = useState(null);
+  const [zoom, setZoom] = useState(100);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
-  const [dragState, setDragState] = useState(null);
-  const [dragPageId, setDragPageId] = useState("");
-  const [pendingImageDataUrl, setPendingImageDataUrl] = useState("");
-  const [uploadName, setUploadName] = useState("");
+
   const canvasRef = useRef(null);
 
   const selectedPage = useMemo(
-    () => pages.find((page) => page.id === selectedPageId) || null,
+    () => pages.find((item) => item.id === selectedPageId) || null,
     [pages, selectedPageId]
   );
 
@@ -104,7 +141,7 @@ export default function IdCardStudioPanel() {
     [selectedElementId, selectedPage]
   );
 
-  function setPagePatch(pageId, patcher) {
+  function applyPagePatch(pageId, patcher) {
     setPages((current) => current.map((page) => (page.id === pageId ? patcher(page) : page)));
   }
 
@@ -116,10 +153,12 @@ export default function IdCardStudioPanel() {
       if (!file) {
         return;
       }
-      const name = String(file.name || "design");
-      const lower = name.toLowerCase();
+
+      const fileName = String(file.name || "design");
+      const isPdf = fileName.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+
       let nextPages = [];
-      if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+      if (isPdf) {
         nextPages = await renderPdfPreviewPages(file, 2);
       } else {
         const dataUrl = await readFileAsDataUrl(file);
@@ -127,23 +166,28 @@ export default function IdCardStudioPanel() {
         nextPages = [{
           id: crypto.randomUUID(),
           label: "Page 1",
-          backgroundDataUrl: dataUrl,
           width: image.width,
           height: image.height,
+          backgroundDataUrl: dataUrl,
           elements: [],
         }];
       }
+
+      if (!nextPages.length) {
+        throw new Error("No preview pages were generated from this file.");
+      }
+
       setPages(nextPages);
-      setSelectedPageId(nextPages[0]?.id || "");
+      setSelectedPageId(nextPages[0].id);
       setSelectedElementId("");
-      setUploadName(name);
-      setMessage(`Loaded ${nextPages.length} page preview for editing.`);
+      setUploadName(fileName);
+      setMessage(`Loaded ${nextPages.length} page(s). You can now edit manually.`);
     } catch (uploadError) {
-      setError(String(uploadError?.message || "Unable to load design."));
+      setError(String(uploadError?.message || "Unable to load design preview."));
     }
   }
 
-  async function handlePendingImage(event) {
+  async function handleImageSourceUpload(event) {
     try {
       const file = event.target.files?.[0];
       if (!file) {
@@ -151,10 +195,10 @@ export default function IdCardStudioPanel() {
       }
       const dataUrl = await readFileAsDataUrl(file);
       setPendingImageDataUrl(dataUrl);
-      setMessage("Image ready. Click on preview to place it.");
+      setMessage("Image source loaded. Click the workspace to place it.");
       setError("");
     } catch (imageError) {
-      setError(String(imageError?.message || "Unable to load image."));
+      setError(String(imageError?.message || "Unable to load image source."));
     }
   }
 
@@ -168,7 +212,7 @@ export default function IdCardStudioPanel() {
         return;
       }
       const dataUrl = await readFileAsDataUrl(file);
-      setPagePatch(selectedPage.id, (page) => ({
+      applyPagePatch(selectedPage.id, (page) => ({
         ...page,
         elements: page.elements.map((item) => (
           item.id === selectedElement.id ? { ...item, imageDataUrl: dataUrl } : item
@@ -177,7 +221,7 @@ export default function IdCardStudioPanel() {
       setMessage("Image replaced for selected layer.");
       setError("");
     } catch (replaceError) {
-      setError(String(replaceError?.message || "Image replace failed."));
+      setError(String(replaceError?.message || "Unable to replace image."));
     }
   }
 
@@ -194,38 +238,40 @@ export default function IdCardStudioPanel() {
     return {
       x: Math.max(0, Math.round(x)),
       y: Math.max(0, Math.round(y)),
-      rect,
     };
   }
 
-  function handleCanvasClick(event) {
+  function handleWorkspaceClick(event) {
     if (!selectedPage) {
       return;
     }
+
     const point = getCanvasPoint(event);
     if (!point) {
       return;
     }
+
     if (activeTool === "text") {
-      const next = createTextElement(point);
-      setPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, next] }));
-      setSelectedElementId(next.id);
+      const element = createTextElement(point);
+      applyPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, element] }));
+      setSelectedElementId(element.id);
       setMessage("Text element added.");
       return;
     }
+
     if (activeTool === "image") {
       if (!pendingImageDataUrl) {
-        setError("Choose an image first, then click preview to place it.");
+        setError("Choose an image source first.");
         return;
       }
-      const next = createImageElement({ ...point, imageDataUrl: pendingImageDataUrl });
-      setPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, next] }));
-      setSelectedElementId(next.id);
+      const element = createImageElement({ ...point, imageDataUrl: pendingImageDataUrl });
+      applyPagePatch(selectedPage.id, (page) => ({ ...page, elements: [...page.elements, element] }));
+      setSelectedElementId(element.id);
       setMessage("Image element added.");
     }
   }
 
-  function beginElementDrag(event, elementId) {
+  function startElementDrag(event, elementId) {
     if (!selectedPage) {
       return;
     }
@@ -238,7 +284,7 @@ export default function IdCardStudioPanel() {
     if (!element) {
       return;
     }
-    setSelectedElementId(elementId);
+    setSelectedElementId(element.id);
     setDragState({
       elementId,
       offsetX: point.x - element.x,
@@ -246,7 +292,7 @@ export default function IdCardStudioPanel() {
     });
   }
 
-  function handleCanvasMouseMove(event) {
+  function handleElementDrag(event) {
     if (!selectedPage || !dragState) {
       return;
     }
@@ -256,7 +302,8 @@ export default function IdCardStudioPanel() {
     }
     const nextX = Math.max(0, Math.round(point.x - dragState.offsetX));
     const nextY = Math.max(0, Math.round(point.y - dragState.offsetY));
-    setPagePatch(selectedPage.id, (page) => ({
+
+    applyPagePatch(selectedPage.id, (page) => ({
       ...page,
       elements: page.elements.map((item) => (
         item.id === dragState.elementId ? { ...item, x: nextX, y: nextY } : item
@@ -272,7 +319,7 @@ export default function IdCardStudioPanel() {
     if (!selectedPage || !selectedElement) {
       return;
     }
-    setPagePatch(selectedPage.id, (page) => ({
+    applyPagePatch(selectedPage.id, (page) => ({
       ...page,
       elements: page.elements.map((item) => (
         item.id === selectedElement.id ? { ...item, ...patch } : item
@@ -284,15 +331,16 @@ export default function IdCardStudioPanel() {
     if (!selectedPage || !selectedElement) {
       return;
     }
-    setPagePatch(selectedPage.id, (page) => ({
+    applyPagePatch(selectedPage.id, (page) => ({
       ...page,
       elements: page.elements.filter((item) => item.id !== selectedElement.id),
     }));
     setSelectedElementId("");
+    setMessage("Selected layer removed.");
   }
 
   function duplicatePage(pageId) {
-    const source = pages.find((page) => page.id === pageId);
+    const source = pages.find((item) => item.id === pageId);
     if (!source) {
       return;
     }
@@ -302,6 +350,7 @@ export default function IdCardStudioPanel() {
       label: `${source.label} Copy`,
       elements: source.elements.map((item) => ({ ...item, id: crypto.randomUUID() })),
     };
+
     setPages((current) => {
       const sourceIndex = current.findIndex((item) => item.id === pageId);
       if (sourceIndex < 0) {
@@ -311,6 +360,7 @@ export default function IdCardStudioPanel() {
       next.splice(sourceIndex + 1, 0, copy);
       return next;
     });
+
     setSelectedPageId(copy.id);
     setSelectedElementId("");
     setMessage("Page duplicated.");
@@ -320,9 +370,10 @@ export default function IdCardStudioPanel() {
     if (!fromId || !toId || fromId === toId) {
       return;
     }
+
     setPages((current) => {
-      const sourceIndex = current.findIndex((page) => page.id === fromId);
-      const targetIndex = current.findIndex((page) => page.id === toId);
+      const sourceIndex = current.findIndex((item) => item.id === fromId);
+      const targetIndex = current.findIndex((item) => item.id === toId);
       if (sourceIndex < 0 || targetIndex < 0) {
         return current;
       }
@@ -338,19 +389,28 @@ export default function IdCardStudioPanel() {
     canvas.width = page.width;
     canvas.height = page.height;
     const ctx = canvas.getContext("2d");
+
     const background = await loadImage(page.backgroundDataUrl);
     ctx.drawImage(background, 0, 0, page.width, page.height);
 
-    for (const item of page.elements) {
-      if (item.type === "image" && item.imageDataUrl) {
-        const image = await loadImage(item.imageDataUrl);
-        ctx.drawImage(image, item.x, item.y, item.width, item.height);
+    for (const element of page.elements) {
+      if (element.type === "image" && element.imageDataUrl) {
+        const image = await loadImage(element.imageDataUrl);
+        ctx.drawImage(image, element.x, element.y, element.width, element.height);
       }
-      if (item.type === "text") {
-        ctx.fillStyle = item.color || "#0f172a";
-        ctx.font = `${item.fontSize || 20}px Arial`;
+      if (element.type === "text") {
+        ctx.fillStyle = element.color || "#0f172a";
+        ctx.font = `${element.fontSize || 20}px Arial`;
         ctx.textBaseline = "top";
-        wrapText(ctx, item.text || "", item.x, item.y, item.width || 260, (item.fontSize || 20) + 5, item.height || 200);
+        wrapText(
+          ctx,
+          element.text || "",
+          element.x,
+          element.y,
+          element.width || 260,
+          (element.fontSize || 20) + 4,
+          element.height || 240
+        );
       }
     }
 
@@ -362,24 +422,33 @@ export default function IdCardStudioPanel() {
       setExporting(true);
       setError("");
       setMessage("");
+
       if (!pages.length) {
-        throw new Error("Upload a PDF or design first.");
+        throw new Error("Upload a PDF or image before saving.");
       }
+
       const first = pages[0];
-      const orientation = first.width >= first.height ? "landscape" : "portrait";
-      const doc = new jsPDF({ orientation, unit: "px", format: [first.width, first.height] });
+      const firstOrientation = first.width >= first.height ? "landscape" : "portrait";
+      const doc = new jsPDF({
+        orientation: firstOrientation,
+        unit: "px",
+        format: [first.width, first.height],
+      });
 
       for (let index = 0; index < pages.length; index += 1) {
         const page = pages[index];
         const canvas = await renderPageCanvas(page);
         const imageData = canvas.toDataURL("image/jpeg", 0.96);
+
         if (index > 0) {
           const pageOrientation = page.width >= page.height ? "landscape" : "portrait";
           doc.addPage([page.width, page.height], pageOrientation);
         }
+
         doc.addImage(imageData, "JPEG", 0, 0, page.width, page.height);
       }
-      doc.save("id_card_manual_edit.pdf");
+
+      doc.save("id-card-edited.pdf");
       setMessage("PDF saved successfully.");
     } catch (saveError) {
       setError(String(saveError?.message || "Unable to save PDF."));
@@ -393,53 +462,33 @@ export default function IdCardStudioPanel() {
       setExporting(true);
       setError("");
       setMessage("");
+
       if (!pages.length) {
-        throw new Error("Upload a PDF or design first.");
+        throw new Error("Upload a PDF or image before export.");
       }
+
       const zip = new JSZip();
       for (let index = 0; index < pages.length; index += 1) {
         const page = pages[index];
         const canvas = await renderPageCanvas(page);
         const base64 = canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
-        const pageName = sanitizeFileName(page.label, `page_${index + 1}`);
-        zip.file(`${pageName}.jpg`, base64, { base64: true });
+        zip.file(`${sanitizeFileName(page.label, `page_${index + 1}`)}.jpg`, base64, { base64: true });
       }
+
       const blob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "id_card_pages.zip";
+      anchor.download = "id-card-pages.zip";
       anchor.click();
       URL.revokeObjectURL(url);
+
       setMessage("Image export completed.");
     } catch (zipError) {
       setError(String(zipError?.message || "Unable to export images."));
     } finally {
       setExporting(false);
     }
-  }
-
-  function saveLayoutJson() {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      uploadName,
-      pages: pages.map((page, index) => ({
-        id: page.id,
-        order: index + 1,
-        label: page.label,
-        width: page.width,
-        height: page.height,
-        elements: page.elements,
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "id_card_layout.json";
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setMessage("Layout JSON saved.");
   }
 
   const overlays = (selectedPage?.elements || []).map((item) => ({
@@ -451,36 +500,49 @@ export default function IdCardStudioPanel() {
   }));
 
   return (
-    <section className="imposition-panel idcard-panel-root">
+    <section className="imposition-panel wzid-root-panel">
       <div className="imposition-panel-heading">
         <h3>Card UPS Workspace</h3>
-        <span>ID Card PDF Manual Editor</span>
+        <span>ID Card PDF Editor</span>
       </div>
 
-      <div className="idcard-studio-shell">
-        <div className="idcard-studio-center">
-          <div className="idcard-upload-row">
-            <label className="imposition-upload-field">
+      <div className="wzid-shell">
+        <div className="wzid-center">
+          <div className="wzid-toolbar">
+            <label className="imposition-upload-field wzid-upload-btn">
               <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleDesignUpload} />
-              <span>{uploadName ? `Loaded: ${uploadName}` : "Upload ID Card PDF / Image"}</span>
+              <span>{uploadName ? `Loaded: ${uploadName}` : "Upload PDF / Image"}</span>
             </label>
+            <div className="wzid-zoom-group">
+              {ZOOM_OPTIONS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`imposition-toolbar-chip ${zoom === value ? "active" : ""}`}
+                  onClick={() => setZoom(value)}
+                >
+                  {value}%
+                </button>
+              ))}
+            </div>
           </div>
 
           {selectedPage ? (
             <div
               ref={canvasRef}
-              className="idcard-manual-canvas"
+              className="wzid-workspace"
               style={{
                 backgroundImage: `url(${selectedPage.backgroundDataUrl})`,
-                aspectRatio: `${selectedPage.width}/${selectedPage.height}`,
+                aspectRatio: `${selectedPage.width} / ${selectedPage.height}`,
+                width: `${zoom}%`,
               }}
-              onClick={handleCanvasClick}
-              onMouseMove={handleCanvasMouseMove}
+              onClick={handleWorkspaceClick}
+              onMouseMove={handleElementDrag}
               onMouseUp={stopElementDrag}
               onMouseLeave={stopElementDrag}
               role="button"
               tabIndex={0}
-              aria-label="ID card editor canvas"
+              aria-label="ID Card editor workspace"
             >
               {overlays.map((item) => (
                 <button
@@ -493,7 +555,7 @@ export default function IdCardStudioPanel() {
                     width: `${item.widthPct}%`,
                     height: `${item.heightPct}%`,
                   }}
-                  onMouseDown={(event) => beginElementDrag(event, item.id)}
+                  onMouseDown={(event) => startElementDrag(event, item.id)}
                   onClick={(event) => {
                     event.stopPropagation();
                     setSelectedElementId(item.id);
@@ -504,59 +566,64 @@ export default function IdCardStudioPanel() {
               ))}
             </div>
           ) : (
-            <div className="idcard-empty-state">Upload PDF to preview 1-2 pages and start editing.</div>
+            <div className="wzid-empty-workspace">
+              Upload a PDF to preview 1-2 pages and start editing.
+            </div>
           )}
         </div>
 
-        <aside className="idcard-studio-right">
-          <section className="idcard-side-card">
-            <div className="idcard-side-head">
-              <strong>Tools</strong>
-              <span>Right side related features</span>
+        <aside className="wzid-right">
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Tools</h3>
+              <span>Manual editing</span>
             </div>
-            <div className="idcard-tool-row">
+            <div className="wzid-tool-row">
               <button type="button" className={`btn btn-secondary ${activeTool === "select" ? "is-active" : ""}`} onClick={() => setActiveTool("select")}>Select</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "text" ? "is-active" : ""}`} onClick={() => setActiveTool("text")}>Text Mode</button>
-              <button type="button" className={`btn btn-secondary ${activeTool === "image" ? "is-active" : ""}`} onClick={() => setActiveTool("image")}>Image Mode</button>
+              <button type="button" className={`btn btn-secondary ${activeTool === "text" ? "is-active" : ""}`} onClick={() => setActiveTool("text")}>Text</button>
+              <button type="button" className={`btn btn-secondary ${activeTool === "image" ? "is-active" : ""}`} onClick={() => setActiveTool("image")}>Image</button>
             </div>
             <label className="imposition-field">
-              <span>Image Source (for Image Mode)</span>
-              <input type="file" accept=".png,.jpg,.jpeg" onChange={handlePendingImage} />
+              <span>Image Source</span>
+              <input type="file" accept=".png,.jpg,.jpeg" onChange={handleImageSourceUpload} />
             </label>
-            <p className="imposition-muted-copy">PDF page centerல click பண்ணி text/image add பண்ணலாம்.</p>
           </section>
 
-          <section className="idcard-side-card">
-            <div className="idcard-side-head">
-              <strong>Pages</strong>
-              <span>Duplicate + drag/drop arrange</span>
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Pages</h3>
+              <span>Duplicate and reorder</span>
             </div>
-            <div className="idcard-page-list">
-              {pages.map((page) => (
-                <article
-                  key={page.id}
-                  className={`idcard-page-item ${selectedPageId === page.id ? "active" : ""}`}
-                  draggable
-                  onDragStart={() => setDragPageId(page.id)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    reorderPages(dragPageId, page.id);
-                    setDragPageId("");
-                  }}
-                >
-                  <button type="button" className="idcard-page-select" onClick={() => { setSelectedPageId(page.id); setSelectedElementId(""); }}>
-                    {page.label}
-                  </button>
-                  <button type="button" className="btn btn-secondary" onClick={() => duplicatePage(page.id)}>Duplicate</button>
-                </article>
-              ))}
+            <div className="wzid-page-list">
+              {pages.length === 0 ? (
+                <div className="imposition-muted-copy">No pages loaded.</div>
+              ) : (
+                pages.map((page) => (
+                  <article
+                    key={page.id}
+                    className={`wzid-page-item ${selectedPageId === page.id ? "active" : ""}`}
+                    draggable
+                    onDragStart={() => setDragPageId(page.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      reorderPages(dragPageId, page.id);
+                      setDragPageId("");
+                    }}
+                  >
+                    <button type="button" className="wzid-page-select" onClick={() => { setSelectedPageId(page.id); setSelectedElementId(""); }}>
+                      {page.label}
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={() => duplicatePage(page.id)}>Duplicate</button>
+                  </article>
+                ))
+              )}
             </div>
           </section>
 
-          <section className="idcard-side-card">
-            <div className="idcard-side-head">
-              <strong>Element Editor</strong>
-              <span>Image replacement + text edit</span>
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Element Editor</h3>
+              <span>Text and image properties</span>
             </div>
             {selectedElement ? (
               <div className="imposition-form-grid imposition-form-grid-tight">
@@ -588,53 +655,25 @@ export default function IdCardStudioPanel() {
                 <button type="button" className="btn btn-secondary" onClick={deleteSelectedElement}>Delete Layer</button>
               </div>
             ) : (
-              <p className="imposition-muted-copy">ஒரு layer select பண்ணினா editor details இங்க வரும்.</p>
+              <div className="imposition-muted-copy">Select a layer to edit details.</div>
             )}
           </section>
 
-          <section className="idcard-side-card">
-            <div className="idcard-side-head">
-              <strong>Export</strong>
-              <span>PDF save + image export</span>
+          <section className="wzid-card">
+            <div className="imposition-panel-heading">
+              <h3>Export</h3>
+              <span>PDF and images</span>
             </div>
-            <div className="idcard-tool-row">
+            <div className="wzid-tool-row">
               <button type="button" className="btn btn-primary" onClick={savePdf} disabled={exporting}>Save PDF</button>
               <button type="button" className="btn btn-secondary" onClick={exportImages} disabled={exporting}>Export Images</button>
-              <button type="button" className="btn btn-secondary" onClick={saveLayoutJson}>Save Layout</button>
             </div>
           </section>
         </aside>
       </div>
 
-      {message ? <div className="alert alert-info">{message}</div> : null}
-      {error ? <div className="alert alert-danger">{error}</div> : null}
+      {message ? <div className="alert alert-info mt-3">{message}</div> : null}
+      {error ? <div className="alert alert-danger mt-3">{error}</div> : null}
     </section>
   );
-}
-
-function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxHeight) {
-  const value = String(text || "").trim();
-  if (!value) {
-    return;
-  }
-  const words = value.split(/\s+/);
-  let line = "";
-  let lineIndex = 0;
-  for (let index = 0; index < words.length; index += 1) {
-    const testLine = line ? `${line} ${words[index]}` : words[index];
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && line) {
-      if ((lineIndex + 1) * lineHeight > maxHeight) {
-        break;
-      }
-      ctx.fillText(line, x, y + lineIndex * lineHeight);
-      line = words[index];
-      lineIndex += 1;
-    } else {
-      line = testLine;
-    }
-  }
-  if ((lineIndex + 1) * lineHeight <= maxHeight) {
-    ctx.fillText(line, x, y + lineIndex * lineHeight);
-  }
 }

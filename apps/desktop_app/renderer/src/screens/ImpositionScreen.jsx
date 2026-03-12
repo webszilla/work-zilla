@@ -1156,7 +1156,7 @@ export default function ImpositionScreen({ onBack }) {
           </div>
         </header>
 
-        <div className="imposition-main-grid">
+        <div className={`imposition-main-grid ${isIdCardStudio ? "is-id-card-mode" : ""}`}>
           {!isIdCardStudio ? (
             <div className="imposition-canvas-column">
               {renderCanvasSummary()}
@@ -1167,7 +1167,7 @@ export default function ImpositionScreen({ onBack }) {
               </div>
             </div>
           ) : null}
-          <div className="imposition-inspector-column">
+          <div className={`imposition-inspector-column ${isIdCardStudio ? "is-id-card-mode" : ""}`}>
             {!isIdCardStudio ? (
               <>
                 {renderArtworkPanel()}
