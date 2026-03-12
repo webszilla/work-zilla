@@ -58,6 +58,7 @@ export default function App() {
   const [theme, setTheme] = useState("system");
   const [platform, setPlatform] = useState("unknown");
   const [connection, setConnection] = useState(defaultConnection);
+  const [appVersion, setAppVersion] = useState("");
 
   const isAdmin = Boolean(
     auth.user?.is_superuser ||
@@ -89,12 +90,21 @@ export default function App() {
         ? normalizeLaunchProduct(await window.storageApi.getLaunchPreference())
         : null;
       const os = window.storageApi.getPlatform ? window.storageApi.getPlatform() : "unknown";
+      let versionResp = null;
+      try {
+        versionResp = window.storageApi.getWindowsAgentVersion
+          ? await window.storageApi.getWindowsAgentVersion()
+          : null;
+      } catch (versionError) {
+        versionResp = null;
+      }
       if (!active) {
         return;
       }
       setAuth(state);
       setTheme(settings.theme || "system");
       setPlatform(os);
+      setAppVersion(String(versionResp?.version || ""));
       setConnection(network || defaultConnection);
       if (preferredProduct === "monitor" || preferredProduct === "imposition") {
         setActiveModule(preferredProduct);
@@ -178,6 +188,17 @@ export default function App() {
     );
   }
 
+  function VersionWatermark() {
+    if (!appVersion) {
+      return null;
+    }
+    return (
+      <div className="app-version-watermark" title={`Work Zilla Agent ${appVersion}`}>
+        Work Zilla Agent v{appVersion}
+      </div>
+    );
+  }
+
   const current = useMemo(
     () => visibleScreens.find((item) => item.id === activeScreen) || visibleScreens[0],
     [activeScreen, visibleScreens]
@@ -221,6 +242,7 @@ export default function App() {
           <div className="panel">Loading...</div>
         </div>
         <WindowControls />
+        <VersionWatermark />
         <ThemeToggle />
       </>
     );
@@ -258,6 +280,7 @@ export default function App() {
             }
           }}
         />
+        <VersionWatermark />
         <ThemeToggle />
       </>
     );
@@ -300,6 +323,7 @@ export default function App() {
             }
           }}
         />
+        <VersionWatermark />
         <ThemeToggle />
       </>
     );
@@ -316,6 +340,7 @@ export default function App() {
             }}
           />
         </Suspense>
+        <VersionWatermark />
         <ThemeToggle />
       </>
     );
@@ -332,6 +357,7 @@ export default function App() {
             }}
           />
         </Suspense>
+        <VersionWatermark />
         <ThemeToggle />
       </>
     );
@@ -389,6 +415,7 @@ export default function App() {
           ) : null}
         </main>
       </div>
+      <VersionWatermark />
       <ThemeToggle />
     </>
   );

@@ -1,12 +1,41 @@
 import { useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import JSZip from "jszip";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfjsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 const ZOOM_OPTIONS = [50, 75, 100, 125, 150];
+let pdfWorkerReadyPromise = null;
+
+async function ensurePdfWorkerReady() {
+  if (pdfWorkerReadyPromise) {
+    return pdfWorkerReadyPromise;
+  }
+  pdfWorkerReadyPromise = (async () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if ("Worker" in window) {
+      try {
+        const workerUrl = new URL(pdfjsWorkerUrl, window.location.href);
+        pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: "module" });
+        return;
+      } catch (workerPortError) {
+        // Ignore and fallback to fake-worker mode below.
+      }
+    }
+
+    // Force fake-worker mode by exposing the worker module on the window scope.
+    try {
+      const workerModule = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+      globalThis.pdfjsWorker = workerModule;
+    } catch (fakeWorkerError) {
+      throw new Error(`Unable to initialize PDF runtime. ${String(fakeWorkerError?.message || fakeWorkerError)}`);
+    }
+  })();
+  return pdfWorkerReadyPromise;
+}
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -59,19 +88,25 @@ function createImageElement({ x, y, imageDataUrl }) {
 
 async function renderPdfPreviewPages(file, maxPages = 2) {
   const buffer = await file.arrayBuffer();
+  await ensurePdfWorkerReady();
+  const loadOptions = {
+    data: new Uint8Array(buffer),
+    stopAtErrors: true,
+    isEvalSupported: false,
+  };
   let pdf = null;
   let firstError = null;
   try {
-    pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    pdf = await pdfjsLib.getDocument(loadOptions).promise;
   } catch (error) {
     firstError = error;
   }
 
-  // Electron production builds can fail to load the worker from packaged assets.
-  // Fallback to worker-less mode so PDF preview still works.
+  // Fallback: force a dedicated in-process worker instance.
   if (!pdf) {
     try {
-      pdf = await pdfjsLib.getDocument({ data: buffer, disableWorker: true }).promise;
+      const fallbackWorker = new pdfjsLib.PDFWorker({ name: "wzid-fallback" });
+      pdf = await pdfjsLib.getDocument({ ...loadOptions, worker: fallbackWorker }).promise;
     } catch (fallbackError) {
       const primaryMessage = String(firstError?.message || firstError || "worker_load_failed");
       const fallbackMessage = String(fallbackError?.message || fallbackError || "fallback_failed");
