@@ -159,6 +159,56 @@ function sanitizeFilename(name) {
   return name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").slice(0, 140);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isLockedFileError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}
+
+async function removeFileWithRetry(filePath, maxAttempts = 10, waitMs = 350) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return;
+      }
+      fs.unlinkSync(filePath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isLockedFileError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+      await sleep(waitMs);
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+}
+
+async function finalizeDownloadedInstaller(tempPath, targetPath) {
+  if (fs.existsSync(targetPath)) {
+    try {
+      await removeFileWithRetry(targetPath);
+    } catch (error) {
+      if (!isLockedFileError(error)) {
+        throw error;
+      }
+      const parsed = path.parse(targetPath);
+      const fallbackName = `${parsed.name}-${Date.now()}${parsed.ext || ""}`;
+      const fallbackPath = path.join(parsed.dir, fallbackName);
+      fs.renameSync(tempPath, fallbackPath);
+      return fallbackPath;
+    }
+  }
+  fs.renameSync(tempPath, targetPath);
+  return targetPath;
+}
+
 function detectInstallerName(productKey, downloadUrl) {
   const platform = getPlatformKey();
   const defaultSuffix = platform === "windows" ? ".exe" : ".dmg";
@@ -857,25 +907,22 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
     total: 1,
     done: true,
   });
-  if (fs.existsSync(destination)) {
-    fs.unlinkSync(destination);
-  }
-  fs.renameSync(tempDestination, destination);
+  const installerPath = await finalizeDownloadedInstaller(tempDestination, destination);
 
   let installMode = "interactive";
   let installDetected = false;
   try {
     savePreferredProduct(productKey);
-    const silentlyInstalled = await runSilentInstall(destination);
+    const silentlyInstalled = await runSilentInstall(installerPath);
     if (!silentlyInstalled) {
-      await openInstaller(destination);
+      await openInstaller(installerPath);
       installDetected = await waitForBaseAgentInstall();
     } else {
       installMode = "silent";
       installDetected = true;
     }
   } catch (_err) {
-    await openInstaller(destination);
+    await openInstaller(installerPath);
     installDetected = await waitForBaseAgentInstall();
   }
   if (installDetected) {
@@ -885,11 +932,11 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
   const installedMarked = Boolean(installedInfo?.[productKey]?.installed);
   return {
     ok: true,
-    path: destination,
+    path: installerPath,
     productKey,
     platform,
     sourceUrl: usedUrl,
-    filename: path.basename(destination),
+    filename: path.basename(installerPath),
     latestVersion: detectLatestVersionFromUrls(downloadUrls) || "latest",
     installedVersion: installedInfo?.[productKey]?.version || "",
     installedMarked,
