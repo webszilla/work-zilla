@@ -399,13 +399,24 @@ async function downloadFileWithRetry({ urlText, destination, progressCb, retries
     } catch (error) {
       lastError = error;
       const message = String(error?.message || "").toLowerCase();
+      const isRangeNotSatisfiable = message.includes("download failed (416)");
+      if (isRangeNotSatisfiable && fs.existsSync(destination)) {
+        // Stale/oversized partial file can trigger HTTP 416 on resumed downloads.
+        // Remove local partial and retry from byte 0.
+        try {
+          fs.unlinkSync(destination);
+        } catch (_unlinkError) {
+          // no-op, normal retry logic below will surface final error if needed.
+        }
+      }
       const retryable = message.includes("timeout")
         || message.includes("interrupted")
         || message.includes("econnreset")
         || message.includes("socket hang up")
         || message.includes("aborted")
         || message.includes("download failed (5")
-        || message.includes("download failed (429)");
+        || message.includes("download failed (429)")
+        || isRangeNotSatisfiable;
       if (!retryable || attempt >= retries) {
         break;
       }
