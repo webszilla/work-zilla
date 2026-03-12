@@ -387,11 +387,11 @@ def download_windows_imposition_product_agent(request):
     return _redirect_to_latest_static_download(
         request,
         "Work Zilla Imposition Setup *.exe",
+        "Work Zilla Agent Setup *.exe",
+        "WorkZillaAgentSetup.exe",
         "Work Zilla Installer-win-x64-*.exe",
         "Work Zilla Installer-win-*.exe",
-        "Work Zilla Agent Setup *.exe",
         "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
     )
 
 
