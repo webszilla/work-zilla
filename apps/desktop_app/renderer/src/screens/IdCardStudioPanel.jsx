@@ -83,6 +83,7 @@ function createImageElement({ x, y, imageDataUrl }) {
     width: 170,
     height: 210,
     imageDataUrl,
+    fit: "cover",
   };
 }
 
@@ -185,6 +186,35 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxHeight) {
   }
 }
 
+function drawImageCover(ctx, image, x, y, width, height) {
+  const frameRatio = width / height;
+  const imageRatio = image.width / image.height;
+  let sourceWidth = image.width;
+  let sourceHeight = image.height;
+  let sourceX = 0;
+  let sourceY = 0;
+
+  if (imageRatio > frameRatio) {
+    sourceWidth = image.height * frameRatio;
+    sourceX = (image.width - sourceWidth) / 2;
+  } else {
+    sourceHeight = image.width / frameRatio;
+    sourceY = (image.height - sourceHeight) / 2;
+  }
+
+  ctx.drawImage(
+    image,
+    Math.floor(sourceX),
+    Math.floor(sourceY),
+    Math.floor(sourceWidth),
+    Math.floor(sourceHeight),
+    x,
+    y,
+    width,
+    height,
+  );
+}
+
 export default function IdCardStudioPanel() {
   const [pages, setPages] = useState([]);
   const [selectedPageId, setSelectedPageId] = useState("");
@@ -200,8 +230,11 @@ export default function IdCardStudioPanel() {
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [pageMenu, setPageMenu] = useState({ open: false, x: 0, y: 0, pageId: "" });
+  const [inlineTextEdit, setInlineTextEdit] = useState({ pageId: "", elementId: "" });
 
   const pageRefs = useRef(new Map());
+  const quickReplaceInputRef = useRef(null);
+  const [quickReplaceTarget, setQuickReplaceTarget] = useState({ pageId: "", elementId: "" });
 
   const selectedPage = useMemo(
     () => pages.find((item) => item.id === selectedPageId) || null,
@@ -456,9 +489,58 @@ export default function IdCardStudioPanel() {
     setDragPageId("");
     setDragState(null);
     setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+    setInlineTextEdit({ pageId: "", elementId: "" });
+    setQuickReplaceTarget({ pageId: "", elementId: "" });
     setEditorEnabled(false);
     setMessage("Current PDF closed.");
     setError("");
+  }
+
+  function deletePage(pageId) {
+    if (!pageId) {
+      return;
+    }
+    setPages((current) => {
+      const next = current.filter((item) => item.id !== pageId);
+      if (!next.length) {
+        setSelectedPageId("");
+        setUploadName("");
+      } else if (!next.find((item) => item.id === selectedPageId)) {
+        setSelectedPageId(next[0].id);
+      }
+      return next;
+    });
+    setSelectedElementId("");
+    setInlineTextEdit({ pageId: "", elementId: "" });
+    setPageMenu({ open: false, x: 0, y: 0, pageId: "" });
+    setMessage("Page deleted.");
+  }
+
+  async function handleQuickReplaceImage(event) {
+    try {
+      const file = event.target.files?.[0];
+      const { pageId, elementId } = quickReplaceTarget;
+      if (!file || !pageId || !elementId) {
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      applyPagePatch(pageId, (page) => ({
+        ...page,
+        elements: page.elements.map((item) => (
+          item.id === elementId ? { ...item, imageDataUrl: dataUrl, fit: "cover" } : item
+        )),
+      }));
+      setSelectedPageId(pageId);
+      setSelectedElementId(elementId);
+      setMessage("Photo replaced.");
+      setError("");
+    } catch (replaceError) {
+      setError(String(replaceError?.message || "Unable to replace selected image."));
+    } finally {
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
   }
 
   function updateSelectedElement(patch) {
@@ -593,7 +675,11 @@ export default function IdCardStudioPanel() {
     for (const element of page.elements) {
       if (element.type === "image" && element.imageDataUrl) {
         const image = await loadImage(element.imageDataUrl);
-        ctx.drawImage(image, element.x, element.y, element.width, element.height);
+        if (element.fit === "cover") {
+          drawImageCover(ctx, image, element.x, element.y, element.width, element.height);
+        } else {
+          ctx.drawImage(image, element.x, element.y, element.width, element.height);
+        }
       }
       if (element.type === "text") {
         ctx.fillStyle = element.color || "#0f172a";
@@ -696,6 +782,13 @@ export default function IdCardStudioPanel() {
       </div>
 
       <div className="wzid-shell">
+        <input
+          ref={quickReplaceInputRef}
+          type="file"
+          accept=".png,.jpg,.jpeg"
+          className="wzid-hidden-file-input"
+          onChange={handleQuickReplaceImage}
+        />
         <div className="wzid-center">
           <div className="wzid-toolbar">
             <label className="imposition-upload-field wzid-upload-btn">
@@ -757,9 +850,8 @@ export default function IdCardStudioPanel() {
                         aria-label={`${page.label} editor workspace`}
                       >
                         {editorEnabled ? overlays.map((item) => (
-                          <button
+                          <div
                             key={item.id}
-                            type="button"
                             className={`idcard-overlay ${selectedElementId === item.id ? "active" : ""}`}
                             style={{
                               left: `${item.leftPct}%`,
@@ -775,10 +867,46 @@ export default function IdCardStudioPanel() {
                               }
                               setSelectedPageId(page.id);
                               setSelectedElementId(item.id);
+                              if (item.type === "image" && activeTool === "select" && quickReplaceInputRef.current) {
+                                setQuickReplaceTarget({ pageId: page.id, elementId: item.id });
+                                quickReplaceInputRef.current.click();
+                              }
+                            }}
+                            onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              if (item.type === "text" && editorEnabled) {
+                                setInlineTextEdit({ pageId: page.id, elementId: item.id });
+                              }
                             }}
                           >
-                            {item.type === "text" ? item.text : "Image"}
-                          </button>
+                            {item.type === "image" ? (
+                              <img
+                                src={item.imageDataUrl}
+                                alt="Layer"
+                                className="idcard-overlay-image"
+                              />
+                            ) : null}
+                            {item.type === "text" ? (
+                              inlineTextEdit.pageId === page.id && inlineTextEdit.elementId === item.id ? (
+                                <textarea
+                                  className="idcard-inline-text-editor"
+                                  autoFocus
+                                  value={item.text || ""}
+                                  onChange={(event) => {
+                                    applyPagePatch(page.id, (pageItem) => ({
+                                      ...pageItem,
+                                      elements: pageItem.elements.map((entry) => (
+                                        entry.id === item.id ? { ...entry, text: event.target.value } : entry
+                                      )),
+                                    }));
+                                  }}
+                                  onBlur={() => setInlineTextEdit({ pageId: "", elementId: "" })}
+                                />
+                              ) : (
+                                <span className="idcard-overlay-text">{item.text}</span>
+                              )
+                            ) : null}
+                          </div>
                         )) : null}
                       </div>
                     </article>
@@ -912,6 +1040,9 @@ export default function IdCardStudioPanel() {
           </button>
           <button type="button" className="wzid-context-btn" onClick={() => addBlankPageAfter(pageMenu.pageId)}>
             Add Blank Page
+          </button>
+          <button type="button" className="wzid-context-btn is-danger" onClick={() => deletePage(pageMenu.pageId)}>
+            Delete Page
           </button>
           <button type="button" className="wzid-context-btn is-danger" onClick={closeCurrentPdf}>
             Close Current PDF
