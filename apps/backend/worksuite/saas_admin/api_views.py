@@ -1169,6 +1169,43 @@ def _serialize_org(org, subscription=None):
     }
 
 
+def _active_orgs_queryset():
+    return Organization.objects.filter(is_deleted=False)
+
+
+def _deleted_orgs_queryset():
+    return Organization.objects.filter(is_deleted=True)
+
+
+def _serialize_deleted_org(org):
+    owner = org.owner
+    return {
+        "id": org.id,
+        "organization_name": org.name,
+        "owner_username": owner.username if owner else "",
+        "owner_email": owner.email if owner else "",
+        "deleted_at": _format_datetime(org.deleted_at),
+        "reason": org.deleted_reason or "Admin deleted organization",
+        "can_restore": True,
+        "can_permanent_delete": True,
+        "legacy_deleted_account_id": None,
+    }
+
+
+def _serialize_deleted_account_entry(row):
+    return {
+        "id": None,
+        "organization_name": row.organization_name,
+        "owner_username": row.owner_username,
+        "owner_email": row.owner_email or "",
+        "deleted_at": _format_datetime(row.deleted_at),
+        "reason": row.reason or "",
+        "can_restore": False,
+        "can_permanent_delete": True,
+        "legacy_deleted_account_id": row.id,
+    }
+
+
 def _normalize_product_slugs(slug):
     product_slug = "storage" if slug in ("storage", "online-storage") else slug
     catalog_slug = "monitor" if product_slug == "work-suite" else product_slug
@@ -1814,7 +1851,7 @@ def organizations_list(request):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
 
-    orgs = Organization.objects.select_related("owner").order_by("name")
+    orgs = _active_orgs_queryset().select_related("owner").order_by("name")
     org_ids = list(orgs.values_list("id", flat=True))
     monitor_product = Product.objects.filter(slug="monitor").first()
     entitlements = (
@@ -1884,16 +1921,13 @@ def organizations_list(request):
         for dealer in dealers
     ]
     deleted_payload = [
-        {
-            "id": row.id,
-            "organization_name": row.organization_name,
-            "owner_username": row.owner_username,
-            "owner_email": row.owner_email or "",
-            "deleted_at": _format_datetime(row.deleted_at),
-            "reason": row.reason or "",
-        }
-        for row in DeletedAccount.objects.order_by("-deleted_at")[:500]
+        _serialize_deleted_org(row)
+        for row in _deleted_orgs_queryset().select_related("owner").order_by("-deleted_at", "-id")[:500]
     ]
+    deleted_payload.extend(
+        _serialize_deleted_account_entry(row)
+        for row in DeletedAccount.objects.order_by("-deleted_at", "-id")[:500]
+    )
 
     return JsonResponse({
         "organizations": payload,
@@ -2045,6 +2079,38 @@ def dealer_detail(request, dealer_id):
         "org_referrals": org_payload,
         "dealer_referrals": dealer_payload,
     })
+
+
+@login_required
+@require_http_methods(["POST"])
+def organization_restore(request, org_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id, is_deleted=True)
+    org.is_deleted = False
+    org.deleted_at = None
+    org.deleted_reason = ""
+    org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+    if org.owner and not org.owner.is_active:
+        org.owner.is_active = True
+        org.owner.save(update_fields=["is_active"])
+    return JsonResponse({"status": "restored"})
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def organization_permanent_delete(request, org_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id)
+    owner = org.owner
+    if owner:
+        owner.delete()
+    else:
+        org.delete()
+    return JsonResponse({"status": "deleted"})
 
 
 @login_required
@@ -2344,7 +2410,7 @@ def organization_detail(request, org_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
 
-    org = get_object_or_404(Organization, id=org_id)
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id)
     subscription = (
         Subscription.objects
         .filter(organization=org)
@@ -2354,30 +2420,30 @@ def organization_detail(request, org_id):
     )
 
     if request.method == "GET":
+        if org.is_deleted:
+            return JsonResponse({"error": "organization_deleted"}, status=410)
         return JsonResponse(_organization_detail_payload(org, subscription))
 
     if request.method == "DELETE":
         owner = org.owner
-        send_templated_email(
-            owner.email if owner else "",
-            "Account Deleted",
-            "emails/account_deleted.txt",
-            {
-                "name": owner.first_name if owner and owner.first_name else (owner.username if owner else "User"),
-                "account_name": org.name,
-                "reason": "Admin deleted organization"
-            }
-        )
-        DeletedAccount.objects.create(
-            organization_name=org.name,
-            owner_username=owner.username if owner else "-",
-            owner_email=owner.email if owner else "",
-            reason="Admin deleted organization",
-        )
-        if owner:
-            owner.delete()
-        else:
-            org.delete()
+        if not org.is_deleted:
+            send_templated_email(
+                owner.email if owner else "",
+                "Account Deleted",
+                "emails/account_deleted.txt",
+                {
+                    "name": owner.first_name if owner and owner.first_name else (owner.username if owner else "User"),
+                    "account_name": org.name,
+                    "reason": "Admin deleted organization"
+                }
+            )
+            org.is_deleted = True
+            org.deleted_at = timezone.now()
+            org.deleted_reason = "Admin deleted organization"
+            org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+            if owner and owner.is_active:
+                owner.is_active = False
+                owner.save(update_fields=["is_active"])
         return JsonResponse({"status": "deleted"})
 
     data = {}
@@ -2689,7 +2755,7 @@ def product_organizations(request, slug):
     if not product:
         return JsonResponse({"error": "product_not_found"}, status=404)
     if product_slug == "storage":
-        orgs = Organization.objects.filter(id__in=list(org_ids)).select_related("owner").order_by("name")
+        orgs = _active_orgs_queryset().filter(id__in=list(org_ids)).select_related("owner").order_by("name")
         subscriptions = list(
             StorageOrgSubscription.objects
             .filter(organization_id__in=list(org_ids))
@@ -2736,10 +2802,13 @@ def product_organizations(request, slug):
             "organizations": payload,
             "plans": plans_payload,
             "dealers": [],
-            "deleted_orgs": [],
+            "deleted_orgs": [
+                _serialize_deleted_org(row)
+                for row in _deleted_orgs_queryset().filter(id__in=list(org_ids)).select_related("owner").order_by("-deleted_at", "-id")[:500]
+            ],
             "deleted_dealers": [],
         })
-    orgs = Organization.objects.filter(id__in=list(org_ids)).select_related("owner").order_by("name")
+    orgs = _active_orgs_queryset().filter(id__in=list(org_ids)).select_related("owner").order_by("name")
     sub_filter = models.Q(plan__product__slug=catalog_slug)
     if catalog_slug == "monitor":
         sub_filter |= models.Q(plan__product__isnull=True)
@@ -2811,15 +2880,8 @@ def product_organizations(request, slug):
         for dealer in dealers
     ]
     deleted_payload = [
-        {
-            "id": row.id,
-            "organization_name": row.organization_name,
-            "owner_username": row.owner_username,
-            "owner_email": row.owner_email or "",
-            "deleted_at": _format_datetime(row.deleted_at),
-            "reason": row.reason or "",
-        }
-        for row in DeletedAccount.objects.order_by("-deleted_at")[:500]
+        _serialize_deleted_org(row)
+        for row in _deleted_orgs_queryset().filter(id__in=list(org_ids)).select_related("owner").order_by("-deleted_at", "-id")[:500]
     ]
     return JsonResponse({
         "product": {"id": product.id, "name": product.name, "slug": product.slug},

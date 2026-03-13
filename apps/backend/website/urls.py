@@ -31,6 +31,7 @@ urlpatterns = [
     path("my-account/billing/renew/start/", views.billing_renew_start, name="account_billing_renew_start"),
     path("my-account/billing/renew/", views.billing_renew_view, name="account_billing_renew"),
     path("my-account/billing/renew/confirm/", views.billing_renew_confirm, name="account_billing_renew_confirm"),
+    path("my-account/ticketing/", views.account_ticketing_view, name="account_ticketing"),
     path("my-account/profile/", views.profile_view, name="account_profile"),
     path("downloads/windows-agent/", views.download_windows_agent, name="download_windows_agent"),
     path("downloads/windows-product-agent/", views.download_windows_product_agent, name="download_windows_product_agent"),

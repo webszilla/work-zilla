@@ -36,6 +36,9 @@ from core.models import (
     BillingProfile,
     SubscriptionHistory,
     InvoiceSellerProfile,
+    OrgSupportTicket,
+    OrgSupportTicketMessage,
+    OrgSupportTicketAttachment,
 )
 from apps.backend.common_auth.models import User
 from core.notification_emails import send_email_verification
@@ -43,6 +46,8 @@ from core.notification_emails import send_email_verification
 CANONICAL_DOWNLOAD_HOST = "getworkzilla.com"
 CANONICAL_DOWNLOAD_BASE_URL = f"https://{CANONICAL_DOWNLOAD_HOST}"
 LOCAL_DOWNLOAD_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
+TICKET_MAX_ATTACHMENTS = 5
+TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 
 
 def _resolve_latest_download(*candidates):
@@ -123,6 +128,114 @@ def _prefer_arm64_mac(request):
     if any(token in user_agent for token in ("intel", "x86_64", "x64")):
         return False
     return any(token in user_agent for token in ("arm64", "aarch64", "apple silicon"))
+
+
+def _normalize_ticket_category(value, default="support"):
+    category = str(value or "").strip().lower()
+    return category if category in {"support", "sales"} else default
+
+
+def _normalize_ticket_status(value, default="open"):
+    status = str(value or "").strip().lower()
+    return status if status in {"open", "in_progress", "resolved", "closed"} else default
+
+
+def _normalize_ticket_product_slug(value, default="monitor"):
+    slug = str(value or "").strip().lower()
+    if not slug:
+        return default
+    if slug in {"worksuite", "work-suite"}:
+        return "monitor"
+    if slug == "online-storage":
+        return "storage"
+    return slug
+
+
+def _ticket_product_label(slug):
+    normalized = _normalize_ticket_product_slug(slug, default="")
+    labels = {
+        "monitor": "Work Suite",
+        "storage": "Online Storage",
+        "ai-chatbot": "AI Chatbot",
+        "imposition-software": "Print Marks",
+        "business-autopilot-erp": "Business Autopilot",
+        "whatsapp-automation": "Whatsapp Automation",
+        "digital-card": "Digital Card",
+        "ai-chat-widget": "AI Chat Widget",
+    }
+    if normalized in labels:
+        return labels[normalized]
+    return normalized.replace("-", " ").title() if normalized else ""
+
+
+def _ticket_product_options_for_org(org):
+    options = []
+    seen = set()
+    for sub in (
+        Subscription.objects
+        .filter(organization=org)
+        .select_related("plan", "plan__product")
+        .order_by("-start_date")
+    ):
+        product = getattr(sub.plan, "product", None)
+        slug = _normalize_ticket_product_slug(getattr(product, "slug", "") or "monitor", default="monitor")
+        if slug in seen:
+            continue
+        seen.add(slug)
+        options.append({"slug": slug, "name": _ticket_product_label(slug)})
+    try:
+        from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+        has_storage = StorageOrgSubscription.objects.filter(organization=org).exists()
+        if has_storage and "storage" not in seen:
+            seen.add("storage")
+            options.append({"slug": "storage", "name": _ticket_product_label("storage")})
+    except Exception:
+        pass
+    if not options:
+        options.append({"slug": "monitor", "name": _ticket_product_label("monitor")})
+    return options
+
+
+def _validate_ticket_attachments(files):
+    if len(files) > TICKET_MAX_ATTACHMENTS:
+        return f"Maximum {TICKET_MAX_ATTACHMENTS} images allowed."
+    for file_obj in files:
+        size = int(getattr(file_obj, "size", 0) or 0)
+        if size > TICKET_MAX_ATTACHMENT_BYTES:
+            return "Each image must be 2MB or smaller."
+        content_type = str(getattr(file_obj, "content_type", "") or "").lower()
+        if content_type and not content_type.startswith("image/"):
+            return "Only image attachments are allowed."
+    return ""
+
+
+def _is_org_admin_account(request, org, profile=None):
+    if not request.user.is_authenticated or not org:
+        return False
+    if getattr(request.user, "is_staff", False) or getattr(org, "owner_id", None) == request.user.id:
+        return True
+    profile = profile or UserProfile.objects.filter(user=request.user).first()
+    return bool(profile and getattr(profile, "is_org_admin", False))
+
+
+def _purge_closed_tickets(days=45):
+    cutoff = timezone.now() - timedelta(days=max(int(days or 45), 1))
+    return (
+        OrgSupportTicket.objects
+        .filter(status="closed", closed_at__isnull=False, closed_at__lt=cutoff)
+        .delete()
+    )
+
+
+def _ticket_author_name(message):
+    if message.author:
+        full_name = f"{getattr(message.author, 'first_name', '')} {getattr(message.author, 'last_name', '')}".strip()
+        return full_name or getattr(message.author, "username", "") or getattr(message.author, "email", "")
+    if message.author_role == "saas_admin":
+        return "SaaS Admin"
+    if message.author_role == "system":
+        return "System"
+    return "ORG Admin"
 
 
 def _build_latest_static_download_url(request, *candidates, fallback_path=None):
@@ -1836,6 +1949,7 @@ def account_view(request):
     context["account_section"] = "products"
     org = _resolve_org_for_user(request.user)
     profile = UserProfile.objects.filter(user=request.user).first()
+    show_ticketing_tab = _is_org_admin_account(request, org, profile)
     is_saas_admin = bool(
         request.user.is_superuser
         or (profile and profile.role in ("superadmin", "super_admin"))
@@ -2092,6 +2206,7 @@ def account_view(request):
         "pending_payment_rows": pending_payment_rows,
         "is_saas_admin": is_saas_admin,
         "is_agent": is_agent,
+        "show_ticketing_tab": show_ticketing_tab,
         "pending_renewal_rows": pending_renewal_rows,
         "email_verification_required": bool(request.user.email and not request.user.email_verified),
         "email_verification_address": request.user.email or "",
@@ -2145,6 +2260,7 @@ def billing_view(request):
     if profile and profile.role == "ai_chatbot_agent":
         return redirect("/my-account/")
     org = _resolve_org_for_user(request.user)
+    show_ticketing_tab = _is_org_admin_account(request, org, profile)
     profile = BillingProfile.objects.filter(organization=org).first()
     product_slug = (request.GET.get("product") or "all").strip().lower()
     if product_slug == "worksuite":
@@ -2344,6 +2460,7 @@ def billing_view(request):
         "billing_phone_number": phone_number,
         "billing_product_slug": product_slug,
         "billing_products": billing_products,
+        "show_ticketing_tab": show_ticketing_tab,
     })
     return render(request, "public/billing.html", context)
 
@@ -2354,6 +2471,7 @@ def account_bank_transfer(request, transfer_id=None):
     context["is_logged_in"] = True
     context["account_section"] = "billing"
     org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
     if not org:
         messages.error(request, "Organization not found.")
         return redirect("/my-account/")
@@ -2397,6 +2515,7 @@ def account_bank_transfer(request, transfer_id=None):
         "bank_account_details": bank_account_details,
         "seller_upi_id": seller_upi_id,
         "transfer_description": (transfer.notes or "").strip() if transfer and transfer.request_type == "addon" else "",
+        "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "payments/bank_transfer.html", context)
 
@@ -2407,6 +2526,7 @@ def profile_view(request):
     context["is_logged_in"] = True
     context["account_section"] = "profile"
     profile = UserProfile.objects.filter(user=request.user).first()
+    org = _resolve_org_for_user(request.user)
 
     if request.method == "POST":
         phone_number = (request.POST.get("phone_number") or "").strip()
@@ -2439,8 +2559,251 @@ def profile_view(request):
 
     context.update({
         "profile": profile,
+        "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "public/profile.html", context)
+
+
+@login_required
+def account_ticketing_view(request):
+    context = _base_context(request)
+    context["is_logged_in"] = True
+    context["account_section"] = "ticketing"
+    org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
+    if not org:
+        messages.error(request, "Organization not found.")
+        return redirect("/my-account/")
+    if not _is_org_admin_account(request, org, profile):
+        messages.error(request, "Ticketing is available only for organization admins.")
+        return redirect("/my-account/")
+
+    _purge_closed_tickets(days=45)
+    product_options = _ticket_product_options_for_org(org)
+    allowed_product_slugs = {item["slug"] for item in product_options}
+    selected_status = _normalize_ticket_status(request.GET.get("status"), default="")
+    if str(request.GET.get("status") or "").strip() == "":
+        selected_status = ""
+    selected_category = _normalize_ticket_category(request.GET.get("category"), default="")
+    if str(request.GET.get("category") or "").strip() == "":
+        selected_category = ""
+    requested_ticket_id = request.GET.get("ticket")
+    selected_ticket_id = int(requested_ticket_id) if str(requested_ticket_id or "").isdigit() else None
+
+    if request.method == "POST":
+        action = str(request.POST.get("ticket_action") or "").strip().lower()
+        redirect_ticket_id = selected_ticket_id
+
+        if action == "create":
+            category = _normalize_ticket_category(request.POST.get("category"), default="support")
+            subject = str(request.POST.get("subject") or "").strip()
+            message = str(request.POST.get("message") or "").strip()
+            product_slug = _normalize_ticket_product_slug(request.POST.get("product_slug"), default="monitor")
+            files = request.FILES.getlist("attachments")
+
+            if not subject:
+                messages.error(request, "Ticket subject is required.")
+            elif not message:
+                messages.error(request, "Ticket message is required.")
+            elif product_slug not in allowed_product_slugs:
+                messages.error(request, "Select a valid product.")
+            else:
+                file_error = _validate_ticket_attachments(files)
+                if file_error:
+                    messages.error(request, file_error)
+                else:
+                    with transaction.atomic():
+                        ticket = OrgSupportTicket.objects.create(
+                            organization=org,
+                            created_by=request.user,
+                            product_slug=product_slug,
+                            category=category,
+                            subject=subject,
+                            status="open",
+                            closed_at=None,
+                        )
+                        msg = OrgSupportTicketMessage.objects.create(
+                            ticket=ticket,
+                            author=request.user,
+                            author_role="org_admin",
+                            message=message,
+                        )
+                        for file_obj in files:
+                            OrgSupportTicketAttachment.objects.create(
+                                ticket=ticket,
+                                message=msg,
+                                file=file_obj,
+                                uploaded_by=request.user,
+                            )
+                        now = timezone.now()
+                        ticket.last_message_at = now
+                        ticket.last_read_by_org_at = now
+                        ticket.save(update_fields=["last_message_at", "last_read_by_org_at", "updated_at"])
+                    messages.success(request, f"Ticket #{ticket.id} created.")
+                    redirect_ticket_id = ticket.id
+        elif action == "reply":
+            ticket_id = request.POST.get("ticket_id")
+            ticket = OrgSupportTicket.objects.filter(id=ticket_id, organization=org).first()
+            message = str(request.POST.get("message") or "").strip()
+            files = request.FILES.getlist("attachments")
+            redirect_ticket_id = ticket.id if ticket else redirect_ticket_id
+            if not ticket:
+                messages.error(request, "Ticket not found.")
+            elif not message:
+                messages.error(request, "Reply message is required.")
+            else:
+                file_error = _validate_ticket_attachments(files)
+                if file_error:
+                    messages.error(request, file_error)
+                else:
+                    with transaction.atomic():
+                        msg = OrgSupportTicketMessage.objects.create(
+                            ticket=ticket,
+                            author=request.user,
+                            author_role="org_admin",
+                            message=message,
+                        )
+                        for file_obj in files:
+                            OrgSupportTicketAttachment.objects.create(
+                                ticket=ticket,
+                                message=msg,
+                                file=file_obj,
+                                uploaded_by=request.user,
+                            )
+                        now = timezone.now()
+                        if ticket.status == "closed":
+                            ticket.status = "open"
+                            ticket.closed_at = None
+                        ticket.last_message_at = now
+                        ticket.last_read_by_org_at = now
+                        ticket.save(update_fields=["status", "closed_at", "last_message_at", "last_read_by_org_at", "updated_at"])
+                    messages.success(request, f"Reply added to ticket #{ticket.id}.")
+        elif action == "status":
+            ticket_id = request.POST.get("ticket_id")
+            ticket = OrgSupportTicket.objects.filter(id=ticket_id, organization=org).first()
+            next_status = _normalize_ticket_status(request.POST.get("status"), default="")
+            redirect_ticket_id = ticket.id if ticket else redirect_ticket_id
+            if not ticket:
+                messages.error(request, "Ticket not found.")
+            elif not next_status:
+                messages.error(request, "Select a valid status.")
+            elif ticket.status != next_status:
+                ticket.status = next_status
+                ticket.closed_at = timezone.now() if next_status == "closed" else None
+                ticket.save(update_fields=["status", "closed_at", "updated_at"])
+                OrgSupportTicketMessage.objects.create(
+                    ticket=ticket,
+                    author=request.user,
+                    author_role="system",
+                    message=f"Ticket status changed to {next_status.replace('_', ' ').title()}.",
+                )
+                messages.success(request, f"Ticket #{ticket.id} status updated.")
+
+        redirect_url = "/my-account/ticketing/"
+        params = []
+        if selected_status:
+            params.append(f"status={selected_status}")
+        if selected_category:
+            params.append(f"category={selected_category}")
+        if redirect_ticket_id:
+            params.append(f"ticket={redirect_ticket_id}")
+        if params:
+            redirect_url = f"{redirect_url}?{'&'.join(params)}"
+        return redirect(redirect_url)
+
+    tickets = (
+        OrgSupportTicket.objects
+        .filter(organization=org)
+        .prefetch_related("messages")
+        .order_by("-updated_at", "-id")
+    )
+    if selected_status:
+        tickets = tickets.filter(status=selected_status)
+    if selected_category:
+        tickets = tickets.filter(category=selected_category)
+    tickets = list(tickets)
+
+    selected_ticket = None
+    if selected_ticket_id:
+        for ticket in tickets:
+            if ticket.id == selected_ticket_id:
+                selected_ticket = ticket
+                break
+    if not selected_ticket and tickets:
+        selected_ticket = tickets[0]
+
+    if selected_ticket:
+        selected_ticket.last_read_by_org_at = timezone.now()
+        selected_ticket.save(update_fields=["last_read_by_org_at"])
+        selected_ticket = (
+            OrgSupportTicket.objects
+            .select_related("created_by")
+            .prefetch_related("messages__author", "messages__attachments")
+            .get(id=selected_ticket.id)
+        )
+        selected_ticket.product_name = _ticket_product_label(selected_ticket.product_slug)
+
+    ticket_rows = []
+    for ticket in tickets:
+        unread_qs = ticket.messages.filter(author_role="saas_admin")
+        if ticket.last_read_by_org_at:
+            unread_qs = unread_qs.filter(created_at__gt=ticket.last_read_by_org_at)
+        latest_message = ticket.messages.order_by("-created_at", "-id").first()
+        ticket_rows.append({
+            "id": ticket.id,
+            "subject": ticket.subject,
+            "category": ticket.category,
+            "status": ticket.status,
+            "product_slug": ticket.product_slug,
+            "product_name": _ticket_product_label(ticket.product_slug),
+            "updated_at": ticket.updated_at,
+            "latest_message_preview": (latest_message.message[:120] + "...") if latest_message and len(latest_message.message or "") > 120 else (latest_message.message if latest_message else ""),
+            "unread_replies": unread_qs.count(),
+        })
+
+    ticket_messages = []
+    if selected_ticket:
+        for msg in selected_ticket.messages.all():
+            ticket_messages.append({
+                "id": msg.id,
+                "author_role": msg.author_role,
+                "author_name": _ticket_author_name(msg),
+                "message": msg.message,
+                "created_at": msg.created_at,
+                "attachments": [
+                    {
+                        "url": attachment.file.url,
+                        "name": os.path.basename(attachment.file.name or ""),
+                    }
+                    for attachment in msg.attachments.all()
+                    if attachment.file
+                ],
+            })
+
+    context.update({
+        "organization": org,
+        "profile": profile,
+        "show_ticketing_tab": True,
+        "ticket_product_options": product_options,
+        "ticket_rows": ticket_rows,
+        "ticket_messages": ticket_messages,
+        "ticket_selected": selected_ticket,
+        "ticket_selected_status": selected_status,
+        "ticket_selected_category": selected_category,
+        "ticket_status_options": [
+            ("", "All Status"),
+            ("open", "Open"),
+            ("in_progress", "In Progress"),
+            ("resolved", "Resolved"),
+            ("closed", "Closed"),
+        ],
+        "ticket_category_options": [
+            ("", "All Categories"),
+            ("support", "Support"),
+            ("sales", "Sales"),
+        ],
+    })
+    return render(request, "public/ticketing.html", context)
 
 
 def sitemap_view(request):

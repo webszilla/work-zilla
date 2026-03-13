@@ -550,9 +550,9 @@ export default function SaasAdminPage() {
                           Configure
                         </Link>
                         {whatsAppState.data?.is_active ? (
-                          <span className="saas-admin-pill saas-admin-pill--active align-self-center">Active</span>
+                          <span className="wz-status-pill align-self-center">Active</span>
                         ) : (
-                          <span className="saas-admin-pill saas-admin-pill--inactive align-self-center">Inactive</span>
+                          <span className="wz-status-pill wz-status-pill--muted align-self-center">Inactive</span>
                         )}
                       </div>
                   </div>

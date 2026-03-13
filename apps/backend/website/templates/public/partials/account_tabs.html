@@ -4,6 +4,9 @@
     <a href="/my-account/billing/" class="account-tab {% if account_section == 'billing' %}active{% endif %}">Billing</a>
     <a href="#" class="account-tab" data-download-modal-trigger>Download</a>
   {% endif %}
+  {% if show_ticketing_tab %}
+    <a href="/my-account/ticketing/" class="account-tab {% if account_section == 'ticketing' %}active{% endif %}">Ticketing</a>
+  {% endif %}
   <a href="/my-account/profile/" class="account-tab {% if account_section == 'profile' %}active{% endif %}">Profile</a>
   <a href="/auth/logout/" class="account-tab">Signout</a>
 </nav>

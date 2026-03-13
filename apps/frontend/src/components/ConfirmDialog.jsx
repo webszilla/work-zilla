@@ -51,7 +51,7 @@ export function ConfirmProvider({ children }) {
             <div className="d-flex justify-content-end gap-2 mt-3">
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn app-btn-secondary"
                 onClick={() => closeDialog(false)}
               >
                 {dialog.cancelText}

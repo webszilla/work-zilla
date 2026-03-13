@@ -1178,8 +1178,8 @@ export default function SaasAdminProductPage() {
   async function handleOrgDelete(org) {
     const confirmed = await confirm({
       title: "Delete Organization",
-      message: `Delete ${org.name}? This removes the organization and owner user.`,
-      confirmText: "Delete",
+      message: `Delete ${org.name}? It will move to Deleted ORG and can be restored later.`,
+      confirmText: "Move to Deleted",
       confirmVariant: "danger"
     });
     if (!confirmed) {
@@ -1190,6 +1190,54 @@ export default function SaasAdminProductPage() {
       await refreshOrganizations();
     } catch (error) {
       setOrgState((prev) => ({ ...prev, error: error?.message || "Unable to delete organization." }));
+    }
+  }
+
+  async function handleDeletedOrgRestore(org) {
+    if (!org?.id || !org.can_restore) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "Restore Organization",
+      message: `Restore ${org.organization_name || "this organization"}?`,
+      confirmText: "Restore",
+      confirmVariant: "primary"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/saas-admin/organizations/${org.id}/restore`, { method: "POST" });
+      await refreshOrganizations();
+    } catch (error) {
+      setOrgState((prev) => ({ ...prev, error: error?.message || "Unable to restore organization." }));
+    }
+  }
+
+  async function handleDeletedOrgPermanentDelete(org) {
+    const orgId = org?.id;
+    const legacyId = org?.legacy_deleted_account_id;
+    if (!orgId && !legacyId) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "Permanent Delete",
+      message: `Permanently delete ${org.organization_name || "this organization"}? This cannot be undone.`,
+      confirmText: "Permanent Delete",
+      confirmVariant: "danger"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      if (orgId) {
+        await apiFetch(`/api/saas-admin/organizations/${orgId}/permanent-delete`, { method: "DELETE" });
+      } else {
+        await apiFetch(`/api/saas-admin/deleted-accounts/${legacyId}`, { method: "DELETE" });
+      }
+      await refreshOrganizations();
+    } catch (error) {
+      setOrgState((prev) => ({ ...prev, error: error?.message || "Unable to permanently delete organization." }));
     }
   }
 
@@ -2312,6 +2360,7 @@ export default function SaasAdminProductPage() {
                   <th>Email ID</th>
                   <th>Deleted At</th>
                   <th>Reason</th>
+                  <th>Action</th>
                 </tr>
               ) : (
                 <tr>
@@ -2334,6 +2383,27 @@ export default function SaasAdminProductPage() {
                       <td>{org.owner_email || "-"}</td>
                       <td>{org.deleted_at || "-"}</td>
                       <td>{org.reason || "-"}</td>
+                      <td>
+                        <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                          {org.can_restore ? (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleDeletedOrgRestore(org)}
+                            >
+                              Restore
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeletedOrgPermanentDelete(org)}
+                            disabled={!org.can_permanent_delete}
+                          >
+                            Permanent Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ) : (
                     <tr key={org.id}>
@@ -2370,7 +2440,7 @@ export default function SaasAdminProductPage() {
                 )
               ) : (
                 <tr>
-                  <td colSpan={statusKey === "deleted" ? 5 : 6}>
+                  <td colSpan={statusKey === "deleted" ? 6 : 6}>
                     {statusKey === "deleted" ? "No deleted organizations found." : "No organizations found."}
                   </td>
                 </tr>

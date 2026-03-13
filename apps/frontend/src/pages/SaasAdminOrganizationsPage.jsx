@@ -379,8 +379,8 @@ export default function SaasAdminOrganizationsPage() {
   async function handleDelete(org) {
     const confirmed = await confirm({
       title: "Delete Organization",
-      message: `Delete ${org.name}? This removes the organization and owner user.`,
-      confirmText: "Delete",
+      message: `Delete ${org.name}? It will move to Deleted ORG and can be restored later.`,
+      confirmText: "Move to Deleted",
       confirmVariant: "danger"
     });
     if (!confirmed) {
@@ -395,6 +395,66 @@ export default function SaasAdminOrganizationsPage() {
       setState((prev) => ({
         ...prev,
         error: error?.message || "Unable to delete organization."
+      }));
+    }
+  }
+
+  async function handleDeletedOrgRestore(org) {
+    if (!org?.id || !org.can_restore) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "Restore Organization",
+      message: `Restore ${org.organization_name || "this organization"} to active/inactive lists?`,
+      confirmText: "Restore",
+      confirmVariant: "primary"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/saas-admin/organizations/${org.id}/restore`, {
+        method: "POST"
+      });
+      await refreshOrganizations();
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to restore organization."
+      }));
+    }
+  }
+
+  async function handleDeletedOrgPermanentDelete(org) {
+    const permanentId = org?.id;
+    const legacyId = org?.legacy_deleted_account_id;
+    if (!permanentId && !legacyId) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: "Permanent Delete",
+      message: `Permanently delete ${org.organization_name || "this organization"}? This cannot be undone.`,
+      confirmText: "Permanent Delete",
+      confirmVariant: "danger"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      if (permanentId) {
+        await apiFetch(`/api/saas-admin/organizations/${permanentId}/permanent-delete`, {
+          method: "DELETE"
+        });
+      } else {
+        await apiFetch(`/api/saas-admin/deleted-accounts/${legacyId}`, {
+          method: "DELETE"
+        });
+      }
+      await refreshOrganizations();
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to permanently delete organization."
       }));
     }
   }
@@ -418,32 +478,6 @@ export default function SaasAdminOrganizationsPage() {
       setState((prev) => ({
         ...prev,
         error: error?.message || "Unable to delete dealer."
-      }));
-    }
-  }
-
-  async function handleDeletedOrgDelete(org) {
-    if (!org?.id) {
-      return;
-    }
-    const confirmed = await confirm({
-      title: "Delete Deleted Account",
-      message: `Delete deleted account entry for ${org.organization_name || "this organization"}?`,
-      confirmText: "Delete",
-      confirmVariant: "danger"
-    });
-    if (!confirmed) {
-      return;
-    }
-    try {
-      await apiFetch(`/api/saas-admin/deleted-accounts/${org.id}`, {
-        method: "DELETE"
-      });
-      await refreshOrganizations();
-    } catch (error) {
-      setState((prev) => ({
-        ...prev,
-        error: error?.message || "Unable to delete deleted account."
       }));
     }
   }
@@ -968,14 +1002,25 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{formatValue(org.deleted_at)}</td>
                         <td>{formatValue(org.reason)}</td>
                         <td className="table-actions">
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDeletedOrgDelete(org)}
-                            disabled={!org.id}
-                          >
-                            Delete
-                          </button>
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            {org.can_restore ? (
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleDeletedOrgRestore(org)}
+                              >
+                                Restore
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDeletedOrgPermanentDelete(org)}
+                              disabled={!org.can_permanent_delete}
+                            >
+                              Permanent Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))

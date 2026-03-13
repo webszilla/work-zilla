@@ -1,0 +1,182 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Ticketing{% endblock %}
+{% block meta_description %}Create and manage organization support tickets from your account.{% endblock %}
+{% block body_class %}account-page{% endblock %}
+
+{% block content %}
+<section class="section">
+  <div class="site-container account-layout">
+    <div class="account-header">
+      <h1 class="section-title">Ticketing</h1>
+    </div>
+    {% include "public/partials/account_tabs.html" %}
+
+    <div class="account-content card p-4">
+      {% if messages %}
+        {% for message in messages|slice:"-1:" %}
+          <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="ticketing-grid">
+        <div class="ticketing-column">
+          <div class="ticketing-panel">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+              <h2 class="section-title">Create Ticket</h2>
+              <div class="text-secondary">ORG admin only</div>
+            </div>
+            <form method="post" enctype="multipart/form-data" class="ticket-form">
+              {% csrf_token %}
+              <input type="hidden" name="ticket_action" value="create">
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>Product</label>
+                  <select name="product_slug" required>
+                    {% for item in ticket_product_options %}
+                      <option value="{{ item.slug }}">{{ item.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label>Category</label>
+                  <select name="category" required>
+                    <option value="support">Support</option>
+                    <option value="sales">Sales</option>
+                  </select>
+                </div>
+                <div class="form-field form-field-full">
+                  <label>Subject</label>
+                  <input type="text" name="subject" maxlength="200" placeholder="Enter ticket subject" required>
+                </div>
+                <div class="form-field form-field-full">
+                  <label>Message</label>
+                  <textarea name="message" rows="5" maxlength="4000" placeholder="Describe the issue clearly" required></textarea>
+                </div>
+                <div class="form-field form-field-full">
+                  <label>Attach Images</label>
+                  <input type="file" name="attachments" accept="image/*" multiple>
+                  <div class="form-help">Up to 5 images, 2MB each.</div>
+                </div>
+              </div>
+              <button class="btn btn-outline mt-3" type="submit">Create Ticket</button>
+            </form>
+          </div>
+
+          <div class="ticketing-panel mt-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+              <h2 class="section-title mb-0">All Tickets</h2>
+              <form method="get" class="ticket-filter-row">
+                <input type="hidden" name="ticket" value="{% if ticket_selected %}{{ ticket_selected.id }}{% endif %}">
+                <select name="status" onchange="this.form.submit()">
+                  {% for value, label in ticket_status_options %}
+                    <option value="{{ value }}" {% if ticket_selected_status == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <select name="category" onchange="this.form.submit()">
+                  {% for value, label in ticket_category_options %}
+                    <option value="{{ value }}" {% if ticket_selected_category == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+            </div>
+            <div class="ticket-list mt-3">
+              {% for row in ticket_rows %}
+                <a
+                  class="ticket-list-item {% if ticket_selected and ticket_selected.id == row.id %}active{% endif %}"
+                  href="/my-account/ticketing/?ticket={{ row.id }}{% if ticket_selected_status %}&status={{ ticket_selected_status }}{% endif %}{% if ticket_selected_category %}&category={{ ticket_selected_category }}{% endif %}"
+                >
+                  <div class="ticket-list-top">
+                    <strong>#{{ row.id }} {{ row.subject }}</strong>
+                    <span class="badge ticket-status-{{ row.status }}">{{ row.status|title }}</span>
+                  </div>
+                  <div class="ticket-list-meta">
+                    <span>{{ row.product_name }}</span>
+                    <span>{{ row.category|title }}</span>
+                    {% if row.unread_replies %}
+                      <span class="ticket-unread">{{ row.unread_replies }} new</span>
+                    {% endif %}
+                  </div>
+                  <div class="ticket-preview">{{ row.latest_message_preview|default:"No replies yet." }}</div>
+                </a>
+              {% empty %}
+                <div class="text-secondary">No tickets found for the selected filters.</div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="ticketing-column">
+          <div class="ticketing-panel">
+            {% if ticket_selected %}
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div>
+                  <h2 class="section-title mb-1">Ticket #{{ ticket_selected.id }}</h2>
+                  <div class="ticket-detail-meta">
+                    <span>{{ ticket_selected.subject }}</span>
+                    <span>{{ ticket_selected.product_name }}</span>
+                    <span>{{ ticket_selected.category|title }}</span>
+                  </div>
+                </div>
+                <form method="post" class="ticket-status-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="ticket_action" value="status">
+                  <input type="hidden" name="ticket_id" value="{{ ticket_selected.id }}">
+                  <select name="status">
+                    <option value="open" {% if ticket_selected.status == "open" %}selected{% endif %}>Open</option>
+                    <option value="in_progress" {% if ticket_selected.status == "in_progress" %}selected{% endif %}>In Progress</option>
+                    <option value="resolved" {% if ticket_selected.status == "resolved" %}selected{% endif %}>Resolved</option>
+                    <option value="closed" {% if ticket_selected.status == "closed" %}selected{% endif %}>Closed</option>
+                  </select>
+                  <button class="btn btn-outline btn-sm" type="submit">Update Status</button>
+                </form>
+              </div>
+
+              <div class="ticket-thread mt-3">
+                {% for message in ticket_messages %}
+                  <div class="ticket-message ticket-message-{{ message.author_role }}">
+                    <div class="ticket-message-head">
+                      <strong>{{ message.author_name }}</strong>
+                      <span>{{ message.created_at|date:"d M Y h:i A" }}</span>
+                    </div>
+                    <div class="ticket-message-body">{{ message.message|linebreaksbr }}</div>
+                    {% if message.attachments %}
+                      <div class="ticket-attachments">
+                        {% for attachment in message.attachments %}
+                          <a href="{{ attachment.url }}" target="_blank" rel="noopener noreferrer">
+                            {{ attachment.name }}
+                          </a>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+
+              <form method="post" enctype="multipart/form-data" class="ticket-form mt-4">
+                {% csrf_token %}
+                <input type="hidden" name="ticket_action" value="reply">
+                <input type="hidden" name="ticket_id" value="{{ ticket_selected.id }}">
+                <div class="form-field form-field-full">
+                  <label>Reply</label>
+                  <textarea name="message" rows="5" maxlength="4000" placeholder="Write your reply" required></textarea>
+                </div>
+                <div class="form-field form-field-full">
+                  <label>Attach Images</label>
+                  <input type="file" name="attachments" accept="image/*" multiple>
+                  <div class="form-help">Up to 5 images, 2MB each.</div>
+                </div>
+                <button class="btn btn-outline mt-3" type="submit">Send Reply</button>
+              </form>
+            {% else %}
+              <h2 class="section-title">Ticket Details</h2>
+              <p class="text-secondary mb-0">Select a ticket from the list to view messages and reply.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

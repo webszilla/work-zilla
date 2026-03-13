@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import TablePagination from "../components/TablePagination.jsx";
@@ -335,13 +336,13 @@ const PROJECT_TAB_CONFIG = {
     itemLabel: "Project",
     columns: [
       { key: "name", label: "Project Name" },
-      { key: "owner", label: "Owner" },
+      { key: "clientCompany", label: "Client / Company" },
       { key: "status", label: "Status" }
     ],
     fields: [
       { key: "name", label: "Project Name", placeholder: "Enter project name" },
-      { key: "owner", label: "Owner", placeholder: "Enter owner name" },
-      { key: "status", label: "Status", placeholder: "Active / Planned / Hold" }
+      { key: "clientCompany", label: "Client / Company", type: "datalist", datalistSource: "accountsCustomers", placeholder: "Search client or company" },
+      { key: "status", label: "Status", type: "select", options: ["Ongoing", "New", "Hold", "Completed"], defaultValue: "New" }
     ]
   },
   tasks: {
@@ -387,13 +388,29 @@ const PROJECT_TAB_CONFIG = {
       { key: "role", label: "Role", placeholder: "Enter role" },
       { key: "project", label: "Project", placeholder: "Enter project name" }
     ]
+  },
+  customers: {
+    label: "Customers",
+    itemLabel: "Customer",
+    columns: [
+      { key: "companyName", label: "Company Name" },
+      { key: "clientName", label: "Client Name" },
+      { key: "phone", label: "Phone Number" },
+      { key: "email", label: "Email ID" }
+    ],
+    fields: [
+      { key: "companyName", label: "Company Name", placeholder: "Enter company name" },
+      { key: "clientName", label: "Client Name", placeholder: "Enter client name" },
+      { key: "phone", label: "Phone Number", placeholder: "Enter phone number" },
+      { key: "email", label: "Email ID", placeholder: "Enter email id" }
+    ]
   }
 };
 
 const DEFAULT_PROJECT_DATA = {
   projects: [
-    { id: "p1", name: "ERP Rollout", owner: "Guru", status: "Active" },
-    { id: "p2", name: "HR Automation", owner: "Nithya", status: "Planned" }
+    { id: "p1", name: "ERP Rollout", clientCompany: "Ultra HD Prints", status: "Ongoing" },
+    { id: "p2", name: "HR Automation", clientCompany: "North India Jewels", status: "New" }
   ],
   tasks: [
     { id: "t1", title: "Finalize sprint board", assignee: "Guru", startDate: "2026-02-16", dueDate: "2026-02-20" },
@@ -406,7 +423,8 @@ const DEFAULT_PROJECT_DATA = {
   team: [
     { id: "u1", name: "Guru", role: "Project Manager", project: "ERP Rollout" },
     { id: "u2", name: "Nithya", role: "Business Analyst", project: "HR Automation" }
-  ]
+  ],
+  customers: []
 };
 
 const HR_TAB_CONFIG = {
@@ -851,7 +869,10 @@ function buildEmptyValues(fields) {
 }
 
 function isValidProjectData(value) {
-  return value && typeof value === "object" && Object.keys(PROJECT_TAB_CONFIG).every((key) => Array.isArray(value[key]));
+  return value
+    && typeof value === "object"
+    && ["projects", "tasks", "milestones", "team"].every((key) => Array.isArray(value[key]))
+    && (!("customers" in value) || Array.isArray(value.customers));
 }
 
 function isValidHrData(value) {
@@ -875,6 +896,153 @@ function isValidAccountsData(value) {
     && Array.isArray(value.billingTemplates)
     && Array.isArray(value.estimates)
     && Array.isArray(value.invoices);
+}
+
+function normalizeSharedCustomerRecord(row = {}) {
+  const companyName = String(row.companyName || row.name || "").trim();
+  const clientName = String(row.clientName || "").trim();
+  const primaryPhone = String(row.phone || "").trim();
+  const primaryEmail = String(row.email || "").trim();
+  const additionalPhones = (Array.isArray(row.additionalPhones) ? row.additionalPhones : [])
+    .map((item) => ({
+      countryCode: String(item?.countryCode || "+91").trim() || "+91",
+      number: String(item?.number || "").trim(),
+    }))
+    .filter((item) => item.number);
+  const additionalEmails = (Array.isArray(row.additionalEmails) ? row.additionalEmails : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const phoneList = Array.isArray(row.phoneList) && row.phoneList.length
+    ? row.phoneList
+      .map((item) => ({
+        countryCode: String(item?.countryCode || "+91").trim() || "+91",
+        number: String(item?.number || "").trim(),
+      }))
+      .filter((item) => item.number)
+    : [
+      ...(primaryPhone ? [{ countryCode: String(row.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+      ...additionalPhones,
+    ];
+  const emailList = Array.isArray(row.emailList) && row.emailList.length
+    ? row.emailList.map((item) => String(item || "").trim()).filter(Boolean)
+    : [primaryEmail, ...additionalEmails].filter(Boolean);
+
+  return {
+    ...row,
+    id: row.id || `cust_${Date.now()}`,
+    companyName,
+    clientName,
+    name: companyName || clientName,
+    gstin: String(row.gstin || "").trim(),
+    phoneCountryCode: String(row.phoneCountryCode || phoneList[0]?.countryCode || "+91").trim() || "+91",
+    phone: primaryPhone || phoneList[0]?.number || "",
+    additionalPhones: phoneList.slice(1),
+    email: primaryEmail || emailList[0] || "",
+    additionalEmails: emailList.slice(1),
+    phoneList,
+    emailList,
+    billingAddress: String(row.billingAddress || "").trim(),
+    shippingAddress: String(row.shippingAddress || "").trim(),
+    billingCountry: String(row.billingCountry || row.country || "India").trim() || "India",
+    billingState: String(row.billingState || row.state || "").trim(),
+    billingPincode: String(row.billingPincode || row.pincode || "").trim(),
+    shippingCountry: String(row.shippingCountry || row.country || "India").trim() || "India",
+    shippingState: String(row.shippingState || row.state || "").trim(),
+    shippingPincode: String(row.shippingPincode || row.pincode || "").trim(),
+    billingShippingSame: Boolean(row.billingShippingSame),
+    country: String(row.billingCountry || row.country || "India").trim() || "India",
+    state: String(row.billingState || row.state || "").trim(),
+    pincode: String(row.billingPincode || row.pincode || "").trim(),
+  };
+}
+
+function formatSharedCustomerPhones(row = {}) {
+  const list = [];
+  if (String(row.phone || "").trim()) {
+    list.push(`${row.phoneCountryCode || "+91"} ${row.phone}`.trim());
+  }
+  if (Array.isArray(row.phoneList)) {
+    row.phoneList.forEach((item, index) => {
+      if (index === 0) return;
+      if (String(item?.number || "").trim()) {
+        list.push(`${item.countryCode || "+91"} ${item.number}`.trim());
+      }
+    });
+  }
+  if (!list.length && Array.isArray(row.additionalPhones)) {
+    row.additionalPhones.forEach((item) => {
+      if (String(item?.number || "").trim()) {
+        list.push(`${item.countryCode || "+91"} ${item.number}`.trim());
+      }
+    });
+  }
+  return list.filter(Boolean);
+}
+
+function formatSharedCustomerEmails(row = {}) {
+  const list = [];
+  if (String(row.email || "").trim()) {
+    list.push(String(row.email).trim());
+  }
+  if (Array.isArray(row.emailList)) {
+    row.emailList.forEach((item, index) => {
+      if (index === 0) return;
+      if (String(item || "").trim()) {
+        list.push(String(item).trim());
+      }
+    });
+  }
+  if (!list.length && Array.isArray(row.additionalEmails)) {
+    row.additionalEmails.forEach((item) => {
+      if (String(item || "").trim()) {
+        list.push(String(item).trim());
+      }
+    });
+  }
+  return list.filter(Boolean);
+}
+
+function getSharedCustomerDisplayName(row = {}) {
+  const companyName = String(row.companyName || row.name || "").trim();
+  const clientName = String(row.clientName || "").trim();
+  if (companyName && clientName) {
+    return `${companyName} / ${clientName}`;
+  }
+  return companyName || clientName;
+}
+
+function readSharedAccountsData() {
+  try {
+    const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_ACCOUNTS_DATA;
+    }
+    const parsed = JSON.parse(raw);
+    return isValidAccountsData(parsed) ? parsed : DEFAULT_ACCOUNTS_DATA;
+  } catch (_error) {
+    return DEFAULT_ACCOUNTS_DATA;
+  }
+}
+
+function readSharedAccountsCustomers() {
+  return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+async function persistSharedAccountsCustomers(nextCustomers) {
+  const currentData = readSharedAccountsData();
+  const nextData = {
+    ...currentData,
+    customers: nextCustomers.map((row) => normalizeSharedCustomerRecord(row)),
+  };
+  window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+  try {
+    await apiFetch("/api/business-autopilot/accounts/workspace", {
+      method: "PUT",
+      body: JSON.stringify({ data: nextData }),
+    });
+  } catch (_error) {
+    // Keep local cache updated even if server sync fails.
+  }
 }
 
 function formatTimeToAmPm(value) {
@@ -932,6 +1100,94 @@ function computeWorkedDuration(inTime, outTime) {
   return `${hours}h ${minutes}m`;
 }
 
+function normalizeImportHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function parseCsvRows(text) {
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let currentCell = "";
+  let currentRow = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const nextChar = source[index + 1];
+
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        currentCell += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      currentRow.push(currentCell);
+      currentCell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      currentRow.push(currentCell);
+      if (currentRow.some((value) => String(value || "").trim() !== "")) {
+        rows.push(currentRow);
+      }
+      currentCell = "";
+      currentRow = [];
+      continue;
+    }
+
+    currentCell += char;
+  }
+
+  currentRow.push(currentCell);
+  if (currentRow.some((value) => String(value || "").trim() !== "")) {
+    rows.push(currentRow);
+  }
+
+  if (!rows.length) {
+    return [];
+  }
+
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows
+    .slice(1)
+    .filter((row) => row.some((value) => String(value || "").trim() !== ""))
+    .map((row) =>
+      headers.reduce((acc, header, columnIndex) => {
+        acc[header] = String(row[columnIndex] || "").trim();
+        return acc;
+      }, {})
+    );
+}
+
+function normalizeSpreadsheetRows(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) {
+    return [];
+  }
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows
+    .slice(1)
+    .filter((row) => Array.isArray(row) && row.some((value) => String(value || "").trim() !== ""))
+    .map((row) =>
+      headers.reduce((acc, header, columnIndex) => {
+        acc[header] = String(row[columnIndex] || "").trim();
+        return acc;
+      }, {})
+    );
+}
+
 function SearchablePaginatedTableCard({
   title,
   badgeLabel = "",
@@ -946,13 +1202,16 @@ function SearchablePaginatedTableCard({
   withoutOuterCard = false,
   headerBottom = null,
   enableExport = false,
+  enableImport = false,
   exportFileName = "table-data",
   exportCellValue,
+  onImportRows,
   actionHeaderStyle = null,
   actionCellStyle = null,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
+  const importInputRef = useRef(null);
 
   const filteredRows = useMemo(() => {
     const term = String(searchTerm || "").trim().toLowerCase();
@@ -1086,18 +1345,66 @@ function SearchablePaginatedTableCard({
     win.setTimeout(triggerPrint, 500);
   }
 
+  function triggerImportPicker() {
+    importInputRef.current?.click();
+  }
+
+  async function onImportFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || typeof onImportRows !== "function") {
+      return;
+    }
+    try {
+      let parsedRows = [];
+      const fileName = String(file.name || "").toLowerCase();
+      if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+        parsedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+      } else {
+        const content = await file.text();
+        parsedRows = parseCsvRows(content);
+      }
+      if (!parsedRows.length) {
+        window.alert("Imported file is empty or invalid.");
+        return;
+      }
+      onImportRows(parsedRows);
+    } catch (_error) {
+      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+    }
+  }
+
   const toolbarControls = (
     <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
       {badgeLabel ? <span className="badge bg-secondary table-count-badge">{badgeLabel}</span> : null}
       {enableExport ? (
         <>
+          {enableImport ? (
+            <>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                className="d-none"
+                onChange={onImportFileChange}
+              />
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerImportPicker}>
+                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                Import
+              </button>
+            </>
+          ) : null}
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsExcelCsv}>
             <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
-            Excel
+            Export
           </button>
-          <button type="button" className="btn btn-sm btn-outline-light" onClick={exportAsPdf}>
+          <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsPdf}>
             <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
-            PDF
+            Export
           </button>
         </>
       ) : null}
@@ -1358,6 +1665,96 @@ function CrmOnePageModule() {
       };
     });
     resetSectionForm(sectionKey);
+  }
+
+  function importRows(sectionKey, importedRows) {
+    const config = CRM_SECTION_CONFIG[sectionKey];
+    const columnByHeader = new Map();
+    config.columns.forEach((column) => {
+      columnByHeader.set(normalizeImportHeader(column.label), column);
+      columnByHeader.set(normalizeImportHeader(column.key), column);
+    });
+
+    const defaultValues = buildEmptyValues(config.fields);
+    const nextRows = importedRows
+      .map((row, rowIndex) => {
+        const payload = {
+          ...defaultValues,
+          id: `${sectionKey}_import_${Date.now()}_${rowIndex}`,
+        };
+
+        Object.entries(row || {}).forEach(([header, rawValue]) => {
+          const column = columnByHeader.get(normalizeImportHeader(header));
+          if (!column) {
+            return;
+          }
+          const value = String(rawValue || "").trim();
+          if (column.key === "phone") {
+            const phoneMatch = value.match(/^(\+\d{1,4})\s+(.+)$/);
+            if (phoneMatch) {
+              payload.phoneCountryCode = phoneMatch[1].trim();
+              payload.phone = phoneMatch[2].trim();
+            } else {
+              payload.phone = value;
+            }
+            return;
+          }
+          if (sectionKey === "meetings" && column.key === "meetingTime") {
+            const twelveHourMatch = value.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+            if (twelveHourMatch) {
+              let hours = Number(twelveHourMatch[1]);
+              const minutes = twelveHourMatch[2];
+              const suffix = twelveHourMatch[3].toUpperCase();
+              if (suffix === "PM" && hours < 12) hours += 12;
+              if (suffix === "AM" && hours === 12) hours = 0;
+              payload.meetingTime = `${String(hours).padStart(2, "0")}:${minutes}`;
+            } else {
+              payload.meetingTime = value;
+            }
+            return;
+          }
+          if (column.key === "reminderSummary") {
+            payload.reminderSummary = value;
+            const reminderMatch = value.match(/^(.*?)\s*[•-]\s*(\d+)\s*min/i);
+            if (reminderMatch) {
+              payload.reminderChannel = reminderMatch[1]
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+              payload.reminderMinutes = reminderMatch[2];
+            }
+            return;
+          }
+          payload[column.key] = value;
+        });
+
+        if (sectionKey === "meetings") {
+          const reminderChannels = Array.isArray(payload.reminderChannel)
+            ? payload.reminderChannel
+            : String(payload.reminderChannel || "")
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
+          payload.reminderChannel = reminderChannels.length ? reminderChannels : defaultValues.reminderChannel;
+          payload.reminderSummary = payload.reminderSummary
+            || `${payload.reminderChannel.join(", ")} • ${payload.reminderMinutes} min before`;
+        }
+
+        return payload;
+      })
+      .filter((row) =>
+        config.columns.some((column) => String(row[column.key] || "").trim() !== "")
+      );
+
+    if (!nextRows.length) {
+      window.alert("No valid rows found in the imported file.");
+      return;
+    }
+
+    setModuleData((prev) => ({
+      ...prev,
+      [sectionKey]: [...nextRows, ...(prev[sectionKey] || [])],
+    }));
   }
 
   const meetingCalendar = useMemo(() => {
@@ -1734,7 +2131,9 @@ function CrmOnePageModule() {
               searchPlaceholder={`Search ${config.label.toLowerCase()}`}
               noRowsText={`No ${config.label.toLowerCase()} yet.`}
               enableExport
+              enableImport
               exportFileName={`crm-${config.label.toLowerCase().replace(/\s+/g, "-")}`}
+              onImportRows={(importedRows) => importRows(sectionKey, importedRows)}
               headerBottom={sectionKey === "leads" ? (
                 <div className="d-flex flex-column gap-2">
                   <div className="d-flex flex-wrap gap-2">
@@ -1947,6 +2346,8 @@ function ProjectManagementModule() {
   const [moduleData, setModuleData] = useState(DEFAULT_PROJECT_DATA);
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
   const [editingId, setEditingId] = useState("");
+  const [projectStatusTab, setProjectStatusTab] = useState("ongoing");
+  const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
 
   useEffect(() => {
     try {
@@ -1956,11 +2357,28 @@ function ProjectManagementModule() {
       }
       const parsed = JSON.parse(raw);
       if (isValidProjectData(parsed)) {
-        setModuleData(parsed);
+        setModuleData({
+          ...DEFAULT_PROJECT_DATA,
+          ...parsed,
+          customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+        });
       }
     } catch (_error) {
       // Ignore invalid cached module data.
     }
+  }, []);
+
+  useEffect(() => {
+    function syncSharedCustomers() {
+      setSharedCustomers(readSharedAccountsCustomers());
+    }
+    syncSharedCustomers();
+    window.addEventListener("storage", syncSharedCustomers);
+    window.addEventListener("focus", syncSharedCustomers);
+    return () => {
+      window.removeEventListener("storage", syncSharedCustomers);
+      window.removeEventListener("focus", syncSharedCustomers);
+    };
   }, []);
 
   useEffect(() => {
@@ -1973,11 +2391,31 @@ function ProjectManagementModule() {
   }, [activeTab]);
 
   const config = PROJECT_TAB_CONFIG[activeTab];
-  const currentRows = moduleData[activeTab] || [];
+  const projectStatusTabs = [
+    { key: "ongoing", label: "Ongoing" },
+    { key: "new", label: "New" },
+    { key: "hold", label: "Hold" },
+    { key: "completed", label: "Completed" },
+  ];
+  const rawRows = activeTab === "customers" ? sharedCustomers : (moduleData[activeTab] || []);
+  const currentRows = activeTab === "projects"
+    ? rawRows.filter((row) => String(row.status || "").trim().toLowerCase() === projectStatusTab)
+    : rawRows;
   const projectInlineSubmitTabs = new Set(["projects"]);
+  const accountsCustomerOptions = useMemo(
+    () => sharedCustomers
+      .flatMap((row) => [
+        String(row.companyName || row.name || "").trim(),
+        String(row.clientName || "").trim(),
+        getSharedCustomerDisplayName(row),
+      ])
+      .filter(Boolean)
+      .filter((value, index, list) => list.indexOf(value) === index),
+    [sharedCustomers]
+  );
 
   const stats = useMemo(() => {
-    const activeProjects = (moduleData.projects || []).filter((item) => item.status.toLowerCase() === "active").length;
+    const activeProjects = (moduleData.projects || []).filter((item) => String(item.status || "").toLowerCase() === "ongoing").length;
     const upcomingTasks = (moduleData.tasks || []).length;
     const overdueTasks = (moduleData.tasks || []).filter((item) => {
       const value = Date.parse(item.dueDate);
@@ -1989,6 +2427,25 @@ function ProjectManagementModule() {
       { label: "Overdue Tasks", value: String(overdueTasks), icon: "bi-exclamation-triangle" }
     ];
   }, [moduleData]);
+  const projectStatusCounts = useMemo(
+    () =>
+      projectStatusTabs.reduce((acc, tab) => {
+        acc[tab.key] = (moduleData.projects || []).filter(
+          (item) => String(item.status || "").trim().toLowerCase() === tab.key
+        ).length;
+        return acc;
+      }, {}),
+    [moduleData.projects]
+  );
+
+  function updateSharedCustomers(updater) {
+    setSharedCustomers((prev) => {
+      const nextCustomers = updater(prev.map((row) => normalizeSharedCustomerRecord(row)))
+        .map((row) => normalizeSharedCustomerRecord(row));
+      void persistSharedAccountsCustomers(nextCustomers);
+      return nextCustomers;
+    });
+  }
 
   function onChangeField(fieldKey, nextValue) {
     setFormValues((prev) => {
@@ -2002,10 +2459,17 @@ function ProjectManagementModule() {
 
   function onEditRow(row) {
     setEditingId(row.id);
-    const nextValues = {};
-    config.fields.forEach((field) => {
-      nextValues[field.key] = row[field.key] || field.defaultValue || "";
-    });
+    const nextValues = buildEmptyValues(config.fields);
+    if (activeTab === "customers") {
+      nextValues.companyName = row.companyName || row.name || "";
+      nextValues.clientName = row.clientName || "";
+      nextValues.phone = row.phone || "";
+      nextValues.email = row.email || "";
+    } else {
+      config.fields.forEach((field) => {
+        nextValues[field.key] = row[field.key] || field.defaultValue || "";
+      });
+    }
     setFormValues(nextValues);
   }
 
@@ -2015,6 +2479,13 @@ function ProjectManagementModule() {
   }
 
   function onDeleteRow(rowId) {
+    if (activeTab === "customers") {
+      updateSharedCustomers((prev) => prev.filter((row) => row.id !== rowId));
+      if (editingId === rowId) {
+        onCancelEdit();
+      }
+      return;
+    }
     setModuleData((prev) => ({
       ...prev,
       [activeTab]: (prev[activeTab] || []).filter((row) => row.id !== rowId)
@@ -2035,6 +2506,24 @@ function ProjectManagementModule() {
     });
     const hasEmptyField = visibleFields.some((field) => !String(formValues[field.key] || "").trim());
     if (hasEmptyField) {
+      return;
+    }
+    if (activeTab === "customers") {
+      const payload = normalizeSharedCustomerRecord({
+        id: editingId || `cust_${Date.now()}`,
+        companyName: String(formValues.companyName || "").trim(),
+        clientName: String(formValues.clientName || "").trim(),
+        phoneCountryCode: "+91",
+        phone: String(formValues.phone || "").trim(),
+        email: String(formValues.email || "").trim(),
+      });
+      updateSharedCustomers((prev) => {
+        if (editingId) {
+          return prev.map((row) => (row.id === editingId ? { ...row, ...payload } : row));
+        }
+        return [payload, ...prev];
+      });
+      onCancelEdit();
       return;
     }
     const payload = {};
@@ -2111,7 +2600,7 @@ function ProjectManagementModule() {
                     className={
                       isInlineProjectsTab
                         ? (
-                            field.key === "projectName" || field.key === "owner"
+                            field.key === "projectName" || field.key === "clientCompany"
                               ? "col-12 col-md-6 col-xl-4"
                               : field.key === "status"
                               ? "col-12 col-md-6 col-xl-3"
@@ -2133,6 +2622,24 @@ function ProjectManagementModule() {
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </select>
+                    ) : field.type === "datalist" ? (
+                      <>
+                        <input
+                          type="text"
+                          list={`project-${field.key}-list`}
+                          className="form-control datalist-readable-input"
+                          placeholder={field.placeholder}
+                          value={formValues[field.key] || ""}
+                          onChange={(event) => onChangeField(field.key, event.target.value)}
+                        />
+                        <datalist id={`project-${field.key}-list`}>
+                          {field.datalistSource === "accountsCustomers"
+                            ? accountsCustomerOptions.map((value) => (
+                                <option key={`project-${field.key}-${value}`} value={value} />
+                              ))
+                            : null}
+                        </datalist>
+                      </>
                     ) : (
                       <input
                         type={field.type || "text"}
@@ -2179,8 +2686,44 @@ function ProjectManagementModule() {
         withoutOuterCard={activeTab === "projects"}
         searchPlaceholder={`Search ${config.label.toLowerCase()}`}
         noRowsText={`No ${config.label.toLowerCase()} yet.`}
-        searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-        renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+        headerBottom={activeTab === "projects" ? (
+          <div className="d-flex flex-wrap gap-2">
+            {projectStatusTabs.map((tab) => (
+              <button
+                key={`project-status-tab-${tab.key}`}
+                type="button"
+                className={`btn btn-sm ${projectStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => setProjectStatusTab(tab.key)}
+              >
+                {tab.label} ({projectStatusCounts[tab.key] || 0})
+              </button>
+            ))}
+          </div>
+        ) : null}
+        searchBy={(row) => {
+          if (activeTab === "customers") {
+            return [
+              row.companyName || row.name,
+              row.clientName,
+              row.phone,
+              ...(formatSharedCustomerPhones(row)),
+              row.email,
+              ...(formatSharedCustomerEmails(row)),
+            ].join(" ");
+          }
+          return config.columns.map((column) => row[column.key] || "").join(" ");
+        }}
+        renderCells={(row) => {
+          if (activeTab === "customers") {
+            return [
+              <span className="fw-semibold">{row.companyName || row.name || "-"}</span>,
+              row.clientName || "-",
+              <span style={{ whiteSpace: "normal" }}>{formatSharedCustomerPhones(row).join(", ") || "-"}</span>,
+              <span style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</span>,
+            ];
+          }
+          return config.columns.map((column) => row[column.key] || "-");
+        }}
         renderActions={(row) => (
           <div className="d-inline-flex gap-2">
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
@@ -2199,7 +2742,10 @@ function ProjectManagementModule() {
 function HrManagementModule() {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
-  const [formValues, setFormValues] = useState(buildEmptyValues(HR_TAB_CONFIG.employees.fields));
+  const [formValues, setFormValues] = useState({
+    ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
+    temporarySameAsPermanent: false,
+  });
   const [hrUserDirectory, setHrUserDirectory] = useState([]);
   const [editingId, setEditingId] = useState("");
   const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
@@ -2281,6 +2827,9 @@ function HrManagementModule() {
   useEffect(() => {
     setEditingId("");
     const next = buildEmptyValues(HR_TAB_CONFIG[activeTab].fields);
+    if (activeTab === "employees") {
+      next.temporarySameAsPermanent = false;
+    }
     if (activeTab === "attendance") {
       next.date = getTodayIsoDate();
     }
@@ -2435,6 +2984,127 @@ function HrManagementModule() {
       { label: "Pending Leaves", value: String(pendingLeaves), icon: "bi-hourglass-split" }
     ];
   }, [moduleData]);
+  const employeeFieldMap = useMemo(
+    () => new Map(HR_TAB_CONFIG.employees.fields.map((field) => [field.key, field])),
+    []
+  );
+
+  function syncTemporaryAddressFromPermanent(target = {}) {
+    return {
+      ...target,
+      temporaryAddress: target.permanentAddress || "",
+      temporaryCountry: target.permanentCountry || "",
+      temporaryState: target.permanentState || "",
+      temporaryCity: target.permanentCity || "",
+      temporaryPincode: target.permanentPincode || "",
+    };
+  }
+
+  function renderHrField(field, className = "col-12 col-md-4") {
+    if (!field) {
+      return null;
+    }
+    const condition = field.conditionalOn;
+    const isVisible = !condition
+      || String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+    if (!isVisible) {
+      return null;
+    }
+    return (
+      <div className={className} key={field.key}>
+        <label className="form-label small text-secondary mb-1">{field.label}</label>
+        {activeTab === "attendance" && field.key === "employee" ? (
+          <div className="position-relative">
+            <input
+              type="text"
+              className="form-control"
+              autoComplete="off"
+              placeholder={field.placeholder}
+              value={formValues[field.key] || ""}
+              onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
+              onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
+              onChange={(event) => {
+                onChangeField(field.key, event.target.value);
+                setAttendanceEmployeeSuggestOpen(true);
+              }}
+            />
+            {attendanceEmployeeSuggestOpen && attendanceEmployeeSuggestions.length ? (
+              <div
+                className="position-absolute start-0 end-0 mt-1 border rounded shadow-sm"
+                style={{
+                  zIndex: 30,
+                  background: "#081528",
+                  borderColor: "rgba(255,255,255,0.16)",
+                  maxHeight: "220px",
+                  overflowY: "auto",
+                }}
+              >
+                {attendanceEmployeeSuggestions.map((name) => (
+                  <button
+                    key={`attendance-emp-suggest-${name}`}
+                    type="button"
+                    className="w-100 text-start border-0 bg-transparent px-3 py-2"
+                    style={{ color: "#e9eef8" }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onChangeField(field.key, name);
+                      setAttendanceEmployeeSuggestOpen(false);
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : activeTab === "employees" && field.key === "name" ? (
+          <>
+            <input
+              type="text"
+              className="form-control datalist-readable-input"
+              list="hr-employee-user-list"
+              autoComplete="off"
+              placeholder={field.placeholder}
+              value={formValues[field.key] || ""}
+              onChange={(event) => onChangeField(field.key, event.target.value)}
+            />
+            <datalist id="hr-employee-user-list">
+              {hrUserNameOptions.map((name) => (
+                <option key={`hr-user-name-${name}`} value={name} />
+              ))}
+            </datalist>
+          </>
+        ) : field.type === "select" ? (
+          <select
+            className="form-select"
+            value={formValues[field.key] || field.defaultValue || ""}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          >
+            <option value="">Select {field.label}</option>
+            {(field.options || []).map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        ) : field.type === "textarea" ? (
+          <textarea
+            className="form-control"
+            rows={3}
+            placeholder={field.placeholder}
+            value={formValues[field.key] || ""}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          />
+        ) : (
+          <input
+            type={field.type || "text"}
+            className="form-control"
+            placeholder={field.placeholder}
+            value={formValues[field.key] || ""}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          />
+        )}
+      </div>
+    );
+  }
 
   function onChangeField(fieldKey, nextValue) {
     setFormValues((prev) => {
@@ -2445,6 +3115,9 @@ function HrManagementModule() {
           next.department = String(matchedUser.department || next.department || "").trim();
           next.designation = String(matchedUser.employee_role || next.designation || "").trim();
         }
+      }
+      if (activeTab === "employees" && prev.temporarySameAsPermanent && fieldKey.startsWith("permanent")) {
+        return syncTemporaryAddressFromPermanent(next);
       }
       if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
         next.permissionHours = "";
@@ -2463,12 +3136,28 @@ function HrManagementModule() {
     config.fields.forEach((field) => {
       nextValues[field.key] = row[field.key] || field.defaultValue || "";
     });
+    if (activeTab === "employees") {
+      const temporarySameAsPermanent = Boolean(row.temporarySameAsPermanent)
+        || (
+          String(row.temporaryAddress || "").trim() === String(row.permanentAddress || "").trim()
+          && String(row.temporaryCountry || "").trim() === String(row.permanentCountry || "").trim()
+          && String(row.temporaryState || "").trim() === String(row.permanentState || "").trim()
+          && String(row.temporaryCity || "").trim() === String(row.permanentCity || "").trim()
+          && String(row.temporaryPincode || "").trim() === String(row.permanentPincode || "").trim()
+          && Boolean(String(row.permanentAddress || "").trim())
+        );
+      nextValues.temporarySameAsPermanent = temporarySameAsPermanent;
+    }
     setFormValues(nextValues);
   }
 
   function onCancelEdit() {
     setEditingId("");
-    setFormValues(buildEmptyValues(config.fields));
+    const next = buildEmptyValues(config.fields);
+    if (activeTab === "employees") {
+      next.temporarySameAsPermanent = false;
+    }
+    setFormValues(next);
   }
 
   function onDeleteRow(rowId) {
@@ -2486,6 +3175,13 @@ function HrManagementModule() {
     const visibleFields = config.fields.filter((field) => {
       const condition = field.conditionalOn;
       if (!condition) {
+        if (
+          activeTab === "employees"
+          && formValues.temporarySameAsPermanent
+          && field.key.startsWith("temporary")
+        ) {
+          return false;
+        }
         return true;
       }
       return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
@@ -2498,6 +3194,12 @@ function HrManagementModule() {
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
     });
+    if (activeTab === "employees") {
+      payload.temporarySameAsPermanent = Boolean(formValues.temporarySameAsPermanent);
+      if (payload.temporarySameAsPermanent) {
+        Object.assign(payload, syncTemporaryAddressFromPermanent(payload));
+      }
+    }
     if (activeTab === "attendance") {
       payload.date = payload.date || todayIso;
       payload.entryMode = payload.entryMode || "HR Side";
@@ -2723,112 +3425,76 @@ function HrManagementModule() {
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
-          <div className="row g-3">
-            {config.fields.map((field) => (
-              (() => {
-                const condition = field.conditionalOn;
-                const isVisible = !condition
-                  || String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
-                if (!isVisible) {
-                  return null;
-                }
-                return (
-                  <div className="col-12 col-md-4" key={field.key}>
-                    <label className="form-label small text-secondary mb-1">{field.label}</label>
-                    {activeTab === "attendance" && field.key === "employee" ? (
-                      <div className="position-relative">
+          {activeTab === "employees" ? (
+            <>
+              <div className="row g-3">
+                {[
+                  "name",
+                  "department",
+                  "designation",
+                  "dateOfBirth",
+                  "bloodGroup",
+                  "fatherName",
+                  "motherName",
+                  "maritalStatus",
+                  "wifeName",
+                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-4"))}
+              </div>
+              <div className="row g-3">
+                <div className="col-12 col-xl-6">
+                  <div className="card h-100 p-3">
+                    <h6 className="mb-3">Permanent Address</h6>
+                    <div className="row g-3">
+                      {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
+                        renderHrField(
+                          employeeFieldMap.get(fieldKey),
+                          fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6"
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <div className="card h-100 p-3">
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                      <h6 className="mb-0">Temporary Address</h6>
+                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
                         <input
-                          type="text"
-                          className="form-control"
-                          autoComplete="off"
-                          placeholder={field.placeholder}
-                          value={formValues[field.key] || ""}
-                          onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
-                          onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
+                          type="checkbox"
+                          className="form-check-input mt-0"
+                          checked={Boolean(formValues.temporarySameAsPermanent)}
                           onChange={(event) => {
-                            onChangeField(field.key, event.target.value);
-                            setAttendanceEmployeeSuggestOpen(true);
+                            const checked = event.target.checked;
+                            setFormValues((prev) => {
+                              const next = { ...prev, temporarySameAsPermanent: checked };
+                              return checked ? syncTemporaryAddressFromPermanent(next) : next;
+                            });
                           }}
                         />
-                        {attendanceEmployeeSuggestOpen && attendanceEmployeeSuggestions.length ? (
-                          <div
-                            className="position-absolute start-0 end-0 mt-1 border rounded shadow-sm"
-                            style={{
-                              zIndex: 30,
-                              background: "#081528",
-                              borderColor: "rgba(255,255,255,0.16)",
-                              maxHeight: "220px",
-                              overflowY: "auto",
-                            }}
-                          >
-                            {attendanceEmployeeSuggestions.map((name) => (
-                              <button
-                                key={`attendance-emp-suggest-${name}`}
-                                type="button"
-                                className="w-100 text-start border-0 bg-transparent px-3 py-2"
-                                style={{ color: "#e9eef8" }}
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  onChangeField(field.key, name);
-                                  setAttendanceEmployeeSuggestOpen(false);
-                                }}
-                              >
-                                {name}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                        Temporary same as permanent
+                      </label>
+                    </div>
+                    {!formValues.temporarySameAsPermanent ? (
+                      <div className="row g-3">
+                        {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
+                          renderHrField(
+                            employeeFieldMap.get(fieldKey),
+                            fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6"
+                          )
+                        )}
                       </div>
-                    ) : activeTab === "employees" && field.key === "name" ? (
-                      <>
-                        <input
-                          type="text"
-                          className="form-control datalist-readable-input"
-                          list="hr-employee-user-list"
-                          autoComplete="off"
-                          placeholder={field.placeholder}
-                          value={formValues[field.key] || ""}
-                          onChange={(event) => onChangeField(field.key, event.target.value)}
-                        />
-                        <datalist id="hr-employee-user-list">
-                          {hrUserNameOptions.map((name) => (
-                            <option key={`hr-user-name-${name}`} value={name} />
-                          ))}
-                        </datalist>
-                      </>
-                    ) : field.type === "select" ? (
-                      <select
-                        className="form-select"
-                        value={formValues[field.key] || field.defaultValue || ""}
-                        onChange={(event) => onChangeField(field.key, event.target.value)}
-                      >
-                        <option value="">Select {field.label}</option>
-                        {(field.options || []).map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
-                    ) : field.type === "textarea" ? (
-                      <textarea
-                        className="form-control"
-                        rows={3}
-                        placeholder={field.placeholder}
-                        value={formValues[field.key] || ""}
-                        onChange={(event) => onChangeField(field.key, event.target.value)}
-                      />
                     ) : (
-                      <input
-                        type={field.type || "text"}
-                        className="form-control"
-                        placeholder={field.placeholder}
-                        value={formValues[field.key] || ""}
-                        onChange={(event) => onChangeField(field.key, event.target.value)}
-                      />
+                      <div className="small text-secondary">Temporary address entry hidden because both addresses are same.</div>
                     )}
                   </div>
-                );
-              })()
-            ))}
-          </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="row g-3">
+              {config.fields.map((field) => renderHrField(field, "col-12 col-md-4"))}
+            </div>
+          )}
           {activeTab === "attendance" ? (
             <div className="d-flex flex-wrap align-items-center gap-2">
               <span className="small text-secondary">User Login Attendance:</span>
@@ -5478,100 +6144,100 @@ function AccountsErpModule() {
                 </div>
                 <div className="col-12 col-xl-6">
                   <label className="form-label small text-secondary mb-1">Phone Number</label>
-                  <div className="d-flex gap-2">
-                    <PhoneCountryCodePicker
-                      value={customerForm.phoneCountryCode || "+91"}
-                      onChange={(code) => setCustomerForm((p) => ({ ...p, phoneCountryCode: code }))}
-                      options={DIAL_COUNTRY_PICKER_OPTIONS}
-                      style={{ maxWidth: "220px" }}
-                      ariaLabel="Customer phone country code"
-                    />
-                    <input className="form-control" value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
-                    <button
-                      type="button"
-                      className="btn btn-outline-light btn-sm"
-                      title="Add Contact Number"
-                      onClick={() => setCustomerForm((p) => ({ ...p, additionalPhones: [...(p.additionalPhones || []), { countryCode: "+91", number: "" }] }))}
-                    >
-                      +
-                    </button>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <PhoneCountryCodePicker
+                        value={customerForm.phoneCountryCode || "+91"}
+                        onChange={(code) => setCustomerForm((p) => ({ ...p, phoneCountryCode: code }))}
+                        options={DIAL_COUNTRY_PICKER_OPTIONS}
+                        style={{ maxWidth: "220px" }}
+                        ariaLabel="Customer phone country code"
+                      />
+                      <input className="form-control" value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Contact Number"
+                        onClick={() => setCustomerForm((p) => ({ ...p, additionalPhones: [...(p.additionalPhones || []), { countryCode: "+91", number: "" }] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(customerForm.additionalPhones || []).map((row, index) => (
+                      <div className="d-flex gap-2" key={`phone-${index}`}>
+                        <PhoneCountryCodePicker
+                          value={row.countryCode || "+91"}
+                          onChange={(code) =>
+                            setCustomerForm((p) => ({
+                              ...p,
+                              additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
+                            }))
+                          }
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "220px" }}
+                          ariaLabel="Additional phone country code"
+                        />
+                        <input
+                          className="form-control"
+                          value={row.number || ""}
+                          placeholder="Additional contact number"
+                          onChange={(e) => setCustomerForm((p) => ({
+                            ...p,
+                            additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: e.target.value } : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setCustomerForm((p) => ({
+                            ...p,
+                            additionalPhones: (p.additionalPhones || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
                   <label className="form-label small text-secondary mb-1">Email ID</label>
-                  <div className="d-flex gap-2">
-                    <input className="form-control" value={customerForm.email || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
-                    <button
-                      type="button"
-                      className="btn btn-outline-light btn-sm"
-                      title="Add Email ID"
-                      onClick={() => setCustomerForm((p) => ({ ...p, additionalEmails: [...(p.additionalEmails || []), ""] }))}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div className="col-12 col-xl-6">
-                  {(customerForm.additionalEmails || []).map((value, index) => (
-                    <div className="d-flex gap-2 mb-2" key={`email-${index}`}>
-                      <input
-                        className="form-control"
-                        value={value || ""}
-                        placeholder="Additional email ID"
-                        onChange={(e) => setCustomerForm((p) => ({
-                          ...p,
-                          additionalEmails: (p.additionalEmails || []).map((item, i) => (i === index ? e.target.value : item))
-                        }))}
-                      />
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <input className="form-control" value={customerForm.email || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
                       <button
                         type="button"
-                        className="btn btn-outline-danger btn-sm"
-                        onClick={() => setCustomerForm((p) => ({
-                          ...p,
-                          additionalEmails: (p.additionalEmails || []).filter((_, i) => i !== index)
-                        }))}
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Email ID"
+                        onClick={() => setCustomerForm((p) => ({ ...p, additionalEmails: [...(p.additionalEmails || []), ""] }))}
                       >
-                        x
+                        +
                       </button>
                     </div>
-                  ))}
-                </div>
-                <div className="col-12">
-                  {(customerForm.additionalPhones || []).map((row, index) => (
-                    <div className="d-flex gap-2 mb-2" key={`phone-${index}`}>
-                      <PhoneCountryCodePicker
-                        value={row.countryCode || "+91"}
-                        onChange={(code) =>
-                          setCustomerForm((p) => ({
+                    {(customerForm.additionalEmails || []).map((value, index) => (
+                      <div className="d-flex gap-2" key={`email-${index}`}>
+                        <input
+                          className="form-control"
+                          value={value || ""}
+                          placeholder="Additional email ID"
+                          onChange={(e) => setCustomerForm((p) => ({
                             ...p,
-                            additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
-                          }))
-                        }
-                        options={DIAL_COUNTRY_PICKER_OPTIONS}
-                        style={{ maxWidth: "220px" }}
-                        ariaLabel="Additional phone country code"
-                      />
-                      <input
-                        className="form-control"
-                        value={row.number || ""}
-                        placeholder="Additional contact number"
-                        onChange={(e) => setCustomerForm((p) => ({
-                          ...p,
-                          additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: e.target.value } : item))
-                        }))}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger btn-sm"
-                        onClick={() => setCustomerForm((p) => ({
-                          ...p,
-                          additionalPhones: (p.additionalPhones || []).filter((_, i) => i !== index)
-                        }))}
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
+                            additionalEmails: (p.additionalEmails || []).map((item, i) => (i === index ? e.target.value : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setCustomerForm((p) => ({
+                            ...p,
+                            additionalEmails: (p.additionalEmails || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="col-12 col-xl-6">
                   <div className="d-flex align-items-center justify-content-between mb-1">

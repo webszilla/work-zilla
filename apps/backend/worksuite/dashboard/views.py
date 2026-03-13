@@ -166,11 +166,11 @@ def get_active_org(request):
     if is_super_admin_user(request.user):
         org_id = request.session.get("active_org_id")
         if not org_id:
-            owned_org = Organization.objects.filter(owner=request.user).first()
+            owned_org = Organization.objects.filter(owner=request.user, is_deleted=False).first()
             if owned_org:
                 return owned_org
-            return Organization.objects.first()
-        org = Organization.objects.filter(id=org_id).first()
+            return Organization.objects.filter(is_deleted=False).first()
+        org = Organization.objects.filter(id=org_id, is_deleted=False).first()
         if not org:
             return None
         if not can_super_admin_access_company(request.user, org):
@@ -183,18 +183,18 @@ def get_active_org(request):
 
     if profile.role == "company_admin":
         if profile.organization_id:
-            return profile.organization
-        return Organization.objects.filter(owner=request.user).first()
+            return profile.organization if profile.organization and not profile.organization.is_deleted else None
+        return Organization.objects.filter(owner=request.user, is_deleted=False).first()
 
     if profile.organization_id:
-        return profile.organization
+        return profile.organization if profile.organization and not profile.organization.is_deleted else None
 
-    owned_org = Organization.objects.filter(owner=request.user).first()
+    owned_org = Organization.objects.filter(owner=request.user, is_deleted=False).first()
     if owned_org:
         return owned_org
 
     sub = Subscription.objects.filter(user=request.user).order_by("-start_date").first()
-    if sub and sub.organization:
+    if sub and sub.organization and not sub.organization.is_deleted:
         return sub.organization
 
     return None
