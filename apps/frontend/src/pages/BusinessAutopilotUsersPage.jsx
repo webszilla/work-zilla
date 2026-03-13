@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
+import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
+import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 
 const defaultForm = {
   name: "",
@@ -21,6 +24,12 @@ const defaultEditForm = {
 };
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
+const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
+const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
+  code: option.value,
+  label: option.label,
+  flag: option.flag,
+}));
 const SYSTEM_ROLE_OPTIONS = [
   { key: "system:company_admin", label: "Company Admin" },
   { key: "system:org_user", label: "Org User" },
@@ -53,6 +62,222 @@ function createDefaultRoleAccessRecord() {
     attendance_self_service: false,
     remarks: "",
   };
+}
+
+function normalizeSharedCustomerRecord(row = {}) {
+  const companyName = String(row.companyName || row.name || "").trim();
+  const clientName = String(row.clientName || "").trim();
+  const primaryPhone = String(row.phone || "").trim();
+  const primaryEmail = String(row.email || "").trim();
+  const additionalPhones = (Array.isArray(row.additionalPhones) ? row.additionalPhones : [])
+    .map((item) => ({
+      countryCode: String(item?.countryCode || "+91").trim() || "+91",
+      number: String(item?.number || "").trim(),
+    }))
+    .filter((item) => item.number);
+  const additionalEmails = (Array.isArray(row.additionalEmails) ? row.additionalEmails : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const phoneList = Array.isArray(row.phoneList) && row.phoneList.length
+    ? row.phoneList.map((item) => ({
+      countryCode: String(item?.countryCode || "+91").trim() || "+91",
+      number: String(item?.number || "").trim(),
+    })).filter((item) => item.number)
+    : [
+      ...(primaryPhone ? [{ countryCode: String(row.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+      ...additionalPhones,
+    ];
+  const emailList = Array.isArray(row.emailList) && row.emailList.length
+    ? row.emailList.map((item) => String(item || "").trim()).filter(Boolean)
+    : [primaryEmail, ...additionalEmails].filter(Boolean);
+
+  return {
+    ...row,
+    id: row.id || `cust_${Date.now()}`,
+    companyName,
+    clientName,
+    name: companyName || clientName,
+    gstin: String(row.gstin || "").trim(),
+    phoneCountryCode: String(row.phoneCountryCode || phoneList[0]?.countryCode || "+91").trim() || "+91",
+    phone: primaryPhone || phoneList[0]?.number || "",
+    additionalPhones: phoneList.slice(1),
+    email: primaryEmail || emailList[0] || "",
+    additionalEmails: emailList.slice(1),
+    phoneList,
+    emailList,
+    billingAddress: String(row.billingAddress || "").trim(),
+    shippingAddress: String(row.shippingAddress || "").trim(),
+    billingCountry: String(row.billingCountry || row.country || "India").trim() || "India",
+    billingState: String(row.billingState || row.state || "").trim(),
+    billingPincode: String(row.billingPincode || row.pincode || "").trim(),
+    shippingCountry: String(row.shippingCountry || row.country || "India").trim() || "India",
+    shippingState: String(row.shippingState || row.state || "").trim(),
+    shippingPincode: String(row.shippingPincode || row.pincode || "").trim(),
+    billingShippingSame: Boolean(row.billingShippingSame),
+    country: String(row.billingCountry || row.country || "India").trim() || "India",
+    state: String(row.billingState || row.state || "").trim(),
+    pincode: String(row.billingPincode || row.pincode || "").trim(),
+  };
+}
+
+function readSharedAccountsData() {
+  try {
+    const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : { customers: [] };
+  } catch {
+    return { customers: [] };
+  }
+}
+
+function readSharedAccountsCustomers() {
+  return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+async function persistSharedAccountsCustomers(nextCustomers) {
+  const currentData = readSharedAccountsData();
+  const nextData = {
+    ...currentData,
+    customers: nextCustomers.map((row) => normalizeSharedCustomerRecord(row)),
+  };
+  window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+  try {
+    await apiFetch("/api/business-autopilot/accounts/workspace", {
+      method: "PUT",
+      body: JSON.stringify({ data: nextData }),
+    });
+  } catch {
+    // Keep local cache updated even if server sync fails.
+  }
+}
+
+function formatSharedCustomerPhones(row = {}) {
+  const list = [];
+  if (String(row.phone || "").trim()) {
+    list.push(`${row.phoneCountryCode || "+91"} ${row.phone}`.trim());
+  }
+  if (Array.isArray(row.phoneList)) {
+    row.phoneList.forEach((item, index) => {
+      if (index === 0) return;
+      if (String(item?.number || "").trim()) {
+        list.push(`${item.countryCode || "+91"} ${item.number}`.trim());
+      }
+    });
+  }
+  if (!list.length && Array.isArray(row.additionalPhones)) {
+    row.additionalPhones.forEach((item) => {
+      if (String(item?.number || "").trim()) {
+        list.push(`${item.countryCode || "+91"} ${item.number}`.trim());
+      }
+    });
+  }
+  return list.filter(Boolean);
+}
+
+function formatSharedCustomerEmails(row = {}) {
+  const list = [];
+  if (String(row.email || "").trim()) {
+    list.push(String(row.email).trim());
+  }
+  if (Array.isArray(row.emailList)) {
+    row.emailList.forEach((item, index) => {
+      if (index === 0) return;
+      if (String(item || "").trim()) {
+        list.push(String(item).trim());
+      }
+    });
+  }
+  if (!list.length && Array.isArray(row.additionalEmails)) {
+    row.additionalEmails.forEach((item) => {
+      if (String(item || "").trim()) {
+        list.push(String(item).trim());
+      }
+    });
+  }
+  return list.filter(Boolean);
+}
+
+function normalizeImportHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function parseCsvRows(text) {
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let currentCell = "";
+  let currentRow = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const nextChar = source[index + 1];
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        currentCell += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      currentRow.push(currentCell);
+      currentCell = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      currentRow.push(currentCell);
+      if (currentRow.some((value) => String(value || "").trim() !== "")) {
+        rows.push(currentRow);
+      }
+      currentCell = "";
+      currentRow = [];
+      continue;
+    }
+    currentCell += char;
+  }
+
+  currentRow.push(currentCell);
+  if (currentRow.some((value) => String(value || "").trim() !== "")) {
+    rows.push(currentRow);
+  }
+  if (!rows.length) {
+    return [];
+  }
+
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows
+    .slice(1)
+    .filter((row) => row.some((value) => String(value || "").trim() !== ""))
+    .map((row) =>
+      headers.reduce((acc, header, columnIndex) => {
+        acc[header] = String(row[columnIndex] || "").trim();
+        return acc;
+      }, {})
+    );
+}
+
+function normalizeSpreadsheetRows(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) {
+    return [];
+  }
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows
+    .slice(1)
+    .filter((row) => Array.isArray(row) && row.some((value) => String(value || "").trim() !== ""))
+    .map((row) =>
+      headers.reduce((acc, header, columnIndex) => {
+        acc[header] = String(row[columnIndex] || "").trim();
+        return acc;
+      }, {})
+    );
 }
 
 export default function BusinessAutopilotUsersPage() {
@@ -88,6 +313,32 @@ export default function BusinessAutopilotUsersPage() {
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientPage, setClientPage] = useState(1);
+  const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
+  const [clientForm, setClientForm] = useState({
+    id: "",
+    companyName: "",
+    clientName: "",
+    name: "",
+    gstin: "",
+    phoneCountryCode: "+91",
+    phone: "",
+    additionalPhones: [],
+    email: "",
+    additionalEmails: [],
+    billingAddress: "",
+    shippingAddress: "",
+    billingCountry: "India",
+    billingState: "",
+    billingPincode: "",
+    shippingCountry: "India",
+    shippingState: "",
+    shippingPincode: "",
+    billingShippingSame: false,
+  });
+  const [editingClientId, setEditingClientId] = useState("");
+  const clientImportInputRef = useRef(null);
   const pageSize = 5;
 
   async function loadUsers() {
@@ -206,6 +457,19 @@ export default function BusinessAutopilotUsersPage() {
   }, [roleAccessMap]);
 
   useEffect(() => {
+    function syncSharedCustomers() {
+      setSharedCustomers(readSharedAccountsCustomers());
+    }
+    syncSharedCustomers();
+    window.addEventListener("storage", syncSharedCustomers);
+    window.addEventListener("focus", syncSharedCustomers);
+    return () => {
+      window.removeEventListener("storage", syncSharedCustomers);
+      window.removeEventListener("focus", syncSharedCustomers);
+    };
+  }, []);
+
+  useEffect(() => {
     setUserPage(1);
   }, [userSearch, users.length]);
 
@@ -216,6 +480,10 @@ export default function BusinessAutopilotUsersPage() {
   useEffect(() => {
     setDepartmentPage(1);
   }, [departmentSearch, departments.length]);
+
+  useEffect(() => {
+    setClientPage(1);
+  }, [clientSearch, sharedCustomers.length]);
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -492,6 +760,36 @@ export default function BusinessAutopilotUsersPage() {
   }, [roleAccessRoleOptions, selectedRoleAccessKey]);
 
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
+  const billingStateOptions = getStateOptionsForCountry(String(clientForm.billingCountry || "India"));
+  const shippingStateOptions = getStateOptionsForCountry(String(clientForm.shippingCountry || "India"));
+  const filteredClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) {
+      return sharedCustomers;
+    }
+    return sharedCustomers.filter((row) =>
+      [
+        row.companyName,
+        row.clientName,
+        row.gstin,
+        row.phone,
+        ...formatSharedCustomerPhones(row),
+        row.email,
+        ...formatSharedCustomerEmails(row),
+        row.billingCountry,
+        row.billingState,
+        row.billingPincode,
+        row.shippingCountry,
+        row.shippingState,
+        row.shippingPincode,
+      ].filter(Boolean).join(" ").toLowerCase().includes(q)
+    );
+  }, [clientSearch, sharedCustomers]);
+  const totalClientPages = Math.max(1, Math.ceil(filteredClients.length / pageSize));
+  const normalizedClientPage = Math.min(clientPage, totalClientPages);
+  const paginatedClients = filteredClients.slice((normalizedClientPage - 1) * pageSize, normalizedClientPage * pageSize);
+  const clientStartIndex = filteredClients.length ? (normalizedClientPage - 1) * pageSize + 1 : 0;
+  const clientEndIndex = Math.min(normalizedClientPage * pageSize, filteredClients.length);
 
   function updateRoleAccess(updater) {
     if (!canManageUsers) {
@@ -508,10 +806,337 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("Role access settings saved locally.");
   }
 
+  function resetClientForm() {
+    setEditingClientId("");
+    setClientForm({
+      id: "",
+      companyName: "",
+      clientName: "",
+      name: "",
+      gstin: "",
+      phoneCountryCode: "+91",
+      phone: "",
+      additionalPhones: [],
+      email: "",
+      additionalEmails: [],
+      billingAddress: "",
+      shippingAddress: "",
+      billingCountry: "India",
+      billingState: "",
+      billingPincode: "",
+      shippingCountry: "India",
+      shippingState: "",
+      shippingPincode: "",
+      billingShippingSame: false,
+    });
+  }
+
+  async function saveClient(event) {
+    event.preventDefault();
+    if (!canManageUsers) {
+      return;
+    }
+    const companyName = String(clientForm.companyName || "").trim();
+    if (!companyName) {
+      return;
+    }
+    const clientName = String(clientForm.clientName || "").trim();
+    const primaryPhone = String(clientForm.phone || "").trim();
+    const primaryEmail = String(clientForm.email || "").trim();
+    const additionalPhones = (clientForm.additionalPhones || [])
+      .map((row) => ({ countryCode: String(row.countryCode || "+91").trim() || "+91", number: String(row.number || "").trim() }))
+      .filter((row) => row.number);
+    const additionalEmails = (clientForm.additionalEmails || [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const billingCountry = String(clientForm.billingCountry || "").trim() || "India";
+    const billingState = String(clientForm.billingState || "").trim();
+    const billingPincode = String(clientForm.billingPincode || "").trim();
+    const useSameShipping = Boolean(clientForm.billingShippingSame);
+    const shippingAddress = useSameShipping
+      ? String(clientForm.billingAddress || "").trim()
+      : String(clientForm.shippingAddress || "").trim();
+    const shippingCountry = useSameShipping
+      ? billingCountry
+      : (String(clientForm.shippingCountry || "").trim() || "India");
+    const shippingState = useSameShipping
+      ? billingState
+      : String(clientForm.shippingState || "").trim();
+    const shippingPincode = useSameShipping
+      ? billingPincode
+      : String(clientForm.shippingPincode || "").trim();
+    const payload = normalizeSharedCustomerRecord({
+      id: editingClientId || `cust_${Date.now()}`,
+      companyName,
+      clientName,
+      name: companyName,
+      gstin: String(clientForm.gstin || "").trim(),
+      phoneCountryCode: String(clientForm.phoneCountryCode || "+91").trim() || "+91",
+      phone: primaryPhone,
+      additionalPhones,
+      phoneList: [
+        ...(primaryPhone ? [{ countryCode: String(clientForm.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+        ...additionalPhones,
+      ],
+      email: primaryEmail,
+      additionalEmails,
+      emailList: [primaryEmail, ...additionalEmails].filter(Boolean),
+      billingAddress: String(clientForm.billingAddress || "").trim(),
+      shippingAddress,
+      billingCountry,
+      billingState,
+      billingPincode,
+      shippingCountry,
+      shippingState,
+      shippingPincode,
+      billingShippingSame: useSameShipping,
+      country: billingCountry,
+      state: billingState,
+      pincode: billingPincode,
+    });
+    const nextCustomers = editingClientId
+      ? sharedCustomers.map((row) => (row.id === editingClientId ? { ...row, ...payload } : row))
+      : [payload, ...sharedCustomers];
+    setSharedCustomers(nextCustomers);
+    await persistSharedAccountsCustomers(nextCustomers);
+    setNotice(editingClientId ? "Client updated successfully." : "Client created successfully.");
+    resetClientForm();
+  }
+
+  function editClient(row) {
+    const normalized = normalizeSharedCustomerRecord(row);
+    setEditingClientId(normalized.id);
+    setClientForm({
+      ...normalized,
+      additionalPhones: Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : [],
+      additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
+    });
+    setActiveTopTab("clients");
+  }
+
+  async function deleteClient(clientId) {
+    if (!canManageUsers) {
+      return;
+    }
+    const nextCustomers = sharedCustomers.filter((row) => String(row.id) !== String(clientId));
+    setSharedCustomers(nextCustomers);
+    await persistSharedAccountsCustomers(nextCustomers);
+    if (editingClientId === String(clientId)) {
+      resetClientForm();
+    }
+    setNotice("Client deleted successfully.");
+  }
+
+  function exportClientsAsExcelCsv() {
+    const headers = ["Company Name", "Client Name", "GSTIN", "Contact Number", "Email ID", "Location"];
+    const csvEscape = (value) => {
+      const raw = String(value ?? "");
+      if (/[",\n]/.test(raw)) {
+        return `"${raw.replace(/"/g, "\"\"")}"`;
+      }
+      return raw;
+    };
+    const lines = [
+      headers.map(csvEscape).join(","),
+      ...filteredClients.map((row) => [
+        row.companyName || row.name || "",
+        row.clientName || "",
+        row.gstin || "",
+        formatSharedCustomerPhones(row).join(", "),
+        formatSharedCustomerEmails(row).join(", "),
+        [row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", "),
+      ].map(csvEscape).join(",")),
+    ];
+    const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "accounts-client-list.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportClientsAsPdf() {
+    const win = window.open("", "_blank", "width=1000,height=700");
+    if (!win) {
+      window.alert("Popup blocked. Please allow popups to export PDF.");
+      return;
+    }
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const rows = filteredClients.length
+      ? filteredClients.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.companyName || row.name || "-")}</td>
+            <td>${escapeHtml(row.clientName || "-")}</td>
+            <td>${escapeHtml(row.gstin || "-")}</td>
+            <td>${escapeHtml(formatSharedCustomerPhones(row).join(", ") || "-")}</td>
+            <td>${escapeHtml(formatSharedCustomerEmails(row).join(", ") || "-")}</td>
+            <td>${escapeHtml([row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-")}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="6">No clients found.</td></tr>`;
+    win.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Client List - Export</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+            h2 { margin: 0 0 12px 0; font-size: 20px; }
+            p { margin: 0 0 12px 0; color: #555; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; vertical-align: top; }
+            th { background: #f1f1f1; }
+          </style>
+        </head>
+        <body>
+          <h2>Client List</h2>
+          <p>Exported ${escapeHtml(new Date().toLocaleString())}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Company Name</th>
+                <th>Client Name</th>
+                <th>GSTIN</th>
+                <th>Contact Number</th>
+                <th>Email ID</th>
+                <th>Location</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    const triggerPrint = () => {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        // ignore print trigger issues
+      }
+    };
+    win.onload = () => {
+      win.setTimeout(triggerPrint, 250);
+    };
+    win.setTimeout(triggerPrint, 500);
+  }
+
+  function triggerClientImportPicker() {
+    clientImportInputRef.current?.click();
+  }
+
+  async function onClientImportFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !canManageUsers) {
+      return;
+    }
+    try {
+      let importedRows = [];
+      const fileName = String(file.name || "").toLowerCase();
+      if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+        importedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+      } else {
+        importedRows = parseCsvRows(await file.text());
+      }
+      const nextRows = importedRows
+        .map((row, rowIndex) => {
+          const getValue = (...keys) => {
+            for (const key of keys) {
+              const match = Object.entries(row || {}).find(
+                ([header]) => normalizeImportHeader(header) === normalizeImportHeader(key)
+              );
+              if (match && String(match[1] || "").trim()) {
+                return String(match[1] || "").trim();
+              }
+            }
+            return "";
+          };
+          const companyName = getValue("Company Name", "Company", "Name");
+          const clientName = getValue("Client Name", "Client", "Contact Person");
+          const gstin = getValue("GSTIN");
+          const contactNumberRaw = getValue("Contact Number", "Phone Number", "Phone", "Mobile Number");
+          const emailRaw = getValue("Email ID", "Email", "Email Address");
+          const locationRaw = getValue("Location", "Billing Location", "Address");
+          if (!companyName && !clientName && !contactNumberRaw && !emailRaw && !locationRaw && !gstin) {
+            return null;
+          }
+          const phoneEntries = contactNumberRaw
+            .split(/[,\n/]+/)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .map((value) => {
+              const phoneMatch = value.match(/^(\+\d{1,4})\s*(.+)$/);
+              if (phoneMatch) {
+                return { countryCode: phoneMatch[1].trim(), number: phoneMatch[2].trim() };
+              }
+              return { countryCode: "+91", number: value };
+            })
+            .filter((item) => item.number);
+          const emailEntries = emailRaw
+            .split(/[,\n/]+/)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean);
+          const locationParts = locationRaw
+            .split(",")
+            .map((value) => String(value || "").trim())
+            .filter(Boolean);
+          const billingState = locationParts[0] || "";
+          const billingCountry = locationParts[1] || "India";
+          const billingPincode = locationParts[2] || "";
+          return normalizeSharedCustomerRecord({
+            id: `cust_import_${Date.now()}_${rowIndex}`,
+            companyName,
+            clientName,
+            name: companyName || clientName,
+            gstin,
+            phoneCountryCode: phoneEntries[0]?.countryCode || "+91",
+            phone: phoneEntries[0]?.number || "",
+            additionalPhones: phoneEntries.slice(1),
+            phoneList: phoneEntries,
+            email: emailEntries[0] || "",
+            additionalEmails: emailEntries.slice(1),
+            emailList: emailEntries,
+            billingCountry,
+            billingState,
+            billingPincode,
+            shippingCountry: billingCountry,
+            shippingState: billingState,
+            shippingPincode: billingPincode,
+            country: billingCountry,
+            state: billingState,
+            pincode: billingPincode,
+          });
+        })
+        .filter(Boolean);
+      if (!nextRows.length) {
+        window.alert("Imported file is empty or invalid.");
+        return;
+      }
+      const nextCustomers = [...nextRows, ...sharedCustomers];
+      setSharedCustomers(nextCustomers);
+      await persistSharedAccountsCustomers(nextCustomers);
+      setNotice("Clients imported successfully.");
+    } catch {
+      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+    }
+  }
+
   return (
     <div className="d-flex flex-column gap-3">
       <div>
-        <h4 className="mb-2">ERP Users</h4>
+        <h4 className="mb-2">Users</h4>
         <p className="text-secondary mb-0">Create and manage users for Business Autopilot.</p>
         <div className="d-flex flex-wrap gap-2 mt-3">
           <button
@@ -527,6 +1152,13 @@ export default function BusinessAutopilotUsersPage() {
             onClick={() => setActiveTopTab("role-access")}
           >
             Role Based Access
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTopTab === "clients" ? "btn-success" : "btn-outline-light"}`}
+            onClick={() => setActiveTopTab("clients")}
+          >
+            Clients
           </button>
         </div>
       </div>
@@ -870,7 +1502,7 @@ export default function BusinessAutopilotUsersPage() {
             ) : null}
           </div>
         </>
-      ) : (
+      ) : activeTopTab === "role-access" ? (
         <div className="card p-3">
           <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
             <div>
@@ -971,6 +1603,267 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           </div>
         </div>
+      ) : (
+        <>
+          <div className="card p-3">
+            <h6 className="mb-3">{editingClientId ? "Edit Client" : "Create Client"}</h6>
+            <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Company Name</label>
+                  <input className="form-control" value={clientForm.companyName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, companyName: event.target.value, name: event.target.value }))} placeholder="Company name" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Client Name</label>
+                  <input className="form-control" value={clientForm.clientName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, clientName: event.target.value }))} placeholder="Client / Contact person" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">GSTIN</label>
+                  <input className="form-control" value={clientForm.gstin || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, gstin: event.target.value }))} placeholder="GSTIN" />
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <PhoneCountryCodePicker
+                        value={clientForm.phoneCountryCode || "+91"}
+                        onChange={(code) => setClientForm((prev) => ({ ...prev, phoneCountryCode: code }))}
+                        options={DIAL_COUNTRY_PICKER_OPTIONS}
+                        style={{ maxWidth: "220px" }}
+                        ariaLabel="Client phone country code"
+                      />
+                      <input className="form-control" value={clientForm.phone || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Contact Number"
+                        onClick={() => setClientForm((prev) => ({ ...prev, additionalPhones: [...(prev.additionalPhones || []), { countryCode: "+91", number: "" }] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(clientForm.additionalPhones || []).map((row, index) => (
+                      <div className="d-flex gap-2" key={`users-client-phone-${index}`}>
+                        <PhoneCountryCodePicker
+                          value={row.countryCode || "+91"}
+                          onChange={(code) => setClientForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
+                          }))}
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "220px" }}
+                          ariaLabel="Additional phone country code"
+                        />
+                        <input
+                          className="form-control"
+                          value={row.number || ""}
+                          placeholder="Additional contact number"
+                          onChange={(event) => setClientForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: event.target.value } : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setClientForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <input className="form-control" value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="Primary email" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Email ID"
+                        onClick={() => setClientForm((prev) => ({ ...prev, additionalEmails: [...(prev.additionalEmails || []), ""] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(clientForm.additionalEmails || []).map((value, index) => (
+                      <div className="d-flex gap-2" key={`users-client-email-${index}`}>
+                        <input
+                          className="form-control"
+                          value={value || ""}
+                          placeholder="Additional email ID"
+                          onChange={(event) => setClientForm((prev) => ({
+                            ...prev,
+                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? event.target.value : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setClientForm((prev) => ({
+                            ...prev,
+                            additionalEmails: (prev.additionalEmails || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0"
+                        checked={Boolean(clientForm.billingShippingSame)}
+                        onChange={(event) => setClientForm((prev) => ({ ...prev, billingShippingSame: event.target.checked }))}
+                      />
+                      Billing and Shipping Same
+                    </label>
+                  </div>
+                  <textarea className="form-control mb-2" rows="2" value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: event.target.value }))} placeholder="Billing address" />
+                  <div className="d-flex flex-column gap-2">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Country</label>
+                      <select className="form-select" value={clientForm.billingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
+                        {COUNTRY_OPTIONS.map((country) => <option key={`users-client-country-${country}`} value={country}>{country}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">State</label>
+                      {billingStateOptions.length ? (
+                        <select className="form-select" value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))}>
+                          <option value="">Select State</option>
+                          {billingStateOptions.map((state) => <option key={`users-client-state-${state}`} value={state}>{state}</option>)}
+                        </select>
+                      ) : (
+                        <input className="form-control" value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))} placeholder="State / Province / Region" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Pincode</label>
+                      <input className="form-control" value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: event.target.value }))} placeholder="Pincode" />
+                    </div>
+                  </div>
+                </div>
+                {!clientForm.billingShippingSame ? (
+                  <div className="col-12 col-xl-6">
+                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <textarea className="form-control mb-2" rows="2" value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: event.target.value }))} placeholder="Shipping address" />
+                    <div className="d-flex flex-column gap-2">
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Country</label>
+                        <select className="form-select" value={clientForm.shippingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
+                          {COUNTRY_OPTIONS.map((country) => <option key={`users-client-shipping-country-${country}`} value={country}>{country}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">State</label>
+                        {shippingStateOptions.length ? (
+                          <select className="form-select" value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
+                            <option value="">Select State</option>
+                            {shippingStateOptions.map((state) => <option key={`users-client-shipping-state-${state}`} value={state}>{state}</option>)}
+                          </select>
+                        ) : (
+                          <input className="form-control" value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))} placeholder="State / Province / Region" />
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <input className="form-control" value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: event.target.value }))} placeholder="Pincode" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm" disabled={!canManageUsers}>{editingClientId ? "Update Client" : "Create Client"}</button>
+                {editingClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetClientForm}>Cancel</button> : null}
+              </div>
+            </form>
+          </div>
+
+          <div>
+            <h6 className="mb-3">Client List</h6>
+            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mb-2">
+              <span className="badge bg-secondary">{filteredClients.length} clients</span>
+              <input
+                ref={clientImportInputRef}
+                type="file"
+                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                className="d-none"
+                onChange={onClientImportFileChange}
+              />
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canManageUsers}>
+                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                Import
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsExcelCsv}>
+                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                Export
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsPdf}>
+                <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
+                Export
+              </button>
+              <div className="table-search">
+                <i className="bi bi-search" aria-hidden="true" />
+                <input type="search" className="form-control form-control-sm" placeholder="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} />
+              </div>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Company Name</th>
+                    <th>Client Name</th>
+                    <th>GSTIN</th>
+                    <th>Contact Number</th>
+                    <th>Email ID</th>
+                    <th>Location</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedClients.length ? (
+                    paginatedClients.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.companyName || "-"}</td>
+                        <td>{row.clientName || "-"}</td>
+                        <td>{row.gstin || "-"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerPhones(row).join(", ") || "-"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</td>
+                        <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
+                        <td>
+                          <div className="d-inline-flex gap-2">
+                            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editClient(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canManageUsers} onClick={() => deleteClient(row.id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={7}>No clients found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+              <div className="small text-secondary">
+                Showing {clientStartIndex} to {clientEndIndex} of {filteredClients.length} entries
+              </div>
+              <TablePagination page={normalizedClientPage} totalPages={totalClientPages} onPageChange={setClientPage} />
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

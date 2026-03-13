@@ -144,7 +144,7 @@ export default function PhoneCountryCodePicker({
 
   return (
     <div
-      className={`wz-country-picker ${className}`.trim()}
+      className={`wz-country-picker ${open ? "is-open" : ""} ${className}`.trim()}
       ref={rootRef}
       style={style}
     >

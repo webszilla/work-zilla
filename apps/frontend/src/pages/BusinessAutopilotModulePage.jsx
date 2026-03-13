@@ -186,6 +186,8 @@ const CRM_SECTION_CONFIG = {
       { key: "name", label: "Lead Name" },
       { key: "company", label: "Company" },
       { key: "phone", label: "Phone" },
+      { key: "assignedTo", label: "Assigned To" },
+      { key: "createdBy", label: "Created By" },
       { key: "stage", label: "Stage" },
       { key: "status", label: "Status" }
     ],
@@ -194,6 +196,9 @@ const CRM_SECTION_CONFIG = {
       { key: "company", label: "Company", placeholder: "Company / Business name" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
+      { key: "assignType", label: "Assign To", type: "select", options: ["User", "Team"], defaultValue: "User" },
+      { key: "assignedUser", label: "User", type: "datalist", datalistSource: "erpUsers", placeholder: "Search user name" },
+      { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
       { key: "stage", label: "Stage", type: "select", options: ["New", "Qualified", "Proposal"], defaultValue: "New" },
       { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Converted"], defaultValue: "Open" }
     ]
@@ -216,6 +221,20 @@ const CRM_SECTION_CONFIG = {
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
       { key: "tag", label: "Tag", type: "select", options: ["Customer", "Prospect", "Vendor"], defaultValue: "Customer" }
+    ]
+  },
+  teams: {
+    label: "Teams",
+    itemLabel: "Team",
+    icon: "bi-people-fill",
+    columns: [
+      { key: "name", label: "Team Name" },
+      { key: "members", label: "Employees" },
+      { key: "createdBy", label: "Created By" }
+    ],
+    fields: [
+      { key: "name", label: "Team Name", placeholder: "Inside Sales Team" },
+      { key: "members", label: "Employees", type: "multiselect", options: [], optionSource: "erpUsers" }
     ]
   },
   deals: {
@@ -305,12 +324,15 @@ const CRM_SECTION_CONFIG = {
 
 const DEFAULT_CRM_DATA = {
   leads: [
-    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phoneCountryCode: "+91", phone: "9876543210", stage: "Qualified", status: "Open" },
-    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phoneCountryCode: "+91", phone: "9123456780", stage: "Proposal", status: "Open" }
+    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phoneCountryCode: "+91", phone: "9876543210", assignType: "User", assignedUser: "GP Prakash", assignedTeam: "", assignedTo: "GP Prakash", createdBy: "GP Prakash", stage: "Qualified", status: "Open" },
+    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phoneCountryCode: "+91", phone: "9123456780", assignType: "Team", assignedUser: "", assignedTeam: "Sales Team", assignedTo: "Sales Team", createdBy: "GP Prakash", stage: "Proposal", status: "Open" }
   ],
   contacts: [
     { id: "crm_c1", name: "Ravi Kumar", company: "Ultra HD Prints", email: "ravi@uhdprints.example", phoneCountryCode: "+91", phone: "9876543210", tag: "Customer" },
     { id: "crm_c2", name: "Priya N", company: "North India Jewels", email: "priya@nij.example", phoneCountryCode: "+91", phone: "9123456780", tag: "Prospect" }
+  ],
+  teams: [
+    { id: "crm_t1", name: "Sales Team", members: ["GP Prakash", "Guru"], createdBy: "GP Prakash" }
   ],
   deals: [
     { id: "crm_d1", dealName: "POS Billing Setup", company: "Ultra HD Prints", stage: "Negotiation", amount: "85000", status: "Open" },
@@ -390,8 +412,8 @@ const PROJECT_TAB_CONFIG = {
     ]
   },
   customers: {
-    label: "Customers",
-    itemLabel: "Customer",
+    label: "Clients",
+    itemLabel: "Client",
     columns: [
       { key: "companyName", label: "Company Name" },
       { key: "clientName", label: "Client Name" },
@@ -438,24 +460,26 @@ const HR_TAB_CONFIG = {
     ],
     fields: [
       { key: "name", label: "Name", placeholder: "Select employee from created users" },
+      { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other"] },
       { key: "department", label: "Department", placeholder: "Auto from user / editable" },
       { key: "designation", label: "Employee Role", placeholder: "Auto from user / editable" },
+      { key: "dateOfJoining", label: "Date of Joining", type: "date" },
       { key: "dateOfBirth", label: "Date of Birth", type: "date" },
       { key: "bloodGroup", label: "Blood Group", type: "select", options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
       { key: "fatherName", label: "Father Name", placeholder: "Father name" },
       { key: "motherName", label: "Mother Name", placeholder: "Mother name" },
       { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorced", "Widowed"] },
       { key: "wifeName", label: "Wife Name", placeholder: "Wife name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
-      { key: "permanentAddress", label: "Permanent Address", placeholder: "Permanent address", type: "textarea" },
-      { key: "permanentCountry", label: "Permanent Country", placeholder: "Country" },
-      { key: "permanentState", label: "Permanent State", placeholder: "State" },
-      { key: "permanentCity", label: "Permanent City", placeholder: "City" },
-      { key: "permanentPincode", label: "Permanent Pincode", placeholder: "Pincode" },
-      { key: "temporaryAddress", label: "Temporary Address", placeholder: "Temporary address", type: "textarea" },
-      { key: "temporaryCountry", label: "Temporary Country", placeholder: "Country" },
-      { key: "temporaryState", label: "Temporary State", placeholder: "State" },
-      { key: "temporaryCity", label: "Temporary City", placeholder: "City" },
-      { key: "temporaryPincode", label: "Temporary Pincode", placeholder: "Pincode" }
+      { key: "permanentAddress", label: "Address", placeholder: "Permanent address", type: "textarea" },
+      { key: "permanentCountry", label: "Country", placeholder: "Country" },
+      { key: "permanentState", label: "State", placeholder: "State" },
+      { key: "permanentCity", label: "City", placeholder: "City" },
+      { key: "permanentPincode", label: "Pincode", placeholder: "Pincode" },
+      { key: "temporaryAddress", label: "Address", placeholder: "Temporary address", type: "textarea" },
+      { key: "temporaryCountry", label: "Country", placeholder: "Country" },
+      { key: "temporaryState", label: "State", placeholder: "State" },
+      { key: "temporaryCity", label: "City", placeholder: "City" },
+      { key: "temporaryPincode", label: "Pincode", placeholder: "Pincode" }
     ]
   },
   attendance: {
@@ -880,7 +904,56 @@ function isValidHrData(value) {
 }
 
 function isValidCrmData(value) {
-  return value && typeof value === "object" && Object.keys(CRM_SECTION_CONFIG).every((key) => Array.isArray(value[key]));
+  return value && typeof value === "object" && Object.keys(CRM_SECTION_CONFIG).every((key) => !value[key] || Array.isArray(value[key]));
+}
+
+function normalizeCrmData(value) {
+  const base = Object.fromEntries(
+    Object.keys(CRM_SECTION_CONFIG).map((key) => [key, Array.isArray(DEFAULT_CRM_DATA[key]) ? [...DEFAULT_CRM_DATA[key]] : []])
+  );
+  if (!value || typeof value !== "object") {
+    return base;
+  }
+  Object.keys(base).forEach((key) => {
+    if (Array.isArray(value[key])) {
+      base[key] = key === "leads"
+        ? value[key].map((row) => normalizeCrmLeadRecord(row))
+        : key === "teams"
+        ? value[key].map((row) => normalizeCrmTeamRecord(row))
+        : value[key];
+    }
+  });
+  base.leads = (base.leads || []).map((row) => normalizeCrmLeadRecord(row));
+  base.teams = (base.teams || []).map((row) => normalizeCrmTeamRecord(row));
+  return base;
+}
+
+function normalizeCrmLeadRecord(row = {}) {
+  const assignType = String(row.assignType || (row.assignedTeam ? "Team" : "User")).trim() || "User";
+  const assignedUser = String(row.assignedUser || (assignType.toLowerCase() === "user" ? row.assignedTo || "" : "")).trim();
+  const assignedTeam = String(row.assignedTeam || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")).trim();
+  return {
+    ...row,
+    assignType,
+    assignedUser,
+    assignedTeam,
+    assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser)).trim(),
+    createdBy: String(row.createdBy || row.owner || "").trim(),
+  };
+}
+
+function normalizeCrmTeamRecord(row = {}) {
+  const members = Array.isArray(row.members)
+    ? row.members.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.members || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  return {
+    ...row,
+    members,
+    createdBy: String(row.createdBy || "").trim(),
+  };
 }
 
 function isValidCustomTabData(value, config) {
@@ -1026,6 +1099,22 @@ function readSharedAccountsData() {
 
 function readSharedAccountsCustomers() {
   return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+function readSharedCrmContacts() {
+  try {
+    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+    if (!raw) {
+      return [...(DEFAULT_CRM_DATA.contacts || [])];
+    }
+    const parsed = JSON.parse(raw);
+    if (!isValidCrmData(parsed)) {
+      return [...(DEFAULT_CRM_DATA.contacts || [])];
+    }
+    return normalizeCrmData(parsed).contacts || [];
+  } catch (_error) {
+    return [...(DEFAULT_CRM_DATA.contacts || [])];
+  }
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
@@ -1510,8 +1599,8 @@ function SearchablePaginatedTableCard({
 }
 
 function CrmOnePageModule() {
-  const sectionOrder = ["leads", "contacts", "deals", "followUps", "meetings", "activities"];
-  const [moduleData, setModuleData] = useState(DEFAULT_CRM_DATA);
+  const sectionOrder = ["leads", "contacts", "teams", "deals", "followUps", "meetings", "activities"];
+  const [moduleData, setModuleData] = useState(() => normalizeCrmData(DEFAULT_CRM_DATA));
   const [activeSection, setActiveSection] = useState(sectionOrder[0]);
   const [calendarMonthDate, setCalendarMonthDate] = useState(() => {
     const now = new Date();
@@ -1528,6 +1617,8 @@ function CrmOnePageModule() {
   const [editingIds, setEditingIds] = useState(() =>
     Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, ""]))
   );
+  const [crmUserDirectory, setCrmUserDirectory] = useState([]);
+  const [currentUserName, setCurrentUserName] = useState("Current User");
 
   useEffect(() => {
     try {
@@ -1537,7 +1628,7 @@ function CrmOnePageModule() {
       }
       const parsed = JSON.parse(raw);
       if (isValidCrmData(parsed)) {
-        setModuleData(parsed);
+        setModuleData(normalizeCrmData(parsed));
       }
     } catch (_error) {
       // Ignore invalid CRM cache.
@@ -1547,6 +1638,34 @@ function CrmOnePageModule() {
   useEffect(() => {
     window.localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(moduleData));
   }, [moduleData]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [usersData, authData] = await Promise.all([
+          apiFetch("/api/business-autopilot/users"),
+          apiFetch("/api/auth/me"),
+        ]);
+        if (!active) return;
+        setCrmUserDirectory(Array.isArray(usersData?.users) ? usersData.users : []);
+        const name = String(
+          authData?.user?.first_name
+          || authData?.user?.username
+          || authData?.profile?.name
+          || "Current User"
+        ).trim();
+        setCurrentUserName(name || "Current User");
+      } catch {
+        if (!active) return;
+        setCrmUserDirectory([]);
+        setCurrentUserName("Current User");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (activeSection !== "meetings") {
@@ -1575,6 +1694,16 @@ function CrmOnePageModule() {
     ];
   }, [moduleData]);
 
+  const crmTeamOptions = useMemo(
+    () => Array.from(new Set((moduleData.teams || []).map((row) => String(row?.name || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [moduleData.teams]
+  );
+  const crmUserOptions = useMemo(
+    () => Array.from(new Set((crmUserDirectory || []).map((row) => String(row?.name || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [crmUserDirectory]
+  );
+  const sharedCustomerOptions = useMemo(() => readSharedAccountsCustomers(), [activeSection, moduleData.contacts, moduleData.teams, crmUserDirectory]);
+
   function setField(sectionKey, fieldKey, value) {
     setForms((prev) => ({
       ...prev,
@@ -1595,9 +1724,14 @@ function CrmOnePageModule() {
 
   function onEdit(sectionKey, row) {
     setEditingIds((prev) => ({ ...prev, [sectionKey]: row.id }));
+    const normalizedRow = sectionKey === "leads"
+      ? normalizeCrmLeadRecord(row)
+      : sectionKey === "teams"
+      ? normalizeCrmTeamRecord(row)
+      : row;
     const nextValues = {};
     CRM_SECTION_CONFIG[sectionKey].fields.forEach((field) => {
-      const rowValue = row[field.key];
+      const rowValue = normalizedRow[field.key];
       if (field.type === "multiselect") {
         if (Array.isArray(rowValue)) {
           nextValues[field.key] = rowValue;
@@ -1630,6 +1764,16 @@ function CrmOnePageModule() {
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
     const hasEmptyField = config.fields.some((field) => {
+      if (sectionKey === "leads" && field.key === "assignedUser") {
+        return String(values.assignType || "User").trim().toLowerCase() === "user"
+          ? !String(values.assignedUser || "").trim()
+          : false;
+      }
+      if (sectionKey === "leads" && field.key === "assignedTeam") {
+        return String(values.assignType || "User").trim().toLowerCase() === "team"
+          ? !String(values.assignedTeam || "").trim()
+          : false;
+      }
       if (field.type === "multiselect") {
         return !Array.isArray(values[field.key]) || values[field.key].length === 0;
       }
@@ -1638,7 +1782,7 @@ function CrmOnePageModule() {
     if (hasEmptyField) {
       return;
     }
-    const payload = {};
+    let payload = {};
     config.fields.forEach((field) => {
       if (field.type === "multiselect") {
         payload[field.key] = Array.isArray(values[field.key]) ? values[field.key].map((v) => String(v).trim()).filter(Boolean) : [];
@@ -1646,6 +1790,18 @@ function CrmOnePageModule() {
         payload[field.key] = String(values[field.key] || "").trim();
       }
     });
+    if (sectionKey === "leads") {
+      const assignType = String(payload.assignType || "User").trim();
+      payload.assignedTo = assignType.toLowerCase() === "team"
+        ? String(payload.assignedTeam || "").trim()
+        : String(payload.assignedUser || "").trim();
+      payload.createdBy = String(currentUserName || "Current User").trim();
+      payload = normalizeCrmLeadRecord(payload);
+    }
+    if (sectionKey === "teams") {
+      payload.createdBy = String(currentUserName || "Current User").trim();
+      payload = normalizeCrmTeamRecord(payload);
+    }
     if (sectionKey === "meetings") {
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
       payload.reminderSummary = `${reminderChannels.join(", ")} • ${payload.reminderMinutes} min before`;
@@ -1656,7 +1812,7 @@ function CrmOnePageModule() {
       if (editingId) {
         return {
           ...prev,
-          [sectionKey]: rows.map((row) => (row.id === editingId ? { ...row, ...payload } : row)),
+          [sectionKey]: rows.map((row) => (row.id === editingId ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName } : row)),
         };
       }
       return {
@@ -1885,6 +2041,19 @@ function CrmOnePageModule() {
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
+        const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
+        const crmContactMatches = sectionKey === "leads" && leadCompanyQuery
+          ? (moduleData.contacts || []).filter((contact) => {
+              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              return haystack.includes(leadCompanyQuery);
+            }).slice(0, 6)
+          : [];
+        const customerMatches = sectionKey === "leads" && leadCompanyQuery
+          ? sharedCustomerOptions.filter((customer) => {
+              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+              return haystack.includes(leadCompanyQuery);
+            }).slice(0, 6)
+          : [];
         return (
           <div key={sectionKey} className="d-flex flex-column gap-3">
             <div className="card p-3">
@@ -1893,17 +2062,35 @@ function CrmOnePageModule() {
                 <div className="row g-3">
                   {config.fields.map((field) => (
                     <Fragment key={`${sectionKey}-${field.key}`}>
-                      {hasPhoneCountryCodeField && field.key === "phoneCountryCode" ? null : (
+                      {hasPhoneCountryCodeField && field.key === "phoneCountryCode"
+                        ? null
+                        : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "User").trim().toLowerCase() !== "user"
+                        ? null
+                        : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "User").trim().toLowerCase() !== "team"
+                        ? null
+                        : (
                       <div
                         className={
                           sectionKey === "leads"
                             ? (
                                 field.key === "name" || field.key === "company"
-                                  ? "col-12 col-md-6 col-xl-3"
+                                  ? "col-12 col-md-6 col-xl-2"
                                   : field.key === "phone"
                                   ? "col-12 col-md-6 col-xl-3"
+                                  : field.key === "assignType"
+                                  ? "col-12 col-md-6 col-xl-1"
+                                  : field.key === "assignedUser" || field.key === "assignedTeam"
+                                  ? "col-12 col-md-6 col-xl-2"
                                   : field.key === "stage" || field.key === "status"
                                   ? "col-12 col-md-6 col-xl-1"
+                                  : "col-12 col-md-6 col-xl-4"
+                              )
+                            : sectionKey === "teams"
+                            ? (
+                                field.key === "name"
+                                  ? "col-12 col-md-6 col-xl-4"
+                                  : field.key === "members"
+                                  ? "col-12 col-md-6 col-xl-6"
                                   : "col-12 col-md-6 col-xl-4"
                               )
                             : sectionKey === "activities"
@@ -1971,95 +2158,193 @@ function CrmOnePageModule() {
                         key={`${sectionKey}-${field.key}`}
                       >
                         <label className="form-label small text-secondary mb-1">{field.label}</label>
-                        {hasPhoneCountryCodeField && field.key === "phone" ? (
-                          <div className="input-group">
-                            <PhoneCountryCodePicker
-                              value={formValues.phoneCountryCode || "+91"}
-                              onChange={(code) => setField(sectionKey, "phoneCountryCode", code)}
-                              options={DIAL_COUNTRY_PICKER_OPTIONS}
-                              style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
-                              ariaLabel="CRM country code"
-                            />
+                        {(() => {
+                          const skipField = false;
+                          if (skipField) {
+                            return null;
+                          }
+                          if (hasPhoneCountryCodeField && field.key === "phone") {
+                            return (
+                              <div className="input-group">
+                                <PhoneCountryCodePicker
+                                  value={formValues.phoneCountryCode || "+91"}
+                                  onChange={(code) => setField(sectionKey, "phoneCountryCode", code)}
+                                  options={DIAL_COUNTRY_PICKER_OPTIONS}
+                                  style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
+                                  ariaLabel="CRM country code"
+                                />
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  placeholder={field.placeholder}
+                                  value={formValues.phone || ""}
+                                  onChange={(event) => setField(sectionKey, "phone", event.target.value)}
+                                />
+                              </div>
+                            );
+                          }
+                          if (sectionKey === "leads" && field.key === "company") {
+                            return (
+                              <div className="crm-inline-suggestions-wrap">
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  placeholder={field.placeholder}
+                                  value={formValues[field.key] || ""}
+                                  onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                />
+                                {(crmContactMatches.length || customerMatches.length) ? (
+                                  <div className="crm-inline-suggestions">
+                                    {crmContactMatches.length ? (
+                                      <div className="crm-inline-suggestions__group">
+                                        <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                        {crmContactMatches.map((contact) => (
+                                          <button
+                                            key={`crm-contact-${contact.id}`}
+                                            type="button"
+                                            className="crm-inline-suggestions__item"
+                                            onClick={() => {
+                                              setForms((prev) => ({
+                                                ...prev,
+                                                leads: {
+                                                  ...prev.leads,
+                                                  name: String(contact.name || "").trim(),
+                                                  company: String(contact.company || "").trim(),
+                                                  phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
+                                                  phone: String(contact.phone || "").trim(),
+                                                },
+                                              }));
+                                            }}
+                                          >
+                                            <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                            <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    {customerMatches.length ? (
+                                      <div className="crm-inline-suggestions__group">
+                                        <div className="crm-inline-suggestions__title">Clients</div>
+                                        {customerMatches.map((customer) => (
+                                          <button
+                                            key={`crm-customer-${customer.id}`}
+                                            type="button"
+                                            className="crm-inline-suggestions__item"
+                                            onClick={() => {
+                                              setForms((prev) => ({
+                                                ...prev,
+                                                leads: {
+                                                  ...prev.leads,
+                                                  name: String(customer.clientName || customer.name || "").trim(),
+                                                  company: String(customer.companyName || customer.name || "").trim(),
+                                                  phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
+                                                  phone: String(customer.phone || "").trim(),
+                                                },
+                                              }));
+                                            }}
+                                          >
+                                            <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                            <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          }
+                          if (field.type === "datalist") {
+                            return (
+                              <Fragment>
+                                <input
+                                  type="text"
+                                  list={`${sectionKey}-${field.key}-datalist`}
+                                  className="form-control datalist-readable-input"
+                                  placeholder={field.placeholder}
+                                  value={formValues[field.key] || ""}
+                                  onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                />
+                                <datalist id={`${sectionKey}-${field.key}-datalist`}>
+                                  {field.datalistSource === "crmContacts"
+                                    ? (moduleData.contacts || []).flatMap((contact) => {
+                                        const options = [];
+                                        if (String(contact.name || "").trim()) options.push(contact.name.trim());
+                                        if (String(contact.company || "").trim()) options.push(contact.company.trim());
+                                        return options;
+                                      }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
+                                        <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                      ))
+                                    : field.datalistSource === "erpUsers"
+                                    ? crmUserOptions.map((value) => (
+                                        <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                      ))
+                                    : null}
+                                </datalist>
+                              </Fragment>
+                            );
+                          }
+                          if (field.type === "multiselect") {
+                            return (
+                              <select
+                                className="form-select"
+                                multiple
+                                size={1}
+                                value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
+                                onChange={(event) => {
+                                  const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
+                                  setField(sectionKey, field.key, selectedValues);
+                                }}
+                              >
+                                {((field.optionSource === "erpUsers" ? crmUserOptions : field.options) || []).map((option) => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            );
+                          }
+                          if (field.type === "select") {
+                            return (
+                              <select
+                                className="form-select"
+                                value={formValues[field.key] || field.defaultValue || ""}
+                                onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                              >
+                                <option value="">Select {field.label}</option>
+                                {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            );
+                          }
+                          if (field.type === "date" || field.type === "time") {
+                            return (
+                              <input
+                                type={field.type}
+                                className="form-control"
+                                value={formValues[field.key] || ""}
+                                onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                              />
+                            );
+                          }
+                          return (
                             <input
                               type="text"
                               className="form-control"
                               placeholder={field.placeholder}
-                              value={formValues.phone || ""}
-                              onChange={(event) => setField(sectionKey, "phone", event.target.value)}
-                            />
-                          </div>
-                        ) : field.type === "datalist" ? (
-                          <Fragment>
-                            <input
-                              type="text"
-                              list={`${sectionKey}-${field.key}-datalist`}
-                              className="form-control datalist-readable-input"
-                              placeholder={field.placeholder}
                               value={formValues[field.key] || ""}
                               onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                             />
-                            <datalist id={`${sectionKey}-${field.key}-datalist`}>
-                              {field.datalistSource === "crmContacts"
-                                ? (moduleData.contacts || []).flatMap((contact) => {
-                                    const options = [];
-                                    if (String(contact.name || "").trim()) options.push(contact.name.trim());
-                                    if (String(contact.company || "").trim()) options.push(contact.company.trim());
-                                    return options;
-                                  }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
-                                    <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                  ))
-                                : null}
-                            </datalist>
-                          </Fragment>
-                        ) : field.type === "multiselect" ? (
-                          <select
-                            className="form-select"
-                            multiple
-                            size={1}
-                            value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
-                            onChange={(event) => {
-                              const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
-                              setField(sectionKey, field.key, selectedValues);
-                            }}
-                          >
-                            {(field.options || []).map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
-                        ) : field.type === "select" ? (
-                          <select
-                            className="form-select"
-                            value={formValues[field.key] || field.defaultValue || ""}
-                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                          >
-                            <option value="">Select {field.label}</option>
-                            {(field.options || []).map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
-                        ) : field.type === "date" || field.type === "time" ? (
-                          <input
-                            type={field.type}
-                            className="form-control"
-                            value={formValues[field.key] || ""}
-                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            className="form-control"
-                            placeholder={field.placeholder}
-                            value={formValues[field.key] || ""}
-                            onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                          />
-                        )}
+                          );
+                        })()}
                       </div>
                       )}
-                      {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                      {(sectionKey === "leads" || sectionKey === "teams" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || field.key === "members" || (sectionKey === "activities" && field.key === "notes")) ? (
                         <div
                             className={
                               sectionKey === "leads"
                               ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              : sectionKey === "teams"
+                              ? "col-12 col-md-6 col-xl-2 d-flex align-items-end"
                               : sectionKey === "deals"
                               ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                               : sectionKey === "followUps"
@@ -2075,7 +2360,7 @@ function CrmOnePageModule() {
                             <button
                               type="submit"
                               className={`btn btn-success btn-sm ${
-                                ["leads", "contacts", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
+                                ["leads", "contacts", "teams", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
                                   ? "single-row-form-submit-btn"
                                   : ""
                               }`}
@@ -2107,7 +2392,7 @@ function CrmOnePageModule() {
                     </Fragment>
                   ))}
                 </div>
-                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
+                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "teams" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                   <div className="d-flex gap-2">
                     <button type="submit" className="btn btn-success btn-sm">
                       {editingId ? "Update" : "Create"}
@@ -2173,6 +2458,9 @@ function CrmOnePageModule() {
                   if (!phone) return "";
                   return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
                 }
+                if (sectionKey === "teams" && column.key === "members") {
+                  return Array.isArray(row.members) ? row.members.join(", ") : String(row.members || "");
+                }
                 if (sectionKey === "meetings" && column.key === "meetingTime") {
                   return formatTimeToAmPm(row[column.key]);
                 }
@@ -2190,6 +2478,9 @@ function CrmOnePageModule() {
                     const phone = String(row.phone || "").trim();
                     if (!phone) return "-";
                     return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
+                  }
+                  if (sectionKey === "teams" && column.key === "members") {
+                    return Array.isArray(row.members) && row.members.length ? row.members.join(", ") : "-";
                   }
                   if (sectionKey === "meetings" && column.key === "meetingTime") {
                     return formatTimeToAmPm(row[column.key]);
@@ -2346,8 +2637,31 @@ function ProjectManagementModule() {
   const [moduleData, setModuleData] = useState(DEFAULT_PROJECT_DATA);
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
   const [editingId, setEditingId] = useState("");
+  const [projectClientForm, setProjectClientForm] = useState({
+    id: "",
+    companyName: "",
+    clientName: "",
+    name: "",
+    gstin: "",
+    phoneCountryCode: "+91",
+    phone: "",
+    additionalPhones: [],
+    email: "",
+    additionalEmails: [],
+    billingAddress: "",
+    shippingAddress: "",
+    billingCountry: "India",
+    billingState: "",
+    billingPincode: "",
+    shippingCountry: "India",
+    shippingState: "",
+    shippingPincode: "",
+    billingShippingSame: false
+  });
+  const [editingProjectClientId, setEditingProjectClientId] = useState("");
   const [projectStatusTab, setProjectStatusTab] = useState("ongoing");
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
+  const [sharedCrmContacts, setSharedCrmContacts] = useState(() => readSharedCrmContacts());
 
   useEffect(() => {
     try {
@@ -2378,6 +2692,19 @@ function ProjectManagementModule() {
     return () => {
       window.removeEventListener("storage", syncSharedCustomers);
       window.removeEventListener("focus", syncSharedCustomers);
+    };
+  }, []);
+
+  useEffect(() => {
+    function syncSharedCrmContacts() {
+      setSharedCrmContacts(readSharedCrmContacts());
+    }
+    syncSharedCrmContacts();
+    window.addEventListener("storage", syncSharedCrmContacts);
+    window.addEventListener("focus", syncSharedCrmContacts);
+    return () => {
+      window.removeEventListener("storage", syncSharedCrmContacts);
+      window.removeEventListener("focus", syncSharedCrmContacts);
     };
   }, []);
 
@@ -2413,6 +2740,21 @@ function ProjectManagementModule() {
       .filter((value, index, list) => list.indexOf(value) === index),
     [sharedCustomers]
   );
+  const projectClientQuery = activeTab === "projects" ? String(formValues.clientCompany || "").trim().toLowerCase() : "";
+  const projectCrmContactMatches = projectClientQuery
+    ? sharedCrmContacts.filter((contact) => {
+        const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+        return haystack.includes(projectClientQuery);
+      }).slice(0, 6)
+    : [];
+  const projectCustomerMatches = projectClientQuery
+    ? sharedCustomers.filter((customer) => {
+        const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+        return haystack.includes(projectClientQuery);
+      }).slice(0, 6)
+    : [];
+  const projectBillingStateOptions = getStateOptionsForCountry(String(projectClientForm.billingCountry || "India"));
+  const projectShippingStateOptions = getStateOptionsForCountry(String(projectClientForm.shippingCountry || "India"));
 
   const stats = useMemo(() => {
     const activeProjects = (moduleData.projects || []).filter((item) => String(item.status || "").toLowerCase() === "ongoing").length;
@@ -2445,6 +2787,121 @@ function ProjectManagementModule() {
       void persistSharedAccountsCustomers(nextCustomers);
       return nextCustomers;
     });
+  }
+
+  function resetProjectClientForm() {
+    setEditingProjectClientId("");
+    setProjectClientForm({
+      id: "",
+      companyName: "",
+      clientName: "",
+      name: "",
+      gstin: "",
+      phoneCountryCode: "+91",
+      phone: "",
+      additionalPhones: [],
+      email: "",
+      additionalEmails: [],
+      billingAddress: "",
+      shippingAddress: "",
+      billingCountry: "India",
+      billingState: "",
+      billingPincode: "",
+      shippingCountry: "India",
+      shippingState: "",
+      shippingPincode: "",
+      billingShippingSame: false
+    });
+  }
+
+  function saveProjectClient(event) {
+    event.preventDefault();
+    const companyName = String(projectClientForm.companyName || projectClientForm.name || "").trim();
+    if (!companyName) {
+      return;
+    }
+    const clientName = String(projectClientForm.clientName || "").trim();
+    const primaryPhone = String(projectClientForm.phone || "").trim();
+    const primaryEmail = String(projectClientForm.email || "").trim();
+    const additionalPhones = (projectClientForm.additionalPhones || [])
+      .map((row) => ({ countryCode: String(row.countryCode || "+91").trim() || "+91", number: String(row.number || "").trim() }))
+      .filter((row) => row.number);
+    const additionalEmails = (projectClientForm.additionalEmails || [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const billingCountry = String(projectClientForm.billingCountry || "").trim() || "India";
+    const billingState = String(projectClientForm.billingState || "").trim();
+    const billingPincode = String(projectClientForm.billingPincode || "").trim();
+    const useSameShipping = Boolean(projectClientForm.billingShippingSame);
+    const shippingAddress = useSameShipping
+      ? String(projectClientForm.billingAddress || "").trim()
+      : String(projectClientForm.shippingAddress || "").trim();
+    const shippingCountry = useSameShipping
+      ? billingCountry
+      : (String(projectClientForm.shippingCountry || "").trim() || "India");
+    const shippingState = useSameShipping
+      ? billingState
+      : String(projectClientForm.shippingState || "").trim();
+    const shippingPincode = useSameShipping
+      ? billingPincode
+      : String(projectClientForm.shippingPincode || "").trim();
+
+    const payload = normalizeSharedCustomerRecord({
+      ...projectClientForm,
+      id: editingProjectClientId || `cust_${Date.now()}`,
+      companyName,
+      clientName,
+      name: companyName,
+      gstin: String(projectClientForm.gstin || "").trim(),
+      phoneCountryCode: String(projectClientForm.phoneCountryCode || "+91").trim() || "+91",
+      phone: primaryPhone,
+      email: primaryEmail,
+      additionalPhones,
+      additionalEmails,
+      phoneList: [
+        ...(primaryPhone ? [{ countryCode: String(projectClientForm.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+        ...additionalPhones
+      ],
+      emailList: [primaryEmail, ...additionalEmails].filter(Boolean),
+      billingAddress: String(projectClientForm.billingAddress || "").trim(),
+      shippingAddress,
+      billingCountry,
+      billingState,
+      billingPincode,
+      shippingCountry,
+      shippingState,
+      shippingPincode,
+      billingShippingSame: useSameShipping,
+      country: billingCountry,
+      state: billingState,
+      pincode: billingPincode
+    });
+
+    updateSharedCustomers((prev) => {
+      if (editingProjectClientId) {
+        return prev.map((row) => (row.id === editingProjectClientId ? { ...row, ...payload } : row));
+      }
+      return [payload, ...prev];
+    });
+    resetProjectClientForm();
+  }
+
+  function editProjectClient(row) {
+    const normalized = normalizeSharedCustomerRecord(row);
+    setEditingProjectClientId(normalized.id);
+    setProjectClientForm({
+      ...normalized,
+      additionalPhones: Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : [],
+      additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
+    });
+    setActiveTab("customers");
+  }
+
+  function deleteProjectClient(id) {
+    updateSharedCustomers((prev) => prev.filter((row) => row.id !== id));
+    if (editingProjectClientId === id) {
+      resetProjectClientForm();
+    }
   }
 
   function onChangeField(fieldKey, nextValue) {
@@ -2582,6 +3039,233 @@ function ProjectManagementModule() {
         ))}
       </div>
 
+      {activeTab === "customers" ? (
+        <>
+          <div className="card p-3">
+            <h6 className="mb-3">{editingProjectClientId ? "Edit Client" : "Create Client"}</h6>
+            <form className="d-flex flex-column gap-3" onSubmit={saveProjectClient}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Company Name</label>
+                  <input className="form-control" value={projectClientForm.companyName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, companyName: e.target.value, name: e.target.value }))} placeholder="Company name" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Client Name</label>
+                  <input className="form-control" value={projectClientForm.clientName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, clientName: e.target.value }))} placeholder="Client / Contact person" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">GSTIN</label>
+                  <input className="form-control" value={projectClientForm.gstin || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, gstin: e.target.value }))} placeholder="GSTIN" />
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <PhoneCountryCodePicker
+                        value={projectClientForm.phoneCountryCode || "+91"}
+                        onChange={(code) => setProjectClientForm((p) => ({ ...p, phoneCountryCode: code }))}
+                        options={DIAL_COUNTRY_PICKER_OPTIONS}
+                        style={{ maxWidth: "220px" }}
+                        ariaLabel="Project client phone country code"
+                      />
+                      <input className="form-control" value={projectClientForm.phone || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Contact Number"
+                        onClick={() => setProjectClientForm((p) => ({ ...p, additionalPhones: [...(p.additionalPhones || []), { countryCode: "+91", number: "" }] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(projectClientForm.additionalPhones || []).map((row, index) => (
+                      <div className="d-flex gap-2" key={`project-phone-${index}`}>
+                        <PhoneCountryCodePicker
+                          value={row.countryCode || "+91"}
+                          onChange={(code) =>
+                            setProjectClientForm((p) => ({
+                              ...p,
+                              additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
+                            }))
+                          }
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "220px" }}
+                          ariaLabel="Additional project phone country code"
+                        />
+                        <input className="form-control" value={row.number || ""} placeholder="Additional contact number" onChange={(e) => setProjectClientForm((p) => ({
+                          ...p,
+                          additionalPhones: (p.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: e.target.value } : item))
+                        }))} />
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setProjectClientForm((p) => ({
+                          ...p,
+                          additionalPhones: (p.additionalPhones || []).filter((_, i) => i !== index)
+                        }))}>
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <input className="form-control" value={projectClientForm.email || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Email ID"
+                        onClick={() => setProjectClientForm((p) => ({ ...p, additionalEmails: [...(p.additionalEmails || []), ""] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(projectClientForm.additionalEmails || []).map((value, index) => (
+                      <div className="d-flex gap-2" key={`project-email-${index}`}>
+                        <input className="form-control" value={value || ""} placeholder="Additional email ID" onChange={(e) => setProjectClientForm((p) => ({
+                          ...p,
+                          additionalEmails: (p.additionalEmails || []).map((item, i) => (i === index ? e.target.value : item))
+                        }))} />
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => setProjectClientForm((p) => ({
+                          ...p,
+                          additionalEmails: (p.additionalEmails || []).filter((_, i) => i !== index)
+                        }))}>
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0"
+                        checked={Boolean(projectClientForm.billingShippingSame)}
+                        onChange={(e) => setProjectClientForm((p) => ({ ...p, billingShippingSame: e.target.checked }))}
+                      />
+                      Billing and Shipping Same
+                    </label>
+                  </div>
+                  <textarea className="form-control mb-2" rows="2" value={projectClientForm.billingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingAddress: e.target.value }))} placeholder="Billing address" />
+                  <div className="d-flex flex-column gap-2">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Country</label>
+                      <select className="form-select" value={projectClientForm.billingCountry || "India"} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingCountry: e.target.value, billingState: "" }))}>
+                        {COUNTRY_OPTIONS.map((country) => (
+                          <option key={`project-billing-country-${country}`} value={country}>{country}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">State</label>
+                      {projectBillingStateOptions.length ? (
+                        <select className="form-select" value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))}>
+                          <option value="">Select State</option>
+                          {projectBillingStateOptions.map((state) => (
+                            <option key={`project-billing-state-${state}`} value={state}>{state}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input className="form-control" value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))} placeholder="State / Province / Region" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Pincode</label>
+                      <input className="form-control" value={projectClientForm.billingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingPincode: e.target.value }))} placeholder="Pincode" />
+                    </div>
+                  </div>
+                </div>
+                {!projectClientForm.billingShippingSame ? (
+                  <div className="col-12 col-xl-6">
+                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <textarea className="form-control mb-2" rows="2" value={projectClientForm.shippingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingAddress: e.target.value }))} placeholder="Shipping address" />
+                    <div className="d-flex flex-column gap-2">
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Country</label>
+                        <select className="form-select" value={projectClientForm.shippingCountry || "India"} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingCountry: e.target.value, shippingState: "" }))}>
+                          {COUNTRY_OPTIONS.map((country) => (
+                            <option key={`project-shipping-country-${country}`} value={country}>{country}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">State</label>
+                        {projectShippingStateOptions.length ? (
+                          <select className="form-select" value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))}>
+                            <option value="">Select State</option>
+                            {projectShippingStateOptions.map((state) => (
+                              <option key={`project-shipping-state-${state}`} value={state}>{state}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input className="form-control" value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))} placeholder="State / Province / Region" />
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <input className="form-control" value={projectClientForm.shippingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingPincode: e.target.value }))} placeholder="Pincode" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">{editingProjectClientId ? "Update Client" : "Create Client"}</button>
+                {editingProjectClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetProjectClientForm}>Cancel</button> : null}
+              </div>
+            </form>
+          </div>
+
+          <SearchablePaginatedTableCard
+            title="Client List"
+            badgeLabel={`${sharedCustomers.length} clients`}
+            rows={sharedCustomers}
+            columns={[
+              { key: "companyName", label: "Company Name" },
+              { key: "clientName", label: "Client Name" },
+              { key: "gstin", label: "GSTIN" },
+              { key: "phones", label: "Contact Number" },
+              { key: "emails", label: "Email ID" },
+              { key: "location", label: "Location" },
+            ]}
+            searchPlaceholder="Search clients"
+            noRowsText="No clients yet."
+            searchBy={(row) => [
+              row.companyName || row.name,
+              row.clientName,
+              row.gstin,
+              ...(formatSharedCustomerPhones(row)),
+              ...(formatSharedCustomerEmails(row)),
+              row.billingCountry || row.country,
+              row.billingState || row.state,
+              row.billingPincode || row.pincode,
+              row.shippingCountry,
+              row.shippingState,
+              row.shippingPincode,
+            ].join(" ")}
+            renderCells={(row) => [
+              <span className="fw-semibold">{row.companyName || row.name || "-"}</span>,
+              row.clientName || "-",
+              row.gstin || "-",
+              <span style={{ whiteSpace: "normal" }}>{formatSharedCustomerPhones(row).join(", ") || "-"}</span>,
+              <span style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</span>,
+              <span style={{ whiteSpace: "normal" }}>
+                {[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}
+              </span>,
+            ]}
+            renderActions={(row) => (
+              <div className="d-inline-flex gap-2">
+                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editProjectClient(row)}>Edit</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteProjectClient(row.id)}>Delete</button>
+              </div>
+            )}
+          />
+        </>
+      ) : (
+        <>
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
@@ -2622,6 +3306,52 @@ function ProjectManagementModule() {
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </select>
+                    ) : activeTab === "projects" && field.key === "clientCompany" ? (
+                      <div className="crm-inline-suggestions-wrap">
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder={field.placeholder}
+                          value={formValues[field.key] || ""}
+                          onChange={(event) => onChangeField(field.key, event.target.value)}
+                        />
+                        {(projectCrmContactMatches.length || projectCustomerMatches.length) ? (
+                          <div className="crm-inline-suggestions">
+                            {projectCrmContactMatches.length ? (
+                              <div className="crm-inline-suggestions__group">
+                                <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                {projectCrmContactMatches.map((contact) => (
+                                  <button
+                                    key={`project-crm-contact-${contact.id || `${contact.name}-${contact.company}`}`}
+                                    type="button"
+                                    className="crm-inline-suggestions__item"
+                                    onClick={() => onChangeField(field.key, String(contact.company || contact.name || "").trim())}
+                                  >
+                                    <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                    <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                            {projectCustomerMatches.length ? (
+                              <div className="crm-inline-suggestions__group">
+                                <div className="crm-inline-suggestions__title">Clients</div>
+                                {projectCustomerMatches.map((customer) => (
+                                  <button
+                                    key={`project-client-${customer.id}`}
+                                    type="button"
+                                    className="crm-inline-suggestions__item"
+                                    onClick={() => onChangeField(field.key, String(customer.companyName || customer.name || customer.clientName || "").trim())}
+                                  >
+                                    <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                    <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     ) : field.type === "datalist" ? (
                       <>
                         <input
@@ -2735,6 +3465,8 @@ function ProjectManagementModule() {
           </div>
         )}
       />
+        </>
+      )}
     </div>
   );
 }
@@ -3430,32 +4162,38 @@ function HrManagementModule() {
               <div className="row g-3">
                 {[
                   "name",
+                  "gender",
                   "department",
                   "designation",
+                  "dateOfJoining",
                   "dateOfBirth",
                   "bloodGroup",
                   "fatherName",
+                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+              </div>
+              <div className="row g-3">
+                {[
                   "motherName",
                   "maritalStatus",
                   "wifeName",
-                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-4"))}
+                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
               </div>
               <div className="row g-3">
                 <div className="col-12 col-xl-6">
-                  <div className="card h-100 p-3">
+                  <div className="h-100">
                     <h6 className="mb-3">Permanent Address</h6>
                     <div className="row g-3">
                       {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
                         renderHrField(
                           employeeFieldMap.get(fieldKey),
-                          fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6"
+                          fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
                         )
                       )}
                     </div>
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <div className="card h-100 p-3">
+                  <div className="h-100">
                     <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
                       <h6 className="mb-0">Temporary Address</h6>
                       <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
@@ -3479,7 +4217,7 @@ function HrManagementModule() {
                         {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
                           renderHrField(
                             employeeFieldMap.get(fieldKey),
-                            fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6"
+                            fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
                           )
                         )}
                       </div>
@@ -5195,6 +5933,102 @@ function AccountsErpModule() {
     resetCustomerForm();
   }
 
+  function importCustomers(importedRows) {
+    const nextRows = importedRows
+      .map((row, rowIndex) => {
+        const getValue = (...keys) => {
+          for (const key of keys) {
+            const match = Object.entries(row || {}).find(
+              ([header]) => normalizeImportHeader(header) === normalizeImportHeader(key)
+            );
+            if (match && String(match[1] || "").trim()) {
+              return String(match[1] || "").trim();
+            }
+          }
+          return "";
+        };
+
+        const companyName = getValue("Company Name", "Company", "Name");
+        const clientName = getValue("Client Name", "Client", "Contact Person");
+        const gstin = getValue("GSTIN");
+        const contactNumberRaw = getValue("Contact Number", "Phone Number", "Phone", "Mobile Number");
+        const emailRaw = getValue("Email ID", "Email", "Email Address");
+        const locationRaw = getValue("Location", "Billing Location", "Address");
+
+        if (!companyName && !clientName && !contactNumberRaw && !emailRaw && !locationRaw && !gstin) {
+          return null;
+        }
+
+        const phoneEntries = contactNumberRaw
+          .split(/[,\n/]+/)
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .map((value) => {
+            const phoneMatch = value.match(/^(\+\d{1,4})\s*(.+)$/);
+            if (phoneMatch) {
+              return {
+                countryCode: phoneMatch[1].trim(),
+                number: phoneMatch[2].trim(),
+              };
+            }
+            return {
+              countryCode: "+91",
+              number: value,
+            };
+          })
+          .filter((item) => item.number);
+
+        const emailEntries = emailRaw
+          .split(/[,\n/]+/)
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+
+        const locationParts = locationRaw
+          .split(",")
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+
+        const billingState = locationParts[0] || "";
+        const billingCountry = locationParts[1] || "India";
+        const billingPincode = locationParts[2] || "";
+
+        return normalizeSharedCustomerRecord({
+          id: `cust_import_${Date.now()}_${rowIndex}`,
+          companyName,
+          clientName,
+          name: companyName || clientName,
+          gstin,
+          phoneCountryCode: phoneEntries[0]?.countryCode || "+91",
+          phone: phoneEntries[0]?.number || "",
+          additionalPhones: phoneEntries.slice(1),
+          phoneList: phoneEntries,
+          email: emailEntries[0] || "",
+          additionalEmails: emailEntries.slice(1),
+          emailList: emailEntries,
+          billingCountry,
+          billingState,
+          billingPincode,
+          shippingCountry: billingCountry,
+          shippingState: billingState,
+          shippingPincode: billingPincode,
+          country: billingCountry,
+          state: billingState,
+          pincode: billingPincode,
+        });
+      })
+      .filter(Boolean);
+
+    if (!nextRows.length) {
+      window.alert("Imported file is empty or invalid.");
+      return;
+    }
+
+    setModuleData((prev) => ({
+      ...prev,
+      customers: [...nextRows, ...(prev.customers || [])],
+    }));
+  }
+
   function editCustomer(row) {
     setEditingCustomerId(row.id);
     setCustomerForm(normalizeCustomerRecord(row));
@@ -5960,7 +6794,7 @@ function AccountsErpModule() {
             { key: "estimates", label: "Estimates" },
             { key: "gst", label: taxUi.templatesLabel },
             { key: "templates", label: "Billing Templates" },
-            { key: "customers", label: "Customers" },
+            { key: "customers", label: "Clients" },
             { key: "items", label: "Items" }
           ].map((tab) => (
             <button
@@ -6127,7 +6961,7 @@ function AccountsErpModule() {
       {activeTab === "customers" ? (
         <>
           <div className="card p-3">
-            <h6 className="mb-3">{editingCustomerId ? "Edit Customer" : "Create Customer"}</h6>
+            <h6 className="mb-3">{editingCustomerId ? "Edit Client" : "Create Client"}</h6>
             <form className="d-flex flex-column gap-3" onSubmit={saveCustomer}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
@@ -6369,7 +7203,7 @@ function AccountsErpModule() {
                 ) : null}
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">{editingCustomerId ? "Update Customer" : "Create Customer"}</button>
+                <button type="submit" className="btn btn-success btn-sm">{editingCustomerId ? "Update Client" : "Create Client"}</button>
                 {editingCustomerId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetCustomerForm}>Cancel</button> : null}
               </div>
             </form>
@@ -6389,6 +7223,24 @@ function AccountsErpModule() {
             ]}
             searchPlaceholder="Search clients"
             noRowsText="No clients yet."
+            enableExport
+            enableImport
+            exportFileName="accounts-client-list"
+            onImportRows={importCustomers}
+            exportCellValue={(row, column) => {
+              if (column.key === "phones") {
+                return formatCustomerPhones(row).join(", ");
+              }
+              if (column.key === "emails") {
+                return formatCustomerEmails(row).join(", ");
+              }
+              if (column.key === "location") {
+                return [row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode]
+                  .filter(Boolean)
+                  .join(", ");
+              }
+              return row?.[column.key] ?? "";
+            }}
             searchBy={(row) => [
               row.companyName || row.name,
               row.clientName,
