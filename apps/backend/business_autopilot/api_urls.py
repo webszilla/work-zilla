@@ -11,6 +11,8 @@ urlpatterns = [
     path("employee-roles/<int:role_id>", api_views.org_employee_role_detail, name="business_autopilot_employee_role_detail"),
     path("departments", api_views.org_departments, name="business_autopilot_departments"),
     path("departments/<int:department_id>", api_views.org_department_detail, name="business_autopilot_department_detail"),
+    path("payroll/workspace", api_views.payroll_workspace, name="business_autopilot_payroll_workspace"),
+    path("payroll/payslips/<int:payslip_id>/pdf", api_views.payroll_payslip_pdf, name="business_autopilot_payroll_payslip_pdf"),
     path("accounts/workspace", api_views.accounts_workspace, name="business_autopilot_accounts_workspace"),
     path(
         "accounts/documents/<slug:doc_type>/<str:doc_id>/print",

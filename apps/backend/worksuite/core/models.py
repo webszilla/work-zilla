@@ -46,6 +46,8 @@ def _screenshot_upload_to(instance, filename):
 class Organization(models.Model):
     name = models.CharField(max_length=200)
     company_key = models.CharField(max_length=100, unique=True)
+    country = models.CharField(max_length=60, default="India")
+    currency = models.CharField(max_length=10, default="INR")
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -1191,6 +1193,7 @@ class BillingProfile(models.Model):
     contact_name = models.CharField(max_length=120)
     company_name = models.CharField(max_length=180)
     email = models.EmailField()
+    mobile_phone = models.CharField(max_length=40, blank=True)
     phone = models.CharField(max_length=40, blank=True)
     address_line1 = models.CharField(max_length=200)
     address_line2 = models.CharField(max_length=200, blank=True)

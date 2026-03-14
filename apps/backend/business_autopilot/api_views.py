@@ -1,14 +1,18 @@
 import json
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, OperationalError, transaction
 from django.shortcuts import render
 from django.utils import timezone
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
-from core.models import Organization, UserProfile, Subscription
+from core.models import Organization, OrganizationSettings, UserProfile, Subscription
 
 from .models import (
     Module,
@@ -17,6 +21,11 @@ from .models import (
     OrganizationEmployeeRole,
     OrganizationDepartment,
     AccountsWorkspace,
+    EmployeeSalaryHistory,
+    PayrollEntry,
+    PayrollSettings,
+    Payslip,
+    SalaryStructure,
 )
 
 
@@ -70,6 +79,34 @@ def _can_manage_users(user: User):
     if not profile:
         return False
     return profile.role in {"company_admin", "superadmin", "super_admin"}
+
+
+def _get_org_membership(user: User, org: Organization):
+    if not user or not user.is_authenticated or not org:
+        return None
+    return (
+        OrganizationUser.objects
+        .filter(organization=org, user=user, is_active=True)
+        .only("id", "role", "department", "employee_role", "is_active")
+        .first()
+    )
+
+
+def _can_manage_payroll(user: User, org: Organization = None):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    role = str(profile.role or "").strip().lower() if profile else ""
+    if role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+        return True
+    membership = _get_org_membership(user, org)
+    if not membership:
+        return False
+    employee_role = str(membership.employee_role or "").strip().lower()
+    department = str(membership.department or "").strip().lower()
+    return employee_role == "hr manager" or department == "hr"
 
 
 def _ensure_default_module_catalog():
@@ -265,6 +302,202 @@ def _serialize_org_users(org):
         }
         for member in memberships
     ]
+
+
+def _decimal_to_string(value, default="0.00"):
+    try:
+      amount = Decimal(str(value if value is not None else default))
+    except (InvalidOperation, TypeError, ValueError):
+      amount = Decimal(str(default or "0"))
+    return f"{amount.quantize(Decimal('0.01'))}"
+
+
+def _to_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _coerce_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_payroll_month(value):
+    month = str(value or "").strip()
+    if len(month) == 7 and month[4] == "-":
+        return month
+    return timezone.localdate().strftime("%Y-%m")
+
+
+def _default_payroll_settings_payload():
+    return {
+        "enablePf": True,
+        "enableEsi": True,
+        "pfEmployeePercent": "12.00",
+        "pfEmployerPercent": "12.00",
+        "esiEmployeePercent": "0.75",
+        "esiEmployerPercent": "3.25",
+    }
+
+
+def _serialize_payroll_settings(row):
+    if not row:
+        return _default_payroll_settings_payload()
+    return {
+        "enablePf": bool(row.enable_pf),
+        "enableEsi": bool(row.enable_esi),
+        "pfEmployeePercent": _decimal_to_string(row.pf_employee_percent, "12.00"),
+        "pfEmployerPercent": _decimal_to_string(row.pf_employer_percent, "12.00"),
+        "esiEmployeePercent": _decimal_to_string(row.esi_employee_percent, "0.75"),
+        "esiEmployerPercent": _decimal_to_string(row.esi_employer_percent, "3.25"),
+    }
+
+
+def _serialize_salary_structure(row):
+    return {
+        "id": row.id,
+        "name": row.name,
+        "isDefault": bool(row.is_default),
+        "basicSalaryPercent": _decimal_to_string(row.basic_salary_percent, "40.00"),
+        "hraPercent": _decimal_to_string(row.hra_percent, "20.00"),
+        "conveyanceFixed": _decimal_to_string(row.conveyance_fixed, "1600.00"),
+        "autoSpecialAllowance": bool(row.auto_special_allowance),
+        "basicSalary": _decimal_to_string(row.basic_salary),
+        "hra": _decimal_to_string(row.hra),
+        "conveyance": _decimal_to_string(row.conveyance),
+        "specialAllowance": _decimal_to_string(row.special_allowance),
+        "bonus": _decimal_to_string(row.bonus),
+        "otherAllowances": _decimal_to_string(row.other_allowances),
+        "applyPf": bool(row.apply_pf),
+        "applyEsi": bool(row.apply_esi),
+        "professionalTax": _decimal_to_string(row.professional_tax),
+        "otherDeduction": _decimal_to_string(row.other_deduction),
+        "notes": row.notes or "",
+        "createdAt": row.created_at.isoformat() if row.created_at else "",
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _serialize_salary_history(row):
+    return {
+        "id": row.id,
+        "employeeName": row.employee_name,
+        "sourceUserId": row.source_user_id,
+        "salaryStructureId": row.salary_structure_id,
+        "salaryStructureName": row.salary_structure.name if row.salary_structure_id and row.salary_structure else "",
+        "currentSalary": _decimal_to_string(row.current_salary),
+        "monthlySalaryAmount": _decimal_to_string(row.monthly_salary_amount),
+        "incrementType": row.increment_type or "percentage",
+        "incrementValue": _decimal_to_string(row.increment_value),
+        "effectiveFrom": row.effective_from.isoformat() if row.effective_from else "",
+        "incrementAmount": _decimal_to_string(row.increment_amount),
+        "newSalary": _decimal_to_string(row.new_salary),
+        "notes": row.notes or "",
+        "createdAt": row.created_at.isoformat() if row.created_at else "",
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _ensure_standard_salary_template(org: Organization):
+    row, _ = SalaryStructure.objects.get_or_create(
+        organization=org,
+        name="Standard Template",
+        defaults={
+            "is_default": True,
+            "basic_salary_percent": Decimal("40"),
+            "hra_percent": Decimal("20"),
+            "conveyance_fixed": Decimal("1600"),
+            "auto_special_allowance": True,
+            "apply_pf": True,
+            "apply_esi": True,
+        },
+    )
+    updates = []
+    if not row.is_default:
+        row.is_default = True
+        updates.append("is_default")
+    if row.basic_salary_percent != Decimal("40"):
+        row.basic_salary_percent = Decimal("40")
+        updates.append("basic_salary_percent")
+    if row.hra_percent != Decimal("20"):
+        row.hra_percent = Decimal("20")
+        updates.append("hra_percent")
+    if row.conveyance_fixed != Decimal("1600"):
+        row.conveyance_fixed = Decimal("1600")
+        updates.append("conveyance_fixed")
+    if not row.auto_special_allowance:
+        row.auto_special_allowance = True
+        updates.append("auto_special_allowance")
+    if updates:
+        row.save(update_fields=updates)
+    SalaryStructure.objects.filter(organization=org).exclude(id=row.id).filter(is_default=True).update(is_default=False)
+    return row
+
+
+def _serialize_payroll_entry(row):
+    return {
+        "id": row.id,
+        "employeeName": row.employee_name,
+        "sourceUserId": row.source_user_id,
+        "month": row.payroll_month,
+        "currency": row.currency or "INR",
+        "salaryStructureId": row.salary_structure_id,
+        "salaryStructureName": row.salary_structure.name if row.salary_structure_id and row.salary_structure else "",
+        "salaryHistoryId": row.salary_history_id,
+        "grossSalary": _decimal_to_string(row.gross_salary),
+        "pfEmployeeAmount": _decimal_to_string(row.pf_employee_amount),
+        "pfEmployerAmount": _decimal_to_string(row.pf_employer_amount),
+        "esiEmployeeAmount": _decimal_to_string(row.esi_employee_amount),
+        "esiEmployerAmount": _decimal_to_string(row.esi_employer_amount),
+        "professionalTaxAmount": _decimal_to_string(row.professional_tax_amount),
+        "otherDeductionAmount": _decimal_to_string(row.other_deduction_amount),
+        "totalDeductions": _decimal_to_string(row.total_deductions),
+        "netSalary": _decimal_to_string(row.net_salary),
+        "earnings": row.earnings if isinstance(row.earnings, dict) else {},
+        "deductions": row.deductions if isinstance(row.deductions, dict) else {},
+        "status": row.status or "processed",
+        "processedAt": row.processed_at.isoformat() if row.processed_at else "",
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else "",
+        "slipNumber": row.payslip.slip_number if hasattr(row, "payslip") and row.payslip else "",
+    }
+
+
+def _serialize_payslip(row):
+    return {
+        "id": row.id,
+        "payrollEntryId": row.payroll_entry_id,
+        "slipNumber": row.slip_number,
+        "generatedForMonth": row.generated_for_month,
+        "employeeName": row.employee_name,
+        "sourceUserId": row.source_user_id,
+        "currency": row.currency or "INR",
+        "generatedAt": row.generated_at.isoformat() if row.generated_at else "",
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _get_or_create_payroll_settings(org):
+    row, _ = PayrollSettings.objects.get_or_create(organization=org)
+    return row
+
+
+def _serialize_org_payroll_profile(org):
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    return {
+        "organizationName": org.name,
+        "country": org.country or "India",
+        "currency": org.currency or "INR",
+        "timezone": settings_obj.org_timezone or "UTC",
+    }
+
+
+def _format_currency_value(currency, amount):
+    return f"{currency or 'INR'} {_decimal_to_string(amount)}"
 
 
 def _serialize_modules(org):
@@ -824,6 +1057,334 @@ def org_department_detail(request, department_id: int):
             "can_manage_users": _can_manage_users(request.user),
         }
     )
+
+
+@require_http_methods(["GET", "PUT"])
+def payroll_workspace(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse(
+            {
+                "authenticated": True,
+                "organization": None,
+                "organization_profile": {
+                    "organizationName": "",
+                    "country": "India",
+                    "currency": "INR",
+                    "timezone": "UTC",
+                },
+                "payroll_settings": _default_payroll_settings_payload(),
+                "salary_structures": [],
+                "salary_history": [],
+                "payroll_entries": [],
+                "payslips": [],
+                "employee_directory": [],
+                "permissions": {
+                    "can_manage_payroll": False,
+                    "can_view_all_payroll": False,
+                },
+            }
+        )
+
+    can_manage_payroll = _can_manage_payroll(request.user, org)
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    payroll_settings = _get_or_create_payroll_settings(org)
+    standard_template = _ensure_standard_salary_template(org)
+
+    if request.method == "PUT":
+        if not can_manage_payroll:
+            return JsonResponse({"detail": "forbidden"}, status=403)
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+
+        org_profile = payload.get("organization_profile") if isinstance(payload, dict) else {}
+        payroll_payload = payload.get("payroll_settings") if isinstance(payload, dict) else {}
+        structure_payloads = payload.get("salary_structures") if isinstance(payload, dict) else []
+        history_payloads = payload.get("salary_history") if isinstance(payload, dict) else []
+        entry_payloads = payload.get("payroll_entries") if isinstance(payload, dict) else []
+        payslip_payloads = payload.get("payslips") if isinstance(payload, dict) else []
+
+        with transaction.atomic():
+            org.name = str((org_profile or {}).get("organizationName") or org.name).strip() or org.name
+            org.country = str((org_profile or {}).get("country") or org.country or "India").strip() or "India"
+            org.currency = str((org_profile or {}).get("currency") or org.currency or "INR").strip().upper()[:10] or "INR"
+            org.save(update_fields=["name", "country", "currency"])
+
+            settings_obj.org_timezone = str((org_profile or {}).get("timezone") or settings_obj.org_timezone or "UTC").strip() or "UTC"
+            settings_obj.save(update_fields=["org_timezone"])
+
+            payroll_settings.enable_pf = _to_bool((payroll_payload or {}).get("enablePf"), True)
+            payroll_settings.enable_esi = _to_bool((payroll_payload or {}).get("enableEsi"), True)
+            payroll_settings.pf_employee_percent = _to_decimal((payroll_payload or {}).get("pfEmployeePercent") or "12")
+            payroll_settings.pf_employer_percent = _to_decimal((payroll_payload or {}).get("pfEmployerPercent") or "12")
+            payroll_settings.esi_employee_percent = _to_decimal((payroll_payload or {}).get("esiEmployeePercent") or "0.75")
+            payroll_settings.esi_employer_percent = _to_decimal((payroll_payload or {}).get("esiEmployerPercent") or "3.25")
+            payroll_settings.updated_by = request.user
+            payroll_settings.save()
+
+            existing_structures = {row.id: row for row in SalaryStructure.objects.filter(organization=org)}
+            keep_structure_ids = set()
+            structure_id_map = {}
+            for item in structure_payloads if isinstance(structure_payloads, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                structure_id = _coerce_int(item.get("id"))
+                row = existing_structures.get(structure_id) if structure_id else None
+                if not row:
+                    row = SalaryStructure(organization=org)
+                row.name = str(item.get("name") or "").strip() or f"Structure {timezone.now().strftime('%H%M%S')}"
+                row.is_default = _to_bool(item.get("isDefault"), False)
+                row.basic_salary_percent = _to_decimal(item.get("basicSalaryPercent") or "40")
+                row.hra_percent = _to_decimal(item.get("hraPercent") or "20")
+                row.conveyance_fixed = _to_decimal(item.get("conveyanceFixed") or item.get("conveyance") or "1600")
+                row.auto_special_allowance = _to_bool(item.get("autoSpecialAllowance"), True)
+                row.basic_salary = _to_decimal(item.get("basicSalary"))
+                row.hra = _to_decimal(item.get("hra"))
+                row.conveyance = _to_decimal(item.get("conveyance"))
+                row.special_allowance = _to_decimal(item.get("specialAllowance"))
+                row.bonus = _to_decimal(item.get("bonus"))
+                row.other_allowances = _to_decimal(item.get("otherAllowances"))
+                row.apply_pf = _to_bool(item.get("applyPf"), True)
+                row.apply_esi = _to_bool(item.get("applyEsi"), True)
+                row.professional_tax = _to_decimal(item.get("professionalTax"))
+                row.other_deduction = _to_decimal(item.get("otherDeduction"))
+                row.notes = str(item.get("notes") or "").strip()
+                row.save()
+                keep_structure_ids.add(row.id)
+                structure_id_map[str(item.get("id") or "")] = row.id
+            SalaryStructure.objects.filter(organization=org).exclude(id__in=keep_structure_ids).delete()
+
+            existing_history = {row.id: row for row in EmployeeSalaryHistory.objects.filter(organization=org)}
+            keep_history_ids = set()
+            history_id_map = {}
+            for item in history_payloads if isinstance(history_payloads, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                history_id = _coerce_int(item.get("id"))
+                row = existing_history.get(history_id) if history_id else None
+                if not row:
+                    row = EmployeeSalaryHistory(organization=org)
+                resolved_structure_id = _coerce_int(item.get("salaryStructureId"))
+                resolved_structure_id = structure_id_map.get(str(item.get("salaryStructureId")), resolved_structure_id)
+                row.employee_name = str(item.get("employeeName") or "").strip()
+                row.source_user_id = _coerce_int(item.get("sourceUserId"))
+                row.salary_structure_id = resolved_structure_id if resolved_structure_id in keep_structure_ids else resolved_structure_id
+                row.current_salary = _to_decimal(item.get("currentSalary") or item.get("monthlySalaryAmount"))
+                row.monthly_salary_amount = _to_decimal(item.get("monthlySalaryAmount"))
+                row.increment_type = str(item.get("incrementType") or "percentage").strip().lower() or "percentage"
+                if row.increment_type not in {"percentage", "fixed"}:
+                    row.increment_type = "percentage"
+                row.increment_value = _to_decimal(item.get("incrementValue"))
+                effective_from = str(item.get("effectiveFrom") or "").strip()
+                row.effective_from = effective_from or timezone.localdate().isoformat()
+                row.increment_amount = _to_decimal(item.get("incrementAmount"))
+                row.new_salary = _to_decimal(item.get("newSalary") or item.get("monthlySalaryAmount"))
+                row.notes = str(item.get("notes") or "").strip()
+                row.save()
+                keep_history_ids.add(row.id)
+                history_id_map[str(item.get("id") or "")] = row.id
+            EmployeeSalaryHistory.objects.filter(organization=org).exclude(id__in=keep_history_ids).delete()
+            default_structure_id = next((row_id for row_id in keep_structure_ids if existing_structures.get(row_id) and existing_structures[row_id].is_default), None)
+            explicit_default_ids = []
+            for row in SalaryStructure.objects.filter(organization=org, id__in=keep_structure_ids):
+                if row.is_default:
+                    explicit_default_ids.append(row.id)
+            if explicit_default_ids:
+                SalaryStructure.objects.filter(organization=org).exclude(id=explicit_default_ids[0]).update(is_default=False)
+            else:
+                standard_template = _ensure_standard_salary_template(org)
+                keep_structure_ids.add(standard_template.id)
+
+            existing_entries = {row.id: row for row in PayrollEntry.objects.filter(organization=org)}
+            keep_entry_ids = set()
+            entry_id_map = {}
+            for item in entry_payloads if isinstance(entry_payloads, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                entry_id = _coerce_int(item.get("id"))
+                row = existing_entries.get(entry_id) if entry_id else None
+                if not row:
+                    row = PayrollEntry(organization=org)
+                resolved_structure_id = _coerce_int(item.get("salaryStructureId"))
+                resolved_structure_id = structure_id_map.get(str(item.get("salaryStructureId")), resolved_structure_id)
+                resolved_history_id = _coerce_int(item.get("salaryHistoryId"))
+                resolved_history_id = history_id_map.get(str(item.get("salaryHistoryId")), resolved_history_id)
+                row.employee_name = str(item.get("employeeName") or "").strip()
+                row.source_user_id = _coerce_int(item.get("sourceUserId"))
+                row.payroll_month = _normalize_payroll_month(item.get("month"))
+                row.currency = str(item.get("currency") or org.currency or "INR").strip().upper()[:10] or "INR"
+                row.salary_structure_id = resolved_structure_id
+                row.salary_history_id = resolved_history_id
+                row.gross_salary = _to_decimal(item.get("grossSalary"))
+                row.pf_employee_amount = _to_decimal(item.get("pfEmployeeAmount"))
+                row.pf_employer_amount = _to_decimal(item.get("pfEmployerAmount"))
+                row.esi_employee_amount = _to_decimal(item.get("esiEmployeeAmount"))
+                row.esi_employer_amount = _to_decimal(item.get("esiEmployerAmount"))
+                row.professional_tax_amount = _to_decimal(item.get("professionalTaxAmount"))
+                row.other_deduction_amount = _to_decimal(item.get("otherDeductionAmount"))
+                row.total_deductions = _to_decimal(item.get("totalDeductions"))
+                row.net_salary = _to_decimal(item.get("netSalary"))
+                row.earnings = item.get("earnings") if isinstance(item.get("earnings"), dict) else {}
+                row.deductions = item.get("deductions") if isinstance(item.get("deductions"), dict) else {}
+                row.status = str(item.get("status") or "processed").strip().lower() or "processed"
+                row.save()
+                keep_entry_ids.add(row.id)
+                entry_id_map[str(item.get("id") or "")] = row.id
+            PayrollEntry.objects.filter(organization=org).exclude(id__in=keep_entry_ids).delete()
+
+            existing_payslips = {row.id: row for row in Payslip.objects.filter(organization=org)}
+            keep_payslip_ids = set()
+            for item in payslip_payloads if isinstance(payslip_payloads, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                payslip_id = _coerce_int(item.get("id"))
+                row = existing_payslips.get(payslip_id) if payslip_id else None
+                if not row:
+                    row = Payslip(organization=org)
+                resolved_entry_id = _coerce_int(item.get("payrollEntryId"))
+                resolved_entry_id = entry_id_map.get(str(item.get("payrollEntryId")), resolved_entry_id)
+                if not resolved_entry_id:
+                    continue
+                row.payroll_entry_id = resolved_entry_id
+                row.slip_number = str(item.get("slipNumber") or f"SLIP-{resolved_entry_id}").strip()
+                row.generated_for_month = _normalize_payroll_month(item.get("generatedForMonth") or item.get("month"))
+                row.employee_name = str(item.get("employeeName") or "").strip()
+                row.source_user_id = _coerce_int(item.get("sourceUserId"))
+                row.currency = str(item.get("currency") or org.currency or "INR").strip().upper()[:10] or "INR"
+                row.save()
+                keep_payslip_ids.add(row.id)
+            Payslip.objects.filter(organization=org).exclude(id__in=keep_payslip_ids).delete()
+
+    salary_structures = list(
+        SalaryStructure.objects.filter(organization=org).order_by("name", "id")
+    )
+    salary_history = list(
+        EmployeeSalaryHistory.objects.filter(organization=org).select_related("salary_structure")
+    )
+    payroll_entries_qs = PayrollEntry.objects.filter(organization=org).select_related("salary_structure", "salary_history", "payslip")
+    payslips_qs = Payslip.objects.filter(organization=org).select_related("payroll_entry")
+
+    if not can_manage_payroll:
+        payroll_entries_qs = payroll_entries_qs.filter(source_user_id=request.user.id)
+        payslips_qs = payslips_qs.filter(source_user_id=request.user.id)
+        salary_history = [row for row in salary_history if row.source_user_id == request.user.id]
+
+    payroll_entries = list(payroll_entries_qs.order_by("-payroll_month", "employee_name", "-id"))
+    payslips = list(payslips_qs.order_by("-generated_at", "-id"))
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "organization": {
+                "id": org.id,
+                "name": org.name,
+                "company_key": org.company_key,
+            },
+            "organization_profile": _serialize_org_payroll_profile(org),
+            "payroll_settings": _serialize_payroll_settings(payroll_settings),
+            "salary_structures": [_serialize_salary_structure(row) for row in salary_structures],
+            "salary_history": [_serialize_salary_history(row) for row in salary_history],
+            "payroll_entries": [_serialize_payroll_entry(row) for row in payroll_entries],
+            "payslips": [_serialize_payslip(row) for row in payslips],
+            "employee_directory": _serialize_org_users(org),
+            "permissions": {
+                "can_manage_payroll": can_manage_payroll,
+                "can_view_all_payroll": can_manage_payroll,
+            },
+        }
+    )
+
+
+@require_http_methods(["GET"])
+def payroll_payslip_pdf(request, payslip_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    payslip = (
+        Payslip.objects
+        .filter(organization=org, id=payslip_id)
+        .select_related("payroll_entry", "payroll_entry__salary_structure")
+        .first()
+    )
+    if not payslip:
+        return JsonResponse({"detail": "payslip_not_found"}, status=404)
+
+    can_manage_payroll = _can_manage_payroll(request.user, org)
+    if not can_manage_payroll and payslip.source_user_id != request.user.id:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    payroll_entry = payslip.payroll_entry
+    currency = payslip.currency or payroll_entry.currency or org.currency or "INR"
+    earnings = payroll_entry.earnings if isinstance(payroll_entry.earnings, dict) else {}
+    deductions = payroll_entry.deductions if isinstance(payroll_entry.deductions, dict) else {}
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    left = 18 * mm
+    top = height - 18 * mm
+
+    pdf.setTitle(f"Payslip {payslip.slip_number}")
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(left, top, org.name or "Organization")
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(left, top - 14, f"Payslip for {payslip.generated_for_month}")
+    pdf.drawRightString(width - left, top - 14, f"Slip No: {payslip.slip_number}")
+
+    info_y = top - 38
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(left, info_y, "Employee Name")
+    pdf.drawString(left + 75 * mm, info_y, "Employee ID")
+    pdf.drawString(left + 120 * mm, info_y, "Currency")
+    pdf.setFont("Helvetica", 11)
+    pdf.drawString(left, info_y - 14, payslip.employee_name or "-")
+    pdf.drawString(left + 75 * mm, info_y - 14, f"EMP-{payslip.source_user_id or payroll_entry.id}")
+    pdf.drawString(left + 120 * mm, info_y - 14, currency)
+
+    section_y = info_y - 42
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(left, section_y, "Earnings")
+    pdf.drawString(left + 105 * mm, section_y, "Deductions")
+
+    row_y = section_y - 16
+    pdf.setFont("Helvetica", 10)
+    for index in range(max(len(earnings), len(deductions), 1)):
+        earning_items = list(earnings.items())
+        deduction_items = list(deductions.items())
+        if index < len(earning_items):
+            label, amount = earning_items[index]
+            pdf.drawString(left, row_y, str(label))
+            pdf.drawRightString(left + 80 * mm, row_y, _format_currency_value(currency, amount))
+        if index < len(deduction_items):
+            label, amount = deduction_items[index]
+            pdf.drawString(left + 105 * mm, row_y, str(label))
+            pdf.drawRightString(width - left, row_y, _format_currency_value(currency, amount))
+        row_y -= 14
+
+    row_y -= 10
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(left, row_y, "Gross Salary")
+    pdf.drawRightString(left + 80 * mm, row_y, _format_currency_value(currency, payroll_entry.gross_salary))
+    pdf.drawString(left + 105 * mm, row_y, "Net Salary")
+    pdf.drawRightString(width - left, row_y, _format_currency_value(currency, payroll_entry.net_salary))
+    row_y -= 16
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(left, row_y, f"Total Deductions: {_format_currency_value(currency, payroll_entry.total_deductions)}")
+    pdf.drawString(left + 105 * mm, row_y, f"Generated: {timezone.localtime(payslip.generated_at).strftime('%Y-%m-%d %H:%M') if payslip.generated_at else '-'}")
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{payslip.slip_number}.pdf"'
+    return response
 
 
 @require_http_methods(["GET", "PUT"])

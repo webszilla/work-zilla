@@ -333,6 +333,7 @@ def _billing_profile_payload(profile):
             "contact_name": "",
             "company_name": "",
             "email": "",
+            "mobile_phone": "",
             "phone": "",
             "address_line1": "",
             "address_line2": "",
@@ -341,11 +342,14 @@ def _billing_profile_payload(profile):
             "postal_code": "",
             "country": "India",
             "gstin": "",
+            "currency": "INR",
+            "timezone": "UTC",
         }
     return {
         "contact_name": profile.contact_name,
         "company_name": profile.company_name,
         "email": profile.email,
+        "mobile_phone": profile.mobile_phone or "",
         "phone": profile.phone or "",
         "address_line1": profile.address_line1,
         "address_line2": profile.address_line2 or "",
@@ -354,6 +358,8 @@ def _billing_profile_payload(profile):
         "postal_code": profile.postal_code,
         "country": profile.country,
         "gstin": profile.gstin or "",
+        "currency": "INR",
+        "timezone": "UTC",
     }
 
 
@@ -362,6 +368,7 @@ def _billing_profile_missing_fields(profile):
         ("contact_name", profile.contact_name if profile else ""),
         ("company_name", profile.company_name if profile else ""),
         ("email", profile.email if profile else ""),
+        ("mobile_phone", profile.mobile_phone if profile else ""),
         ("phone", profile.phone if profile else ""),
         ("address_line1", profile.address_line1 if profile else ""),
         ("city", profile.city if profile else ""),
@@ -4461,10 +4468,19 @@ def billing_profile(request):
         return error
 
     profile = BillingProfile.objects.filter(organization=org).first()
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    current_timezone = normalize_timezone(settings_obj.org_timezone, fallback="UTC")
     if request.method == "GET":
+        payload = _billing_profile_payload(profile)
+        payload["company_name"] = (
+            payload.get("company_name")
+            or str(org.name or "").strip()
+        )
+        payload["currency"] = str(org.currency or "INR").strip().upper() or "INR"
+        payload["timezone"] = current_timezone
         missing_fields = _billing_profile_missing_fields(profile)
         return JsonResponse({
-            "profile": _billing_profile_payload(profile),
+            "profile": payload,
             "complete": not missing_fields,
             "missing_fields": missing_fields,
         })
@@ -4478,11 +4494,16 @@ def billing_profile(request):
     phone_country = _normalize_text(payload.get("phone_country"))
     if phone_value and phone_country and phone_country.startswith("+") and not phone_value.startswith("+"):
         phone_value = f"{phone_country} {phone_value}"
+    mobile_value = _normalize_text(payload.get("mobile_phone"))
+    mobile_country = _normalize_text(payload.get("mobile_phone_country"))
+    if mobile_value and mobile_country and mobile_country.startswith("+") and not mobile_value.startswith("+"):
+        mobile_value = f"{mobile_country} {mobile_value}"
 
     incoming = {
         "contact_name": _normalize_text(payload.get("contact_name")),
-        "company_name": _normalize_text(payload.get("company_name")),
+        "company_name": _normalize_text(payload.get("company_name")) or _normalize_text(payload.get("organization_name")) or _normalize_text(org.name),
         "email": _normalize_text(payload.get("email")),
+        "mobile_phone": mobile_value,
         "phone": phone_value,
         "address_line1": _normalize_text(payload.get("address_line1")),
         "address_line2": _normalize_text(payload.get("address_line2")),
@@ -4492,6 +4513,8 @@ def billing_profile(request):
         "country": _normalize_text(payload.get("country")) or "India",
         "gstin": _normalize_text(payload.get("gstin")).upper(),
     }
+    currency = _normalize_text(payload.get("currency")).upper() or str(org.currency or "INR").strip().upper() or "INR"
+    org_timezone = _normalize_text(payload.get("timezone"))
 
     missing_fields = [
         key
@@ -4499,6 +4522,7 @@ def billing_profile(request):
             "contact_name",
             "company_name",
             "email",
+            "mobile_phone",
             "phone",
             "address_line1",
             "city",
@@ -4524,15 +4548,27 @@ def billing_profile(request):
     else:
         profile = BillingProfile.objects.create(organization=org, **incoming)
 
-    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
-    current_timezone = normalize_timezone(settings_obj.org_timezone, fallback="UTC")
+    if incoming["company_name"] and org.name != incoming["company_name"]:
+        org.name = incoming["company_name"]
+    org.country = incoming["country"] or "India"
+    org.currency = currency
+    org.save(update_fields=["name", "country", "currency"])
+
     country_timezone = resolve_default_timezone(country=incoming.get("country"), browser_timezone="", fallback=current_timezone)
-    if current_timezone == "UTC" and country_timezone != current_timezone:
-        settings_obj.org_timezone = country_timezone
+    next_timezone = normalize_timezone(org_timezone, fallback=country_timezone if current_timezone == "UTC" else current_timezone)
+    if not org_timezone and current_timezone == "UTC" and country_timezone != current_timezone:
+        next_timezone = country_timezone
+    if settings_obj.org_timezone != next_timezone:
+        settings_obj.org_timezone = next_timezone
         settings_obj.save(update_fields=["org_timezone"])
 
+    response_payload = _billing_profile_payload(profile)
+    response_payload["company_name"] = incoming["company_name"]
+    response_payload["currency"] = org.currency or "INR"
+    response_payload["timezone"] = settings_obj.org_timezone or "UTC"
+
     return JsonResponse({
-        "profile": _billing_profile_payload(profile),
+        "profile": response_payload,
         "complete": True,
         "missing_fields": [],
     })

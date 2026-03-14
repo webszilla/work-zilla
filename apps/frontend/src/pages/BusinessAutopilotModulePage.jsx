@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
@@ -446,7 +447,34 @@ const DEFAULT_PROJECT_DATA = {
     { id: "u1", name: "Guru", role: "Project Manager", project: "ERP Rollout" },
     { id: "u2", name: "Nithya", role: "Business Analyst", project: "HR Automation" }
   ],
-  customers: []
+  customers: [],
+  projectDetails: {
+    p1: {
+      projectId: "p1",
+      projectValueEnabled: true,
+      projectValue: "450000",
+      teams: ["Implementation Team", "Support Team"],
+      employees: ["Guru", "Nithya"],
+      expenses: [
+        { id: "pex_1", title: "Requirement workshop", category: "Travel", amount: "18000", date: "2026-02-19", payee: "Field Team", notes: "Client kickoff travel and stay" },
+        { id: "pex_2", title: "Server provisioning", category: "Infrastructure", amount: "42000", date: "2026-02-24", payee: "Cloud Vendor", notes: "Production hosting setup" },
+      ],
+      notes: "Priority rollout project with phase-wise delivery tracking.",
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
+    p2: {
+      projectId: "p2",
+      projectValueEnabled: false,
+      projectValue: "",
+      teams: ["HR Operations"],
+      employees: ["Guru"],
+      expenses: [
+        { id: "pex_3", title: "Process discovery", category: "Consulting", amount: "12000", date: "2026-02-25", payee: "Internal Team", notes: "" },
+      ],
+      notes: "Automation blueprint under approval.",
+      updatedAt: "2026-02-25T09:30:00.000Z",
+    },
+  }
 };
 
 const HR_TAB_CONFIG = {
@@ -468,15 +496,24 @@ const HR_TAB_CONFIG = {
       { key: "bloodGroup", label: "Blood Group", type: "select", options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
       { key: "fatherName", label: "Father Name", placeholder: "Father name" },
       { key: "motherName", label: "Mother Name", placeholder: "Mother name" },
+      { key: "photoDataUrl", label: "Employee Photo", type: "imageUpload", optional: true },
+      { key: "photoName", label: "Employee Photo Name", optional: true },
+      { key: "documentName", label: "Employee Document", type: "documentUpload", optional: true },
+      { key: "documentMimeType", label: "Employee Document Type", optional: true },
+      { key: "documentSizeLabel", label: "Employee Document Size", optional: true },
+      { key: "contactCountryCode", label: "Contact Number", type: "phoneCode", defaultValue: "+91" },
+      { key: "contactNumber", label: "Contact Number", placeholder: "Primary mobile number", type: "phoneNumber" },
+      { key: "secondaryContactCountryCode", label: "Secondary Contact Number", type: "phoneCode", defaultValue: "+91", optional: true },
+      { key: "secondaryContactNumber", label: "Secondary Contact Number", placeholder: "Secondary mobile number", type: "phoneNumber", optional: true },
       { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorced", "Widowed"] },
       { key: "wifeName", label: "Wife Name", placeholder: "Wife name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
       { key: "permanentAddress", label: "Address", placeholder: "Permanent address", type: "textarea" },
-      { key: "permanentCountry", label: "Country", placeholder: "Country" },
+      { key: "permanentCountry", label: "Country", placeholder: "Country", defaultValue: "India" },
       { key: "permanentState", label: "State", placeholder: "State" },
       { key: "permanentCity", label: "City", placeholder: "City" },
       { key: "permanentPincode", label: "Pincode", placeholder: "Pincode" },
       { key: "temporaryAddress", label: "Address", placeholder: "Temporary address", type: "textarea" },
-      { key: "temporaryCountry", label: "Country", placeholder: "Country" },
+      { key: "temporaryCountry", label: "Country", placeholder: "Country", defaultValue: "India" },
       { key: "temporaryState", label: "State", placeholder: "State" },
       { key: "temporaryCity", label: "City", placeholder: "City" },
       { key: "temporaryPincode", label: "Pincode", placeholder: "Pincode" }
@@ -531,6 +568,24 @@ const HR_TAB_CONFIG = {
       { key: "month", label: "Month", placeholder: "YYYY-MM" },
       { key: "salary", label: "Net Salary", placeholder: "INR amount" }
     ]
+  },
+  salaryStructures: {
+    label: "Salary Structures",
+    itemLabel: "Salary Structure",
+    columns: [],
+    fields: [],
+  },
+  payslips: {
+    label: "Payslips",
+    itemLabel: "Payslip",
+    columns: [],
+    fields: [],
+  },
+  payrollSettings: {
+    label: "Payroll Settings",
+    itemLabel: "Payroll Settings",
+    columns: [],
+    fields: [],
   }
 };
 
@@ -550,7 +605,10 @@ const DEFAULT_HR_DATA = {
   payroll: [
     { id: "pr1", employee: "Guru", month: "2026-02", salary: "INR 85,000" },
     { id: "pr2", employee: "Nithya", month: "2026-02", salary: "INR 42,000" }
-  ]
+  ],
+  salaryStructures: [],
+  payslips: [],
+  payrollSettings: [],
 };
 
 const TICKETING_TAB_CONFIG = {
@@ -892,11 +950,371 @@ function buildEmptyValues(fields) {
   }, {});
 }
 
+function formatFileSizeLabel(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "";
+  }
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+const PAYROLL_MANAGEMENT_TABS = new Set(["payroll", "salaryStructures", "payslips", "payrollSettings"]);
+const FALLBACK_CURRENCY_CODES = [
+  "INR", "USD", "EUR", "AED", "SGD", "GBP", "AUD", "CAD", "JPY", "CNY",
+  "CHF", "SAR", "QAR", "KWD", "OMR", "BHD", "NZD", "MYR", "THB", "IDR",
+  "PHP", "ZAR", "NGN", "KES", "EGP", "TRY", "PLN", "SEK", "NOK", "DKK",
+  "HKD", "KRW", "VND", "BRL", "MXN", "ARS", "CLP", "COP", "PKR", "BDT"
+];
+
+function getCurrencyCodeOptions() {
+  try {
+    if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+      return Array.from(new Set(Intl.supportedValuesOf("currency").map((code) => String(code || "").trim().toUpperCase()).filter(Boolean))).sort();
+    }
+  } catch (_error) {
+    // Fallback below.
+  }
+  return [...FALLBACK_CURRENCY_CODES];
+}
+
+function formatCurrencyAmount(amount, currency = "INR", locale = "en-IN") {
+  const numericValue = parseNumber(amount);
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: String(currency || "INR").trim().toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(numericValue);
+  } catch (_error) {
+    return `${String(currency || "INR").trim().toUpperCase()} ${numericValue.toLocaleString(locale, { maximumFractionDigits: 2 })}`;
+  }
+}
+
+function createEmptyPayrollOrganizationProfile() {
+  return {
+    organizationName: "",
+    country: "India",
+    currency: "INR",
+    timezone: "UTC",
+  };
+}
+
+function createEmptyPayrollSettingsForm() {
+  return {
+    enablePf: true,
+    enableEsi: true,
+    pfEmployeePercent: "12.00",
+    pfEmployerPercent: "12.00",
+    esiEmployeePercent: "0.75",
+    esiEmployerPercent: "3.25",
+  };
+}
+
+function createEmptySalaryStructureForm() {
+  return {
+    id: "",
+    name: "",
+    isDefault: false,
+    basicSalaryPercent: "40.00",
+    hraPercent: "20.00",
+    conveyanceFixed: "1600.00",
+    autoSpecialAllowance: true,
+    basicSalary: "",
+    hra: "",
+    conveyance: "1600.00",
+    specialAllowance: "",
+    bonus: "",
+    otherAllowances: "",
+    applyPf: true,
+    applyEsi: true,
+    professionalTax: "",
+    otherDeduction: "",
+    notes: "",
+  };
+}
+
+function createEmptySalaryHistoryForm(defaultMonth = "") {
+  return {
+    id: "",
+    employeeName: "",
+    sourceUserId: "",
+    salaryStructureId: "",
+    currentSalary: "",
+    monthlySalaryAmount: "",
+    incrementType: "percentage",
+    incrementValue: "",
+    effectiveFrom: defaultMonth ? `${defaultMonth}-01` : getTodayIsoDate(),
+    incrementAmount: "",
+    newSalary: "",
+    notes: "",
+  };
+}
+
+function createEmptyPayrollRunForm() {
+  return {
+    month: getTodayIsoDate().slice(0, 7),
+  };
+}
+
+function createEmptyPayrollWorkspaceState() {
+  return {
+    organizationProfile: createEmptyPayrollOrganizationProfile(),
+    payrollSettings: createEmptyPayrollSettingsForm(),
+    salaryStructures: [],
+    salaryHistory: [],
+    payrollEntries: [],
+    payslips: [],
+    employeeDirectory: [],
+    permissions: {
+      can_manage_payroll: false,
+      can_view_all_payroll: false,
+    },
+  };
+}
+
+function monthToLabel(value) {
+  const month = String(value || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return month || "-";
+  }
+  const [year, monthNumber] = month.split("-");
+  const date = new Date(Number(year), Number(monthNumber) - 1, 1);
+  return Number.isNaN(date.getTime()) ? month : date.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+function payrollEmployeeKey(row = {}) {
+  const sourceUserId = String(row.sourceUserId || "").trim();
+  if (sourceUserId) {
+    return `user:${sourceUserId}`;
+  }
+  return `name:${String(row.employeeName || row.name || "").trim().toLowerCase()}`;
+}
+
+function buildPayrollSlipNumber(month, row, fallbackIndex = 1) {
+  const monthPart = String(month || "").replace(/[^0-9]/g, "") || new Date().toISOString().slice(0, 7).replace("-", "");
+  const employeePart = String(row.sourceUserId || row.employeeName || fallbackIndex).replace(/[^a-zA-Z0-9]/g, "").slice(0, 10) || String(fallbackIndex);
+  return `PS-${monthPart}-${employeePart.toUpperCase()}`;
+}
+
+function calculatePayrollFromStructure({
+  employeeName,
+  sourceUserId,
+  payrollMonth,
+  structure,
+  salaryHistory,
+  payrollSettings,
+  currency,
+}) {
+  if (!structure) {
+    return null;
+  }
+  const totalSalary = parseNumber(salaryHistory?.monthlySalaryAmount);
+  if (totalSalary <= 0) {
+    return null;
+  }
+  const basicSalary = (totalSalary * parseNumber(structure.basicSalaryPercent || structure.basicSalary)) / 100;
+  const hra = (totalSalary * parseNumber(structure.hraPercent || structure.hra)) / 100;
+  const conveyance = parseNumber(structure.conveyanceFixed || structure.conveyance);
+  const bonus = parseNumber(structure.bonus);
+  const otherAllowances = parseNumber(structure.otherAllowances);
+  const incrementAmount = parseNumber(salaryHistory?.incrementAmount);
+  const remainingSpecialAllowance = totalSalary - basicSalary - hra - conveyance - bonus - otherAllowances;
+  const specialAllowance = Boolean(structure.autoSpecialAllowance) ? Math.max(remainingSpecialAllowance, 0) : parseNumber(structure.specialAllowance);
+  const grossSalary = totalSalary + incrementAmount;
+  const enablePf = Boolean(payrollSettings?.enablePf) && Boolean(structure.applyPf);
+  const enableEsi = Boolean(payrollSettings?.enableEsi) && Boolean(structure.applyEsi);
+  const pfEmployeeAmount = enablePf ? (basicSalary * parseNumber(payrollSettings?.pfEmployeePercent)) / 100 : 0;
+  const pfEmployerAmount = enablePf ? (basicSalary * parseNumber(payrollSettings?.pfEmployerPercent)) / 100 : 0;
+  const esiEligible = grossSalary <= 21000 || parseNumber(payrollSettings?.esiEmployeePercent) <= 0;
+  const esiEmployeeAmount = enableEsi && esiEligible ? (grossSalary * parseNumber(payrollSettings?.esiEmployeePercent)) / 100 : 0;
+  const esiEmployerAmount = enableEsi && esiEligible ? (grossSalary * parseNumber(payrollSettings?.esiEmployerPercent)) / 100 : 0;
+  const professionalTaxAmount = parseNumber(structure.professionalTax);
+  const otherDeductionAmount = parseNumber(structure.otherDeduction);
+  const totalDeductions = pfEmployeeAmount + esiEmployeeAmount + professionalTaxAmount + otherDeductionAmount;
+  const netSalary = grossSalary - totalDeductions;
+  const earnings = {
+    "Basic Salary": basicSalary,
+    HRA: hra,
+    Conveyance: conveyance,
+    "Special Allowance": specialAllowance,
+    Bonus: bonus,
+    "Other Allowances": otherAllowances,
+    Increment: incrementAmount,
+  };
+  const deductions = {
+    PF: pfEmployeeAmount,
+    ESI: esiEmployeeAmount,
+    "Professional Tax": professionalTaxAmount,
+    "Other Deduction": otherDeductionAmount,
+  };
+  return {
+    employeeName,
+    sourceUserId: sourceUserId || "",
+    month: payrollMonth,
+    currency: currency || "INR",
+    salaryStructureId: structure.id,
+    salaryStructureName: structure.name || "",
+    salaryHistoryId: salaryHistory?.id || "",
+    monthlySalaryAmount: totalSalary.toFixed(2),
+    grossSalary: grossSalary.toFixed(2),
+    pfEmployeeAmount: pfEmployeeAmount.toFixed(2),
+    pfEmployerAmount: pfEmployerAmount.toFixed(2),
+    esiEmployeeAmount: esiEmployeeAmount.toFixed(2),
+    esiEmployerAmount: esiEmployerAmount.toFixed(2),
+    professionalTaxAmount: professionalTaxAmount.toFixed(2),
+    otherDeductionAmount: otherDeductionAmount.toFixed(2),
+    totalDeductions: totalDeductions.toFixed(2),
+    netSalary: netSalary.toFixed(2),
+    earnings,
+    deductions,
+    status: "processed",
+  };
+}
+
+function calculateSalaryBreakdownPreview(totalSalaryValue, structure = {}) {
+  const totalSalary = parseNumber(totalSalaryValue);
+  if (totalSalary <= 0 || !structure) {
+    return null;
+  }
+  const basicSalary = (totalSalary * parseNumber(structure.basicSalaryPercent || structure.basicSalary)) / 100;
+  const hra = (totalSalary * parseNumber(structure.hraPercent || structure.hra)) / 100;
+  const conveyance = parseNumber(structure.conveyanceFixed || structure.conveyance);
+  const bonus = parseNumber(structure.bonus);
+  const otherAllowances = parseNumber(structure.otherAllowances);
+  const specialAllowance = Boolean(structure.autoSpecialAllowance)
+    ? Math.max(totalSalary - basicSalary - hra - conveyance - bonus - otherAllowances, 0)
+    : parseNumber(structure.specialAllowance);
+  return {
+    basicSalary,
+    hra,
+    conveyance,
+    specialAllowance,
+    grossSalary: totalSalary,
+    netSalary: totalSalary,
+  };
+}
+
+function calculateSalaryIncrementPreview(currentSalaryValue, incrementType, incrementValue) {
+  const currentSalary = parseNumber(currentSalaryValue);
+  const normalizedType = String(incrementType || "percentage").trim().toLowerCase();
+  const value = parseNumber(incrementValue);
+  const incrementAmount = normalizedType === "fixed"
+    ? value
+    : (currentSalary * value) / 100;
+  const newSalary = currentSalary + incrementAmount;
+  return {
+    currentSalary,
+    incrementAmount,
+    newSalary,
+  };
+}
+
 function isValidProjectData(value) {
   return value
     && typeof value === "object"
     && ["projects", "tasks", "milestones", "team"].every((key) => Array.isArray(value[key]))
-    && (!("customers" in value) || Array.isArray(value.customers));
+    && (!("customers" in value) || Array.isArray(value.customers))
+    && (!("projectDetails" in value) || (value.projectDetails && typeof value.projectDetails === "object" && !Array.isArray(value.projectDetails)));
+}
+
+function createEmptyProjectExpense() {
+  return {
+    id: "",
+    title: "",
+    category: "Operations",
+    amount: "",
+    date: getTodayIsoDate(),
+    payee: "",
+    notes: "",
+  };
+}
+
+function normalizeProjectExpenseRecord(row = {}) {
+  return {
+    id: row.id || `pex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    title: String(row.title || "").trim(),
+    category: String(row.category || "Operations").trim() || "Operations",
+    amount: String(row.amount || "").trim(),
+    date: String(row.date || getTodayIsoDate()).trim() || getTodayIsoDate(),
+    payee: String(row.payee || "").trim(),
+    notes: String(row.notes || "").trim(),
+  };
+}
+
+function createEmptyProjectDetail(projectId = "") {
+  return {
+    projectId,
+    projectValueEnabled: false,
+    projectValue: "",
+    teams: [],
+    employees: [],
+    expenses: [],
+    notes: "",
+    updatedAt: "",
+  };
+}
+
+function normalizeProjectDetailRecord(row = {}, projectId = "") {
+  return {
+    ...createEmptyProjectDetail(projectId),
+    ...row,
+    projectId: String(row.projectId || projectId || "").trim(),
+    projectValueEnabled: Boolean(row.projectValueEnabled),
+    projectValue: String(row.projectValue || "").trim(),
+    teams: Array.from(new Set((Array.isArray(row.teams) ? row.teams : []).map((item) => String(item || "").trim()).filter(Boolean))),
+    employees: Array.from(new Set((Array.isArray(row.employees) ? row.employees : []).map((item) => String(item || "").trim()).filter(Boolean))),
+    expenses: (Array.isArray(row.expenses) ? row.expenses : []).map((item) => normalizeProjectExpenseRecord(item)),
+    notes: String(row.notes || "").trim(),
+    updatedAt: String(row.updatedAt || "").trim(),
+  };
+}
+
+function normalizeProjectData(value) {
+  const base = {
+    projects: Array.isArray(DEFAULT_PROJECT_DATA.projects) ? [...DEFAULT_PROJECT_DATA.projects] : [],
+    tasks: Array.isArray(DEFAULT_PROJECT_DATA.tasks) ? [...DEFAULT_PROJECT_DATA.tasks] : [],
+    milestones: Array.isArray(DEFAULT_PROJECT_DATA.milestones) ? [...DEFAULT_PROJECT_DATA.milestones] : [],
+    team: Array.isArray(DEFAULT_PROJECT_DATA.team) ? [...DEFAULT_PROJECT_DATA.team] : [],
+    customers: Array.isArray(DEFAULT_PROJECT_DATA.customers) ? [...DEFAULT_PROJECT_DATA.customers] : [],
+    projectDetails: {},
+  };
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.projects)) base.projects = value.projects;
+    if (Array.isArray(value.tasks)) base.tasks = value.tasks;
+    if (Array.isArray(value.milestones)) base.milestones = value.milestones;
+    if (Array.isArray(value.team)) base.team = value.team;
+    if (Array.isArray(value.customers)) base.customers = value.customers;
+  }
+
+  const incomingDetails = value && typeof value === "object" && value.projectDetails && typeof value.projectDetails === "object"
+    ? value.projectDetails
+    : DEFAULT_PROJECT_DATA.projectDetails;
+
+  base.projects.forEach((project) => {
+    const projectId = String(project?.id || "").trim();
+    if (!projectId) {
+      return;
+    }
+    base.projectDetails[projectId] = normalizeProjectDetailRecord(incomingDetails?.[projectId] || DEFAULT_PROJECT_DATA.projectDetails?.[projectId] || {}, projectId);
+  });
+
+  return base;
+}
+
+function readProjectWorkspaceData() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return normalizeProjectData(DEFAULT_PROJECT_DATA);
+    }
+    const parsed = JSON.parse(raw);
+    return isValidProjectData(parsed) ? normalizeProjectData(parsed) : normalizeProjectData(DEFAULT_PROJECT_DATA);
+  } catch (_error) {
+    return normalizeProjectData(DEFAULT_PROJECT_DATA);
+  }
 }
 
 function isValidHrData(value) {
@@ -1115,6 +1533,944 @@ function readSharedCrmContacts() {
   } catch (_error) {
     return [...(DEFAULT_CRM_DATA.contacts || [])];
   }
+}
+
+function readSharedCrmTeams() {
+  try {
+    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+    if (!raw) {
+      return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
+    }
+    const parsed = JSON.parse(raw);
+    if (!isValidCrmData(parsed)) {
+      return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
+    }
+    return (normalizeCrmData(parsed).teams || []).map((row) => normalizeCrmTeamRecord(row));
+  } catch (_error) {
+    return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
+  }
+}
+
+function readSharedHrEmployees() {
+  try {
+    const raw = window.localStorage.getItem(HR_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!isValidHrData(parsed)) {
+      return [];
+    }
+    return Array.isArray(parsed.employees) ? parsed.employees : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [workspace, setWorkspace] = useState(() => createEmptyPayrollWorkspaceState());
+  const [organizationProfileForm, setOrganizationProfileForm] = useState(() => createEmptyPayrollOrganizationProfile());
+  const [payrollSettingsForm, setPayrollSettingsForm] = useState(() => createEmptyPayrollSettingsForm());
+  const [salaryStructureForm, setSalaryStructureForm] = useState(() => createEmptySalaryStructureForm());
+  const [salaryHistoryForm, setSalaryHistoryForm] = useState(() => createEmptySalaryHistoryForm());
+  const [payrollRunForm, setPayrollRunForm] = useState(() => createEmptyPayrollRunForm());
+  const [editingStructureId, setEditingStructureId] = useState("");
+  const [editingHistoryId, setEditingHistoryId] = useState("");
+  const currencyOptions = useMemo(() => getCurrencyCodeOptions(), []);
+  const timezoneOptions = useMemo(() => {
+    const fallback = ["Asia/Kolkata", "UTC", "Asia/Dubai", "Asia/Singapore", "Europe/London", "Europe/Berlin", "America/New_York", "America/Chicago", "America/Los_Angeles", "Australia/Sydney"];
+    try {
+      if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+        const timeZones = Intl.supportedValuesOf("timeZone");
+        return Array.from(new Set([Intl.DateTimeFormat().resolvedOptions().timeZone, ...timeZones, ...fallback].filter(Boolean)));
+      }
+    } catch (_error) {
+      // Fallback below.
+    }
+    return Array.from(new Set([Intl.DateTimeFormat().resolvedOptions().timeZone, ...fallback].filter(Boolean)));
+  }, []);
+
+  const canManagePayroll = Boolean(workspace.permissions?.can_manage_payroll);
+  const payrollCurrency = String(workspace.organizationProfile?.currency || "INR").trim().toUpperCase() || "INR";
+
+  const employeeOptions = useMemo(() => {
+    const map = new Map();
+    (hrEmployees || []).forEach((row) => {
+      const name = String(row?.name || "").trim();
+      if (!name) return;
+      const sourceUserId = String(row?.sourceUserId || row?.userId || "").trim();
+      const key = sourceUserId ? `user:${sourceUserId}` : `name:${name.toLowerCase()}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          name,
+          sourceUserId,
+          department: String(row?.department || "").trim(),
+          employeeRole: String(row?.designation || row?.employee_role || "").trim(),
+        });
+      }
+    });
+    (workspace.employeeDirectory || []).forEach((row) => {
+      const name = String(row?.name || "").trim();
+      if (!name) return;
+      const sourceUserId = String(row?.id || row?.sourceUserId || "").trim();
+      const key = sourceUserId ? `user:${sourceUserId}` : `name:${name.toLowerCase()}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          name,
+          sourceUserId,
+          department: String(row?.department || "").trim(),
+          employeeRole: String(row?.employee_role || "").trim(),
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [hrEmployees, workspace.employeeDirectory]);
+
+  const salaryStructuresById = useMemo(
+    () => new Map((workspace.salaryStructures || []).map((row) => [String(row.id || ""), row])),
+    [workspace.salaryStructures]
+  );
+  const defaultSalaryStructure = useMemo(
+    () => (workspace.salaryStructures || []).find((row) => row.isDefault) || (workspace.salaryStructures || [])[0] || null,
+    [workspace.salaryStructures]
+  );
+
+  const salaryHistoryByEmployeeKey = useMemo(() => {
+    const map = new Map();
+    (workspace.salaryHistory || []).forEach((row) => {
+      const key = payrollEmployeeKey(row);
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key).push(row);
+    });
+    map.forEach((rows) => rows.sort((a, b) => String(b.effectiveFrom || "").localeCompare(String(a.effectiveFrom || ""))));
+    return map;
+  }, [workspace.salaryHistory]);
+
+  const payrollStats = useMemo(() => {
+    const entries = workspace.payrollEntries || [];
+    const payslips = workspace.payslips || [];
+    const totalNet = entries.reduce((sum, row) => sum + parseNumber(row.netSalary), 0);
+    return [
+      { label: "Payroll Entries", value: String(entries.length), icon: "bi-calculator" },
+      { label: "Payslips", value: String(payslips.length), icon: "bi-file-earmark-text" },
+      { label: "Net Payout", value: formatCurrencyAmount(totalNet, payrollCurrency), icon: "bi-cash-stack" },
+    ];
+  }, [payrollCurrency, workspace.payrollEntries, workspace.payslips]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await apiFetch("/api/business-autopilot/payroll/workspace");
+        if (!active) return;
+        const nextWorkspace = {
+          organizationProfile: data?.organization_profile || createEmptyPayrollOrganizationProfile(),
+          payrollSettings: data?.payroll_settings || createEmptyPayrollSettingsForm(),
+          salaryStructures: Array.isArray(data?.salary_structures) ? data.salary_structures : [],
+          salaryHistory: Array.isArray(data?.salary_history) ? data.salary_history : [],
+          payrollEntries: Array.isArray(data?.payroll_entries) ? data.payroll_entries : [],
+          payslips: Array.isArray(data?.payslips) ? data.payslips : [],
+          employeeDirectory: Array.isArray(data?.employee_directory) ? data.employee_directory : [],
+          permissions: data?.permissions || { can_manage_payroll: false, can_view_all_payroll: false },
+        };
+        setWorkspace(nextWorkspace);
+        setOrganizationProfileForm(nextWorkspace.organizationProfile);
+        setPayrollSettingsForm(nextWorkspace.payrollSettings);
+        setPayrollRunForm((prev) => ({ ...prev, month: prev.month || createEmptyPayrollRunForm().month }));
+      } catch (error) {
+        if (!active) return;
+        setSaveError(error?.message || "Unable to load payroll workspace.");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!defaultSalaryStructure) {
+      return;
+    }
+    setSalaryHistoryForm((prev) => (
+      prev.salaryStructureId
+        ? prev
+        : { ...prev, salaryStructureId: String(defaultSalaryStructure.id || "") }
+    ));
+    setSalaryStructureForm((prev) => (
+      prev.id || String(prev.name || "").trim()
+        ? prev
+        : { ...prev, ...defaultSalaryStructure }
+    ));
+  }, [defaultSalaryStructure]);
+
+  async function persistWorkspace(nextWorkspace, successText = "Saved successfully.") {
+    setSaving(true);
+    setSaveError("");
+    setSaveMessage("");
+    try {
+      const data = await apiFetch("/api/business-autopilot/payroll/workspace", {
+        method: "PUT",
+        body: JSON.stringify({
+          organization_profile: nextWorkspace.organizationProfile,
+          payroll_settings: nextWorkspace.payrollSettings,
+          salary_structures: nextWorkspace.salaryStructures,
+          salary_history: nextWorkspace.salaryHistory,
+          payroll_entries: nextWorkspace.payrollEntries,
+          payslips: nextWorkspace.payslips,
+        }),
+      });
+      const normalized = {
+        organizationProfile: data?.organization_profile || createEmptyPayrollOrganizationProfile(),
+        payrollSettings: data?.payroll_settings || createEmptyPayrollSettingsForm(),
+        salaryStructures: Array.isArray(data?.salary_structures) ? data.salary_structures : [],
+        salaryHistory: Array.isArray(data?.salary_history) ? data.salary_history : [],
+        payrollEntries: Array.isArray(data?.payroll_entries) ? data.payroll_entries : [],
+        payslips: Array.isArray(data?.payslips) ? data.payslips : [],
+        employeeDirectory: Array.isArray(data?.employee_directory) ? data.employee_directory : [],
+        permissions: data?.permissions || nextWorkspace.permissions,
+      };
+      setWorkspace(normalized);
+      setOrganizationProfileForm(normalized.organizationProfile);
+      setPayrollSettingsForm(normalized.payrollSettings);
+      setSaveMessage(successText);
+      return normalized;
+    } catch (error) {
+      setSaveError(error?.message || "Unable to save payroll workspace.");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function resetSalaryStructureForm() {
+    setEditingStructureId("");
+    setSalaryStructureForm(createEmptySalaryStructureForm());
+  }
+
+  function resetSalaryHistoryForm() {
+    setEditingHistoryId("");
+    setSalaryHistoryForm({
+      ...createEmptySalaryHistoryForm(payrollRunForm.month),
+      salaryStructureId: defaultSalaryStructure?.id ? String(defaultSalaryStructure.id) : "",
+    });
+  }
+
+  async function saveOrganizationProfile(event) {
+    event.preventDefault();
+    if (!canManagePayroll) return;
+    await persistWorkspace(
+      {
+        ...workspace,
+        organizationProfile: {
+          ...organizationProfileForm,
+          organizationName: String(organizationProfileForm.organizationName || "").trim(),
+          country: String(organizationProfileForm.country || "India").trim() || "India",
+          currency: String(organizationProfileForm.currency || "INR").trim().toUpperCase() || "INR",
+          timezone: String(organizationProfileForm.timezone || "UTC").trim() || "UTC",
+        },
+      },
+      "Organization payroll settings saved."
+    );
+  }
+
+  async function savePayrollSettings(event) {
+    event.preventDefault();
+    if (!canManagePayroll) return;
+    await persistWorkspace(
+      { ...workspace, payrollSettings: payrollSettingsForm },
+      "Payroll settings saved."
+    );
+  }
+
+  async function saveSalaryStructure(event) {
+    event.preventDefault();
+    if (!canManagePayroll) return;
+    if (!String(salaryStructureForm.name || "").trim()) {
+      return;
+    }
+    const payload = {
+      ...salaryStructureForm,
+      id: editingStructureId || salaryStructureForm.id || "",
+      name: String(salaryStructureForm.name || "").trim(),
+    };
+    if (payload.isDefault) {
+      payload.isDefault = true;
+    }
+    const nextRows = editingStructureId
+      ? (workspace.salaryStructures || []).map((row) => (String(row.id) === String(editingStructureId) ? { ...row, ...payload } : (payload.isDefault ? { ...row, isDefault: false } : row)))
+      : [{ ...payload, id: `tmp_structure_${Date.now()}` }, ...(workspace.salaryStructures || []).map((row) => (payload.isDefault ? { ...row, isDefault: false } : row))];
+    await persistWorkspace({ ...workspace, salaryStructures: nextRows }, editingStructureId ? "Salary structure updated." : "Salary structure created.");
+    resetSalaryStructureForm();
+  }
+
+  async function deleteSalaryStructure(structureId) {
+    if (!canManagePayroll) return;
+    const nextRows = (workspace.salaryStructures || []).filter((row) => String(row.id) !== String(structureId));
+    await persistWorkspace({ ...workspace, salaryStructures: nextRows }, "Salary structure deleted.");
+    if (String(editingStructureId) === String(structureId)) {
+      resetSalaryStructureForm();
+    }
+  }
+
+  async function saveSalaryHistory(event) {
+    event.preventDefault();
+    if (!canManagePayroll) return;
+    if (!String(salaryHistoryForm.employeeName || "").trim() || !String(salaryHistoryForm.salaryStructureId || "").trim()) {
+      return;
+    }
+    const payload = {
+      ...salaryHistoryForm,
+      id: editingHistoryId || salaryHistoryForm.id || "",
+      employeeName: String(salaryHistoryForm.employeeName || "").trim(),
+      sourceUserId: salaryHistoryForm.sourceUserId || "",
+      currentSalary: salaryHistoryForm.currentSalary || salaryHistoryForm.monthlySalaryAmount || "",
+      monthlySalaryAmount: salaryHistoryForm.monthlySalaryAmount || "",
+      incrementType: salaryHistoryForm.incrementType || "percentage",
+      incrementValue: salaryHistoryForm.incrementValue || "",
+      effectiveFrom: salaryHistoryForm.effectiveFrom || getTodayIsoDate(),
+      newSalary: salaryHistoryForm.newSalary || salaryHistoryForm.monthlySalaryAmount || "",
+    };
+    const nextRows = editingHistoryId
+      ? (workspace.salaryHistory || []).map((row) => (String(row.id) === String(editingHistoryId) ? { ...row, ...payload } : row))
+      : [{ ...payload, id: `tmp_history_${Date.now()}` }, ...(workspace.salaryHistory || [])];
+    await persistWorkspace({ ...workspace, salaryHistory: nextRows }, editingHistoryId ? "Salary history updated." : "Salary history created.");
+    resetSalaryHistoryForm();
+  }
+
+  async function deleteSalaryHistory(historyId) {
+    if (!canManagePayroll) return;
+    const nextRows = (workspace.salaryHistory || []).filter((row) => String(row.id) !== String(historyId));
+    await persistWorkspace({ ...workspace, salaryHistory: nextRows }, "Salary history deleted.");
+    if (String(editingHistoryId) === String(historyId)) {
+      resetSalaryHistoryForm();
+    }
+  }
+
+  async function runPayroll(event) {
+    event.preventDefault();
+    if (!canManagePayroll) return;
+    const payrollMonth = String(payrollRunForm.month || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(payrollMonth)) {
+      return;
+    }
+    const nextEntries = [...(workspace.payrollEntries || [])];
+    const nextPayslips = [...(workspace.payslips || [])];
+
+    employeeOptions.forEach((employee, index) => {
+      const key = payrollEmployeeKey({
+        employeeName: employee.name,
+        sourceUserId: employee.sourceUserId,
+      });
+      const historyRows = salaryHistoryByEmployeeKey.get(key) || salaryHistoryByEmployeeKey.get(`name:${String(employee.name || "").trim().toLowerCase()}`) || [];
+      const latestHistory = historyRows.find((row) => String(row.effectiveFrom || "").trim() <= `${payrollMonth}-31`) || historyRows[0];
+      const structure = latestHistory ? salaryStructuresById.get(String(latestHistory.salaryStructureId || "")) : null;
+      const computed = calculatePayrollFromStructure({
+        employeeName: employee.name,
+        sourceUserId: employee.sourceUserId,
+        payrollMonth,
+        structure,
+        salaryHistory: latestHistory,
+        payrollSettings: workspace.payrollSettings,
+        currency: payrollCurrency,
+      });
+      if (!computed) {
+        return;
+      }
+      const existingIndex = nextEntries.findIndex((row) => (
+        String(row.month || "") === payrollMonth
+        && payrollEmployeeKey({ employeeName: row.employeeName, sourceUserId: row.sourceUserId }) === payrollEmployeeKey(computed)
+      ));
+      const existingRow = existingIndex >= 0 ? nextEntries[existingIndex] : null;
+      const nextRow = {
+        ...existingRow,
+        ...computed,
+        id: existingRow?.id || `tmp_payroll_${Date.now()}_${index}`,
+      };
+      if (existingIndex >= 0) {
+        nextEntries[existingIndex] = nextRow;
+      } else {
+        nextEntries.unshift(nextRow);
+      }
+      const payslipPayload = {
+        id: nextPayslips.find((row) => String(row.payrollEntryId || "") === String(nextRow.id || ""))?.id || `tmp_payslip_${Date.now()}_${index}`,
+        payrollEntryId: nextRow.id,
+        slipNumber: buildPayrollSlipNumber(payrollMonth, nextRow, index + 1),
+        generatedForMonth: payrollMonth,
+        employeeName: nextRow.employeeName,
+        sourceUserId: nextRow.sourceUserId || "",
+        currency: payrollCurrency,
+      };
+      const existingPayslipIndex = nextPayslips.findIndex((row) => (
+        String(row.generatedForMonth || "") === payrollMonth
+        && payrollEmployeeKey({ employeeName: row.employeeName, sourceUserId: row.sourceUserId }) === payrollEmployeeKey(nextRow)
+      ));
+      if (existingPayslipIndex >= 0) {
+        nextPayslips[existingPayslipIndex] = { ...nextPayslips[existingPayslipIndex], ...payslipPayload };
+      } else {
+        nextPayslips.unshift(payslipPayload);
+      }
+    });
+
+    await persistWorkspace(
+      { ...workspace, payrollEntries: nextEntries, payslips: nextPayslips },
+      `Payroll calculated for ${monthToLabel(payrollMonth)}.`
+    );
+  }
+
+  async function deletePayrollEntry(entryId) {
+    if (!canManagePayroll) return;
+    const nextEntries = (workspace.payrollEntries || []).filter((row) => String(row.id) !== String(entryId));
+    const nextPayslips = (workspace.payslips || []).filter((row) => String(row.payrollEntryId) !== String(entryId));
+    await persistWorkspace({ ...workspace, payrollEntries: nextEntries, payslips: nextPayslips }, "Payroll entry deleted.");
+  }
+
+  async function deletePayslip(payslipId) {
+    if (!canManagePayroll) return;
+    const nextRows = (workspace.payslips || []).filter((row) => String(row.id) !== String(payslipId));
+    await persistWorkspace({ ...workspace, payslips: nextRows }, "Payslip deleted.");
+  }
+
+  function editSalaryStructure(row) {
+    setEditingStructureId(String(row.id || ""));
+    setSalaryStructureForm({
+      id: row.id || "",
+      name: row.name || "",
+      isDefault: Boolean(row.isDefault),
+      basicSalaryPercent: row.basicSalaryPercent || "",
+      hraPercent: row.hraPercent || "",
+      conveyanceFixed: row.conveyanceFixed || "",
+      autoSpecialAllowance: Boolean(row.autoSpecialAllowance),
+      basicSalary: row.basicSalary || "",
+      hra: row.hra || "",
+      conveyance: row.conveyance || "",
+      specialAllowance: row.specialAllowance || "",
+      bonus: row.bonus || "",
+      otherAllowances: row.otherAllowances || "",
+      applyPf: Boolean(row.applyPf),
+      applyEsi: Boolean(row.applyEsi),
+      professionalTax: row.professionalTax || "",
+      otherDeduction: row.otherDeduction || "",
+      notes: row.notes || "",
+    });
+  }
+
+  function editSalaryHistory(row) {
+    setEditingHistoryId(String(row.id || ""));
+    setSalaryHistoryForm({
+      id: row.id || "",
+      employeeName: row.employeeName || "",
+      sourceUserId: row.sourceUserId || "",
+      salaryStructureId: row.salaryStructureId || "",
+      currentSalary: row.currentSalary || row.monthlySalaryAmount || "",
+      monthlySalaryAmount: row.monthlySalaryAmount || "",
+      incrementType: row.incrementType || "percentage",
+      incrementValue: row.incrementValue || "",
+      effectiveFrom: row.effectiveFrom || getTodayIsoDate(),
+      incrementAmount: row.incrementAmount || "",
+      newSalary: row.newSalary || row.monthlySalaryAmount || "",
+      notes: row.notes || "",
+    });
+  }
+
+  function downloadPayslipPdf(payslipId) {
+    window.open(`/api/business-autopilot/payroll/payslips/${payslipId}/pdf`, "_blank", "noopener,noreferrer");
+  }
+
+  if (loading) {
+    return <div className="card p-3 text-secondary">Loading payroll workspace...</div>;
+  }
+
+  const readOnlyNotice = !canManagePayroll ? (
+    <div className="card p-3 text-secondary">Payroll is read-only for this account. You can view your payslips here.</div>
+  ) : null;
+  const openCompanyProfileSettings = () => {
+    const basePath = typeof window !== "undefined"
+      ? `${window.location.origin}/app/business-autopilot/profile?tab=companyProfile`
+      : "/app/business-autopilot/profile?tab=companyProfile";
+    window.location.href = basePath;
+  };
+  const selectedPreviewStructure = salaryStructuresById.get(String(salaryHistoryForm.salaryStructureId || "")) || defaultSalaryStructure;
+  const salaryBreakdownPreview = calculateSalaryBreakdownPreview(salaryHistoryForm.monthlySalaryAmount, selectedPreviewStructure);
+  const salaryIncrementPreview = calculateSalaryIncrementPreview(
+    salaryHistoryForm.currentSalary || salaryHistoryForm.monthlySalaryAmount,
+    salaryHistoryForm.incrementType,
+    salaryHistoryForm.incrementValue
+  );
+
+  if (activeTab === "payrollSettings") {
+    return (
+      <div className="d-flex flex-column gap-3">
+        {readOnlyNotice}
+        <div className="row g-3">
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                <h6 className="mb-0">Organization Profile</h6>
+                {saveMessage ? <span className="small text-success">{saveMessage}</span> : null}
+              </div>
+              <div className="row g-3">
+                <div className="col-12">
+                  <div className="small text-secondary mb-1">Company Name</div>
+                  <div className="fw-semibold">{organizationProfileForm.organizationName || "-"}</div>
+                </div>
+                <div className="col-12 col-md-6">
+                  <div className="small text-secondary mb-1">Country</div>
+                  <div className="fw-semibold">{organizationProfileForm.country || "-"}</div>
+                </div>
+                <div className="col-12 col-md-6">
+                  <div className="small text-secondary mb-1">Currency</div>
+                  <div className="fw-semibold">{organizationProfileForm.currency || "-"}</div>
+                </div>
+                <div className="col-12">
+                  <div className="small text-secondary mb-1">Timezone</div>
+                  <div className="fw-semibold">{organizationProfileForm.timezone || "-"}</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={openCompanyProfileSettings}>
+                  Edit in Company Profile
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <h6 className="mb-3">Payroll Settings</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={savePayrollSettings}>
+                <div className="d-flex flex-wrap gap-3">
+                  <label className="form-check-label d-flex align-items-center gap-2">
+                    <input type="checkbox" className="form-check-input mt-0" checked={Boolean(payrollSettingsForm.enablePf)} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, enablePf: e.target.checked }))} disabled={!canManagePayroll} />
+                    Enable PF
+                  </label>
+                  <label className="form-check-label d-flex align-items-center gap-2">
+                    <input type="checkbox" className="form-check-input mt-0" checked={Boolean(payrollSettingsForm.enableEsi)} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, enableEsi: e.target.checked }))} disabled={!canManagePayroll} />
+                    Enable ESI
+                  </label>
+                </div>
+                <div className="row g-3">
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">PF Employee %</label>
+                    <input className="form-control" value={payrollSettingsForm.pfEmployeePercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, pfEmployeePercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enablePf} />
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">PF Employer %</label>
+                    <input className="form-control" value={payrollSettingsForm.pfEmployerPercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, pfEmployerPercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enablePf} />
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">ESI Employee %</label>
+                    <input className="form-control" value={payrollSettingsForm.esiEmployeePercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, esiEmployeePercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enableEsi} />
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">ESI Employer %</label>
+                    <input className="form-control" value={payrollSettingsForm.esiEmployerPercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, esiEmployerPercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enableEsi} />
+                  </div>
+                </div>
+                {canManagePayroll ? <button type="submit" className="btn btn-success btn-sm" disabled={saving}>Save Payroll Settings</button> : null}
+              </form>
+            </div>
+          </div>
+        </div>
+        {saveError ? <div className="small text-danger">{saveError}</div> : null}
+      </div>
+    );
+  }
+
+  if (activeTab === "salaryStructures") {
+    return (
+      <div className="d-flex flex-column gap-3">
+        {readOnlyNotice}
+        <div className="row g-3">
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <h6 className="mb-3">{editingStructureId ? "Edit Salary Structure" : "Create Salary Structure"}</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={saveSalaryStructure}>
+                <div className="row g-3">
+                  <div className="col-12 col-md-8">
+                    <label className="form-label small text-secondary mb-1">Template Name</label>
+                    <input className="form-control" value={salaryStructureForm.name || ""} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, name: e.target.value }))} disabled={!canManagePayroll} />
+                  </div>
+                  <div className="col-12 col-md-4 d-flex align-items-end">
+                    <label className="form-check-label d-flex align-items-center gap-2 mb-2">
+                      <input type="checkbox" className="form-check-input mt-0" checked={Boolean(salaryStructureForm.isDefault)} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, isDefault: e.target.checked }))} disabled={!canManagePayroll} />
+                      Set as default template
+                    </label>
+                  </div>
+                  {[
+                    ["basicSalaryPercent", "Basic Salary %"],
+                    ["hraPercent", "HRA %"],
+                    ["conveyanceFixed", "Conveyance (Fixed)"],
+                    ["bonus", "Bonus"],
+                    ["otherAllowances", "Other Allowances"],
+                    ["professionalTax", "Professional Tax"],
+                    ["otherDeduction", "Other Deduction"],
+                  ].map(([key, label]) => (
+                    <div className="col-12 col-md-6" key={`salary-structure-${key}`}>
+                      <label className="form-label small text-secondary mb-1">{label}</label>
+                      <input className="form-control" value={salaryStructureForm[key] || ""} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, [key]: e.target.value }))} disabled={!canManagePayroll} />
+                    </div>
+                  ))}
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Special Allowance</label>
+                    <input className="form-control" value={Boolean(salaryStructureForm.autoSpecialAllowance) ? "AUTO (remaining amount)" : (salaryStructureForm.specialAllowance || "")} disabled />
+                  </div>
+                  <div className="col-12 d-flex flex-wrap gap-3">
+                    <label className="form-check-label d-flex align-items-center gap-2">
+                      <input type="checkbox" className="form-check-input mt-0" checked={Boolean(salaryStructureForm.applyPf)} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, applyPf: e.target.checked }))} disabled={!canManagePayroll} />
+                      Apply PF
+                    </label>
+                    <label className="form-check-label d-flex align-items-center gap-2">
+                      <input type="checkbox" className="form-check-input mt-0" checked={Boolean(salaryStructureForm.applyEsi)} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, applyEsi: e.target.checked }))} disabled={!canManagePayroll} />
+                      Apply ESI
+                    </label>
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label small text-secondary mb-1">Notes</label>
+                    <input className="form-control" value={salaryStructureForm.notes || ""} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, notes: e.target.value }))} disabled={!canManagePayroll} />
+                  </div>
+                  <div className="col-12">
+                    <div className="small text-secondary">Standard split example: Basic 40%, HRA 20%, Conveyance 1600 fixed, Special Allowance auto remaining.</div>
+                  </div>
+                </div>
+                {canManagePayroll ? (
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm" disabled={saving}>{editingStructureId ? "Update" : "Create"}</button>
+                    {editingStructureId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSalaryStructureForm}>Cancel</button> : null}
+                  </div>
+                ) : null}
+              </form>
+            </div>
+          </div>
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <h6 className="mb-3">{editingHistoryId ? "Edit Salary History" : "Employee Salary History"}</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={saveSalaryHistory}>
+                <div className="row g-3">
+                  <div className="col-12">
+                    <label className="form-label small text-secondary mb-1">Employee</label>
+                    <select className="form-select" value={salaryHistoryForm.sourceUserId || salaryHistoryForm.employeeName || ""} onChange={(e) => {
+                      const selected = employeeOptions.find((row) => String(row.sourceUserId || row.name) === String(e.target.value));
+                      setSalaryHistoryForm((prev) => ({
+                        ...prev,
+                        sourceUserId: selected?.sourceUserId || "",
+                        employeeName: selected?.name || "",
+                      }));
+                    }} disabled={!canManagePayroll}>
+                      <option value="">Select Employee</option>
+                      {employeeOptions.map((employee) => (
+                        <option key={`salary-history-emp-${employee.sourceUserId || employee.name}`} value={employee.sourceUserId || employee.name}>
+                          {employee.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label small text-secondary mb-1">Salary Structure</label>
+                    <select className="form-select" value={salaryHistoryForm.salaryStructureId || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, salaryStructureId: e.target.value }))} disabled={!canManagePayroll}>
+                      <option value="">Select Salary Structure</option>
+                      {(workspace.salaryStructures || []).map((row) => (
+                        <option key={`salary-structure-option-${row.id}`} value={row.id}>{row.name}{row.isDefault ? " (Default)" : ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Monthly Salary Amount</label>
+                    <input
+                      className="form-control"
+                      value={salaryHistoryForm.monthlySalaryAmount || ""}
+                      onChange={(e) => setSalaryHistoryForm((prev) => {
+                        const nextValue = e.target.value;
+                        const preview = calculateSalaryIncrementPreview(nextValue, prev.incrementType, prev.incrementValue);
+                        return {
+                          ...prev,
+                          currentSalary: nextValue,
+                          monthlySalaryAmount: nextValue,
+                          incrementAmount: preview.incrementAmount ? preview.incrementAmount.toFixed(2) : "",
+                          newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : nextValue,
+                        };
+                      })}
+                      disabled={!canManagePayroll}
+                      placeholder="Enter total monthly salary"
+                    />
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Effective From</label>
+                    <input type="date" className="form-control" value={salaryHistoryForm.effectiveFrom || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))} disabled={!canManagePayroll} />
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Increment Type</label>
+                    <select
+                      className="form-select"
+                      value={salaryHistoryForm.incrementType || "percentage"}
+                      onChange={(e) => setSalaryHistoryForm((prev) => {
+                        const nextType = e.target.value;
+                        const preview = calculateSalaryIncrementPreview(prev.currentSalary || prev.monthlySalaryAmount, nextType, prev.incrementValue);
+                        return {
+                          ...prev,
+                          incrementType: nextType,
+                          incrementAmount: preview.incrementAmount ? preview.incrementAmount.toFixed(2) : "",
+                          newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : prev.monthlySalaryAmount,
+                        };
+                      })}
+                      disabled={!canManagePayroll}
+                    >
+                      <option value="percentage">Percentage (%)</option>
+                      <option value="fixed">Fixed Amount</option>
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Increment Value</label>
+                    <input
+                      className="form-control"
+                      value={salaryHistoryForm.incrementValue || ""}
+                      onChange={(e) => setSalaryHistoryForm((prev) => {
+                        const nextValue = e.target.value;
+                        const preview = calculateSalaryIncrementPreview(prev.currentSalary || prev.monthlySalaryAmount, prev.incrementType, nextValue);
+                        return {
+                          ...prev,
+                          incrementValue: nextValue,
+                          incrementAmount: preview.incrementAmount ? preview.incrementAmount.toFixed(2) : "",
+                          newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : prev.monthlySalaryAmount,
+                        };
+                      })}
+                      disabled={!canManagePayroll}
+                      placeholder={salaryHistoryForm.incrementType === "fixed" ? "Enter fixed amount" : "Enter percentage"}
+                    />
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label small text-secondary mb-1">Notes</label>
+                    <input className="form-control" value={salaryHistoryForm.notes || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, notes: e.target.value }))} disabled={!canManagePayroll} />
+                  </div>
+                  <div className="col-12">
+                    <div className="border rounded p-3">
+                      <div className="fw-semibold mb-2">Increment Preview</div>
+                      <div className="row g-2 small">
+                        <div className="col-12 col-md-4">Current Salary: <span className="fw-semibold">{formatCurrencyAmount(salaryIncrementPreview.currentSalary, payrollCurrency)}</span></div>
+                        <div className="col-12 col-md-4">Increment Amount: <span className="fw-semibold">{formatCurrencyAmount(salaryIncrementPreview.incrementAmount, payrollCurrency)}</span></div>
+                        <div className="col-12 col-md-4">New Salary: <span className="fw-semibold">{formatCurrencyAmount(salaryIncrementPreview.newSalary, payrollCurrency)}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  {salaryBreakdownPreview ? (
+                    <div className="col-12">
+                      <div className="border rounded p-3">
+                        <div className="fw-semibold mb-2">Salary Breakdown</div>
+                        <div className="row g-2 small">
+                          <div className="col-12 col-md-4">Basic Salary: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.basicSalary, payrollCurrency)}</span></div>
+                          <div className="col-12 col-md-4">HRA: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.hra, payrollCurrency)}</span></div>
+                          <div className="col-12 col-md-4">Conveyance: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.conveyance, payrollCurrency)}</span></div>
+                          <div className="col-12 col-md-6">Special Allowance: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.specialAllowance, payrollCurrency)}</span></div>
+                          <div className="col-12 col-md-3">Gross Salary: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.grossSalary, payrollCurrency)}</span></div>
+                          <div className="col-12 col-md-3">Net Salary: <span className="fw-semibold">{formatCurrencyAmount(salaryBreakdownPreview.netSalary, payrollCurrency)}</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                {canManagePayroll ? (
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm" disabled={saving}>{editingHistoryId ? "Update" : "Create"}</button>
+                    {editingHistoryId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSalaryHistoryForm}>Cancel</button> : null}
+                  </div>
+                ) : null}
+              </form>
+            </div>
+          </div>
+        </div>
+        <SearchablePaginatedTableCard
+          title="Salary Structure Templates"
+          badgeLabel={`${(workspace.salaryStructures || []).length} items`}
+          rows={workspace.salaryStructures || []}
+          columns={[
+            { key: "name", label: "Template" },
+            { key: "split", label: "Auto Split" },
+            { key: "professionalTax", label: "Professional Tax" },
+            { key: "otherDeduction", label: "Other Deduction" },
+          ]}
+          searchPlaceholder="Search salary structures"
+          noRowsText="No salary structures yet."
+          searchBy={(row) => [row.name, row.notes].join(" ")}
+          renderCells={(row) => [
+            <span className="fw-semibold">{row.name}{row.isDefault ? " (Default)" : ""}</span>,
+            `${parseNumber(row.basicSalaryPercent || 0)}% / ${parseNumber(row.hraPercent || 0)}% / ${formatCurrencyAmount(row.conveyanceFixed || 0, payrollCurrency)}`,
+            formatCurrencyAmount(row.professionalTax, payrollCurrency),
+            formatCurrencyAmount(row.otherDeduction, payrollCurrency),
+          ]}
+          renderActions={(row) => canManagePayroll ? (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSalaryStructure(row)}>Edit</button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSalaryStructure(row.id)}>Delete</button>
+            </div>
+          ) : null}
+        />
+        <SearchablePaginatedTableCard
+          title="Salary History"
+          badgeLabel={`${(workspace.salaryHistory || []).length} items`}
+          rows={workspace.salaryHistory || []}
+          columns={[
+            { key: "employeeName", label: "Employee" },
+            { key: "monthlySalaryAmount", label: "Monthly Salary" },
+            { key: "incrementType", label: "Increment Type" },
+            { key: "incrementValue", label: "Increment Value" },
+            { key: "salaryStructureName", label: "Salary Structure" },
+            { key: "effectiveFrom", label: "Effective From" },
+            { key: "incrementAmount", label: "Increment Amount" },
+            { key: "newSalary", label: "New Salary" },
+          ]}
+          searchPlaceholder="Search salary history"
+          noRowsText="No salary history yet."
+          searchBy={(row) => [row.employeeName, row.salaryStructureName, row.effectiveFrom, row.notes].join(" ")}
+          renderCells={(row) => [
+            <span className="fw-semibold">{row.employeeName || "-"}</span>,
+            formatCurrencyAmount(row.monthlySalaryAmount, payrollCurrency),
+            row.incrementType === "fixed" ? "Fixed Amount" : "Percentage (%)",
+            row.incrementType === "fixed" ? formatCurrencyAmount(row.incrementValue, payrollCurrency) : `${parseNumber(row.incrementValue).toFixed(2)}%`,
+            row.salaryStructureName || salaryStructuresById.get(String(row.salaryStructureId || ""))?.name || "-",
+            row.effectiveFrom || "-",
+            formatCurrencyAmount(row.incrementAmount, payrollCurrency),
+            formatCurrencyAmount(row.newSalary, payrollCurrency),
+          ]}
+          renderActions={(row) => canManagePayroll ? (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSalaryHistory(row)}>Edit</button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSalaryHistory(row.id)}>Delete</button>
+            </div>
+          ) : null}
+        />
+      </div>
+    );
+  }
+
+  if (activeTab === "payslips") {
+    return (
+      <div className="d-flex flex-column gap-3">
+        {saveError ? <div className="small text-danger">{saveError}</div> : null}
+        <SearchablePaginatedTableCard
+          title="Payslips"
+          badgeLabel={`${(workspace.payslips || []).length} items`}
+          rows={workspace.payslips || []}
+          columns={[
+            { key: "slipNumber", label: "Slip Number" },
+            { key: "employeeName", label: "Employee" },
+            { key: "generatedForMonth", label: "Month" },
+            { key: "currency", label: "Currency" },
+            { key: "generatedAt", label: "Generated At" },
+          ]}
+          searchPlaceholder="Search payslips"
+          noRowsText="No payslips generated yet."
+          searchBy={(row) => [row.slipNumber, row.employeeName, row.generatedForMonth, row.currency].join(" ")}
+          renderCells={(row) => [
+            <span className="fw-semibold">{row.slipNumber || "-"}</span>,
+            row.employeeName || "-",
+            monthToLabel(row.generatedForMonth),
+            row.currency || payrollCurrency,
+            row.generatedAt ? new Date(row.generatedAt).toLocaleString() : "-",
+          ]}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={() => downloadPayslipPdf(row.id)}>PDF</button>
+              {canManagePayroll ? <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deletePayslip(row.id)}>Delete</button> : null}
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="d-flex flex-column gap-3">
+      {readOnlyNotice}
+      <div className="row g-3">
+        {payrollStats.map((item) => (
+          <div className="col-12 col-md-4" key={item.label}>
+            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+              <div className="stat-icon stat-icon-primary mb-2">
+                <i className={`bi ${item.icon}`} aria-hidden="true" />
+              </div>
+              <div className="text-secondary small">{item.label}</div>
+              <h5 className="mb-0 mt-1">{item.value}</h5>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="card p-3">
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+          <div>
+            <h6 className="mb-1">Run Payroll</h6>
+            <p className="text-secondary mb-0">Select month, fetch employees, and calculate salary using latest structure + payroll settings.</p>
+          </div>
+          {saveMessage ? <span className="small text-success">{saveMessage}</span> : null}
+        </div>
+        <form className="row g-3 align-items-end" onSubmit={runPayroll}>
+          <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">Month</label>
+            <input type="month" className="form-control" value={payrollRunForm.month || ""} onChange={(e) => setPayrollRunForm((prev) => ({ ...prev, month: e.target.value }))} disabled={!canManagePayroll} />
+          </div>
+          <div className="col-12 col-md-4">
+            <div className="small text-secondary mb-1">Employees Fetched</div>
+            <div className="fw-semibold">{employeeOptions.length}</div>
+          </div>
+          <div className="col-12 col-md-4 d-flex gap-2">
+            {canManagePayroll ? <button type="submit" className="btn btn-success btn-sm" disabled={saving}>Calculate Salary</button> : null}
+            <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setPayrollRunForm(createEmptyPayrollRunForm())}>Reset</button>
+          </div>
+        </form>
+      </div>
+      {saveError ? <div className="small text-danger">{saveError}</div> : null}
+      <SearchablePaginatedTableCard
+        title="Payroll Entries"
+        badgeLabel={`${(workspace.payrollEntries || []).length} items`}
+        rows={workspace.payrollEntries || []}
+        columns={[
+          { key: "employeeName", label: "Employee" },
+          { key: "month", label: "Month" },
+          { key: "grossSalary", label: "Gross" },
+          { key: "totalDeductions", label: "Deductions" },
+          { key: "netSalary", label: "Net Salary" },
+          { key: "status", label: "Status" },
+        ]}
+        searchPlaceholder="Search payroll"
+        noRowsText="No payroll entries yet."
+        searchBy={(row) => [row.employeeName, row.month, row.status, row.salaryStructureName].join(" ")}
+        renderCells={(row) => [
+          <span className="fw-semibold">{row.employeeName || "-"}</span>,
+          monthToLabel(row.month),
+          formatCurrencyAmount(row.grossSalary, row.currency || payrollCurrency),
+          formatCurrencyAmount(row.totalDeductions, row.currency || payrollCurrency),
+          formatCurrencyAmount(row.netSalary, row.currency || payrollCurrency),
+          row.status || "processed",
+        ]}
+        renderActions={(row) => (
+          <div className="d-inline-flex gap-2">
+            {row.slipNumber ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-success"
+                onClick={() => {
+                  const payslip = (workspace.payslips || []).find((item) => String(item.payrollEntryId) === String(row.id));
+                  if (payslip) {
+                    downloadPayslipPdf(payslip.id);
+                  }
+                }}
+              >
+                Payslip
+              </button>
+            ) : null}
+            {canManagePayroll ? <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deletePayrollEntry(row.id)}>Delete</button> : null}
+          </div>
+        )}
+      />
+    </div>
+  );
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
@@ -2633,10 +3989,12 @@ function CrmOnePageModule() {
 }
 
 function ProjectManagementModule() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("projects");
-  const [moduleData, setModuleData] = useState(DEFAULT_PROJECT_DATA);
+  const [moduleData, setModuleData] = useState(() => readProjectWorkspaceData());
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
   const [editingId, setEditingId] = useState("");
+  const [showProjectClientSuggestions, setShowProjectClientSuggestions] = useState(false);
   const [projectClientForm, setProjectClientForm] = useState({
     id: "",
     companyName: "",
@@ -2659,28 +4017,9 @@ function ProjectManagementModule() {
     billingShippingSame: false
   });
   const [editingProjectClientId, setEditingProjectClientId] = useState("");
-  const [projectStatusTab, setProjectStatusTab] = useState("ongoing");
+  const [projectStatusTab, setProjectStatusTab] = useState("all");
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedCrmContacts, setSharedCrmContacts] = useState(() => readSharedCrmContacts());
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (isValidProjectData(parsed)) {
-        setModuleData({
-          ...DEFAULT_PROJECT_DATA,
-          ...parsed,
-          customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-        });
-      }
-    } catch (_error) {
-      // Ignore invalid cached module data.
-    }
-  }, []);
 
   useEffect(() => {
     function syncSharedCustomers() {
@@ -2709,7 +4048,7 @@ function ProjectManagementModule() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(moduleData));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeProjectData(moduleData)));
   }, [moduleData]);
 
   useEffect(() => {
@@ -2719,6 +4058,7 @@ function ProjectManagementModule() {
 
   const config = PROJECT_TAB_CONFIG[activeTab];
   const projectStatusTabs = [
+    { key: "all", label: "All" },
     { key: "ongoing", label: "Ongoing" },
     { key: "new", label: "New" },
     { key: "hold", label: "Hold" },
@@ -2726,7 +4066,9 @@ function ProjectManagementModule() {
   ];
   const rawRows = activeTab === "customers" ? sharedCustomers : (moduleData[activeTab] || []);
   const currentRows = activeTab === "projects"
-    ? rawRows.filter((row) => String(row.status || "").trim().toLowerCase() === projectStatusTab)
+    ? (projectStatusTab === "all"
+        ? rawRows
+        : rawRows.filter((row) => String(row.status || "").trim().toLowerCase() === projectStatusTab))
     : rawRows;
   const projectInlineSubmitTabs = new Set(["projects"]);
   const accountsCustomerOptions = useMemo(
@@ -2772,9 +4114,11 @@ function ProjectManagementModule() {
   const projectStatusCounts = useMemo(
     () =>
       projectStatusTabs.reduce((acc, tab) => {
-        acc[tab.key] = (moduleData.projects || []).filter(
-          (item) => String(item.status || "").trim().toLowerCase() === tab.key
-        ).length;
+        acc[tab.key] = tab.key === "all"
+          ? (moduleData.projects || []).length
+          : (moduleData.projects || []).filter(
+              (item) => String(item.status || "").trim().toLowerCase() === tab.key
+            ).length;
         return acc;
       }, {}),
     [moduleData.projects]
@@ -2912,6 +4256,9 @@ function ProjectManagementModule() {
       }
       return next;
     });
+    if (activeTab === "projects" && fieldKey === "clientCompany") {
+      setShowProjectClientSuggestions(Boolean(String(nextValue || "").trim()));
+    }
   }
 
   function onEditRow(row) {
@@ -2928,14 +4275,31 @@ function ProjectManagementModule() {
       });
     }
     setFormValues(nextValues);
+    setShowProjectClientSuggestions(false);
   }
 
   function onCancelEdit() {
     setEditingId("");
     setFormValues(buildEmptyValues(config.fields));
+    setShowProjectClientSuggestions(false);
   }
 
   function onDeleteRow(rowId) {
+    if (activeTab === "projects") {
+      setModuleData((prev) => {
+        const nextDetails = { ...(prev.projectDetails || {}) };
+        delete nextDetails[rowId];
+        return {
+          ...prev,
+          projects: (prev.projects || []).filter((row) => row.id !== rowId),
+          projectDetails: nextDetails,
+        };
+      });
+      if (editingId === rowId) {
+        onCancelEdit();
+      }
+      return;
+    }
     if (activeTab === "customers") {
       updateSharedCustomers((prev) => prev.filter((row) => row.id !== rowId));
       if (editingId === rowId) {
@@ -2998,12 +4362,26 @@ function ProjectManagementModule() {
           [activeTab]: existing.map((row) => (row.id === editingId ? { ...row, ...payload } : row))
         };
       }
+      const nextId = `${activeTab}_${Date.now()}`;
       return {
         ...prev,
-        [activeTab]: [{ id: `${activeTab}_${Date.now()}`, ...payload }, ...existing]
+        [activeTab]: [{ id: nextId, ...payload }, ...existing],
+        ...(activeTab === "projects"
+          ? {
+              projectDetails: {
+                ...(prev.projectDetails || {}),
+                [nextId]: normalizeProjectDetailRecord({}, nextId),
+              },
+            }
+          : {}),
       };
     });
     onCancelEdit();
+  }
+
+  function selectProjectClientCompany(nextValue) {
+    onChangeField("clientCompany", nextValue);
+    setShowProjectClientSuggestions(false);
   }
 
   return (
@@ -3314,8 +4692,12 @@ function ProjectManagementModule() {
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
+                          onFocus={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
+                          onBlur={() => {
+                            window.setTimeout(() => setShowProjectClientSuggestions(false), 120);
+                          }}
                         />
-                        {(projectCrmContactMatches.length || projectCustomerMatches.length) ? (
+                        {showProjectClientSuggestions && (projectCrmContactMatches.length || projectCustomerMatches.length) ? (
                           <div className="crm-inline-suggestions">
                             {projectCrmContactMatches.length ? (
                               <div className="crm-inline-suggestions__group">
@@ -3325,7 +4707,8 @@ function ProjectManagementModule() {
                                     key={`project-crm-contact-${contact.id || `${contact.name}-${contact.company}`}`}
                                     type="button"
                                     className="crm-inline-suggestions__item"
-                                    onClick={() => onChangeField(field.key, String(contact.company || contact.name || "").trim())}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => selectProjectClientCompany(String(contact.company || contact.name || "").trim())}
                                   >
                                     <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
                                     <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
@@ -3341,7 +4724,8 @@ function ProjectManagementModule() {
                                     key={`project-client-${customer.id}`}
                                     type="button"
                                     className="crm-inline-suggestions__item"
-                                    onClick={() => onChangeField(field.key, String(customer.companyName || customer.name || customer.clientName || "").trim())}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => selectProjectClientCompany(String(customer.companyName || customer.name || customer.clientName || "").trim())}
                                   >
                                     <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
                                     <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
@@ -3456,6 +4840,11 @@ function ProjectManagementModule() {
         }}
         renderActions={(row) => (
           <div className="d-inline-flex gap-2">
+            {activeTab === "projects" ? (
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => navigate(`/business-autopilot/projects/${row.id}`)}>
+                Details
+              </button>
+            ) : null}
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
               Edit
             </button>
@@ -3471,6 +4860,520 @@ function ProjectManagementModule() {
   );
 }
 
+function ProjectDetailPage() {
+  const navigate = useNavigate();
+  const { projectId = "" } = useParams();
+  const [moduleData, setModuleData] = useState(() => readProjectWorkspaceData());
+  const [activeSection, setActiveSection] = useState("overview");
+  const [expenseForm, setExpenseForm] = useState(() => createEmptyProjectExpense());
+  const [editingExpenseId, setEditingExpenseId] = useState("");
+  const [crmTeams, setCrmTeams] = useState(() => readSharedCrmTeams());
+  const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
+  const [erpUsers, setErpUsers] = useState([]);
+  const [customTeamInput, setCustomTeamInput] = useState("");
+  const [customEmployeeInput, setCustomEmployeeInput] = useState("");
+
+  useEffect(() => {
+    setModuleData(readProjectWorkspaceData());
+  }, [projectId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeProjectData(moduleData)));
+  }, [moduleData]);
+
+  useEffect(() => {
+    function syncSharedDirectories() {
+      setCrmTeams(readSharedCrmTeams());
+      setHrEmployees(readSharedHrEmployees());
+    }
+    syncSharedDirectories();
+    window.addEventListener("storage", syncSharedDirectories);
+    window.addEventListener("focus", syncSharedDirectories);
+    return () => {
+      window.removeEventListener("storage", syncSharedDirectories);
+      window.removeEventListener("focus", syncSharedDirectories);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUsers() {
+      try {
+        const data = await apiFetch("/api/business-autopilot/users");
+        if (cancelled) return;
+        setErpUsers(Array.isArray(data?.users) ? data.users : []);
+      } catch (_error) {
+        if (!cancelled) {
+          setErpUsers([]);
+        }
+      }
+    }
+    loadUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const project = useMemo(
+    () => (moduleData.projects || []).find((row) => String(row.id || "") === String(projectId || "")) || null,
+    [moduleData.projects, projectId]
+  );
+
+  const projectDetail = useMemo(
+    () => normalizeProjectDetailRecord(moduleData.projectDetails?.[projectId] || {}, projectId),
+    [moduleData.projectDetails, projectId]
+  );
+
+  const expenseRows = projectDetail.expenses || [];
+  const totalExpenses = useMemo(
+    () => expenseRows.reduce((sum, row) => sum + parseNumber(row.amount), 0),
+    [expenseRows]
+  );
+  const projectValue = parseNumber(projectDetail.projectValue);
+  const utilization = projectDetail.projectValueEnabled && projectValue > 0
+    ? Math.min(100, Math.round((totalExpenses / projectValue) * 100))
+    : 0;
+
+  const teamOptions = useMemo(
+    () => Array.from(new Set([
+      ...crmTeams.map((row) => String(row.name || "").trim()),
+      ...(projectDetail.teams || []),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [crmTeams, projectDetail.teams]
+  );
+
+  const employeeOptions = useMemo(
+    () => Array.from(new Set([
+      ...erpUsers.map((row) => String(row?.name || row?.full_name || row?.username || row?.email || "").trim()),
+      ...hrEmployees.map((row) => String(row?.name || row?.employeeName || "").trim()),
+      ...(projectDetail.employees || []),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [erpUsers, hrEmployees, projectDetail.employees]
+  );
+
+  function updateProjectDetails(updater) {
+    setModuleData((prev) => {
+      const currentDetail = normalizeProjectDetailRecord(prev.projectDetails?.[projectId] || {}, projectId);
+      const nextDetail = normalizeProjectDetailRecord({
+        ...updater(currentDetail),
+        updatedAt: new Date().toISOString(),
+      }, projectId);
+      return {
+        ...prev,
+        projectDetails: {
+          ...(prev.projectDetails || {}),
+          [projectId]: nextDetail,
+        },
+      };
+    });
+  }
+
+  function toggleSelection(key, value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    updateProjectDetails((prev) => {
+      const currentList = Array.isArray(prev[key]) ? prev[key] : [];
+      const nextList = currentList.includes(normalizedValue)
+        ? currentList.filter((item) => item !== normalizedValue)
+        : [...currentList, normalizedValue];
+      return { ...prev, [key]: nextList };
+    });
+  }
+
+  function addCustomSelection(key, value, clearInput) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    updateProjectDetails((prev) => ({
+      ...prev,
+      [key]: Array.from(new Set([...(Array.isArray(prev[key]) ? prev[key] : []), normalizedValue])),
+    }));
+    clearInput("");
+  }
+
+  function saveExpense(event) {
+    event.preventDefault();
+    if (!String(expenseForm.title || "").trim() || parseNumber(expenseForm.amount) <= 0) {
+      return;
+    }
+    updateProjectDetails((prev) => {
+      const normalizedExpense = normalizeProjectExpenseRecord({
+        ...expenseForm,
+        id: editingExpenseId || expenseForm.id || `pex_${Date.now()}`,
+      });
+      const currentExpenses = Array.isArray(prev.expenses) ? prev.expenses : [];
+      return {
+        ...prev,
+        expenses: editingExpenseId
+          ? currentExpenses.map((row) => (row.id === editingExpenseId ? normalizedExpense : row))
+          : [normalizedExpense, ...currentExpenses],
+      };
+    });
+    setEditingExpenseId("");
+    setExpenseForm(createEmptyProjectExpense());
+  }
+
+  function editExpense(row) {
+    setEditingExpenseId(row.id);
+    setActiveSection("expenses");
+    setExpenseForm(normalizeProjectExpenseRecord(row));
+  }
+
+  function deleteExpense(expenseId) {
+    updateProjectDetails((prev) => ({
+      ...prev,
+      expenses: (prev.expenses || []).filter((row) => row.id !== expenseId),
+    }));
+    if (editingExpenseId === expenseId) {
+      setEditingExpenseId("");
+      setExpenseForm(createEmptyProjectExpense());
+    }
+  }
+
+  const summaryCards = [
+    {
+      label: "Project Value",
+      value: projectDetail.projectValueEnabled ? formatInr(projectValue) : "Optional",
+      icon: "bi-cash-stack",
+    },
+    {
+      label: "Project Expenses",
+      value: formatInr(totalExpenses),
+      icon: "bi-receipt-cutoff",
+      targetSection: "expenses",
+    },
+    {
+      label: "Project Teams",
+      value: String((projectDetail.teams || []).length),
+      icon: "bi-diagram-3",
+      targetSection: "resources",
+    },
+    {
+      label: "Project Employees",
+      value: String((projectDetail.employees || []).length),
+      icon: "bi-people",
+      targetSection: "resources",
+    },
+  ];
+
+  if (!project) {
+    return (
+      <div className="card p-4">
+        <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+          <div>
+            <h4 className="mb-1">Project not found</h4>
+            <p className="text-secondary mb-0">This project may have been deleted or is not available in the current workspace.</p>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => navigate("..", { relative: "path" })}>
+            Back to Projects
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="d-flex flex-column gap-3">
+      <div className="card p-3 p-lg-4">
+        <div className="d-flex flex-column flex-xl-row align-items-xl-center justify-content-between gap-3">
+          <div>
+            <div className="d-flex flex-wrap align-items-stretch gap-2 mb-3">
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={() => navigate("..", { relative: "path" })}>
+                <i className="bi bi-arrow-left me-1" />
+                Back to Projects
+              </button>
+              <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "120px" }}>
+                <span className="text-secondary small text-uppercase">Status</span>
+                <span className="fw-semibold">{project.status || "New"}</span>
+              </div>
+              <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "200px" }}>
+                <span className="text-secondary small text-uppercase">Client / Company</span>
+                <span className="fw-semibold">{project.clientCompany || "No client selected"}</span>
+              </div>
+            </div>
+            <h4 className="mb-1">{project.name || "Project Details"}</h4>
+            <p className="text-secondary mb-0">Manage project value, expenses, teams, and employees from one focused workspace.</p>
+          </div>
+          <div className="d-flex flex-wrap gap-2">
+            {[
+              { key: "overview", label: "Overview", icon: "bi-grid" },
+              { key: "expenses", label: "Expenses", icon: "bi-wallet2" },
+              { key: "resources", label: "Resources", icon: "bi-people-fill" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`btn btn-sm ${activeSection === tab.key ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => setActiveSection(tab.key)}
+              >
+                <i className={`bi ${tab.icon} me-1`} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {activeSection === "overview" ? (
+        <>
+          <div className="row g-3">
+            {summaryCards.map((item) => (
+              <div className="col-12 col-sm-6 col-xl-3" key={item.label}>
+                <button
+                  type="button"
+                  className="card p-3 h-100 w-100 d-flex flex-column align-items-center justify-content-center text-center border-0"
+                  onClick={() => {
+                    if (item.targetSection) {
+                      setActiveSection(item.targetSection);
+                    }
+                  }}
+                  style={{ cursor: item.targetSection ? "pointer" : "default" }}
+                >
+                  <div className="stat-icon stat-icon-primary mb-2">
+                    <i className={`bi ${item.icon}`} aria-hidden="true" />
+                  </div>
+                  <div className="text-secondary small">{item.label}</div>
+                  <h5 className="mb-0 mt-1">{item.value}</h5>
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="row g-3">
+            <div className="col-12 col-xl-7">
+            <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <h6 className="mb-0">Project Setup</h6>
+                <span className="text-secondary small">Optional project value with live expense tracking</span>
+              </div>
+              <div className="row g-3">
+                <div className="col-12">
+                  <div className="form-check form-switch">
+                    <input
+                      id="project-value-toggle"
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={Boolean(projectDetail.projectValueEnabled)}
+                      onChange={(event) => updateProjectDetails((prev) => ({
+                        ...prev,
+                        projectValueEnabled: event.target.checked,
+                        projectValue: event.target.checked ? prev.projectValue : "",
+                      }))}
+                    />
+                    <label className="form-check-label" htmlFor="project-value-toggle">Track project value</label>
+                  </div>
+                </div>
+                {projectDetail.projectValueEnabled ? (
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small text-secondary mb-1">Project Value</label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="form-control"
+                      value={projectDetail.projectValue || ""}
+                      placeholder="Enter project value"
+                      onChange={(event) => updateProjectDetails((prev) => ({ ...prev, projectValue: event.target.value }))}
+                    />
+                  </div>
+                ) : null}
+                <div className="col-12">
+                  <label className="form-label small text-secondary mb-1">Project Notes</label>
+                  <textarea
+                    className="form-control"
+                    rows="4"
+                    placeholder="Add project scope, approvals, or delivery notes"
+                    value={projectDetail.notes || ""}
+                    onChange={(event) => updateProjectDetails((prev) => ({ ...prev, notes: event.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+            <div className="col-12 col-xl-5">
+              <div className="card p-3 h-100">
+                <h6 className="mb-3">Financial Snapshot</h6>
+                <div className="d-flex flex-column gap-3">
+                  <div className="border rounded p-3">
+                    <div className="text-secondary small mb-1">Budget Utilization</div>
+                    <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                      <span className="fw-semibold">
+                        {projectDetail.projectValueEnabled ? `${utilization}% used` : "Enable project value to track utilization"}
+                      </span>
+                      {projectDetail.projectValueEnabled ? <span className="small text-secondary">{formatInr(totalExpenses)} / {formatInr(projectValue)}</span> : null}
+                    </div>
+                    <div className="progress" style={{ height: "10px" }}>
+                      <div
+                        className="progress-bar"
+                        role="progressbar"
+                        style={{ width: `${projectDetail.projectValueEnabled ? utilization : 0}%` }}
+                        aria-valuenow={projectDetail.projectValueEnabled ? utilization : 0}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      />
+                    </div>
+                  </div>
+                  <div className="border rounded p-3">
+                    <div className="text-secondary small mb-2">Assigned Teams</div>
+                    <div className="d-flex flex-wrap gap-2">
+                      {(projectDetail.teams || []).length ? (projectDetail.teams || []).map((team) => (
+                        <span key={team} className="badge bg-primary-subtle text-primary-emphasis">{team}</span>
+                      )) : <span className="text-secondary small">No teams assigned yet.</span>}
+                    </div>
+                  </div>
+                  <div className="border rounded p-3">
+                    <div className="text-secondary small mb-2">Assigned Employees</div>
+                    <div className="d-flex flex-wrap gap-2">
+                      {(projectDetail.employees || []).length ? (projectDetail.employees || []).map((employee) => (
+                        <span key={employee} className="badge bg-info-subtle text-info-emphasis">{employee}</span>
+                      )) : <span className="text-secondary small">No employees assigned yet.</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {activeSection === "expenses" ? (
+        <>
+          <div className="card p-3">
+            <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+              <h6 className="mb-0">{editingExpenseId ? "Edit Expense" : "Add Expense"}</h6>
+              <span className="text-secondary small">Every expense updates the top summary instantly.</span>
+            </div>
+            <form className="row g-3" onSubmit={saveExpense}>
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">Expense Title</label>
+                <input className="form-control" value={expenseForm.title || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="Travel, hosting, consultation..." />
+              </div>
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">Category</label>
+                <select className="form-select" value={expenseForm.category || "Operations"} onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}>
+                  {["Operations", "Travel", "Infrastructure", "Consulting", "Salary", "Software", "Other"].map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-2">
+                <label className="form-label small text-secondary mb-1">Amount</label>
+                <input type="number" min="0" className="form-control" value={expenseForm.amount || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, amount: event.target.value }))} placeholder="0" />
+              </div>
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">Date</label>
+                <input type="date" className="form-control" value={expenseForm.date || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, date: event.target.value }))} />
+              </div>
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">Payee / Vendor</label>
+                <input className="form-control" value={expenseForm.payee || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, payee: event.target.value }))} placeholder="Vendor or employee name" />
+              </div>
+              <div className="col-12 col-md-8">
+                <label className="form-label small text-secondary mb-1">Notes</label>
+                <input className="form-control" value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional expense note" />
+              </div>
+              <div className="col-12 d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">{editingExpenseId ? "Update Expense" : "Add Expense"}</button>
+                {editingExpenseId ? (
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => {
+                    setEditingExpenseId("");
+                    setExpenseForm(createEmptyProjectExpense());
+                  }}>
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </div>
+
+          <SearchablePaginatedTableCard
+            title="Project Expenses"
+            badgeLabel={`${expenseRows.length} items`}
+            rows={expenseRows}
+            columns={[
+              { key: "date", label: "Date" },
+              { key: "title", label: "Expense" },
+              { key: "category", label: "Category" },
+              { key: "payee", label: "Payee / Vendor" },
+              { key: "amount", label: "Amount" },
+            ]}
+            searchPlaceholder="Search expenses"
+            noRowsText="No expenses added yet."
+            searchBy={(row) => [row.date, row.title, row.category, row.payee, row.notes, row.amount].join(" ")}
+            renderCells={(row) => [
+              row.date || "-",
+              <span className="fw-semibold">{row.title || "-"}</span>,
+              row.category || "-",
+              row.payee || "-",
+              formatInr(row.amount),
+            ]}
+            renderActions={(row) => (
+              <div className="d-inline-flex gap-2">
+                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editExpense(row)}>Edit</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteExpense(row.id)}>Delete</button>
+              </div>
+            )}
+          />
+        </>
+      ) : null}
+
+      {activeSection === "resources" ? (
+        <div className="row g-3">
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <h6 className="mb-0">Project Teams</h6>
+                <span className="text-secondary small">Select multiple teams or add your own.</span>
+              </div>
+              <div className="d-flex gap-2 mb-3">
+                <input className="form-control" value={customTeamInput} onChange={(event) => setCustomTeamInput(event.target.value)} placeholder="Add custom team" />
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addCustomSelection("teams", customTeamInput, setCustomTeamInput)}>Add</button>
+              </div>
+              <div className="d-flex flex-wrap gap-2">
+                {teamOptions.length ? teamOptions.map((team) => (
+                  <button
+                    key={team}
+                    type="button"
+                    className={`btn btn-sm ${(projectDetail.teams || []).includes(team) ? "btn-success" : "btn-outline-light"}`}
+                    onClick={() => toggleSelection("teams", team)}
+                  >
+                    {team}
+                  </button>
+                )) : <span className="text-secondary small">No team suggestions yet. Add a custom team above.</span>}
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-xl-6">
+            <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <h6 className="mb-0">Project Employees</h6>
+                <span className="text-secondary small">Assign multiple employees to this project.</span>
+              </div>
+              <div className="d-flex gap-2 mb-3">
+                <input className="form-control" value={customEmployeeInput} onChange={(event) => setCustomEmployeeInput(event.target.value)} placeholder="Add custom employee" />
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addCustomSelection("employees", customEmployeeInput, setCustomEmployeeInput)}>Add</button>
+              </div>
+              <div className="d-flex flex-wrap gap-2">
+                {employeeOptions.length ? employeeOptions.map((employee) => (
+                  <button
+                    key={employee}
+                    type="button"
+                    className={`btn btn-sm ${(projectDetail.employees || []).includes(employee) ? "btn-primary" : "btn-outline-light"}`}
+                    onClick={() => toggleSelection("employees", employee)}
+                  >
+                    {employee}
+                  </button>
+                )) : <span className="text-secondary small">No employee suggestions yet. Add a custom employee above.</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function HrManagementModule() {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
@@ -3480,6 +5383,7 @@ function HrManagementModule() {
   });
   const [hrUserDirectory, setHrUserDirectory] = useState([]);
   const [editingId, setEditingId] = useState("");
+  const [hrEmployeeSuggestOpen, setHrEmployeeSuggestOpen] = useState(false);
   const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
   const [attendanceEmployeeSuggestOpen, setAttendanceEmployeeSuggestOpen] = useState(false);
   const [attendanceTaskModal, setAttendanceTaskModal] = useState({
@@ -3520,10 +5424,17 @@ function HrManagementModule() {
   useEffect(() => {
     const applyHashTab = () => {
       const rawHash = String(window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
-      if (rawHash === "attendance") {
-        setActiveTab("attendance");
-      } else if (rawHash === "employees" || rawHash === "leaves" || rawHash === "payroll") {
-        setActiveTab(rawHash);
+      const tabByHash = {
+        employees: "employees",
+        attendance: "attendance",
+        leaves: "leaves",
+        payroll: "payroll",
+        salarystructures: "salaryStructures",
+        payslips: "payslips",
+        payrollsettings: "payrollSettings",
+      };
+      if (tabByHash[rawHash]) {
+        setActiveTab(tabByHash[rawHash]);
       }
     };
     applyHashTab();
@@ -3569,6 +5480,7 @@ function HrManagementModule() {
   }, [activeTab]);
 
   const config = HR_TAB_CONFIG[activeTab];
+  const isPayrollManagementTab = PAYROLL_MANAGEMENT_TABS.has(activeTab);
   const hrTableColumns = useMemo(() => {
     if (activeTab !== "attendance") {
       return config.columns;
@@ -3597,17 +5509,6 @@ function HrManagementModule() {
     () => Array.from(new Set((moduleData.employees || []).map((item) => String(item.name || "").trim()).filter(Boolean))),
     [moduleData.employees]
   );
-  const hrUserNameOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (hrUserDirectory || [])
-            .map((item) => String(item?.name || "").trim())
-            .filter(Boolean)
-        )
-      ),
-    [hrUserDirectory]
-  );
   const hrUserLookupByName = useMemo(() => {
     const map = new Map();
     (hrUserDirectory || []).forEach((item) => {
@@ -3617,6 +5518,24 @@ function HrManagementModule() {
     });
     return map;
   }, [hrUserDirectory]);
+  const hrEmployeeLookupByName = useMemo(() => {
+    const map = new Map();
+    (moduleData.employees || []).forEach((item) => {
+      const key = String(item?.name || "").trim().toLowerCase();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [moduleData.employees]);
+  const hrEmployeeLookupByUserId = useMemo(() => {
+    const map = new Map();
+    (moduleData.employees || []).forEach((item) => {
+      const key = String(item?.sourceUserId || item?.userId || "").trim();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [moduleData.employees]);
   const attendanceEmployeeSuggestions = useMemo(() => {
     if (activeTab !== "attendance") {
       return [];
@@ -3627,6 +5546,18 @@ function HrManagementModule() {
       : employeeNameOptions;
     return filtered.slice(0, 8);
   }, [activeTab, employeeNameOptions, formValues.employee]);
+  const hrEmployeeSuggestions = useMemo(() => {
+    if (activeTab !== "employees") {
+      return [];
+    }
+    const term = String(formValues.name || "").trim().toLowerCase();
+    const rows = (hrUserDirectory || []).filter((item) => {
+      const name = String(item?.name || "").trim();
+      if (!name) return false;
+      return term ? name.toLowerCase().includes(term) : true;
+    });
+    return rows.slice(0, 8);
+  }, [activeTab, formValues.name, hrUserDirectory]);
 
   const attendanceDateMeta = useMemo(() => {
     const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
@@ -3732,8 +5663,129 @@ function HrManagementModule() {
     };
   }
 
+  function buildEmployeeFormValuesFromName(selectedName, previousValues = {}) {
+    const trimmedName = String(selectedName || "").trim();
+    const normalizedName = trimmedName.toLowerCase();
+    const matchedUser = hrUserLookupByName.get(normalizedName) || null;
+    const matchedEmployee = (
+      matchedUser?.id
+        ? hrEmployeeLookupByUserId.get(String(matchedUser.id))
+        : null
+    ) || hrEmployeeLookupByName.get(normalizedName) || null;
+    const nextValues = {
+      ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
+      temporarySameAsPermanent: false,
+      ...previousValues,
+      name: trimmedName,
+    };
+
+    if (matchedUser) {
+      nextValues.name = String(matchedUser.name || trimmedName).trim();
+      nextValues.department = String(matchedUser.department || nextValues.department || "").trim();
+      nextValues.designation = String(matchedUser.employee_role || nextValues.designation || "").trim();
+      nextValues.sourceUserId = String(matchedUser.id || "");
+      nextValues.sourceUserEmail = String(matchedUser.email || "");
+    } else {
+      nextValues.sourceUserId = "";
+      nextValues.sourceUserEmail = "";
+    }
+
+    if (matchedEmployee) {
+      HR_TAB_CONFIG.employees.fields.forEach((field) => {
+        nextValues[field.key] = String(matchedEmployee[field.key] || nextValues[field.key] || "").trim();
+      });
+      nextValues.temporarySameAsPermanent = Boolean(matchedEmployee.temporarySameAsPermanent)
+        || (
+          String(matchedEmployee.temporaryAddress || "").trim() === String(matchedEmployee.permanentAddress || "").trim()
+          && String(matchedEmployee.temporaryCountry || "").trim() === String(matchedEmployee.permanentCountry || "").trim()
+          && String(matchedEmployee.temporaryState || "").trim() === String(matchedEmployee.permanentState || "").trim()
+          && String(matchedEmployee.temporaryCity || "").trim() === String(matchedEmployee.permanentCity || "").trim()
+          && String(matchedEmployee.temporaryPincode || "").trim() === String(matchedEmployee.permanentPincode || "").trim()
+          && Boolean(String(matchedEmployee.permanentAddress || "").trim())
+        );
+      nextValues.sourceUserId = String(
+        matchedUser?.id
+        || matchedEmployee.sourceUserId
+        || matchedEmployee.userId
+        || nextValues.sourceUserId
+        || ""
+      );
+      nextValues.sourceUserEmail = String(
+        matchedUser?.email
+        || matchedEmployee.sourceUserEmail
+        || nextValues.sourceUserEmail
+        || ""
+      );
+    }
+
+    return {
+      nextValues,
+      matchedEmployeeId: matchedEmployee ? String(matchedEmployee.id || "") : "",
+    };
+  }
+
+  function handleHrEmployeePhotoChange(file) {
+    if (!file) {
+      return;
+    }
+    if (!String(file.type || "").startsWith("image/")) {
+      showUploadAlert("Employee photo must be an image file.");
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      showUploadAlert("Employee photo size must be under 1 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      setFormValues((prev) => ({
+        ...prev,
+        photoDataUrl: dataUrl,
+        photoName: file.name || "employee-photo",
+      }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleHrEmployeeDocumentChange(file) {
+    if (!file) {
+      return;
+    }
+    const allowedMimeTypes = [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    const lowerName = String(file.name || "").trim().toLowerCase();
+    const hasAllowedExtension = [".pdf", ".doc", ".docx"].some((ext) => lowerName.endsWith(ext));
+    if (!allowedMimeTypes.includes(String(file.type || "").trim()) && !hasAllowedExtension) {
+      showUploadAlert("Employee document must be PDF or Word file only.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showUploadAlert("Employee document size must be under 5 MB.");
+      return;
+    }
+    setFormValues((prev) => ({
+      ...prev,
+      documentName: file.name || "employee-document",
+      documentMimeType: file.type || "",
+      documentSizeLabel: formatFileSizeLabel(file.size),
+    }));
+  }
+
   function renderHrField(field, className = "col-12 col-md-4") {
     if (!field) {
+      return null;
+    }
+    if (
+      activeTab === "employees"
+      && (
+        field.type === "phoneNumber"
+        || ["photoName", "documentMimeType", "documentSizeLabel"].includes(field.key)
+      )
+    ) {
       return null;
     }
     const condition = field.conditionalOn;
@@ -3790,23 +5842,173 @@ function HrManagementModule() {
             ) : null}
           </div>
         ) : activeTab === "employees" && field.key === "name" ? (
-          <>
+          <div className="crm-inline-suggestions-wrap">
             <input
               type="text"
-              className="form-control datalist-readable-input"
-              list="hr-employee-user-list"
+              className="form-control"
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
-              onChange={(event) => onChangeField(field.key, event.target.value)}
+              onFocus={() => setHrEmployeeSuggestOpen(true)}
+              onBlur={() => window.setTimeout(() => setHrEmployeeSuggestOpen(false), 120)}
+              onChange={(event) => {
+                onChangeField(field.key, event.target.value);
+                setHrEmployeeSuggestOpen(true);
+              }}
             />
-            <datalist id="hr-employee-user-list">
-              {hrUserNameOptions.map((name) => (
-                <option key={`hr-user-name-${name}`} value={name} />
-              ))}
-            </datalist>
-          </>
-        ) : field.type === "select" ? (
+            {hrEmployeeSuggestOpen && hrEmployeeSuggestions.length ? (
+              <div className="crm-inline-suggestions">
+                <div className="crm-inline-suggestions__group">
+                  <div className="crm-inline-suggestions__title">Office Users</div>
+                  {hrEmployeeSuggestions.map((user) => (
+                    <button
+                      key={`hr-user-suggest-${user.id || user.name}`}
+                      type="button"
+                      className="crm-inline-suggestions__item"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        onChangeField(field.key, String(user.name || "").trim());
+                        setHrEmployeeSuggestOpen(false);
+                      }}
+                    >
+                      <span className="crm-inline-suggestions__item-main">{user.name || "-"}</span>
+                      <span className="crm-inline-suggestions__item-sub">
+                        {[user.department, user.employee_role].map((value) => String(value || "").trim()).filter(Boolean).join(" • ") || (user.email || "-")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : activeTab === "employees" && field.type === "phoneCode" ? (
+          <div className="input-group">
+            <PhoneCountryCodePicker
+              value={formValues[field.key] || field.defaultValue || "+91"}
+              onChange={(code) => onChangeField(field.key, code)}
+              options={DIAL_COUNTRY_PICKER_OPTIONS}
+              style={{ maxWidth: "120px" }}
+              ariaLabel={field.label}
+            />
+            <input
+              type="tel"
+              className="form-control hr-phone-input"
+              placeholder={
+                field.key === "secondaryContactCountryCode"
+                  ? employeeFieldMap.get("secondaryContactNumber")?.placeholder || "Secondary mobile number"
+                  : employeeFieldMap.get("contactNumber")?.placeholder || "Primary mobile number"
+              }
+              value={
+                field.key === "secondaryContactCountryCode"
+                  ? (formValues.secondaryContactNumber || "")
+                  : (formValues.contactNumber || "")
+              }
+              onChange={(event) => onChangeField(
+                field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber",
+                event.target.value
+              )}
+            />
+          </div>
+        ) : activeTab === "employees" && field.type === "imageUpload" ? (
+          <div className="d-flex flex-wrap align-items-center gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              className="form-control"
+              onChange={(event) => handleHrEmployeePhotoChange(event.target.files?.[0])}
+            />
+            {formValues.photoDataUrl ? (
+              <>
+                <img
+                  src={formValues.photoDataUrl}
+                  alt="Employee preview"
+                  style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, border: "1px solid var(--bs-border-color)" }}
+                />
+                <span className="small text-secondary text-truncate" style={{ maxWidth: 220 }}>
+                  {formValues.photoName || "employee-photo"}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm"
+                  onClick={() => setFormValues((prev) => ({ ...prev, photoDataUrl: "", photoName: "" }))}
+                >
+                  Remove
+                </button>
+              </>
+            ) : (
+              <span className="small text-secondary">Image only, max 1 MB.</span>
+            )}
+          </div>
+        ) : activeTab === "employees" && field.type === "documentUpload" ? (
+          <div className="d-flex flex-wrap align-items-center gap-2">
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="form-control"
+              onChange={(event) => handleHrEmployeeDocumentChange(event.target.files?.[0])}
+            />
+            {formValues.documentName ? (
+              <>
+                <span className="small text-secondary text-truncate" style={{ maxWidth: 260 }}>
+                  {formValues.documentName}
+                  {formValues.documentSizeLabel ? ` • ${formValues.documentSizeLabel}` : ""}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm"
+                  onClick={() => setFormValues((prev) => ({
+                    ...prev,
+                    documentName: "",
+                    documentMimeType: "",
+                    documentSizeLabel: "",
+                  }))}
+                >
+                  Remove
+                </button>
+              </>
+            ) : (
+              <span className="small text-secondary">PDF / DOC / DOCX only, max 5 MB.</span>
+            )}
+          </div>
+        ) : activeTab === "employees" && field.key.endsWith("Country") ? (
+          <select
+            className="form-select"
+            value={formValues[field.key] || field.defaultValue || "India"}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          >
+            {COUNTRY_OPTIONS.map((country) => (
+              <option key={`hr-${field.key}-${country}`} value={country}>{country}</option>
+            ))}
+          </select>
+        ) : activeTab === "employees" && field.key.endsWith("State") ? (
+          (() => {
+            const countryKey = field.key.replace(/State$/, "Country");
+            const stateOptions = getStateOptionsForCountry(String(formValues[countryKey] || "India"));
+            if (stateOptions.length) {
+              return (
+                <select
+                  className="form-select"
+                  value={formValues[field.key] || ""}
+                  onChange={(event) => onChangeField(field.key, event.target.value)}
+                >
+                  <option value="">Select State</option>
+                  {stateOptions.map((state) => (
+                    <option key={`hr-${field.key}-${state}`} value={state}>{state}</option>
+                  ))}
+                </select>
+              );
+            }
+            return (
+              <input
+                type="text"
+                className="form-control"
+                placeholder={field.placeholder}
+                value={formValues[field.key] || ""}
+                onChange={(event) => onChangeField(field.key, event.target.value)}
+              />
+            );
+          })()
+        ) : activeTab === "employees" && field.type === "phoneNumber" ? null : field.type === "select" ? (
           <select
             className="form-select"
             value={formValues[field.key] || field.defaultValue || ""}
@@ -3839,14 +6041,16 @@ function HrManagementModule() {
   }
 
   function onChangeField(fieldKey, nextValue) {
+    if (activeTab === "employees" && fieldKey === "name") {
+      const { nextValues, matchedEmployeeId } = buildEmployeeFormValuesFromName(nextValue, formValues);
+      setEditingId(matchedEmployeeId);
+      setFormValues(nextValues);
+      return;
+    }
     setFormValues((prev) => {
       const next = { ...prev, [fieldKey]: nextValue };
-      if (activeTab === "employees" && fieldKey === "name") {
-        const matchedUser = hrUserLookupByName.get(String(nextValue || "").trim().toLowerCase());
-        if (matchedUser) {
-          next.department = String(matchedUser.department || next.department || "").trim();
-          next.designation = String(matchedUser.employee_role || next.designation || "").trim();
-        }
+      if (activeTab === "employees" && fieldKey.endsWith("Country")) {
+        next[fieldKey.replace(/Country$/, "State")] = "";
       }
       if (activeTab === "employees" && prev.temporarySameAsPermanent && fieldKey.startsWith("permanent")) {
         return syncTemporaryAddressFromPermanent(next);
@@ -3869,6 +6073,8 @@ function HrManagementModule() {
       nextValues[field.key] = row[field.key] || field.defaultValue || "";
     });
     if (activeTab === "employees") {
+      nextValues.sourceUserId = row.sourceUserId || row.userId || "";
+      nextValues.sourceUserEmail = row.sourceUserEmail || "";
       const temporarySameAsPermanent = Boolean(row.temporarySameAsPermanent)
         || (
           String(row.temporaryAddress || "").trim() === String(row.permanentAddress || "").trim()
@@ -3927,6 +6133,9 @@ function HrManagementModule() {
       payload[field.key] = String(formValues[field.key]).trim();
     });
     if (activeTab === "employees") {
+      const matchedUser = hrUserLookupByName.get(String(payload.name || "").trim().toLowerCase());
+      payload.sourceUserId = String(formValues.sourceUserId || matchedUser?.id || "");
+      payload.sourceUserEmail = String(formValues.sourceUserEmail || matchedUser?.email || "");
       payload.temporarySameAsPermanent = Boolean(formValues.temporarySameAsPermanent);
       if (payload.temporarySameAsPermanent) {
         Object.assign(payload, syncTemporaryAddressFromPermanent(payload));
@@ -4130,7 +6339,11 @@ function HrManagementModule() {
               key={tabKey}
               type="button"
               className={`btn btn-sm ${activeTab === tabKey ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTab(tabKey)}
+              onClick={() => {
+                setActiveTab(tabKey);
+                const nextHash = String(tabKey || "").replace(/[A-Z]/g, (match) => match.toLowerCase());
+                window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${nextHash}`);
+              }}
             >
               {tabValue.label}
             </button>
@@ -4154,6 +6367,10 @@ function HrManagementModule() {
         </div>
       ) : null}
 
+      {isPayrollManagementTab ? (
+        <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
+      ) : (
+        <>
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
@@ -4165,18 +6382,41 @@ function HrManagementModule() {
                   "gender",
                   "department",
                   "designation",
-                  "dateOfJoining",
-                  "dateOfBirth",
-                  "bloodGroup",
-                  "fatherName",
                 ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
               </div>
               <div className="row g-3">
                 {[
+                  "dateOfJoining",
+                  "dateOfBirth",
+                  "bloodGroup",
+                  "fatherName",
                   "motherName",
+                ].map((fieldKey) => renderHrField(
+                  employeeFieldMap.get(fieldKey),
+                  ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
+                    ? "col-12 col-md-6 col-xl-2"
+                    : "col-12 col-md-6 col-xl-3"
+                ))}
+              </div>
+              <div className="row g-3 hr-upload-divider">
+                {[
+                  "photoDataUrl",
+                  "documentName",
+                ].map((fieldKey) => renderHrField(
+                  employeeFieldMap.get(fieldKey),
+                  "col-12 col-xl-6"
+                ))}
+              </div>
+              <div className="row g-3">
+                {[
+                  "contactCountryCode",
+                  "secondaryContactCountryCode",
                   "maritalStatus",
                   "wifeName",
-                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+                ].map((fieldKey) => renderHrField(
+                  employeeFieldMap.get(fieldKey),
+                  "col-12 col-md-6 col-xl-3"
+                ))}
               </div>
               <div className="row g-3">
                 <div className="col-12 col-xl-6">
@@ -4532,6 +6772,8 @@ function HrManagementModule() {
           </div>
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -7625,6 +9867,9 @@ export default function BusinessAutopilotModulePage({ moduleKey = "crm", title }
 
   if (moduleKey === "crm") {
     return <CrmOnePageModule />;
+  }
+  if (moduleKey === "project-details") {
+    return <ProjectDetailPage />;
   }
   if (moduleKey === "projects") {
     return <ProjectManagementModule />;

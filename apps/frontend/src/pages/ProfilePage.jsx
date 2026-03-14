@@ -39,6 +39,25 @@ const WHATSAPP_CLIENT_EVENT_OPTIONS = [
 const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
 const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const COMPANY_PROFILE_CURRENCIES = ["INR", "USD", "EUR", "AED", "SGD", "GBP", "AUD", "CAD"];
+
+function buildEmptyCompanyProfile() {
+  return {
+    company_name: "",
+    address_line1: "",
+    city: "",
+    state: "",
+    postal_code: "",
+    country: "India",
+    gstin: "",
+    currency: "INR",
+    mobile_phone_country: "+91",
+    mobile_phone: "",
+    phone_country: "+91",
+    phone: "",
+    timezone: "UTC",
+  };
+}
 
 function normalizeHexColor(value, fallback = "") {
   const color = String(value || "").trim();
@@ -135,7 +154,7 @@ export default function ProfilePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const requestedTab = String(params.get("tab") || "").trim();
-    const allowedTabs = new Set(["profile", "uiTheme", "backup", "referral", "whatsappApi", "tickets"]);
+    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "tickets"]);
     return allowedTabs.has(requestedTab) ? requestedTab : "profile";
   })();
   const [state, setState] = useState(emptyState);
@@ -156,6 +175,9 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [profileTopTab, setProfileTopTab] = useState(initialProfileTab);
+  const [companyProfileForm, setCompanyProfileForm] = useState(buildEmptyCompanyProfile());
+  const [companyProfileLoading, setCompanyProfileLoading] = useState(true);
+  const [companyProfileError, setCompanyProfileError] = useState("");
   const [ticketForm, setTicketForm] = useState({
     category: "support",
     subject: "",
@@ -257,6 +279,49 @@ export default function ProfilePage() {
       active = false;
     };
   }, [adminPage, tableSearchQuery, currentProductSlug]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCompanyProfile() {
+      setCompanyProfileLoading(true);
+      setCompanyProfileError("");
+      try {
+        const data = await apiFetch("/api/dashboard/billing-profile");
+        if (!active) {
+          return;
+        }
+        setCompanyProfileForm({
+          ...buildEmptyCompanyProfile(),
+          ...(data?.profile || {}),
+          mobile_phone_country: String(data?.profile?.mobile_phone || "").trim().startsWith("+")
+            ? String(data.profile.mobile_phone).trim().split(/\s+/)[0]
+            : "+91",
+          mobile_phone: String(data?.profile?.mobile_phone || "").trim().startsWith("+")
+            ? String(data.profile.mobile_phone).trim().split(/\s+/).slice(1).join(" ")
+            : (data?.profile?.mobile_phone || ""),
+          phone_country: String(data?.profile?.phone || "").trim().startsWith("+")
+            ? String(data.profile.phone).trim().split(/\s+/)[0]
+            : "+91",
+          phone: String(data?.profile?.phone || "").trim().startsWith("+")
+            ? String(data.profile.phone).trim().split(/\s+/).slice(1).join(" ")
+            : (data?.profile?.phone || ""),
+        });
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setCompanyProfileError(error?.message || "Unable to load company profile.");
+      } finally {
+        if (active) {
+          setCompanyProfileLoading(false);
+        }
+      }
+    }
+    loadCompanyProfile();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -466,6 +531,69 @@ export default function ProfilePage() {
         ...prev,
         error: error?.message || "Unable to update password."
       }));
+    }
+  }
+
+  async function handleCompanyProfileSubmit(event) {
+    event.preventDefault();
+    setNotice("");
+    setCompanyProfileError("");
+    try {
+      const response = await apiFetch("/api/dashboard/billing-profile", {
+        method: "POST",
+        body: JSON.stringify({
+          contact_name: user.username || companyProfileForm.company_name || "Org Admin",
+          company_name: companyProfileForm.company_name,
+          email: email || user.email || "",
+          mobile_phone: companyProfileForm.mobile_phone || "",
+          mobile_phone_country: companyProfileForm.mobile_phone_country || "+91",
+          phone: companyProfileForm.phone || "",
+          phone_country: companyProfileForm.phone_country || "+91",
+          address_line1: companyProfileForm.address_line1,
+          city: companyProfileForm.city,
+          state: companyProfileForm.state,
+          postal_code: companyProfileForm.postal_code,
+          country: companyProfileForm.country,
+          gstin: companyProfileForm.gstin,
+          currency: companyProfileForm.currency,
+          timezone: companyProfileForm.timezone,
+        }),
+      });
+      const nextProfile = {
+        ...buildEmptyCompanyProfile(),
+        ...(response?.profile || {}),
+        mobile_phone_country: String(response?.profile?.mobile_phone || "").trim().startsWith("+")
+          ? String(response.profile.mobile_phone).trim().split(/\s+/)[0]
+          : (companyProfileForm.mobile_phone_country || "+91"),
+        mobile_phone: String(response?.profile?.mobile_phone || "").trim().startsWith("+")
+          ? String(response.profile.mobile_phone).trim().split(/\s+/).slice(1).join(" ")
+          : (response?.profile?.mobile_phone || ""),
+        phone_country: String(response?.profile?.phone || "").trim().startsWith("+")
+          ? String(response.profile.phone).trim().split(/\s+/)[0]
+          : (companyProfileForm.phone_country || "+91"),
+        phone: String(response?.profile?.phone || "").trim().startsWith("+")
+          ? String(response.profile.phone).trim().split(/\s+/).slice(1).join(" ")
+          : (response?.profile?.phone || ""),
+      };
+      setCompanyProfileForm(nextProfile);
+      setOrgTimezone(nextProfile.timezone || "UTC");
+      applyOrgTimezone(nextProfile.timezone || "UTC");
+      setState((prev) => ({
+        ...prev,
+        data: prev.data
+          ? {
+              ...prev.data,
+              org: {
+                ...(prev.data.org || {}),
+                name: nextProfile.company_name || prev.data.org?.name || "",
+              },
+              org_timezone: nextProfile.timezone || prev.data.org_timezone || "UTC",
+            }
+          : prev.data,
+      }));
+      setNotice("Company profile updated successfully.");
+    } catch (error) {
+      setCompanyProfileError(error?.message || "Unable to update company profile.");
     }
   }
 
@@ -681,6 +809,13 @@ export default function ProfilePage() {
         </button>
         <button
           type="button"
+          className={`btn btn-sm ${profileTopTab === "companyProfile" ? "btn-primary" : "btn-outline-light"}`}
+          onClick={() => setProfileTopTab("companyProfile")}
+        >
+          Company Profile
+        </button>
+        <button
+          type="button"
           className={`btn btn-sm ${profileTopTab === "uiTheme" ? "btn-primary" : "btn-outline-light"}`}
           onClick={() => setProfileTopTab("uiTheme")}
         >
@@ -718,6 +853,7 @@ export default function ProfilePage() {
 
       {notice ? <div className="alert alert-success">{notice}</div> : null}
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
+      {companyProfileError ? <div className="alert alert-danger">{companyProfileError}</div> : null}
 
       {profileTopTab === "profile" ? (
       <div className="row g-3 mt-1">
@@ -816,6 +952,156 @@ export default function ProfilePage() {
               <button className="btn btn-warning btn-sm">Update Password</button>
             </form>
           </div>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "companyProfile" ? (
+      <div className="mt-3">
+        <div className="card p-3">
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <div>
+              <h5 className="mb-1">Company Profile</h5>
+              <p className="text-secondary mb-0">Manage company identity, address, GST, currency, and timezone for your organization.</p>
+            </div>
+          </div>
+          {companyProfileLoading ? (
+            <div className="text-secondary">Loading company profile...</div>
+          ) : (
+            <form className="d-flex flex-column gap-3" onSubmit={handleCompanyProfileSubmit}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-6">
+                  <label className="form-label">Company Name</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.company_name || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, company_name: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="col-12 col-xl-3">
+                  <label className="form-label">GST</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.gstin || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, gstin: event.target.value.toUpperCase() }))}
+                    placeholder="GSTIN"
+                  />
+                </div>
+                <div className="col-12 col-xl-3">
+                  <label className="form-label">Currency</label>
+                  <select
+                    className="form-select"
+                    value={companyProfileForm.currency || "INR"}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, currency: event.target.value }))}
+                  >
+                    {COMPANY_PROFILE_CURRENCIES.map((currency) => (
+                      <option key={`company-currency-${currency}`} value={currency}>{currency}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-12">
+                  <label className="form-label">Address</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.address_line1 || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, address_line1: event.target.value }))}
+                    placeholder="Company address"
+                    required
+                  />
+                </div>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label">Country</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.country || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, country: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label">State</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.state || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, state: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label">City</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.city || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, city: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label">Pincode</label>
+                  <input
+                    className="form-control"
+                    value={companyProfileForm.postal_code || ""}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, postal_code: event.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Mobile Number</label>
+                  <div className="input-group">
+                    <PhoneCountryCodePicker
+                      value={companyProfileForm.mobile_phone_country || "+91"}
+                      onChange={(code) => setCompanyProfileForm((prev) => ({ ...prev, mobile_phone_country: code }))}
+                      options={phoneCountries}
+                      style={{ maxWidth: "170px" }}
+                      ariaLabel="Company mobile country code"
+                    />
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={companyProfileForm.mobile_phone || ""}
+                      onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, mobile_phone: event.target.value }))}
+                      placeholder="Mobile number"
+                    />
+                  </div>
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Phone Number</label>
+                  <div className="input-group">
+                    <PhoneCountryCodePicker
+                      value={companyProfileForm.phone_country || "+91"}
+                      onChange={(code) => setCompanyProfileForm((prev) => ({ ...prev, phone_country: code }))}
+                      options={phoneCountries}
+                      style={{ maxWidth: "170px" }}
+                      ariaLabel="Company phone country code"
+                    />
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={companyProfileForm.phone || ""}
+                      onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, phone: event.target.value }))}
+                      placeholder="Phone number"
+                    />
+                  </div>
+                </div>
+                <div className="col-12">
+                  <label className="form-label">Timezone</label>
+                  <select
+                    className="form-select"
+                    value={companyProfileForm.timezone || "UTC"}
+                    onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, timezone: event.target.value }))}
+                  >
+                    {tzList.map((tz) => (
+                      <option key={`company-profile-tz-${tz.value}`} value={tz.value}>{tz.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="d-flex gap-2">
+                <button className="btn btn-primary btn-sm" type="submit">Save Company Profile</button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
       ) : null}

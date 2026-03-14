@@ -1121,6 +1121,18 @@ function AppShell({ state, productPrefix, productSlug }) {
             }
           />
           <Route
+            path="/projects/:projectId"
+            element={
+              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects")
+                ? (
+                  <Suspense fallback={<div className="card p-3">Loading project...</div>}>
+                    <BusinessAutopilotModulePage moduleKey="project-details" title="Project Details" />
+                  </Suspense>
+                )
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
             path="/accounts"
             element={
               isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts")
