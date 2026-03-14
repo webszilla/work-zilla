@@ -1041,6 +1041,7 @@ function createEmptySalaryHistoryForm(defaultMonth = "") {
     id: "",
     employeeName: "",
     sourceUserId: "",
+    employeeId: "",
     salaryStructureId: "",
     currentSalary: "",
     monthlySalaryAmount: "",
@@ -1071,6 +1072,7 @@ function createEmptyPayrollWorkspaceState() {
     permissions: {
       can_manage_payroll: false,
       can_view_all_payroll: false,
+      can_view_salary_history: false,
     },
   };
 }
@@ -1083,6 +1085,32 @@ function monthToLabel(value) {
   const [year, monthNumber] = month.split("-");
   const date = new Date(Number(year), Number(monthNumber) - 1, 1);
   return Number.isNaN(date.getTime()) ? month : date.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+function buildPayrollEmployeeCode(sourceUserId) {
+  const numericUserId = Number.parseInt(String(sourceUserId || "").trim(), 10);
+  if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
+    return "";
+  }
+  return `EMP${String(numericUserId).padStart(3, "0")}`;
+}
+
+function buildPayrollEmployeeLabel({ employeeName = "", employeeId = "", sourceUserId = "" } = {}) {
+  const name = String(employeeName || "").trim();
+  const code = String(employeeId || "").trim() || buildPayrollEmployeeCode(sourceUserId);
+  if (name && code) {
+    return `${name} (${code})`;
+  }
+  return name || code;
+}
+
+function formatIsoDateForDisplay(value) {
+  const isoValue = String(value || "").trim();
+  const match = isoValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return isoValue || "-";
+  }
+  return `${match[3]}-${match[2]}-${match[1]}`;
 }
 
 function payrollEmployeeKey(row = {}) {
@@ -1580,6 +1608,21 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   const [payrollRunForm, setPayrollRunForm] = useState(() => createEmptyPayrollRunForm());
   const [editingStructureId, setEditingStructureId] = useState("");
   const [editingHistoryId, setEditingHistoryId] = useState("");
+  const [salaryHistoryEmployeeSearch, setSalaryHistoryEmployeeSearch] = useState("");
+  const [salaryHistoryEmployeeResults, setSalaryHistoryEmployeeResults] = useState([]);
+  const [salaryHistoryEmployeeSearchOpen, setSalaryHistoryEmployeeSearchOpen] = useState(false);
+  const [salaryHistoryEmployeeSearchLoading, setSalaryHistoryEmployeeSearchLoading] = useState(false);
+  const [salaryHistoryEmployeeSearchError, setSalaryHistoryEmployeeSearchError] = useState("");
+  const [salaryHistoryDetailsModal, setSalaryHistoryDetailsModal] = useState({
+    open: false,
+    loading: false,
+    error: "",
+    employeeId: "",
+    employeeCode: "",
+    employeeName: "",
+    rows: [],
+  });
+  const salaryHistoryEmployeeSearchRequestRef = useRef(0);
   const currencyOptions = useMemo(() => getCurrencyCodeOptions(), []);
   const timezoneOptions = useMemo(() => {
     const fallback = ["Asia/Kolkata", "UTC", "Asia/Dubai", "Asia/Singapore", "Europe/London", "Europe/Berlin", "America/New_York", "America/Chicago", "America/Los_Angeles", "Australia/Sydney"];
@@ -1595,6 +1638,8 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   }, []);
 
   const canManagePayroll = Boolean(workspace.permissions?.can_manage_payroll);
+  const canViewSalaryHistory = Boolean(workspace.permissions?.can_view_salary_history);
+  const canEditSalaryHistory = Boolean(canManagePayroll && canViewSalaryHistory);
   const payrollCurrency = String(workspace.organizationProfile?.currency || "INR").trim().toUpperCase() || "INR";
 
   const employeeOptions = useMemo(() => {
@@ -1608,6 +1653,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         map.set(key, {
           name,
           sourceUserId,
+          employeeId: buildPayrollEmployeeCode(sourceUserId),
           department: String(row?.department || "").trim(),
           employeeRole: String(row?.designation || row?.employee_role || "").trim(),
         });
@@ -1622,6 +1668,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         map.set(key, {
           name,
           sourceUserId,
+          employeeId: String(row?.employeeId || "").trim() || buildPayrollEmployeeCode(sourceUserId),
           department: String(row?.department || "").trim(),
           employeeRole: String(row?.employee_role || "").trim(),
         });
@@ -1677,7 +1724,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
           payrollEntries: Array.isArray(data?.payroll_entries) ? data.payroll_entries : [],
           payslips: Array.isArray(data?.payslips) ? data.payslips : [],
           employeeDirectory: Array.isArray(data?.employee_directory) ? data.employee_directory : [],
-          permissions: data?.permissions || { can_manage_payroll: false, can_view_all_payroll: false },
+          permissions: data?.permissions || { can_manage_payroll: false, can_view_all_payroll: false, can_view_salary_history: false },
         };
         setWorkspace(nextWorkspace);
         setOrganizationProfileForm(nextWorkspace.organizationProfile);
@@ -1713,6 +1760,50 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     ));
   }, [defaultSalaryStructure]);
 
+  useEffect(() => {
+    const query = String(salaryHistoryEmployeeSearch || "").trim();
+    if (!canEditSalaryHistory || !salaryHistoryEmployeeSearchOpen) {
+      setSalaryHistoryEmployeeSearchLoading(false);
+      setSalaryHistoryEmployeeSearchError("");
+      setSalaryHistoryEmployeeResults([]);
+      return undefined;
+    }
+    if (!query) {
+      setSalaryHistoryEmployeeSearchLoading(false);
+      setSalaryHistoryEmployeeSearchError("");
+      setSalaryHistoryEmployeeResults([]);
+      return undefined;
+    }
+
+    const requestId = salaryHistoryEmployeeSearchRequestRef.current + 1;
+    salaryHistoryEmployeeSearchRequestRef.current = requestId;
+    const timerId = window.setTimeout(async () => {
+      setSalaryHistoryEmployeeSearchLoading(true);
+      setSalaryHistoryEmployeeSearchError("");
+      try {
+        const data = await apiFetch(`/api/employees/search?q=${encodeURIComponent(query)}`);
+        if (salaryHistoryEmployeeSearchRequestRef.current !== requestId) {
+          return;
+        }
+        setSalaryHistoryEmployeeResults(Array.isArray(data) ? data : []);
+      } catch (error) {
+        if (salaryHistoryEmployeeSearchRequestRef.current !== requestId) {
+          return;
+        }
+        setSalaryHistoryEmployeeResults([]);
+        setSalaryHistoryEmployeeSearchError(error?.message || "Unable to search employees.");
+      } finally {
+        if (salaryHistoryEmployeeSearchRequestRef.current === requestId) {
+          setSalaryHistoryEmployeeSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [canEditSalaryHistory, salaryHistoryEmployeeSearch, salaryHistoryEmployeeSearchOpen]);
+
   async function persistWorkspace(nextWorkspace, successText = "Saved successfully.") {
     setSaving(true);
     setSaveError("");
@@ -1737,7 +1828,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         payrollEntries: Array.isArray(data?.payroll_entries) ? data.payroll_entries : [],
         payslips: Array.isArray(data?.payslips) ? data.payslips : [],
         employeeDirectory: Array.isArray(data?.employee_directory) ? data.employee_directory : [],
-        permissions: data?.permissions || nextWorkspace.permissions,
+        permissions: data?.permissions || nextWorkspace.permissions || { can_manage_payroll: false, can_view_all_payroll: false, can_view_salary_history: false },
       };
       setWorkspace(normalized);
       setOrganizationProfileForm(normalized.organizationProfile);
@@ -1763,6 +1854,10 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       ...createEmptySalaryHistoryForm(payrollRunForm.month),
       salaryStructureId: defaultSalaryStructure?.id ? String(defaultSalaryStructure.id) : "",
     });
+    setSalaryHistoryEmployeeSearch("");
+    setSalaryHistoryEmployeeResults([]);
+    setSalaryHistoryEmployeeSearchOpen(false);
+    setSalaryHistoryEmployeeSearchError("");
   }
 
   async function saveOrganizationProfile(event) {
@@ -1824,8 +1919,12 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
 
   async function saveSalaryHistory(event) {
     event.preventDefault();
-    if (!canManagePayroll) return;
+    if (!canEditSalaryHistory) return;
     if (!String(salaryHistoryForm.employeeName || "").trim() || !String(salaryHistoryForm.salaryStructureId || "").trim()) {
+      return;
+    }
+    if (!String(salaryHistoryForm.sourceUserId || "").trim()) {
+      setSaveError("Select an employee from the auto search results.");
       return;
     }
     const payload = {
@@ -1833,6 +1932,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       id: editingHistoryId || salaryHistoryForm.id || "",
       employeeName: String(salaryHistoryForm.employeeName || "").trim(),
       sourceUserId: salaryHistoryForm.sourceUserId || "",
+      employeeId: String(salaryHistoryForm.employeeId || "").trim() || buildPayrollEmployeeCode(salaryHistoryForm.sourceUserId),
       currentSalary: salaryHistoryForm.currentSalary || salaryHistoryForm.monthlySalaryAmount || "",
       monthlySalaryAmount: salaryHistoryForm.monthlySalaryAmount || "",
       incrementType: salaryHistoryForm.incrementType || "percentage",
@@ -1848,12 +1948,82 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   }
 
   async function deleteSalaryHistory(historyId) {
-    if (!canManagePayroll) return;
+    if (!canEditSalaryHistory) return;
     const nextRows = (workspace.salaryHistory || []).filter((row) => String(row.id) !== String(historyId));
     await persistWorkspace({ ...workspace, salaryHistory: nextRows }, "Salary history deleted.");
     if (String(editingHistoryId) === String(historyId)) {
       resetSalaryHistoryForm();
     }
+  }
+
+  function selectSalaryHistoryEmployee(employee) {
+    const employeeName = String(employee?.name || "").trim();
+    const sourceUserId = String(employee?.id || employee?.sourceUserId || "").trim();
+    const employeeId = String(employee?.employee_id || employee?.employeeId || "").trim() || buildPayrollEmployeeCode(sourceUserId);
+    setSalaryHistoryForm((prev) => ({
+      ...prev,
+      employeeName,
+      sourceUserId,
+      employeeId,
+    }));
+    setSalaryHistoryEmployeeSearch(buildPayrollEmployeeLabel({ employeeName, employeeId, sourceUserId }));
+    setSalaryHistoryEmployeeResults([]);
+    setSalaryHistoryEmployeeSearchOpen(false);
+    setSalaryHistoryEmployeeSearchError("");
+  }
+
+  async function openSalaryHistoryDetails(row) {
+    if (!canViewSalaryHistory) return;
+    const employeeId = String(row?.sourceUserId || "").trim();
+    const fallbackEmployeeName = String(row?.employeeName || "").trim();
+    const fallbackEmployeeCode = String(row?.employeeId || "").trim() || buildPayrollEmployeeCode(employeeId);
+    setSalaryHistoryDetailsModal({
+      open: true,
+      loading: true,
+      error: "",
+      employeeId,
+      employeeCode: fallbackEmployeeCode,
+      employeeName: fallbackEmployeeName,
+      rows: [],
+    });
+    if (!employeeId) {
+      setSalaryHistoryDetailsModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: "Employee ID is missing for this salary record.",
+      }));
+      return;
+    }
+    try {
+      const data = await apiFetch(`/api/hr/employee/${encodeURIComponent(employeeId)}/salary-history/`);
+      setSalaryHistoryDetailsModal({
+        open: true,
+        loading: false,
+        error: "",
+        employeeId: String(data?.employee_id || employeeId),
+        employeeCode: String(data?.employee_code || fallbackEmployeeCode),
+        employeeName: String(data?.employee_name || fallbackEmployeeName),
+        rows: Array.isArray(data?.history) ? data.history : [],
+      });
+    } catch (error) {
+      setSalaryHistoryDetailsModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: error?.message || "Unable to load salary history.",
+      }));
+    }
+  }
+
+  function closeSalaryHistoryDetailsModal() {
+    setSalaryHistoryDetailsModal({
+      open: false,
+      loading: false,
+      error: "",
+      employeeId: "",
+      employeeCode: "",
+      employeeName: "",
+      rows: [],
+    });
   }
 
   async function runPayroll(event) {
@@ -1970,6 +2140,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       id: row.id || "",
       employeeName: row.employeeName || "",
       sourceUserId: row.sourceUserId || "",
+      employeeId: row.employeeId || buildPayrollEmployeeCode(row.sourceUserId),
       salaryStructureId: row.salaryStructureId || "",
       currentSalary: row.currentSalary || row.monthlySalaryAmount || "",
       monthlySalaryAmount: row.monthlySalaryAmount || "",
@@ -1980,6 +2151,14 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       newSalary: row.newSalary || row.monthlySalaryAmount || "",
       notes: row.notes || "",
     });
+    setSalaryHistoryEmployeeSearch(buildPayrollEmployeeLabel({
+      employeeName: row.employeeName || "",
+      employeeId: row.employeeId || buildPayrollEmployeeCode(row.sourceUserId),
+      sourceUserId: row.sourceUserId || "",
+    }));
+    setSalaryHistoryEmployeeResults([]);
+    setSalaryHistoryEmployeeSearchOpen(false);
+    setSalaryHistoryEmployeeSearchError("");
   }
 
   function downloadPayslipPdf(payslipId) {
@@ -1992,6 +2171,9 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
 
   const readOnlyNotice = !canManagePayroll ? (
     <div className="card p-3 text-secondary">Payroll is read-only for this account. You can view your payslips here.</div>
+  ) : null;
+  const salaryHistoryAccessNotice = canManagePayroll && !canViewSalaryHistory ? (
+    <div className="card p-3 text-secondary">Salary history is restricted to Org Admin and HR Manager accounts.</div>
   ) : null;
   const openCompanyProfileSettings = () => {
     const basePath = typeof window !== "undefined"
@@ -2089,6 +2271,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     return (
       <div className="d-flex flex-column gap-3">
         {readOnlyNotice}
+        {salaryHistoryAccessNotice}
         <div className="row g-3">
           <div className="col-12 col-xl-6">
             <div className="card p-3 h-100">
@@ -2157,25 +2340,84 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                 <div className="row g-3">
                   <div className="col-12">
                     <label className="form-label small text-secondary mb-1">Employee</label>
-                    <select className="form-select" value={salaryHistoryForm.sourceUserId || salaryHistoryForm.employeeName || ""} onChange={(e) => {
-                      const selected = employeeOptions.find((row) => String(row.sourceUserId || row.name) === String(e.target.value));
-                      setSalaryHistoryForm((prev) => ({
-                        ...prev,
-                        sourceUserId: selected?.sourceUserId || "",
-                        employeeName: selected?.name || "",
-                      }));
-                    }} disabled={!canManagePayroll}>
-                      <option value="">Select Employee</option>
-                      {employeeOptions.map((employee) => (
-                        <option key={`salary-history-emp-${employee.sourceUserId || employee.name}`} value={employee.sourceUserId || employee.name}>
-                          {employee.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="text"
+                        className="form-control"
+                        autoComplete="off"
+                        placeholder="Search employee name"
+                        value={salaryHistoryEmployeeSearch}
+                        onFocus={() => {
+                          if (canEditSalaryHistory) {
+                            setSalaryHistoryEmployeeSearchOpen(true);
+                          }
+                        }}
+                        onBlur={() => window.setTimeout(() => setSalaryHistoryEmployeeSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setSalaryHistoryEmployeeSearch(nextValue);
+                          setSalaryHistoryEmployeeSearchOpen(true);
+                          setSalaryHistoryEmployeeSearchError("");
+                          setSalaryHistoryForm((prev) => ({
+                            ...prev,
+                            employeeName: nextValue,
+                            sourceUserId: "",
+                            employeeId: "",
+                          }));
+                        }}
+                        disabled={!canEditSalaryHistory}
+                      />
+                      {salaryHistoryEmployeeSearchOpen && String(salaryHistoryEmployeeSearch || "").trim() ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Employees</div>
+                            {salaryHistoryEmployeeSearchLoading ? (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">Searching...</span>
+                              </div>
+                            ) : null}
+                            {!salaryHistoryEmployeeSearchLoading && salaryHistoryEmployeeSearchError ? (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main text-danger">{salaryHistoryEmployeeSearchError}</span>
+                              </div>
+                            ) : null}
+                            {!salaryHistoryEmployeeSearchLoading && !salaryHistoryEmployeeSearchError && !salaryHistoryEmployeeResults.length ? (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No employees found</span>
+                              </div>
+                            ) : null}
+                            {!salaryHistoryEmployeeSearchLoading && !salaryHistoryEmployeeSearchError ? salaryHistoryEmployeeResults.map((employee) => (
+                              <button
+                                key={`salary-history-search-${employee.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  selectSalaryHistoryEmployee(employee);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">
+                                  {String(employee.name || "").trim() || "-"}
+                                </span>
+                              </button>
+                            )) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    {salaryHistoryForm.sourceUserId ? (
+                      <div className="small text-secondary mt-1">
+                        Selected: {buildPayrollEmployeeLabel({
+                          employeeName: salaryHistoryForm.employeeName,
+                          employeeId: salaryHistoryForm.employeeId,
+                          sourceUserId: salaryHistoryForm.sourceUserId,
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="col-12">
                     <label className="form-label small text-secondary mb-1">Salary Structure</label>
-                    <select className="form-select" value={salaryHistoryForm.salaryStructureId || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, salaryStructureId: e.target.value }))} disabled={!canManagePayroll}>
+                    <select className="form-select" value={salaryHistoryForm.salaryStructureId || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, salaryStructureId: e.target.value }))} disabled={!canEditSalaryHistory}>
                       <option value="">Select Salary Structure</option>
                       {(workspace.salaryStructures || []).map((row) => (
                         <option key={`salary-structure-option-${row.id}`} value={row.id}>{row.name}{row.isDefault ? " (Default)" : ""}</option>
@@ -2198,13 +2440,13 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                           newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : nextValue,
                         };
                       })}
-                      disabled={!canManagePayroll}
+                      disabled={!canEditSalaryHistory}
                       placeholder="Enter total monthly salary"
                     />
                   </div>
                   <div className="col-12 col-md-6">
                     <label className="form-label small text-secondary mb-1">Effective From</label>
-                    <input type="date" className="form-control" value={salaryHistoryForm.effectiveFrom || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))} disabled={!canManagePayroll} />
+                    <input type="date" className="form-control" value={salaryHistoryForm.effectiveFrom || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))} disabled={!canEditSalaryHistory} />
                   </div>
                   <div className="col-12 col-md-6">
                     <label className="form-label small text-secondary mb-1">Increment Type</label>
@@ -2221,7 +2463,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                           newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : prev.monthlySalaryAmount,
                         };
                       })}
-                      disabled={!canManagePayroll}
+                      disabled={!canEditSalaryHistory}
                     >
                       <option value="percentage">Percentage (%)</option>
                       <option value="fixed">Fixed Amount</option>
@@ -2242,13 +2484,13 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                           newSalary: preview.newSalary ? preview.newSalary.toFixed(2) : prev.monthlySalaryAmount,
                         };
                       })}
-                      disabled={!canManagePayroll}
+                      disabled={!canEditSalaryHistory}
                       placeholder={salaryHistoryForm.incrementType === "fixed" ? "Enter fixed amount" : "Enter percentage"}
                     />
                   </div>
                   <div className="col-12">
                     <label className="form-label small text-secondary mb-1">Notes</label>
-                    <input className="form-control" value={salaryHistoryForm.notes || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, notes: e.target.value }))} disabled={!canManagePayroll} />
+                    <input className="form-control" value={salaryHistoryForm.notes || ""} onChange={(e) => setSalaryHistoryForm((prev) => ({ ...prev, notes: e.target.value }))} disabled={!canEditSalaryHistory} />
                   </div>
                   <div className="col-12">
                     <div className="border rounded p-3">
@@ -2276,7 +2518,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                     </div>
                   ) : null}
                 </div>
-                {canManagePayroll ? (
+                {canEditSalaryHistory ? (
                   <div className="d-flex gap-2">
                     <button type="submit" className="btn btn-success btn-sm" disabled={saving}>{editingHistoryId ? "Update" : "Create"}</button>
                     {editingHistoryId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSalaryHistoryForm}>Cancel</button> : null}
@@ -2330,22 +2572,113 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
           noRowsText="No salary history yet."
           searchBy={(row) => [row.employeeName, row.salaryStructureName, row.effectiveFrom, row.notes].join(" ")}
           renderCells={(row) => [
-            <span className="fw-semibold">{row.employeeName || "-"}</span>,
+            <span className="fw-semibold">
+              {buildPayrollEmployeeLabel({
+                employeeName: row.employeeName,
+                employeeId: row.employeeId,
+                sourceUserId: row.sourceUserId,
+              }) || "-"}
+            </span>,
             formatCurrencyAmount(row.monthlySalaryAmount, payrollCurrency),
             row.incrementType === "fixed" ? "Fixed Amount" : "Percentage (%)",
             row.incrementType === "fixed" ? formatCurrencyAmount(row.incrementValue, payrollCurrency) : `${parseNumber(row.incrementValue).toFixed(2)}%`,
             row.salaryStructureName || salaryStructuresById.get(String(row.salaryStructureId || ""))?.name || "-",
-            row.effectiveFrom || "-",
+            formatIsoDateForDisplay(row.effectiveFrom),
             formatCurrencyAmount(row.incrementAmount, payrollCurrency),
             formatCurrencyAmount(row.newSalary, payrollCurrency),
           ]}
-          renderActions={(row) => canManagePayroll ? (
+          renderActions={(row) => canViewSalaryHistory ? (
             <div className="d-inline-flex gap-2">
-              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSalaryHistory(row)}>Edit</button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSalaryHistory(row.id)}>Delete</button>
+              {canEditSalaryHistory ? <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSalaryHistory(row)}>Edit</button> : null}
+              {canEditSalaryHistory ? <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSalaryHistory(row.id)}>Delete</button> : null}
+              <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => openSalaryHistoryDetails(row)}>Details</button>
             </div>
           ) : null}
         />
+        {salaryHistoryDetailsModal.open ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+            style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+            onClick={closeSalaryHistoryDetailsModal}
+          >
+            <div
+              className="card p-3"
+              style={{ width: "min(980px, 100%)" }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+                <div>
+                  <h5 className="mb-1">Employee Salary History</h5>
+                  <div className="small text-secondary">
+                    {buildPayrollEmployeeLabel({
+                      employeeName: salaryHistoryDetailsModal.employeeName,
+                      employeeId: salaryHistoryDetailsModal.employeeCode,
+                      sourceUserId: salaryHistoryDetailsModal.employeeId,
+                    }) || "-"} - Salary Increment History
+                  </div>
+                </div>
+                <button type="button" className="btn btn-sm btn-outline-light" onClick={closeSalaryHistoryDetailsModal}>
+                  <i className="bi bi-x-lg" aria-hidden="true" />
+                </button>
+              </div>
+              {salaryHistoryDetailsModal.loading ? (
+                <div className="text-secondary">Loading salary history...</div>
+              ) : salaryHistoryDetailsModal.error ? (
+                <div className="text-danger small">{salaryHistoryDetailsModal.error}</div>
+              ) : (
+                <div className="table-responsive border rounded" style={{ maxHeight: "360px", overflowY: "auto" }}>
+                  <table className="table table-sm align-middle mb-0">
+                    <thead className="table-dark position-sticky top-0">
+                      <tr>
+                        <th>Effective Date</th>
+                        <th>Previous Salary</th>
+                        <th>Increment Type</th>
+                        <th>Increment Value</th>
+                        <th>Increment Amount</th>
+                        <th>New Salary</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salaryHistoryDetailsModal.rows.length ? salaryHistoryDetailsModal.rows.map((historyRow) => {
+                        const incrementValue = parseNumber(historyRow.incrementValue);
+                        const incrementAmount = parseNumber(historyRow.incrementAmount);
+                        const isInitialSalary = incrementValue <= 0 && incrementAmount <= 0;
+                        const incrementValueLabel = Number.isInteger(incrementValue)
+                          ? String(incrementValue)
+                          : incrementValue.toFixed(2);
+                        return (
+                          <tr key={`salary-history-detail-${historyRow.id}`}>
+                            <td>{formatIsoDateForDisplay(historyRow.effectiveDate)}</td>
+                            <td>{formatCurrencyAmount(historyRow.previousSalary, payrollCurrency)}</td>
+                            <td>
+                              {isInitialSalary
+                                ? "-"
+                                : historyRow.incrementType === "fixed"
+                                  ? formatCurrencyAmount(historyRow.incrementValue, payrollCurrency)
+                                  : `${parseNumber(historyRow.incrementValue).toFixed(2)}%`}
+                            </td>
+                            <td>{isInitialSalary ? "-" : incrementValueLabel}</td>
+                            <td>{isInitialSalary ? "-" : formatCurrencyAmount(historyRow.incrementAmount, payrollCurrency)}</td>
+                            <td>{formatCurrencyAmount(historyRow.newSalary, payrollCurrency)}</td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr>
+                          <td colSpan={6} className="text-center text-secondary py-4">No salary increment history found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="mt-3">
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeSalaryHistoryDetailsModal}>Close</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }

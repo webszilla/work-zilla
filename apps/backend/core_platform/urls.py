@@ -27,6 +27,7 @@ from apps.backend.website import views as website_views
 from saas_admin.views_reports import observability_report
 
 from apps.backend.common_auth import api_views as common_auth_api_views
+from apps.backend.business_autopilot import api_views as business_autopilot_api_views
 
 admin.site.site_header = "Work Zilla Administration"
 admin.site.site_title = "Work Zilla Administration"
@@ -100,6 +101,8 @@ urlpatterns = [
     path("api/storage/files/", include("apps.backend.storage.api_urls")),
     path("api/storage/explorer/", include("apps.backend.storage.api_explorer_urls")),
     path("api/business-autopilot/", include("apps.backend.business_autopilot.api_urls")),
+    path("api/employees/search", business_autopilot_api_views.employees_search),
+    path("api/hr/employee/<int:employee_id>/salary-history/", business_autopilot_api_views.employee_salary_history),
     path("api/imposition/", include("apps.backend.imposition.api_urls")),
     path("api/product/", include("apps.backend.imposition.product_api_urls")),
     path("api/whatsapp-automation/", include("apps.backend.modules.whatsapp_automation.api_urls")),

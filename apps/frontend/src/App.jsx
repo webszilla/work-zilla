@@ -110,6 +110,7 @@ const emptyState = {
 const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const THEME_LAST_KEY = "wz_brand_theme";
 const THEME_PREV_KEY = "wz_brand_theme_prev";
+const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
 
 function applyThemeColors(theme) {
   if (typeof document === "undefined") {
@@ -278,6 +279,8 @@ function AppShell({ state, productPrefix, productSlug }) {
   const [autopilotCatalog, setAutopilotCatalog] = useState([]);
   const [autopilotCanManageModules, setAutopilotCanManageModules] = useState(false);
   const [autopilotCanManageUsers, setAutopilotCanManageUsers] = useState(false);
+  const [, setAutopilotModulesLoading] = useState(false);
+  const [autopilotModulesResolved, setAutopilotModulesResolved] = useState(false);
   const [autopilotSavingSlug, setAutopilotSavingSlug] = useState("");
   const [autopilotModuleError, setAutopilotModuleError] = useState("");
   const [theme, setTheme] = useState(() => {
@@ -452,6 +455,9 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("wz_theme", theme);
       window.__WZ_PRODUCT_SLUG__ = productSlug;
+      if (productSlug && productSlug !== "saas-admin") {
+        window.localStorage.setItem(LAST_APP_PRODUCT_KEY, productSlug);
+      }
     }
   }, [theme, productSlug]);
 
@@ -519,9 +525,15 @@ function AppShell({ state, productPrefix, productSlug }) {
           setAutopilotCatalog([]);
           setAutopilotCanManageModules(false);
           setAutopilotCanManageUsers(false);
+          setAutopilotModulesLoading(false);
+          setAutopilotModulesResolved(true);
           setAutopilotModuleError("");
         }
         return;
+      }
+      if (active) {
+        setAutopilotModulesLoading(true);
+        setAutopilotModulesResolved(false);
       }
       try {
         const data = await apiFetch("/api/business-autopilot/modules");
@@ -534,6 +546,8 @@ function AppShell({ state, productPrefix, productSlug }) {
           setAutopilotCanManageModules(Boolean(data.can_manage_modules));
           setAutopilotCanManageUsers(Boolean(data.can_manage_users));
           setAutopilotModuleError("");
+          setAutopilotModulesLoading(false);
+          setAutopilotModulesResolved(true);
         }
       } catch (_error) {
         if (active) {
@@ -542,6 +556,8 @@ function AppShell({ state, productPrefix, productSlug }) {
           setAutopilotCanManageModules(false);
           setAutopilotCanManageUsers(false);
           setAutopilotModuleError("Unable to load modules.");
+          setAutopilotModulesLoading(false);
+          setAutopilotModulesResolved(true);
         }
       }
     }
@@ -716,6 +732,16 @@ function AppShell({ state, productPrefix, productSlug }) {
       return navBase;
     }
     return `${navBase}${path.startsWith("/") ? path : `/${path}`}`;
+  };
+
+  const renderRouteElement = (element, { allowed = true, pending = false } = {}) => {
+    if (pending) {
+      return <div className="card p-3">Loading page...</div>;
+    }
+    if (allowed) {
+      return element;
+    }
+    return <Navigate to={withBase("/")} replace />;
   };
 
   function handleSidebarNavClick() {
@@ -1086,87 +1112,87 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/crm"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "crm")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="crm" title="CRM" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="crm" title="CRM" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "crm"),
+              }
+            )}
           />
           <Route
             path="/hrm"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "hrm")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="hrm" title="HR" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="hrm" title="HR" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "hrm"),
+              }
+            )}
           />
           <Route
             path="/projects"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="projects" title="Project Management" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="projects" title="Project Management" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects"),
+              }
+            )}
           />
           <Route
             path="/projects/:projectId"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading project...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="project-details" title="Project Details" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading project...</div>}>
+                <BusinessAutopilotModulePage moduleKey="project-details" title="Project Details" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects"),
+              }
+            )}
           />
           <Route
             path="/accounts"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts"),
+              }
+            )}
           />
           <Route
             path="/ticketing"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "ticketing")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="ticketing" title="Ticketing System" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="ticketing" title="Ticketing System" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "ticketing"),
+              }
+            )}
           />
           <Route
             path="/stocks"
-            element={
-              isBusinessAutopilot && autopilotModules.some((module) => module.slug === "stocks")
-                ? (
-                  <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                    <BusinessAutopilotModulePage moduleKey="stocks" title="Stocks Management" />
-                  </Suspense>
-                )
-                : <Navigate to={withBase("/")} replace />
-            }
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="stocks" title="Stocks Management" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "stocks"),
+              }
+            )}
           />
           <Route
             path="/files"
@@ -1174,15 +1200,20 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/users"
-            element={
-              productSlug === "storage" && isAdmin
+            element={renderRouteElement(
+              productSlug === "storage"
                 ? <StorageUsersPage />
-                : productSlug === "imposition-software" && isAdmin
+                : productSlug === "imposition-software"
                 ? <ImpositionProductUsersPage />
-                : isBusinessAutopilot && autopilotCanManageUsers
-                ? <BusinessAutopilotUsersPage />
-                : <Navigate to={withBase("/")} replace />
-            }
+                : <BusinessAutopilotUsersPage />,
+              {
+                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                allowed:
+                  (productSlug === "storage" && isAdmin) ||
+                  (productSlug === "imposition-software" && isAdmin) ||
+                  (isBusinessAutopilot && autopilotCanManageUsers),
+              }
+            )}
           />
           <Route
             path="/activity"
@@ -1813,6 +1844,30 @@ export default function App() {
     return routeList.find((route) => pathname === route.prefix || pathname.startsWith(`${route.prefix}/`)) || null;
   }
 
+  function inferProductSlugFromInnerPath(pathname) {
+    const candidate = String(pathname || "").trim();
+    if (!candidate || candidate === "/") {
+      return "";
+    }
+
+    const productSpecificPrefixes = [
+      { slug: "worksuite", prefixes: ["/activity", "/work-activity", "/app-usage", "/app-urls", "/gaming-ott", "/employees", "/screenshots", "/company", "/privacy"] },
+      { slug: "storage", prefixes: ["/files", "/user"] },
+      { slug: "ai-chatbot", prefixes: ["/inbox", "/widgets", "/leads", "/agents", "/history", "/chat-settings"] },
+      { slug: "business-autopilot-erp", prefixes: ["/crm", "/hrm", "/projects", "/accounts", "/ticketing", "/stocks"] },
+      { slug: "whatsapp-automation", prefixes: ["/dashboard/company-profile", "/dashboard/whatsapp-automation", "/dashboard/catalogue", "/dashboard/digital-card", "/media-library"] },
+    ];
+
+    const match = productSpecificPrefixes.find((entry) =>
+      entry.prefixes.some((prefix) => candidate === prefix || candidate.startsWith(`${prefix}/`))
+    );
+    if (match) {
+      return match.slug;
+    }
+
+    return "";
+  }
+
   function getSubscriptionEntry(slug) {
     const normalizedSlug = slug === "worksuite" ? "monitor" : slug;
     const list = state.subscriptions || [];
@@ -1925,6 +1980,22 @@ export default function App() {
     }
 
     const match = getProductRoute(location.pathname);
+    if (!match && location.pathname && location.pathname !== "/" && !isDealer && !isSaasAdminPath) {
+      const inferredProductSlug = inferProductSlugFromInnerPath(location.pathname);
+      const lastProductSlug = typeof window !== "undefined"
+        ? String(window.localStorage.getItem(LAST_APP_PRODUCT_KEY) || window.__WZ_PRODUCT_SLUG__ || "worksuite").trim()
+        : "worksuite";
+      const preferredProductSlug = inferredProductSlug || lastProductSlug;
+      const preferredProductRoute = productRoutes.find((route) => route.slug === preferredProductSlug) || productRoutes[0];
+      if (preferredProductRoute?.prefix) {
+        return (
+          <Navigate
+            to={`${preferredProductRoute.prefix}${location.pathname}${location.search || ""}${location.hash || ""}`}
+            replace
+          />
+        );
+      }
+    }
     if (match?.redirectPrefix && location.pathname.startsWith(match.prefix)) {
       const nextPath = match.redirectPrefix + location.pathname.slice(match.prefix.length);
       return <Navigate to={`${nextPath}${location.search || ""}${location.hash || ""}`} replace />;

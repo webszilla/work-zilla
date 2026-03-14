@@ -6,7 +6,8 @@ import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 
 const defaultForm = {
-  name: "",
+  first_name: "",
+  last_name: "",
   email: "",
   password: "",
   role: "org_user",
@@ -16,7 +17,10 @@ const defaultForm = {
 
 const defaultEditForm = {
   membership_id: "",
-  name: "",
+  first_name: "",
+  last_name: "",
+  email: "",
+  password: "",
   role: "org_user",
   department_id: "",
   employee_role_id: "",
@@ -25,6 +29,7 @@ const defaultEditForm = {
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
+const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: option.value,
   label: option.label,
@@ -50,6 +55,45 @@ const ROLE_ACCESS_SECTIONS = [
   { key: "profile", label: "Profile" },
 ];
 const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "Create/Edit", "Full Access"];
+const USER_DETAIL_FIELDS = [
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "email", label: "Official Email" },
+  { key: "employeeId", label: "Employee ID" },
+  { key: "role", label: "Role" },
+  { key: "department", label: "Department" },
+  { key: "employee_role", label: "Employee Role" },
+  { key: "is_active", label: "Status" },
+];
+const HR_EMPLOYEE_DETAIL_FIELDS = [
+  { key: "name", label: "Employee Name" },
+  { key: "gender", label: "Gender" },
+  { key: "department", label: "Department" },
+  { key: "designation", label: "Employee Role" },
+  { key: "dateOfJoining", label: "Date of Joining" },
+  { key: "dateOfBirth", label: "Date of Birth" },
+  { key: "bloodGroup", label: "Blood Group" },
+  { key: "fatherName", label: "Father Name" },
+  { key: "motherName", label: "Mother Name" },
+  { key: "maritalStatus", label: "Marital Status" },
+  { key: "wifeName", label: "Wife Name" },
+  { key: "contactCountryCode", label: "Contact Country Code" },
+  { key: "contactNumber", label: "Contact Number" },
+  { key: "secondaryContactCountryCode", label: "Secondary Contact Country Code" },
+  { key: "secondaryContactNumber", label: "Secondary Contact Number" },
+  { key: "permanentAddress", label: "Permanent Address" },
+  { key: "permanentCountry", label: "Permanent Country" },
+  { key: "permanentState", label: "Permanent State" },
+  { key: "permanentCity", label: "Permanent City" },
+  { key: "permanentPincode", label: "Permanent Pincode" },
+  { key: "temporaryAddress", label: "Temporary Address" },
+  { key: "temporaryCountry", label: "Temporary Country" },
+  { key: "temporaryState", label: "Temporary State" },
+  { key: "temporaryCity", label: "Temporary City" },
+  { key: "temporaryPincode", label: "Temporary Pincode" },
+  { key: "temporarySameAsPermanent", label: "Temporary Same As Permanent" },
+  { key: "sourceUserEmail", label: "Linked User Email" },
+];
 
 function createDefaultRoleAccessRecord() {
   return {
@@ -280,6 +324,63 @@ function normalizeSpreadsheetRows(rows) {
     );
 }
 
+function readSharedHrEmployees() {
+  try {
+    const raw = window.localStorage.getItem(HR_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.employees) ? parsed.employees : [];
+  } catch {
+    return [];
+  }
+}
+
+function splitDisplayName(value) {
+  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) {
+    return { first_name: "", last_name: "" };
+  }
+  return {
+    first_name: parts[0] || "",
+    last_name: parts.slice(1).join(" "),
+  };
+}
+
+function buildDisplayName(firstName, lastName) {
+  return [String(firstName || "").trim(), String(lastName || "").trim()].filter(Boolean).join(" ").trim();
+}
+
+function findHrEmployeeForUser(user, hrEmployees = []) {
+  const userId = String(user?.id || "").trim();
+  const email = String(user?.email || "").trim().toLowerCase();
+  const firstName = String(user?.first_name || "").trim();
+  const lastName = String(user?.last_name || "").trim();
+  const fullName = buildDisplayName(firstName, lastName) || String(user?.name || "").trim();
+  const normalizedName = fullName.toLowerCase();
+
+  return hrEmployees.find((row) =>
+    String(row?.sourceUserId || row?.userId || "").trim() === userId
+    || (email && String(row?.sourceUserEmail || "").trim().toLowerCase() === email)
+    || (normalizedName && String(row?.name || "").trim().toLowerCase() === normalizedName)
+  ) || null;
+}
+
+function formatDetailValue(key, value) {
+  if (typeof value === "boolean") {
+    if (key === "is_active") {
+      return value ? "Active" : "Inactive";
+    }
+    return value ? "Yes" : "No";
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : "-";
+  }
+  const normalized = String(value || "").trim();
+  return normalized || "-";
+}
+
 export default function BusinessAutopilotUsersPage() {
   const [activeTopTab, setActiveTopTab] = useState("users");
   const [userSearch, setUserSearch] = useState("");
@@ -315,7 +416,9 @@ export default function BusinessAutopilotUsersPage() {
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
   const [clientSearch, setClientSearch] = useState("");
   const [clientPage, setClientPage] = useState(1);
+  const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
+  const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
   const [clientForm, setClientForm] = useState({
     id: "",
     companyName: "",
@@ -339,6 +442,7 @@ export default function BusinessAutopilotUsersPage() {
   });
   const [editingClientId, setEditingClientId] = useState("");
   const clientImportInputRef = useRef(null);
+  const userFormRef = useRef(null);
   const pageSize = 5;
 
   async function loadUsers() {
@@ -364,15 +468,22 @@ export default function BusinessAutopilotUsersPage() {
   function openEdit(user) {
     const matchedRole = employeeRoles.find((role) => role.name === (user.employee_role || ""));
     const matchedDepartment = departments.find((department) => department.name === (user.department || ""));
+    const splitName = splitDisplayName(user.name || "");
     setEditForm({
       membership_id: user.membership_id,
-      name: user.name || "",
+      first_name: String(user.first_name || splitName.first_name || "").trim(),
+      last_name: String(user.last_name || splitName.last_name || "").trim(),
+      email: String(user.email || "").trim(),
+      password: "",
       role: user.role || "org_user",
       department_id: matchedDepartment ? String(matchedDepartment.id) : "",
       employee_role_id: matchedRole ? String(matchedRole.id) : "",
       is_active: Boolean(user.is_active)
     });
     setNotice("");
+    window.requestAnimationFrame(() => {
+      userFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 
   function cancelEdit() {
@@ -390,7 +501,10 @@ export default function BusinessAutopilotUsersPage() {
       const data = await apiFetch(`/api/business-autopilot/users/${editForm.membership_id}`, {
         method: "PUT",
         body: JSON.stringify({
-          name: editForm.name,
+          first_name: editForm.first_name,
+          last_name: editForm.last_name,
+          email: editForm.email,
+          password: editForm.password,
           role: editForm.role,
           department_id: editForm.department_id || null,
           employee_role_id: editForm.employee_role_id || null,
@@ -433,6 +547,14 @@ export default function BusinessAutopilotUsersPage() {
     }
   }
 
+  function openViewUser(user) {
+    setViewUserModal({
+      open: true,
+      user,
+      employee: findHrEmployeeForUser(user, hrEmployees),
+    });
+  }
+
   useEffect(() => {
     loadUsers();
   }, []);
@@ -470,6 +592,19 @@ export default function BusinessAutopilotUsersPage() {
   }, []);
 
   useEffect(() => {
+    function syncHrEmployees() {
+      setHrEmployees(readSharedHrEmployees());
+    }
+    syncHrEmployees();
+    window.addEventListener("storage", syncHrEmployees);
+    window.addEventListener("focus", syncHrEmployees);
+    return () => {
+      window.removeEventListener("storage", syncHrEmployees);
+      window.removeEventListener("focus", syncHrEmployees);
+    };
+  }, []);
+
+  useEffect(() => {
     setUserPage(1);
   }, [userSearch, users.length]);
 
@@ -495,7 +630,10 @@ export default function BusinessAutopilotUsersPage() {
     try {
       const data = await apiFetch("/api/business-autopilot/users", {
         method: "POST",
-        body: JSON.stringify(form)
+        body: JSON.stringify({
+          ...form,
+          name: buildDisplayName(form.first_name, form.last_name),
+        })
       });
       setUsers(data.users || []);
       setEmployeeRoles(data.employee_roles || []);
@@ -694,6 +832,8 @@ export default function BusinessAutopilotUsersPage() {
     return users.filter((user) =>
       [
         user.name,
+        user.first_name,
+        user.last_name,
         user.email,
         user.department,
         user.role,
@@ -751,6 +891,7 @@ export default function BusinessAutopilotUsersPage() {
     });
     return Array.from(unique.values());
   }, [employeeRoles]);
+  const isEditingUser = Boolean(editForm.membership_id);
 
   useEffect(() => {
     if (roleAccessRoleOptions.some((item) => item.key === selectedRoleAccessKey)) {
@@ -1189,6 +1330,7 @@ export default function BusinessAutopilotUsersPage() {
                   </button>
                 </div>
               </form>
+              <hr className="my-3" />
               <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
                 <span className="badge bg-secondary">{filteredEmployeeRoles.length} items</span>
                 <div className="table-search">
@@ -1284,6 +1426,7 @@ export default function BusinessAutopilotUsersPage() {
                   </button>
                 </div>
               </form>
+              <hr className="my-3" />
               <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
                 <span className="badge bg-secondary">{filteredDepartments.length} items</span>
                 <div className="table-search">
@@ -1362,35 +1505,123 @@ export default function BusinessAutopilotUsersPage() {
           </div>
               </div>
 
-              <div>
+              <div className="card p-3">
                 <h6 className="mb-3">Create User</h6>
-                <form className="row g-2" onSubmit={handleCreate}>
-                  <div className="col-12 col-md-2">
-                    <input type="text" className="form-control" placeholder="Full Name" value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} required />
+                <form ref={userFormRef} className="row g-2" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
+                  <div className="col-12 col-xl-2">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="First Name"
+                      value={isEditingUser ? editForm.first_name : form.first_name}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, first_name: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, first_name: value }));
+                      }}
+                      required
+                    />
                   </div>
-                  <div className="col-12 col-md-2">
-                    <input type="email" className="form-control" placeholder="Email" value={form.email} onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))} required />
+                  <div className="col-12 col-xl-2">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Last Name"
+                      value={isEditingUser ? editForm.last_name : form.last_name}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, last_name: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, last_name: value }));
+                      }}
+                    />
                   </div>
-                  <div className="col-12 col-md-2">
-                    <input type="password" className="form-control" placeholder="Password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} minLength={6} required />
+                  <div className="col-12 col-xl-2">
+                    <input
+                      type="email"
+                      className="form-control"
+                      placeholder="Official Email"
+                      value={isEditingUser ? editForm.email : form.email}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, email: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, email: value }));
+                      }}
+                      required
+                    />
                   </div>
-                  <div className="col-12 col-md-2">
-                    <select className="form-select" value={form.department_id} onChange={(event) => setForm((prev) => ({ ...prev, department_id: event.target.value }))}>
+                  <div className="col-12 col-xl-2">
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Password"
+                      value={isEditingUser ? editForm.password : form.password}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, password: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, password: value }));
+                      }}
+                      minLength={6}
+                      required={!isEditingUser}
+                    />
+                  </div>
+                  <div className="col-12 col-xl-1">
+                    <select
+                      className="form-select"
+                      value={isEditingUser ? editForm.department_id : form.department_id}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, department_id: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, department_id: value }));
+                      }}
+                    >
                       <option value="">Department</option>
                       {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                     </select>
                   </div>
-                  <div className="col-12 col-md-2">
-                    <select className="form-select" value={form.employee_role_id} onChange={(event) => setForm((prev) => ({ ...prev, employee_role_id: event.target.value }))}>
+                  <div className="col-12 col-xl-1">
+                    <select
+                      className="form-select"
+                      value={isEditingUser ? editForm.employee_role_id : form.employee_role_id}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (isEditingUser) {
+                          setEditForm((prev) => ({ ...prev, employee_role_id: value }));
+                          return;
+                        }
+                        setForm((prev) => ({ ...prev, employee_role_id: value }));
+                      }}
+                    >
                       <option value="">Employee Role</option>
                       {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                     </select>
                   </div>
-                  <div className="col-12 col-md-2 d-grid">
-                    <button type="submit" className="btn btn-primary" disabled={saving} title="Create User">
-                      {saving ? "Creating..." : "Create"}
+                  <div className="col-12 col-xl-1 d-grid">
+                    <button type="submit" className="btn btn-primary w-100" disabled={isEditingUser ? savingEdit : saving} title={isEditingUser ? "Update User" : "Create User"}>
+                      {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}
                     </button>
                   </div>
+                  {isEditingUser ? (
+                    <div className="col-12 col-xl-1 d-grid">
+                      <button type="button" className="btn btn-outline-light" onClick={cancelEdit}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : null}
                 </form>
               </div>
             </>
@@ -1400,65 +1631,25 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           )}
 
-          {editForm.membership_id ? (
-            <div className="card p-3">
-              <h6 className="mb-3">Edit User</h6>
-              <form className="row g-2" onSubmit={handleUpdateUser}>
-                <div className="col-12 col-md-3">
-                  <input type="text" className="form-control" placeholder="Full Name" value={editForm.name} onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))} required />
-                </div>
-                <div className="col-12 col-md-2">
-                  <select className="form-select" value={editForm.role} onChange={(event) => setEditForm((prev) => ({ ...prev, role: event.target.value }))}>
-                    <option value="org_user">Org User</option>
-                    <option value="hr_view">HR View</option>
-                    <option value="company_admin">Company Admin</option>
-                  </select>
-                </div>
-                <div className="col-12 col-md-2">
-                  <select className="form-select" value={editForm.department_id} onChange={(event) => setEditForm((prev) => ({ ...prev, department_id: event.target.value }))}>
-                    <option value="">Department</option>
-                    {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                  </select>
-                </div>
-                <div className="col-12 col-md-3">
-                  <select className="form-select" value={editForm.employee_role_id} onChange={(event) => setEditForm((prev) => ({ ...prev, employee_role_id: event.target.value }))}>
-                    <option value="">Employee Role</option>
-                    {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                  </select>
-                </div>
-                <div className="col-12 col-md-2">
-                  <select className="form-select" value={editForm.is_active ? "active" : "inactive"} onChange={(event) => setEditForm((prev) => ({ ...prev, is_active: event.target.value === "active" }))}>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-                <div className="col-12 col-md-2 d-flex gap-2">
-                  <button type="submit" className="btn btn-success w-100" disabled={savingEdit}>
-                    {savingEdit ? "Updating..." : "Update"}
-                  </button>
-                  <button type="button" className="btn btn-outline-light" onClick={cancelEdit}>Cancel</button>
-                </div>
-              </form>
-            </div>
-          ) : null}
-
           <div>
-            <h6 className="mb-3">User List</h6>
-            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mb-2">
-              <span className="badge bg-secondary">{filteredUsers.length} items</span>
-              <div className="table-search">
-                <i className="bi bi-search" aria-hidden="true" />
-                <input type="search" className="form-control form-control-sm" placeholder="Search users" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <h6 className="mb-0">User List</h6>
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+                <span className="badge bg-secondary">{filteredUsers.length} items</span>
+                <div className="table-search">
+                  <i className="bi bi-search" aria-hidden="true" />
+                  <input type="search" className="form-control form-control-sm" placeholder="Search users" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
+                </div>
               </div>
             </div>
             <div className="table-responsive">
               <table className="table table-dark table-hover align-middle mb-0">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Email</th>
+                    <th>First Name</th>
+                    <th>Last Name</th>
+                    <th>Official Email</th>
                     <th>Department</th>
-                    <th>Role</th>
                     <th>Employee Role</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -1470,14 +1661,15 @@ export default function BusinessAutopilotUsersPage() {
                   ) : paginatedUsers.length ? (
                     paginatedUsers.map((user) => (
                       <tr key={user.membership_id || user.id}>
-                        <td>{user.name || "-"}</td>
+                        <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
+                        <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                         <td>{user.email || "-"}</td>
                         <td>{user.department || "-"}</td>
-                        <td>{(user.role || "org_user").replace("_", " ")}</td>
                         <td>{user.employee_role || "-"}</td>
                         <td>{user.is_active ? "Active" : "Inactive"}</td>
                         <td>
                           <div className="d-inline-flex gap-2">
+                            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openViewUser(user)}>View</button>
                             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openEdit(user)}>Edit</button>
                             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
                               {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
@@ -1501,6 +1693,75 @@ export default function BusinessAutopilotUsersPage() {
               </div>
             ) : null}
           </div>
+
+          {viewUserModal.open ? (
+            <div className="modal-overlay" onClick={() => setViewUserModal({ open: false, user: null, employee: null })}>
+              <div className="modal-panel" style={{ width: "min(960px, 96vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+                <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                  <div>
+                    <h5 className="mb-1">User Details</h5>
+                    <div className="text-secondary">
+                      {buildDisplayName(viewUserModal.user?.first_name, viewUserModal.user?.last_name) || viewUserModal.user?.name || "User"}
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewUserModal({ open: false, user: null, employee: null })}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="card p-3 mb-3">
+                  <h6 className="mb-3">User List Details</h6>
+                  <div className="row g-3">
+                    {USER_DETAIL_FIELDS.map((field) => (
+                      <div className="col-12 col-md-6 col-xl-3" key={`user-detail-${field.key}`}>
+                        <div className="small text-secondary mb-1">{field.label}</div>
+                        <div>{formatDetailValue(field.key, viewUserModal.user?.[field.key])}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="card p-3">
+                  <h6 className="mb-3">Employee Details</h6>
+                  {viewUserModal.employee ? (
+                    <>
+                      {viewUserModal.employee.photoDataUrl ? (
+                        <div className="mb-3">
+                          <div className="small text-secondary mb-1">Employee Photo</div>
+                          <img
+                            src={viewUserModal.employee.photoDataUrl}
+                            alt={viewUserModal.employee.name || "Employee"}
+                            style={{ width: "96px", height: "96px", objectFit: "cover", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.12)" }}
+                          />
+                        </div>
+                      ) : null}
+
+                      <div className="row g-3">
+                        {HR_EMPLOYEE_DETAIL_FIELDS.map((field) => (
+                          <div className="col-12 col-md-6 col-xl-4" key={`employee-detail-${field.key}`}>
+                            <div className="small text-secondary mb-1">{field.label}</div>
+                            <div>{formatDetailValue(field.key, viewUserModal.employee?.[field.key])}</div>
+                          </div>
+                        ))}
+                        <div className="col-12 col-md-6 col-xl-4">
+                          <div className="small text-secondary mb-1">Employee Document</div>
+                          <div>
+                            {[
+                              viewUserModal.employee.documentName,
+                              viewUserModal.employee.documentSizeLabel,
+                              viewUserModal.employee.documentMimeType
+                            ].filter(Boolean).join(" • ") || "-"}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-secondary">No HR employee profile found for this user.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : activeTopTab === "role-access" ? (
         <div className="card p-3">
