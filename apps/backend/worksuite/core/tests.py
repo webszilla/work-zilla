@@ -1,5 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.test.utils import override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+import os
+import tempfile
 
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
@@ -103,3 +107,38 @@ class ProductAuthorizationMiddlewareTests(TestCase):
         self.assertEqual(len(allowed_payload["subscriptions"]), 1)
         self.assertEqual(allowed_payload["subscriptions"][0]["product_slug"], "ai-chatbot")
         self.assertEqual(allowed_payload["subscriptions"][0]["permission"], "edit")
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="wz-profile-photo-tests-"))
+class UserProfilePhotoCleanupTests(TestCase):
+    def test_replacing_profile_photo_deletes_old_file(self):
+        user = User.objects.create_user(username="photo-user@example.com", email="photo-user@example.com", password="pw123456")
+        profile = UserProfile.objects.create(user=user, role="org_user")
+        first = SimpleUploadedFile("first.jpg", b"first-image-bytes", content_type="image/jpeg")
+        second = SimpleUploadedFile("second.jpg", b"second-image-bytes", content_type="image/jpeg")
+
+        profile.profile_photo = first
+        profile.save()
+        first_path = profile.profile_photo.path
+        self.assertTrue(os.path.exists(first_path))
+
+        profile.profile_photo = second
+        profile.save()
+        second_path = profile.profile_photo.path
+
+        self.assertFalse(os.path.exists(first_path))
+        self.assertTrue(os.path.exists(second_path))
+
+    def test_deleting_user_deletes_profile_photo_file(self):
+        user = User.objects.create_user(username="delete-user@example.com", email="delete-user@example.com", password="pw123456")
+        profile = UserProfile.objects.create(
+            user=user,
+            role="org_user",
+            profile_photo=SimpleUploadedFile("avatar.jpg", b"avatar-bytes", content_type="image/jpeg"),
+        )
+        file_path = profile.profile_photo.path
+        self.assertTrue(os.path.exists(file_path))
+
+        user.delete()
+
+        self.assertFalse(os.path.exists(file_path))

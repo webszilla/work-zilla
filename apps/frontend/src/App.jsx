@@ -111,6 +111,74 @@ const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const THEME_LAST_KEY = "wz_brand_theme";
 const THEME_PREV_KEY = "wz_brand_theme_prev";
 const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
+const BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
+
+function readBusinessAutopilotRoleAccessMap() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getBusinessAutopilotSectionKey(pathname) {
+  const candidate = String(pathname || "").trim();
+  if (!candidate || candidate === "/") return "dashboard";
+  if (candidate === "/notifications-inbox" || candidate.startsWith("/notifications-inbox/")) return "inbox";
+  if (candidate === "/crm" || candidate.startsWith("/crm/")) return "crm";
+  if (candidate === "/hrm" || candidate.startsWith("/hrm/")) return "hr";
+  if (candidate === "/projects" || candidate.startsWith("/projects/")) return "projects";
+  if (candidate === "/accounts" || candidate.startsWith("/accounts/")) return "accounts";
+  if (candidate === "/ticketing" || candidate.startsWith("/ticketing/")) return "ticketing";
+  if (candidate === "/stocks" || candidate.startsWith("/stocks/")) return "stocks";
+  if (candidate === "/users" || candidate.startsWith("/users/")) return "users";
+  if (candidate === "/billing" || candidate.startsWith("/billing/")) return "billing";
+  if (candidate === "/plans" || candidate.startsWith("/plans/")) return "plans";
+  if (candidate === "/profile" || candidate.startsWith("/profile/")) return "profile";
+  return "";
+}
+
+function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employeeRole) {
+  const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
+  const normalizedProfileRole = String(profileRole || "").trim().toLowerCase();
+  const normalizedEmployeeRole = String(employeeRole || "").trim();
+  const keys = [];
+  if (normalizedEmployeeRole) {
+    keys.push(`employee_role:${normalizedEmployeeRole}`);
+  }
+  if (normalizedProfileRole) {
+    keys.push(`system:${normalizedProfileRole}`);
+  }
+  for (const key of keys) {
+    if (safeMap[key] && typeof safeMap[key] === "object") {
+      return safeMap[key];
+    }
+  }
+  return null;
+}
+
+function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
+  if (isAdmin) {
+    return true;
+  }
+  if (!sectionKey) {
+    return false;
+  }
+  const value = String(accessRecord?.sections?.[sectionKey] || "No Access").trim();
+  return value && value !== "No Access";
+}
+
+function hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, profileRole, isAdmin) {
+  if (!isBusinessAutopilot || isAdmin) {
+    return false;
+  }
+  return String(profileRole || "").trim().toLowerCase() === "org_user";
+}
 
 function applyThemeColors(theme) {
   if (typeof document === "undefined") {
@@ -159,6 +227,20 @@ function applyThemeColors(theme) {
   if (accentRgb) {
     root.style.setProperty("--color-accent-rgb", accentRgb);
   }
+}
+
+function BusinessAutopilotAccessDenied({ sectionLabel = "this page" }) {
+  return (
+    <div className="page-center">
+      <div className="panel">
+        <h1>Business Autopilot</h1>
+        <p>Page Access Not Assigned</p>
+        <div className="text-secondary">
+          You do not have access to {sectionLabel}. Contact admin to enable this page for your role.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatWorkspaceText(value, fallback = "Workspace") {
@@ -399,6 +481,8 @@ function AppShell({ state, productPrefix, productSlug }) {
       }
     : location;
   const normalizedPathname = normalizedLocation.pathname || "/";
+  const [autopilotAccessRecord, setAutopilotAccessRecord] = useState(null);
+  const [autopilotAccessResolved, setAutopilotAccessResolved] = useState(false);
 
   function isAllowedPath(pathname, prefixList) {
     return prefixList.some((prefix) => {
@@ -567,6 +651,60 @@ function AppShell({ state, productPrefix, productSlug }) {
     };
   }, [isBusinessAutopilot]);
 
+  useEffect(() => {
+    if (!isBusinessAutopilot || isAdmin) {
+      setAutopilotAccessRecord(null);
+      setAutopilotAccessResolved(true);
+      return () => {};
+    }
+    let active = true;
+    async function loadBusinessAutopilotAccess() {
+      setAutopilotAccessResolved(false);
+      try {
+        const roleAccessMap = readBusinessAutopilotRoleAccessMap();
+        const usersData = await apiFetch("/api/business-autopilot/users");
+        if (!active) {
+          return;
+        }
+        const currentEmail = String(state.user?.email || state.user?.username || "").trim().toLowerCase();
+        const matchedUser = (Array.isArray(usersData?.users) ? usersData.users : []).find(
+          (row) => String(row?.email || "").trim().toLowerCase() === currentEmail
+        );
+        const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
+          roleAccessMap,
+          state.profile?.role,
+          matchedUser?.employee_role || ""
+        );
+        setAutopilotAccessRecord(nextAccessRecord);
+      } catch {
+        if (!active) {
+          return;
+        }
+        setAutopilotAccessRecord(null);
+      } finally {
+        if (active) {
+          setAutopilotAccessResolved(true);
+        }
+      }
+    }
+    loadBusinessAutopilotAccess();
+    const refreshAccess = () => {
+      loadBusinessAutopilotAccess();
+    };
+    window.addEventListener("storage", refreshAccess);
+    window.addEventListener("focus", refreshAccess);
+    return () => {
+      active = false;
+      window.removeEventListener("storage", refreshAccess);
+      window.removeEventListener("focus", refreshAccess);
+    };
+  }, [isAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username]);
+
+  const autopilotCurrentSectionKey = useMemo(
+    () => getBusinessAutopilotSectionKey(normalizedPathname),
+    [normalizedPathname]
+  );
+
   const toggleAutopilotModule = useCallback(async (moduleSlug, enabled) => {
     if (!isBusinessAutopilot || !moduleSlug) {
       return;
@@ -621,12 +759,33 @@ function AppShell({ state, productPrefix, productSlug }) {
       return false;
     }
     if (isBusinessAutopilot && item.moduleKey) {
-      return autopilotModules.some((module) => module.slug === item.moduleKey);
+      if (!autopilotModules.some((module) => module.slug === item.moduleKey)) {
+        return false;
+      }
+    }
+    if (isBusinessAutopilot) {
+      const sectionKey = getBusinessAutopilotSectionKey(item.path);
+      const hasDefaultProfileAccess = sectionKey === "profile"
+        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin);
+      if (
+        sectionKey
+        && !hasDefaultProfileAccess
+        && !hasBusinessAutopilotSectionAccess(autopilotAccessRecord, sectionKey, isAdmin)
+      ) {
+        return false;
+      }
     }
     if (item.saasAdminOnly) {
       return isSaasAdmin;
     }
     if (item.adminOnly) {
+      if (
+        isBusinessAutopilot
+        && item.path === "/profile"
+        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin)
+      ) {
+        return true;
+      }
       return isAdmin;
     }
     if (item.allowAgent && !isAdmin && !isAiChatbotAgent) {
@@ -740,6 +899,12 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     if (allowed) {
       return element;
+    }
+    if (isBusinessAutopilot) {
+      const sectionLabel = autopilotCurrentSectionKey
+        ? autopilotCurrentSectionKey.charAt(0).toUpperCase() + autopilotCurrentSectionKey.slice(1)
+        : "this page";
+      return <BusinessAutopilotAccessDenied sectionLabel={sectionLabel} />;
     }
     return <Navigate to={withBase("/")} replace />;
   };
@@ -1092,18 +1257,25 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <ImpositionProductDashboardPage isAdmin={isAdmin} subscriptions={state.subscriptions} />
                 : productSlug === "business-autopilot-erp"
                 ? (
-                  <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
-                    <BusinessAutopilotDashboardPage
-                      modules={autopilotModules}
-                      catalog={autopilotCatalog}
-                      canManageModules={autopilotCanManageModules}
-                      onToggleModule={toggleAutopilotModule}
-                      savingModuleSlug={autopilotSavingSlug}
-                      moduleError={autopilotModuleError}
-                      productBasePath={basePath}
-                      subscriptions={state.subscriptions}
-                    />
-                  </Suspense>
+                  !autopilotAccessResolved
+                    ? <div className="card p-3">Loading access...</div>
+                    : hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", isAdmin)
+                    ? (
+                      <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
+                        <BusinessAutopilotDashboardPage
+                          modules={autopilotModules}
+                          catalog={autopilotCatalog}
+                          canManageModules={autopilotCanManageModules}
+                          isOrgAdmin={isAdmin}
+                          onToggleModule={toggleAutopilotModule}
+                          savingModuleSlug={autopilotSavingSlug}
+                          moduleError={autopilotModuleError}
+                          productBasePath={basePath}
+                          subscriptions={state.subscriptions}
+                        />
+                      </Suspense>
+                    )
+                    : <BusinessAutopilotAccessDenied sectionLabel="Dashboard" />
                 )
                 : productSlug === "whatsapp-automation"
                 ? <WhatsappAutomationOverviewPage subscriptions={state.subscriptions} />
@@ -1117,8 +1289,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="crm" title="CRM" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "crm"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "crm") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", isAdmin),
               }
             )}
           />
@@ -1129,8 +1304,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="hrm" title="HR" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "hrm"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "hrm") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", isAdmin),
               }
             )}
           />
@@ -1141,8 +1319,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="projects" title="Project Management" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "projects") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", isAdmin),
               }
             )}
           />
@@ -1153,8 +1334,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="project-details" title="Project Details" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "projects"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "projects") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", isAdmin),
               }
             )}
           />
@@ -1165,8 +1349,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "accounts"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "accounts") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", isAdmin),
               }
             )}
           />
@@ -1177,8 +1364,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="ticketing" title="Ticketing System" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "ticketing"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "ticketing") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "ticketing", isAdmin),
               }
             )}
           />
@@ -1189,8 +1379,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 <BusinessAutopilotModulePage moduleKey="stocks" title="Stocks Management" />
               </Suspense>,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
-                allowed: isBusinessAutopilot && autopilotModules.some((module) => module.slug === "stocks"),
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "stocks") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "stocks", isAdmin),
               }
             )}
           />
@@ -1207,11 +1400,13 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <ImpositionProductUsersPage />
                 : <BusinessAutopilotUsersPage />,
               {
-                pending: isBusinessAutopilot && !autopilotModulesResolved,
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   (productSlug === "storage" && isAdmin) ||
                   (productSlug === "imposition-software" && isAdmin) ||
-                  (isBusinessAutopilot && autopilotCanManageUsers),
+                  (isBusinessAutopilot &&
+                    autopilotCanManageUsers &&
+                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "users", isAdmin)),
               }
             )}
           />
@@ -1270,24 +1465,41 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/billing"
             element={
-              isAdmin && !isHrView
+              (isAdmin && !isHrView) ||
+              (isBusinessAutopilot &&
+                autopilotAccessResolved &&
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", isAdmin))
                 ? <BillingPage />
+                : isBusinessAutopilot
+                ? <BusinessAutopilotAccessDenied sectionLabel="Billing" />
                 : <Navigate to={withBase("/")} replace />
             }
           />
           <Route
             path="/plans"
             element={
-              isAdmin && !isHrView
+              (isAdmin && !isHrView) ||
+              (isBusinessAutopilot &&
+                autopilotAccessResolved &&
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "plans", isAdmin))
                 ? <PlansPage />
+                : isBusinessAutopilot
+                ? <BusinessAutopilotAccessDenied sectionLabel="Plans" />
                 : <Navigate to={withBase("/")} replace />
             }
           />
           <Route
             path="/profile"
             element={
-              isAdmin && !isHrView
+              (isAdmin && !isHrView) ||
+              (isBusinessAutopilot
+                && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin)) ||
+              (isBusinessAutopilot &&
+                autopilotAccessResolved &&
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "profile", isAdmin))
                 ? <ProfilePage />
+                : isBusinessAutopilot
+                ? <BusinessAutopilotAccessDenied sectionLabel="Profile" />
                 : <Navigate to={withBase("/")} replace />
             }
           />
@@ -1321,7 +1533,13 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/notifications-inbox"
-            element={!isDealer ? <OrgInboxPage productSlug={productSlug} /> : <Navigate to={withBase("/")} replace />}
+            element={
+              !isDealer && (!isBusinessAutopilot || !autopilotAccessResolved || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "inbox", isAdmin))
+                ? <OrgInboxPage productSlug={productSlug} />
+                : isBusinessAutopilot
+                ? <BusinessAutopilotAccessDenied sectionLabel="Inbox" />
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/org-admin/media-library"

@@ -15,6 +15,14 @@ const emptyState = {
 };
 const PROFILE_WHATSAPP_CONFIG_KEY = "wz_profile_whatsapp_api_config";
 const PROFILE_WHATSAPP_RULES_KEY = "wz_profile_whatsapp_event_rules";
+const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
+const PROFILE_OPENAI_DEFAULT_FORM = {
+  api_key: "",
+  account_email: "",
+  model: "gpt-4o-mini",
+  agent_name: "Work Zilla AI Assistant",
+  enabled: false,
+};
 const WHATSAPP_DEPARTMENTS = ["HR", "Sales", "Accounts", "Support", "Projects", "Operations", "Client"];
 const WHATSAPP_COMPANY_EVENT_OPTIONS = [
   "New Lead Assigned",
@@ -40,6 +48,29 @@ const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
 const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const COMPANY_PROFILE_CURRENCIES = ["INR", "USD", "EUR", "AED", "SGD", "GBP", "AUD", "CAD"];
+const PROFILE_EMPLOYEE_DETAILS_FIELDS = [
+  ["Department", "department"],
+  ["Employee Role", "designation"],
+  ["Gender", "gender"],
+  ["Date of Joining", "dateOfJoining"],
+  ["Date of Birth", "dateOfBirth"],
+  ["Blood Group", "bloodGroup"],
+  ["Father Name", "fatherName"],
+  ["Mother Name", "motherName"],
+  ["Primary Mobile", "contactNumberFull"],
+  ["Secondary Mobile", "secondaryContactNumberFull"],
+  ["Marital Status", "maritalStatus"],
+  ["Permanent Address", "permanentAddress"],
+  ["Permanent Country", "permanentCountry"],
+  ["Permanent State", "permanentState"],
+  ["Permanent City", "permanentCity"],
+  ["Permanent Pincode", "permanentPincode"],
+  ["Temporary Address", "temporaryAddress"],
+  ["Temporary Country", "temporaryCountry"],
+  ["Temporary State", "temporaryState"],
+  ["Temporary City", "temporaryCity"],
+  ["Temporary Pincode", "temporaryPincode"],
+];
 
 function buildEmptyCompanyProfile() {
   return {
@@ -130,6 +161,22 @@ function buildEmptyWhatsappRule(adminName = "") {
   };
 }
 
+function readThemeOverride() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.localStorage.getItem(THEME_OVERRIDE_KEY);
+  if (!raw || raw === "default") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function validateTicketImages(files) {
   const rows = Array.from(files || []);
   if (rows.length > PROFILE_TICKET_MAX_ATTACHMENTS) {
@@ -146,6 +193,76 @@ function validateTicketImages(files) {
   return "";
 }
 
+function splitCombinedPhoneValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { countryCode: "", number: "" };
+  }
+  const parts = raw.split(/\s+/);
+  if (parts[0]?.startsWith("+")) {
+    return {
+      countryCode: parts[0],
+      number: parts.slice(1).join(" ").trim(),
+    };
+  }
+  return { countryCode: "", number: raw };
+}
+
+function readHrEmployeeProfileForUser(user = {}) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(HR_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    const employees = Array.isArray(parsed?.employees) ? parsed.employees : [];
+    const userId = String(user?.id || "").trim();
+    const email = String(user?.email || "").trim().toLowerCase();
+    const fullName = `${String(user?.first_name || "").trim()} ${String(user?.last_name || "").trim()}`.trim().toLowerCase();
+    const matched = employees.find((row) => {
+      const sourceUserId = String(row?.sourceUserId || row?.userId || "").trim();
+      const sourceUserEmail = String(row?.sourceUserEmail || "").trim().toLowerCase();
+      const employeeName = String(row?.name || "").trim().toLowerCase();
+      return (
+        (userId && sourceUserId === userId)
+        || (email && sourceUserEmail === email)
+        || (fullName && employeeName === fullName)
+      );
+    });
+    if (!matched) {
+      return null;
+    }
+    const primaryPhone = [String(matched.contactCountryCode || "").trim(), String(matched.contactNumber || "").trim()].filter(Boolean).join(" ").trim();
+    const secondaryPhone = [String(matched.secondaryContactCountryCode || "").trim(), String(matched.secondaryContactNumber || "").trim()].filter(Boolean).join(" ").trim();
+    return {
+      ...matched,
+      contactNumberFull: primaryPhone || "-",
+      secondaryContactNumberFull: secondaryPhone || "-",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getProfilePhotoFallbackLabel(user = {}) {
+  const fullName = `${String(user?.first_name || "").trim()} ${String(user?.last_name || "").trim()}`.trim();
+  if (fullName) {
+    return fullName.slice(0, 1).toUpperCase();
+  }
+  const username = String(user?.username || "").trim();
+  if (username) {
+    return username.slice(0, 1).toUpperCase();
+  }
+  const email = String(user?.email || "").trim();
+  if (email) {
+    return email.slice(0, 1).toUpperCase();
+  }
+  return "U";
+}
+
 const phoneCountries = PHONE_COUNTRIES;
 export default function ProfilePage() {
   const initialProfileTab = (() => {
@@ -154,7 +271,7 @@ export default function ProfilePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const requestedTab = String(params.get("tab") || "").trim();
-    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "tickets"]);
+    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "openAiApi", "tickets"]);
     return allowedTabs.has(requestedTab) ? requestedTab : "profile";
   })();
   const [state, setState] = useState(emptyState);
@@ -175,6 +292,7 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [profileTopTab, setProfileTopTab] = useState(initialProfileTab);
+  const [orgUserTab, setOrgUserTab] = useState("profile");
   const [companyProfileForm, setCompanyProfileForm] = useState(buildEmptyCompanyProfile());
   const [companyProfileLoading, setCompanyProfileLoading] = useState(true);
   const [companyProfileError, setCompanyProfileError] = useState("");
@@ -203,6 +321,17 @@ export default function ProfilePage() {
   const [editingWhatsappRuleId, setEditingWhatsappRuleId] = useState("");
   const [viewWhatsappRule, setViewWhatsappRule] = useState(null);
   const [whatsappRulesTab, setWhatsappRulesTab] = useState("company");
+  const [openAiState, setOpenAiState] = useState({
+    loading: false,
+    error: "",
+    success: "",
+    data: null,
+    form: { ...PROFILE_OPENAI_DEFAULT_FORM },
+  });
+  const [openAiTestState, setOpenAiTestState] = useState({ loading: false, message: "", ok: null });
+  const [employeeProfile, setEmployeeProfile] = useState(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
+  const [photoUploadState, setPhotoUploadState] = useState({ loading: false, error: "", success: "" });
   const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
   const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
   const currentProductSlug = globalSlug
@@ -217,6 +346,22 @@ export default function ProfilePage() {
       : rawPath.includes("/work-suite") || rawPath.includes("/worksuite") || rawPath.includes("/monitor")
       ? "worksuite"
       : "");
+
+  useEffect(() => {
+    const overrideTheme = readThemeOverride();
+    if (!overrideTheme) {
+      return;
+    }
+    if (overrideTheme.primary) {
+      setThemePrimary(normalizeHexColor(overrideTheme.primary, "#e11d48"));
+    }
+    if (overrideTheme.secondary) {
+      setThemeSecondary(normalizeHexColor(overrideTheme.secondary, "#f59e0b"));
+    }
+    if (overrideTheme.sidebarMenuStyle) {
+      setSidebarMenuStyle(overrideTheme.sidebarMenuStyle === "compact" ? "compact" : "default");
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -248,6 +393,7 @@ export default function ProfilePage() {
         setEmail(data.user?.email || "");
         setPhoneCountry(data.phone_country || "+91");
         setPhoneNumber(data.phone_number || "");
+        setProfilePhotoUrl(data.user?.profile_photo_url || "");
         const timezone = data.org_timezone || "UTC";
         setOrgTimezone(timezone);
         applyOrgTimezone(timezone);
@@ -510,6 +656,45 @@ export default function ProfilePage() {
     }
   }
 
+  function handlePersonalThemeSubmit(event) {
+    event.preventDefault();
+    setNotice("");
+    const nextTheme = {
+      primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+      secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+      sidebarMenuStyle: sidebarMenuStyle === "compact" ? "compact" : "default",
+    };
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THEME_OVERRIDE_KEY, JSON.stringify(nextTheme));
+      window.dispatchEvent(
+        new CustomEvent("wz:sidebar-menu-style-change", {
+          detail: { style: nextTheme.sidebarMenuStyle }
+        })
+      );
+    }
+    applyOrgThemePreview({
+      primary: nextTheme.primary,
+      secondary: nextTheme.secondary,
+    });
+    setNotice("Your personal theme settings were saved.");
+  }
+
+  function handleResetPersonalTheme() {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THEME_OVERRIDE_KEY, "default");
+      window.dispatchEvent(
+        new CustomEvent("wz:sidebar-menu-style-change", {
+          detail: { style: "default" }
+        })
+      );
+    }
+    setThemePrimary(themeDefaults.primary);
+    setThemeSecondary(themeDefaults.secondary);
+    setSidebarMenuStyle("default");
+    applyOrgThemePreview(null);
+    setNotice("Your personal theme settings were reset.");
+  }
+
   async function handlePasswordSubmit(event) {
     event.preventDefault();
     setNotice("");
@@ -531,6 +716,104 @@ export default function ProfilePage() {
         ...prev,
         error: error?.message || "Unable to update password."
       }));
+    }
+  }
+
+  async function handleProfilePhotoChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    setPhotoUploadState({ loading: true, error: "", success: "" });
+    try {
+      const formData = new FormData();
+      formData.set("photo", file);
+      const response = await apiFetch("/api/dashboard/profile/photo", {
+        method: "POST",
+        body: formData,
+      });
+      setProfilePhotoUrl(response?.profile_photo_url || "");
+      setState((prev) => ({
+        ...prev,
+        data: prev.data
+          ? {
+              ...prev.data,
+              user: {
+                ...(prev.data.user || {}),
+                profile_photo_url: response?.profile_photo_url || "",
+              },
+              profile: {
+                ...(prev.data.profile || {}),
+                profile_photo_url: response?.profile_photo_url || "",
+              },
+            }
+          : prev.data,
+      }));
+      setPhotoUploadState({ loading: false, error: "", success: "Profile photo updated successfully." });
+    } catch (error) {
+      setPhotoUploadState({ loading: false, error: error?.message || "Unable to upload profile photo.", success: "" });
+    }
+  }
+
+  async function handleSaveOpenAiSettings(event) {
+    event.preventDefault();
+    setOpenAiState((prev) => ({ ...prev, loading: true, error: "", success: "" }));
+    try {
+      const response = await apiFetch("/api/business-autopilot/openai/settings", {
+        method: "POST",
+        body: JSON.stringify({
+          api_key: openAiState.form.api_key,
+          account_email: openAiState.form.account_email,
+          model: openAiState.form.model,
+          enabled: Boolean(openAiState.form.enabled),
+        }),
+      });
+      setOpenAiState((prev) => ({
+        ...prev,
+        loading: false,
+        error: "",
+        success: "Open AI settings saved successfully.",
+        data: response,
+        form: {
+          ...prev.form,
+          api_key: "",
+          account_email: response?.account_email || "",
+          model: response?.model || prev.form.model,
+          agent_name: response?.agent_name || prev.form.agent_name,
+          enabled: Boolean(response?.enabled),
+        },
+      }));
+    } catch (error) {
+      setOpenAiState((prev) => ({
+        ...prev,
+        loading: false,
+        error: error?.message || "Unable to save Open AI settings.",
+      }));
+    }
+  }
+
+  async function handleTestOpenAiConnection() {
+    setOpenAiTestState({ loading: true, message: "", ok: null });
+    try {
+      const response = await apiFetch("/api/business-autopilot/openai/test", {
+        method: "POST",
+        body: JSON.stringify({
+          api_key: openAiState.form.api_key,
+          model: openAiState.form.model,
+        }),
+      });
+      setOpenAiTestState({
+        loading: false,
+        message: `Connection OK (${response?.model || openAiState.form.model})`,
+        ok: true,
+      });
+    } catch (error) {
+      setOpenAiTestState({
+        loading: false,
+        message: error?.message || "Connection failed.",
+        ok: false,
+      });
     }
   }
 
@@ -655,7 +938,12 @@ export default function ProfilePage() {
 
   const data = state.data || {};
   const user = data.user || {};
+  const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
+  const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
+  const isBusinessAutopilotOrgAdmin = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "company_admin";
   const recentActions = data.recent_actions || [];
+  const profilePhoneDisplay = `${phoneCountry || ""} ${phoneNumber || ""}`.trim();
+  const profilePhotoFallback = getProfilePhotoFallbackLabel(user);
   const referral = data.referral || {};
   const referralEarnings = Array.isArray(referral.earnings) ? referral.earnings : [];
   const tzList = TIMEZONE_OPTIONS.some((item) => item.value === orgTimezone)
@@ -694,6 +982,23 @@ export default function ProfilePage() {
   }, [whatsappEventRules, whatsappRulesTab]);
 
   useEffect(() => {
+    if (!isBusinessAutopilotOrgUser) {
+      setEmployeeProfile(null);
+      return undefined;
+    }
+    const syncEmployeeProfile = () => {
+      setEmployeeProfile(readHrEmployeeProfileForUser(data.user || {}));
+    };
+    syncEmployeeProfile();
+    window.addEventListener("storage", syncEmployeeProfile);
+    window.addEventListener("focus", syncEmployeeProfile);
+    return () => {
+      window.removeEventListener("storage", syncEmployeeProfile);
+      window.removeEventListener("focus", syncEmployeeProfile);
+    };
+  }, [data.user, isBusinessAutopilotOrgUser]);
+
+  useEffect(() => {
     setWhatsappRuleForm((prev) => {
       if (prev.assignedOrgAdmin) {
         return prev;
@@ -704,6 +1009,48 @@ export default function ProfilePage() {
       };
     });
   }, [orgAdminAssigneeOptions]);
+
+  useEffect(() => {
+    if (!isBusinessAutopilotOrgAdmin) {
+      return undefined;
+    }
+    let active = true;
+    async function loadOpenAiSettings() {
+      setOpenAiState((prev) => ({ ...prev, loading: true, error: "", success: "" }));
+      try {
+        const response = await apiFetch("/api/business-autopilot/openai/settings");
+        if (!active) {
+          return;
+        }
+        setOpenAiState({
+          loading: false,
+          error: "",
+          success: "",
+          data: response,
+          form: {
+            api_key: "",
+            account_email: response?.account_email || "",
+            model: response?.model || "gpt-4o-mini",
+            agent_name: response?.agent_name || "Work Zilla AI Assistant",
+            enabled: Boolean(response?.enabled),
+          },
+        });
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setOpenAiState((prev) => ({
+          ...prev,
+          loading: false,
+          error: error?.message || "Unable to load Open AI settings.",
+        }));
+      }
+    }
+    loadOpenAiSettings();
+    return () => {
+      active = false;
+    };
+  }, [isBusinessAutopilotOrgAdmin]);
 
   if (state.loading) {
     return (
@@ -799,63 +1146,296 @@ export default function ProfilePage() {
     <div className="wz-profile-workspace">
       <h2 className="page-title">Profile</h2>
       <hr className="section-divider" />
-      <div className="d-flex flex-wrap gap-2 mb-3">
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "profile" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("profile")}
-        >
-          Profile
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "companyProfile" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("companyProfile")}
-        >
-          Company Profile
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "uiTheme" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("uiTheme")}
-        >
-          UI Theme
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "backup" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("backup")}
-        >
-          Backup
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "referral" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("referral")}
-        >
-          Referral Program
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "whatsappApi" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("whatsappApi")}
-        >
-          WhatsApp API
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${profileTopTab === "tickets" ? "btn-primary" : "btn-outline-light"}`}
-          onClick={() => setProfileTopTab("tickets")}
-        >
-          Create Ticket
-        </button>
-      </div>
+      {!isBusinessAutopilotOrgUser ? (
+        <div className="d-flex flex-wrap gap-2 mb-3">
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "profile" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("profile")}
+          >
+            Profile
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "companyProfile" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("companyProfile")}
+          >
+            Company Profile
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "uiTheme" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("uiTheme")}
+          >
+            UI Theme
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "backup" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("backup")}
+          >
+            Backup
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "referral" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("referral")}
+          >
+            Referral Program
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "whatsappApi" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("whatsappApi")}
+          >
+            WhatsApp API
+          </button>
+          {isBusinessAutopilotOrgAdmin ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${profileTopTab === "openAiApi" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setProfileTopTab("openAiApi")}
+            >
+              Open AI API
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={`btn btn-sm ${profileTopTab === "tickets" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setProfileTopTab("tickets")}
+          >
+            Create Ticket
+          </button>
+        </div>
+      ) : null}
 
       {notice ? <div className="alert alert-success">{notice}</div> : null}
       {state.error ? <div className="alert alert-danger">{state.error}</div> : null}
       {companyProfileError ? <div className="alert alert-danger">{companyProfileError}</div> : null}
 
-      {profileTopTab === "profile" ? (
+      {isBusinessAutopilotOrgUser ? (
+        <div className="row g-3 mt-1">
+          <div className="col-12 col-xl-5">
+            <div className="d-flex flex-column gap-3 h-100">
+              <div className="card p-3">
+                <div className="wz-profile-photo-card">
+                  <div className="wz-profile-photo-card__preview">
+                    {profilePhotoUrl ? (
+                      <img src={profilePhotoUrl} alt="Profile" className="wz-profile-photo-card__image" />
+                    ) : (
+                      <div className="wz-profile-photo-card__fallback">{profilePhotoFallback}</div>
+                    )}
+                  </div>
+                  <div className="wz-profile-photo-card__body">
+                    <h5 className="mb-1">Profile Photo</h5>
+                    <p className="text-secondary mb-0">Recommended size: 250x250px. Maximum file size: 500MB.</p>
+                    <div className="wz-profile-photo-card__actions">
+                      <label className="btn btn-outline-light btn-sm wz-profile-photo-card__upload-btn">
+                        {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
+                        <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
+                      </label>
+                    </div>
+                    {photoUploadState.error ? <div className="text-danger small mt-2">{photoUploadState.error}</div> : null}
+                    {photoUploadState.success ? <div className="text-success small mt-2">{photoUploadState.success}</div> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="card p-3 h-100">
+                <h5>Update Password</h5>
+                <p className="text-secondary mb-3">Use this page to change your login password.</p>
+                <form onSubmit={handlePasswordSubmit}>
+                  <div className="mb-2">
+                    <label className="form-label">Current Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      value={currentPassword}
+                      onChange={(event) => setCurrentPassword(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="mb-2">
+                    <label className="form-label">New Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label className="form-label">Confirm New Password</label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <button className="btn btn-warning btn-sm">Update Password</button>
+                </form>
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-xl-7">
+            <div className="d-flex flex-column gap-3 h-100">
+              <div className="d-flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${orgUserTab === "profile" ? "btn-primary" : "btn-outline-light"}`}
+                  onClick={() => setOrgUserTab("profile")}
+                >
+                  Profile Details
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${orgUserTab === "employee" ? "btn-primary" : "btn-outline-light"}`}
+                  onClick={() => setOrgUserTab("employee")}
+                >
+                  Employee Details
+                </button>
+              </div>
+              {orgUserTab === "profile" ? (
+                <>
+                  <div className="card p-3">
+                    <h5>Profile Details</h5>
+                    <div className="row g-3 mt-1">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">First Name</label>
+                        <input className="form-control" value={user.first_name || employeeProfile?.name?.split(" ")?.[0] || "-"} readOnly />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">Last Name</label>
+                        <input className="form-control" value={user.last_name || employeeProfile?.name?.split(" ").slice(1).join(" ") || "-"} readOnly />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">Email</label>
+                        <input className="form-control" value={user.email || employeeProfile?.sourceUserEmail || "-"} readOnly />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">Phone Number</label>
+                        <input
+                          className="form-control"
+                          value={(phoneNumber ? profilePhoneDisplay : "") || employeeProfile?.contactNumberFull || "-"}
+                          readOnly
+                        />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">Role</label>
+                        <input className="form-control" value={data.profile?.role_label || "Org User"} readOnly />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small mb-1">Organization</label>
+                        <input className="form-control" value={data.profile?.organization?.name || data.org?.name || "-"} readOnly />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="card p-3">
+                    <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                      <div>
+                        <h5 className="mb-1">Personal Theme</h5>
+                        <p className="text-secondary mb-0">These color and menu settings work only for your login.</p>
+                      </div>
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={handleResetPersonalTheme}>
+                        Reset
+                      </button>
+                    </div>
+                    <form onSubmit={handlePersonalThemeSubmit}>
+                      <div className="row g-3">
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small mb-1">Primary Color</label>
+                          <div className="input-group">
+                            <input
+                              type="color"
+                              className="form-control form-control-color"
+                              value={normalizeHexColor(themePrimary, themeDefaults.primary)}
+                              onChange={(event) => setThemePrimary(event.target.value)}
+                              title="Primary color"
+                            />
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={themePrimary}
+                              onChange={(event) => setThemePrimary(event.target.value)}
+                              placeholder="#e11d48"
+                            />
+                          </div>
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small mb-1">Secondary Color</label>
+                          <div className="input-group">
+                            <input
+                              type="color"
+                              className="form-control form-control-color"
+                              value={normalizeHexColor(themeSecondary, themeDefaults.secondary)}
+                              onChange={(event) => setThemeSecondary(event.target.value)}
+                              title="Secondary color"
+                            />
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={themeSecondary}
+                              onChange={(event) => setThemeSecondary(event.target.value)}
+                              placeholder="#f59e0b"
+                            />
+                          </div>
+                        </div>
+                        <div className="col-12">
+                          <label className="form-label small mb-2">Menu Style</label>
+                          <div className="d-flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${sidebarMenuStyle === "default" ? "btn-primary" : "btn-outline-light"}`}
+                              onClick={() => setSidebarMenuStyle("default")}
+                            >
+                              Default Menu
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${sidebarMenuStyle === "compact" ? "btn-primary" : "btn-outline-light"}`}
+                              onClick={() => setSidebarMenuStyle("compact")}
+                            >
+                              Compact Center Menu
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <button className="btn btn-primary btn-sm" type="submit">Save My Theme</button>
+                      </div>
+                    </form>
+                  </div>
+                </>
+              ) : (
+                <div className="card p-3">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <div>
+                      <h5 className="mb-1">Employee Details</h5>
+                      <p className="text-secondary mb-0">These details come from the HR employee entry form.</p>
+                    </div>
+                  </div>
+                  {employeeProfile ? (
+                    <div className="row g-3 mt-1">
+                      {PROFILE_EMPLOYEE_DETAILS_FIELDS.map(([label, key]) => (
+                        <div key={key} className="col-12 col-md-6">
+                          <label className="form-label small mb-1">{label}</label>
+                          <input className="form-control" value={String(employeeProfile?.[key] || "-")} readOnly />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-secondary">HR employee details are not available yet. Once the employee form is completed in the HR section, the details will appear here.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!isBusinessAutopilotOrgUser && profileTopTab === "profile" ? (
       <div className="row g-3 mt-1">
         <div className="col-12 col-lg-6">
           <div className="card p-3 h-100">
@@ -863,6 +1443,28 @@ export default function ProfilePage() {
             <p>
               <strong>Username:</strong> {user.username || "-"}
             </p>
+
+            <div className="wz-profile-photo-card mb-3">
+              <div className="wz-profile-photo-card__preview">
+                {profilePhotoUrl ? (
+                  <img src={profilePhotoUrl} alt="Profile" className="wz-profile-photo-card__image" />
+                ) : (
+                  <div className="wz-profile-photo-card__fallback">{profilePhotoFallback}</div>
+                )}
+              </div>
+              <div className="wz-profile-photo-card__body">
+                <h6 className="mb-1">Profile Photo</h6>
+                <p className="text-secondary mb-0">Recommended size: 250x250px. Maximum file size: 500MB.</p>
+                <div className="wz-profile-photo-card__actions">
+                  <label className="btn btn-outline-light btn-sm wz-profile-photo-card__upload-btn">
+                    {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
+                    <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
+                  </label>
+                </div>
+                {photoUploadState.error ? <div className="text-danger small mt-2">{photoUploadState.error}</div> : null}
+                {photoUploadState.success ? <div className="text-success small mt-2">{photoUploadState.success}</div> : null}
+              </div>
+            </div>
 
             <form className="mt-3" onSubmit={handleEmailSubmit}>
               <div className="mb-2">
@@ -1191,6 +1793,115 @@ export default function ProfilePage() {
               </div>
             </div>
             <button className="btn btn-primary btn-sm" type="submit">Save UI Theme</button>
+          </form>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "openAiApi" && isBusinessAutopilotOrgAdmin ? (
+      <div className="mt-3">
+        <div className="card p-3">
+          <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+            <div>
+              <h5 className="mb-1">Open AI API Connection</h5>
+              <p className="text-secondary mb-0">
+                Connect your OpenAI API key and OpenAI account email to enable the Business Autopilot dashboard chat helper.
+              </p>
+            </div>
+            {openAiState.data?.masked_api_key ? (
+              <span className="badge bg-secondary">Saved Key: {openAiState.data.masked_api_key}</span>
+            ) : null}
+          </div>
+          {openAiState.error ? <div className="alert alert-danger py-2">{openAiState.error}</div> : null}
+          {openAiState.success ? <div className="alert alert-success py-2">{openAiState.success}</div> : null}
+          {openAiTestState.message ? (
+            <div className={`alert py-2 ${openAiTestState.ok ? "alert-success" : "alert-danger"}`}>
+              {openAiTestState.message}
+            </div>
+          ) : null}
+          <form className="d-flex flex-column gap-3" onSubmit={handleSaveOpenAiSettings}>
+            <div className="row g-3">
+              <div className="col-12 col-md-6">
+                <label className="form-label">AI Agent Name</label>
+                <input
+                  className="form-control"
+                  value={openAiState.form.agent_name}
+                  readOnly
+                  disabled
+                />
+                <div className="form-text">This assistant name is fixed for all organizations.</div>
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">Model</label>
+                <input
+                  className="form-control"
+                  value={openAiState.form.model}
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, model: event.target.value },
+                  }))}
+                  placeholder="gpt-4o-mini"
+                  required
+                />
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">OpenAI Account Email</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={openAiState.form.account_email}
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, account_email: event.target.value },
+                  }))}
+                  placeholder="name@example.com"
+                />
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">OpenAI API Key</label>
+                <input
+                  type="password"
+                  className="form-control"
+                  value={openAiState.form.api_key}
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, api_key: event.target.value },
+                  }))}
+                  placeholder={openAiState.data?.has_api_key ? "Leave blank to keep existing key" : "sk-..."}
+                />
+              </div>
+              <div className="col-12">
+                <div className="form-check">
+                  <input
+                    id="ba-openai-enabled"
+                    className="form-check-input"
+                    type="checkbox"
+                    checked={Boolean(openAiState.form.enabled)}
+                    onChange={(event) => setOpenAiState((prev) => ({
+                      ...prev,
+                      form: { ...prev.form, enabled: event.target.checked },
+                    }))}
+                  />
+                  <label className="form-check-label" htmlFor="ba-openai-enabled">
+                    Mark dashboard AI assistant as enabled
+                  </label>
+                </div>
+                <div className="form-text">Even without API credentials, the dashboard chat button can appear and guide you to configure OpenAI.</div>
+              </div>
+            </div>
+            <div className="d-flex flex-wrap gap-2">
+              <button className="btn btn-primary btn-sm" type="submit" disabled={openAiState.loading}>
+                {openAiState.loading ? "Saving..." : "Save Open AI Settings"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={handleTestOpenAiConnection}
+                disabled={openAiState.loading || openAiTestState.loading}
+              >
+                {openAiTestState.loading ? "Testing..." : "Test Connection"}
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -1690,7 +2401,7 @@ export default function ProfilePage() {
       </div>
       ) : null}
 
-      {profileTopTab === "profile" ? (
+      {!isBusinessAutopilotOrgUser && profileTopTab === "profile" ? (
       <div className="mt-3">
         <h5>Admin Activity</h5>
         <div className="table-controls">
@@ -1765,6 +2476,64 @@ export default function ProfilePage() {
           />
         </div>
       </div>
+      ) : null}
+
+      {isBusinessAutopilotOrgUser ? (
+        <div className="mt-3">
+          <h5>Your Activity</h5>
+          <div className="table-controls">
+            <div className="table-length">Show {pageSize} entries</div>
+            <label className="table-search" htmlFor="profile-user-search">
+              <span>Search:</span>
+              <input
+                id="profile-user-search"
+                type="text"
+                value={tableSearchTerm}
+                onChange={(event) => setTableSearchTerm(event.target.value)}
+                placeholder="Search activity"
+              />
+            </label>
+          </div>
+          <div className="table-responsive">
+            <table className="table table-dark table-striped table-hover align-middle mt-2">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Action</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentActions.length ? (
+                  recentActions.map((log, idx) => (
+                    <tr key={`${log.time}-${idx}`}>
+                      <td>{log.time}</td>
+                      <td>{log.action}</td>
+                      <td>{log.details || "-"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="3">No recent activity.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="table-footer">
+            <div className="table-info">
+              Showing {startEntry} to {endEntry} of {totalItems} entries
+            </div>
+            <TablePagination
+              page={currentPage}
+              totalPages={pagination.total_pages || 1}
+              onPageChange={setAdminPage}
+              showPageLinks
+              showPageLabel={false}
+              maxPageLinks={7}
+            />
+          </div>
+        </div>
       ) : null}
 
       {usersModal.open ? (

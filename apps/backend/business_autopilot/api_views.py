@@ -1,6 +1,8 @@
 import json
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from typing import Optional
+import requests
 
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
@@ -12,7 +14,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
-from core.models import Organization, OrganizationSettings, UserProfile, Subscription
+from apps.backend.products.models import Product
+from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription
 
 from .models import (
     Module,
@@ -50,6 +53,88 @@ DEFAULT_ERP_MODULES = [
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
+BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
+
+
+def _get_business_autopilot_product():
+    return Product.objects.filter(slug=BUSINESS_AUTOPILOT_PRODUCT_SLUG).first()
+
+
+def _get_business_autopilot_permission(role: str):
+    normalized_role = str(role or "").strip().lower()
+    if normalized_role == "company_admin":
+        return UserProductAccess.PERMISSION_FULL
+    if normalized_role == "org_user":
+        return UserProductAccess.PERMISSION_EDIT
+    return UserProductAccess.PERMISSION_VIEW
+
+
+def _grant_business_autopilot_access(user: User, granted_by: User, role: str):
+    product = _get_business_autopilot_product()
+    if not product:
+        return
+    UserProductAccess.objects.update_or_create(
+        user=user,
+        product=product,
+        defaults={
+            "permission": _get_business_autopilot_permission(role),
+            "granted_by": granted_by,
+        },
+    )
+
+
+def _revoke_business_autopilot_access(user: User):
+    product = _get_business_autopilot_product()
+    if not product:
+        return
+    UserProductAccess.objects.filter(user=user, product=product).delete()
+
+
+def _get_user_granted_products(user: User):
+    rows = (
+        UserProductAccess.objects
+        .filter(user=user)
+        .select_related("product")
+        .order_by("product__name", "product__slug")
+    )
+    return [
+        {
+            "slug": row.product.slug,
+            "name": row.product.name or row.product.slug,
+            "permission": row.permission,
+        }
+        for row in rows
+        if row.product_id
+    ]
+
+
+def _sync_business_autopilot_membership_access(org: Organization, granted_by: Optional[User] = None):
+    product = _get_business_autopilot_product()
+    if not org or not product:
+        return
+    memberships = list(
+        OrganizationUser.objects
+        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
+        .select_related("user")
+    )
+    active_user_ids = set()
+    for membership in memberships:
+        if membership.is_active and membership.user_id:
+            active_user_ids.add(membership.user_id)
+            UserProductAccess.objects.update_or_create(
+                user=membership.user,
+                product=product,
+                defaults={
+                    "permission": _get_business_autopilot_permission(membership.role),
+                    "granted_by": granted_by,
+                },
+            )
+    if memberships:
+        UserProductAccess.objects.filter(product=product, user_id__in=[row.user_id for row in memberships if row.user_id]).exclude(
+            user_id__in=active_user_ids
+        ).delete()
 
 
 def _resolve_org(user: User):
@@ -79,6 +164,37 @@ def _can_manage_users(user: User):
     if not profile:
         return False
     return profile.role in {"company_admin", "superadmin", "super_admin"}
+
+
+def _can_manage_openai(user: User, org: Organization = None):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    role = str(profile.role or "").strip().lower() if profile else ""
+    if role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+        return True
+    membership = _get_org_membership(user, org)
+    return bool(membership and str(membership.role or "").strip().lower() == "company_admin")
+
+
+def _mask_secret(value: str):
+    secret = str(value or "").strip()
+    if len(secret) <= 8:
+        return "*" * len(secret)
+    return f"{secret[:4]}{'*' * max(0, len(secret) - 8)}{secret[-4:]}"
+
+
+def _serialize_openai_settings(settings_obj: OrganizationSettings):
+    return {
+        "enabled": bool(settings_obj.business_autopilot_openai_enabled),
+        "agent_name": str(settings_obj.business_autopilot_ai_agent_name or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME,
+        "account_email": str(settings_obj.business_autopilot_openai_account_email or "").strip(),
+        "model": str(settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        "has_api_key": bool(str(settings_obj.business_autopilot_openai_api_key or "").strip()),
+        "masked_api_key": _mask_secret(settings_obj.business_autopilot_openai_api_key),
+    }
 
 
 def _get_org_membership(user: User, org: Organization):
@@ -299,12 +415,25 @@ def _serialize_departments(org):
 
 
 def _serialize_org_users(org):
+    _sync_business_autopilot_membership_access(org)
+    product = _get_business_autopilot_product()
+    assigned_user_ids = set()
+    if product:
+        assigned_user_ids = set(
+            UserProductAccess.objects
+            .filter(product=product)
+            .values_list("user_id", flat=True)
+        )
     memberships = (
         OrganizationUser.objects
         .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
-        .select_related("user")
+        .select_related("user", "user__userprofile")
         .order_by("-id")
     )
+    if assigned_user_ids:
+        memberships = memberships.filter(user_id__in=assigned_user_ids)
+    else:
+        memberships = memberships.none()
     return [
         {
             "id": member.user_id,
@@ -314,6 +443,9 @@ def _serialize_org_users(org):
             "last_name": str(getattr(member.user, "last_name", "") or "").strip(),
             "employeeId": _format_employee_code(member.user_id),
             "email": member.user.email or "",
+            "phone_number": str(
+                getattr(getattr(member.user, "userprofile", None), "phone_number", "") or ""
+            ).strip(),
             "role": member.role or "org_user",
             "department": member.department or "",
             "employee_role": member.employee_role or "",
@@ -749,6 +881,8 @@ def org_users(request):
         name = " ".join([first_name, last_name]).strip()
         email = (payload.get("email") or "").strip().lower()
         password = payload.get("password") or ""
+        phone_number = str(payload.get("phone_number") or "").strip()
+        confirm_existing_user = bool(payload.get("confirm_existing_user"))
         role = (payload.get("role") or "org_user").strip().lower()
         employee_role = (payload.get("employee_role") or "").strip()
         employee_role_id = payload.get("employee_role_id")
@@ -791,6 +925,22 @@ def org_users(request):
                 existing_profile = UserProfile.objects.filter(user=existing_user).first()
                 if existing_profile and existing_profile.organization_id and existing_profile.organization_id != org.id:
                     return JsonResponse({"detail": "email_belongs_to_another_organization"}, status=409)
+                existing_products = _get_user_granted_products(existing_user)
+                already_has_business_autopilot = any(
+                    product["slug"] == BUSINESS_AUTOPILOT_PRODUCT_SLUG for product in existing_products
+                )
+                if not already_has_business_autopilot and not confirm_existing_user:
+                    return JsonResponse(
+                        {
+                            "detail": "existing_org_user_requires_confirmation",
+                            "message": "This user is already assigned to another product in this organization. The same password will continue to work.",
+                            "same_password_allowed": True,
+                            "existing_products": existing_products,
+                        },
+                        status=409,
+                    )
+                if already_has_business_autopilot:
+                    return JsonResponse({"detail": "user_already_assigned_to_business_autopilot"}, status=409)
                 user = existing_user
                 if first_name or last_name:
                     user.first_name = first_name
@@ -799,9 +949,15 @@ def org_users(request):
                 if existing_profile:
                     existing_profile.organization = org
                     existing_profile.role = role
-                    existing_profile.save(update_fields=["organization", "role"])
+                    existing_profile.phone_number = phone_number
+                    existing_profile.save(update_fields=["organization", "role", "phone_number"])
                 else:
-                    UserProfile.objects.create(user=user, organization=org, role=role)
+                    UserProfile.objects.create(
+                        user=user,
+                        organization=org,
+                        role=role,
+                        phone_number=phone_number,
+                    )
             else:
                 user = User.objects.create_user(
                     username=email,
@@ -816,6 +972,7 @@ def org_users(request):
                     defaults={
                         "organization": org,
                         "role": role,
+                        "phone_number": phone_number,
                     },
                 )
 
@@ -829,6 +986,7 @@ def org_users(request):
                     "is_active": True,
                 },
             )
+            _grant_business_autopilot_access(user, request.user, role)
 
     users = _serialize_org_users(org)
     return JsonResponse(
@@ -865,6 +1023,7 @@ def org_user_detail(request, membership_id: int):
         return JsonResponse({"detail": "user_not_found"}, status=404)
 
     if request.method == "DELETE":
+        _revoke_business_autopilot_access(membership.user)
         membership.delete()
         return JsonResponse(
             {
@@ -889,6 +1048,7 @@ def org_user_detail(request, membership_id: int):
     name = " ".join([first_name, last_name]).strip()
     email = str(payload.get("email") or membership.user.email or "").strip().lower()
     password = str(payload.get("password") or "")
+    phone_number = str(payload.get("phone_number") or "").strip()
     employee_role = (payload.get("employee_role") or "").strip()
     employee_role_id = payload.get("employee_role_id")
     department = (payload.get("department") or membership.department or "").strip()
@@ -948,7 +1108,15 @@ def org_user_detail(request, membership_id: int):
         if profile:
             profile.organization = org
             profile.role = role
-            profile.save(update_fields=["organization", "role"])
+            profile.phone_number = phone_number
+            profile.save(update_fields=["organization", "role", "phone_number"])
+        else:
+            UserProfile.objects.create(
+                user=membership.user,
+                organization=org,
+                role=role,
+                phone_number=phone_number,
+            )
 
         membership.role = role
         membership.department = department
@@ -956,6 +1124,10 @@ def org_user_detail(request, membership_id: int):
         if isinstance(is_active, bool):
             membership.is_active = is_active
         membership.save(update_fields=["role", "department", "employee_role", "is_active", "updated_at"])
+        if membership.is_active:
+            _grant_business_autopilot_access(membership.user, request.user, role)
+        else:
+            _revoke_business_autopilot_access(membership.user)
 
     return JsonResponse(
         {
@@ -1603,6 +1775,176 @@ def accounts_workspace(request):
             "updated_at": workspace.updated_at.isoformat() if workspace.updated_at else "",
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+def org_openai_settings(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _can_manage_openai(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        account_email = str(payload.get("account_email") or "").strip()
+        model = str(payload.get("model") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        api_key = str(payload.get("api_key") or "").strip()
+        enabled = bool(payload.get("enabled"))
+        update_fields = []
+        if "api_key" in payload and api_key:
+            settings_obj.business_autopilot_openai_api_key = api_key
+            update_fields.append("business_autopilot_openai_api_key")
+        settings_obj.business_autopilot_ai_agent_name = DEFAULT_BA_OPENAI_AGENT_NAME
+        settings_obj.business_autopilot_openai_account_email = account_email[:254]
+        settings_obj.business_autopilot_openai_model = model[:120]
+        settings_obj.business_autopilot_openai_enabled = enabled
+        update_fields.extend([
+            "business_autopilot_ai_agent_name",
+            "business_autopilot_openai_account_email",
+            "business_autopilot_openai_model",
+            "business_autopilot_openai_enabled",
+        ])
+        settings_obj.save(update_fields=list(dict.fromkeys(update_fields)))
+        return JsonResponse({
+            "saved": True,
+            **_serialize_openai_settings(settings_obj),
+        })
+
+    return JsonResponse(_serialize_openai_settings(settings_obj))
+
+
+@require_http_methods(["POST"])
+def org_openai_test(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _can_manage_openai(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    api_key = str(payload.get("api_key") or settings_obj.business_autopilot_openai_api_key or "").strip()
+    model = str(payload.get("model") or settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini"
+    if not api_key:
+        return JsonResponse({"detail": "openai_api_key_missing"}, status=400)
+
+    try:
+        response = requests.post(
+            OPENAI_CHAT_COMPLETIONS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "Reply with exactly: Connection OK"},
+                    {"role": "user", "content": "Test connection."},
+                ],
+                "max_tokens": 16,
+                "temperature": 0,
+            },
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        return JsonResponse({"detail": f"openai_request_failed: {exc}"}, status=502)
+
+    data = response.json() if response.content else {}
+    if response.status_code >= 400:
+        return JsonResponse({"detail": data.get("error", {}).get("message") or "openai_connection_failed"}, status=400)
+    return JsonResponse({"ok": True, "model": model})
+
+
+@require_http_methods(["POST"])
+def org_openai_chat(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _can_manage_openai(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    api_key = str(settings_obj.business_autopilot_openai_api_key or "").strip()
+    if not api_key:
+        return JsonResponse({"detail": "openai_api_key_missing"}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    message = str(payload.get("message") or "").strip()
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    if not message:
+        return JsonResponse({"detail": "message_required"}, status=400)
+
+    agent_name = str(settings_obj.business_autopilot_ai_agent_name or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME
+    model = str(settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini"
+    context_json = json.dumps(context, ensure_ascii=True)[:24000]
+    system_prompt = (
+        f"You are {agent_name}, an assistant for Work Zilla Business Autopilot. "
+        "Answer only from the provided organization context. "
+        "If data is missing, clearly say it is not available in the current dashboard data. "
+        "When appropriate, answer in short step-by-step bullets. "
+        "Do not invent names, counts, dates, or meetings."
+    )
+
+    try:
+        response = requests.post(
+            OPENAI_CHAT_COMPLETIONS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Organization context JSON:\n"
+                            f"{context_json}\n\n"
+                            f"User question: {message}"
+                        ),
+                    },
+                ],
+                "temperature": 0.2,
+                "max_tokens": 500,
+            },
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        return JsonResponse({"detail": f"openai_request_failed: {exc}"}, status=502)
+
+    data = response.json() if response.content else {}
+    if response.status_code >= 400:
+        return JsonResponse({"detail": data.get("error", {}).get("message") or "openai_chat_failed"}, status=400)
+    answer = (
+        (((data.get("choices") or [{}])[0]).get("message") or {}).get("content")
+        if isinstance(data, dict)
+        else ""
+    )
+    answer_text = str(answer or "").strip() or "No response received."
+    return JsonResponse({
+        "reply": answer_text,
+        "agent_name": agent_name,
+        "model": model,
+    })
 
 
 @require_http_methods(["GET"])

@@ -546,6 +546,16 @@ html[data-theme="light"] .stat-card p{
   overflow-y: auto;
 }
 
+.ai-chatbot-message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.ai-chatbot-message-row--visitor {
+  justify-content: flex-end;
+}
+
 .ai-chatbot-message {
   max-width: 75%;
   padding: 10px 12px;

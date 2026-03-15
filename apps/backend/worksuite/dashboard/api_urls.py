@@ -45,6 +45,7 @@ urlpatterns = [
     path("bank-transfer/<int:transfer_id>/submit", api_views.bank_transfer_submit, name="api_bank_transfer_submit_id"),
     path("profile", api_views.profile_summary, name="api_profile_summary"),
     path("profile/email", api_views.profile_update_email, name="api_profile_update_email"),
+    path("profile/photo", api_views.profile_update_photo, name="api_profile_update_photo"),
     path("profile/password", api_views.profile_update_password, name="api_profile_update_password"),
     path("inbox", api_views.org_inbox_list, name="api_org_inbox_list"),
     path("inbox/compose", api_views.org_inbox_compose, name="api_org_inbox_compose"),

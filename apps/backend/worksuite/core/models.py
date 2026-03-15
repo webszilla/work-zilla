@@ -43,6 +43,13 @@ def _screenshot_upload_to(instance, filename):
     return f"screenshots/{org_part}/{safe_name}"
 
 
+def _user_profile_photo_upload_to(instance, filename):
+    safe_name = os.path.basename(filename or "profile-photo.jpg")
+    stamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    user_part = str(getattr(instance, "user_id", "") or "unknown")
+    return f"profile_photos/{user_part}/{stamp}_{safe_name}"
+
+
 class Organization(models.Model):
     name = models.CharField(max_length=200)
     company_key = models.CharField(max_length=100, unique=True)
@@ -189,6 +196,7 @@ class UserProfile(models.Model):
         blank=True,
     )
     phone_number = models.CharField(max_length=30, blank=True)
+    profile_photo = models.ImageField(upload_to=_user_profile_photo_upload_to, blank=True, null=True)
 
     # Important ➜ link user to organization
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True, blank=True)
@@ -204,6 +212,24 @@ class UserProfile(models.Model):
         if role in {"org_user", "employee", "hr_view", "ai_chatbot_agent"}:
             return "EMPLOYEE"
         return role.upper() if role else ""
+
+
+@receiver(pre_save, sender=UserProfile)
+def user_profile_replace_photo(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    try:
+        previous = UserProfile.objects.get(pk=instance.pk)
+    except UserProfile.DoesNotExist:
+        return
+    if previous.profile_photo and previous.profile_photo != instance.profile_photo:
+        previous.profile_photo.delete(save=False)
+
+
+@receiver(post_delete, sender=UserProfile)
+def user_profile_delete_photo(sender, instance, **kwargs):
+    if instance.profile_photo:
+        instance.profile_photo.delete(save=False)
 
     @property
     def is_org_admin(self):
@@ -1249,6 +1275,11 @@ class OrganizationSettings(models.Model):
     sidebar_menu_style = models.CharField(max_length=32, blank=True, default="default")
     ai_chatbot_premade_replies = models.TextField(blank=True, default="")
     ai_chatbot_user_attachments_enabled = models.BooleanField(default=False)
+    business_autopilot_openai_api_key = models.TextField(blank=True, default="")
+    business_autopilot_openai_account_email = models.EmailField(blank=True, default="")
+    business_autopilot_openai_model = models.CharField(max_length=120, blank=True, default="gpt-4o-mini")
+    business_autopilot_ai_agent_name = models.CharField(max_length=120, blank=True, default="Work Zilla AI Assistant")
+    business_autopilot_openai_enabled = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.organization.name} settings"

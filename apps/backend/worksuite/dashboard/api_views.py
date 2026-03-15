@@ -5795,6 +5795,8 @@ def profile_summary(request):
         .filter(user__userprofile__organization=org)
         .select_related("user")
     )
+    if str(profile.role or "").strip().lower() != "company_admin":
+        recent_actions_qs = recent_actions_qs.filter(user=user)
     if requested_product_slug:
         recent_actions_qs = recent_actions_qs.filter(product_slug=requested_product_slug)
     search_query = (request.GET.get("q") or "").strip()
@@ -5830,6 +5832,12 @@ def profile_summary(request):
     ]
 
     _, org_timezone = _resolve_org_timezone(org, request=request)
+    profile_photo_url = ""
+    if getattr(profile, "profile_photo", None):
+        try:
+            profile_photo_url = request.build_absolute_uri(profile.profile_photo.url)
+        except Exception:
+            profile_photo_url = ""
     return JsonResponse({
         "org": {
             "id": org.id,
@@ -5842,12 +5850,22 @@ def profile_summary(request):
             "earnings": earnings_payload,
         },
         "user": {
+            "id": user.id,
             "username": user.username,
+            "first_name": user.first_name or "",
+            "last_name": user.last_name or "",
             "email": user.email or "",
+            "profile_photo_url": profile_photo_url,
         },
         "profile": {
             "role": profile.role,
+            "role_label": profile.get_role_display() if hasattr(profile, "get_role_display") else profile.role,
+            "organization": {
+                "id": org.id,
+                "name": org.name,
+            },
             "phone_number": profile.phone_number or "",
+            "profile_photo_url": profile_photo_url,
         },
         "org_timezone": org_timezone,
         "theme_primary": effective_theme_primary,
@@ -5988,6 +6006,39 @@ def profile_update_email(request):
         "public_server_ip": saved_public_server_ip,
         "public_server_domain": saved_public_server_domain,
         "email_verified": user.email_verified,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def profile_update_photo(request):
+    if not dashboard_views.is_super_admin_user(request.user):
+        org, error = _get_org_or_error(request)
+        if error:
+            return error
+
+    upload = request.FILES.get("photo")
+    if not upload:
+        return _json_error("Profile photo is required.", status=400)
+    if not str(upload.content_type or "").startswith("image/"):
+        return _json_error("Profile photo must be an image file.", status=400)
+    max_size = 500 * 1024 * 1024
+    if upload.size > max_size:
+        return _json_error("Profile photo must be 500MB or smaller.", status=400)
+
+    profile = dashboard_views.get_profile(request.user)
+    profile.profile_photo = upload
+    profile.save(update_fields=["profile_photo"])
+    photo_url = ""
+    try:
+        photo_url = request.build_absolute_uri(profile.profile_photo.url)
+    except Exception:
+        photo_url = ""
+
+    dashboard_views.log_admin_activity(request.user, "Update Profile Photo", "Updated profile photo", request=request)
+    return JsonResponse({
+        "updated": True,
+        "profile_photo_url": photo_url,
     })
 
 

@@ -10,6 +10,8 @@ const defaultForm = {
   last_name: "",
   email: "",
   password: "",
+  phone_country_code: "+91",
+  phone_number_input: "",
   role: "org_user",
   department_id: "",
   employee_role_id: ""
@@ -21,6 +23,8 @@ const defaultEditForm = {
   last_name: "",
   email: "",
   password: "",
+  phone_country_code: "+91",
+  phone_number_input: "",
   role: "org_user",
   department_id: "",
   employee_role_id: "",
@@ -59,6 +63,7 @@ const USER_DETAIL_FIELDS = [
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
   { key: "email", label: "Official Email" },
+  { key: "phone_number", label: "Phone Number" },
   { key: "employeeId", label: "Employee ID" },
   { key: "role", label: "Role" },
   { key: "department", label: "Department" },
@@ -193,6 +198,13 @@ async function persistSharedAccountsCustomers(nextCustomers) {
   } catch {
     // Keep local cache updated even if server sync fails.
   }
+}
+
+function formatExistingProductList(products = []) {
+  return products
+    .map((item) => String(item?.name || item?.slug || "").trim())
+    .filter(Boolean)
+    .join(", ");
 }
 
 function formatSharedCustomerPhones(row = {}) {
@@ -337,6 +349,65 @@ function readSharedHrEmployees() {
   }
 }
 
+function writeSharedHrEmployees(rows = []) {
+  try {
+    const nextData = { employees: Array.isArray(rows) ? rows : [] };
+    window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(nextData));
+    window.dispatchEvent(new Event("storage"));
+  } catch {
+    // Ignore local sync failures.
+  }
+}
+
+function syncHrEmployeeDirectoryFromUsers(userRows = [], currentHrEmployees = []) {
+  const rows = Array.isArray(currentHrEmployees) ? [...currentHrEmployees] : [];
+  let changed = false;
+  const nextRows = rows.map((employee) => {
+    const employeeUserId = String(employee?.sourceUserId || employee?.userId || "").trim();
+    const employeeEmail = String(employee?.sourceUserEmail || "").trim().toLowerCase();
+    const employeeName = String(employee?.name || "").trim().toLowerCase();
+    const linkedUser = (Array.isArray(userRows) ? userRows : []).find((user) => {
+      const userName = buildDisplayName(user?.first_name, user?.last_name) || String(user?.name || "").trim();
+      return (
+        (employeeUserId && String(user?.id || "").trim() === employeeUserId)
+        || (employeeEmail && String(user?.email || "").trim().toLowerCase() === employeeEmail)
+        || (employeeName && userName.toLowerCase() === employeeName)
+      );
+    });
+    if (!linkedUser) {
+      return employee;
+    }
+    const nextDepartment = String(linkedUser.department || "").trim();
+    const nextDesignation = String(linkedUser.employee_role || "").trim();
+    const nextName = buildDisplayName(linkedUser.first_name, linkedUser.last_name) || String(linkedUser.name || employee?.name || "").trim();
+    const phoneParts = splitCombinedPhoneValue(linkedUser.phone_number || "");
+    if (
+      nextDepartment === String(employee?.department || "").trim()
+      && nextDesignation === String(employee?.designation || employee?.employee_role || "").trim()
+      && nextName === String(employee?.name || "").trim()
+      && phoneParts.countryCode === String(employee?.contactCountryCode || "+91").trim()
+      && phoneParts.number === String(employee?.contactNumber || "").trim()
+    ) {
+      return employee;
+    }
+    changed = true;
+    return {
+      ...employee,
+      name: nextName,
+      department: nextDepartment,
+      designation: nextDesignation,
+      employee_role: nextDesignation,
+      sourceUserId: String(linkedUser.id || employee?.sourceUserId || employee?.userId || "").trim(),
+      sourceUserEmail: String(linkedUser.email || employee?.sourceUserEmail || "").trim(),
+      contactCountryCode: phoneParts.number
+        ? (phoneParts.countryCode || String(employee?.contactCountryCode || "+91").trim() || "+91")
+        : (String(employee?.contactCountryCode || "+91").trim() || "+91"),
+      contactNumber: phoneParts.number || String(employee?.contactNumber || "").trim(),
+    };
+  });
+  return changed ? nextRows : rows;
+}
+
 function splitDisplayName(value) {
   const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) {
@@ -350,6 +421,27 @@ function splitDisplayName(value) {
 
 function buildDisplayName(firstName, lastName) {
   return [String(firstName || "").trim(), String(lastName || "").trim()].filter(Boolean).join(" ").trim();
+}
+
+function splitCombinedPhoneValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { countryCode: "+91", number: "" };
+  }
+  const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+  if (match) {
+    return {
+      countryCode: String(match[1] || "+91").trim() || "+91",
+      number: String(match[2] || "").trim(),
+    };
+  }
+  return { countryCode: "+91", number: raw };
+}
+
+function buildCombinedPhoneValue(countryCode, number) {
+  const code = String(countryCode || "").trim();
+  const phone = String(number || "").trim();
+  return [code, phone].filter(Boolean).join(" ").trim();
 }
 
 function findHrEmployeeForUser(user, hrEmployees = []) {
@@ -450,10 +542,14 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch("/api/business-autopilot/users");
-      setUsers(data.users || []);
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
       setCanManageUsers(Boolean(data.can_manage_users));
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
     } catch (error) {
       setNotice(error?.message || "Unable to load users.");
       setUsers([]);
@@ -469,12 +565,15 @@ export default function BusinessAutopilotUsersPage() {
     const matchedRole = employeeRoles.find((role) => role.name === (user.employee_role || ""));
     const matchedDepartment = departments.find((department) => department.name === (user.department || ""));
     const splitName = splitDisplayName(user.name || "");
+    const phoneParts = splitCombinedPhoneValue(user.phone_number || "");
     setEditForm({
       membership_id: user.membership_id,
       first_name: String(user.first_name || splitName.first_name || "").trim(),
       last_name: String(user.last_name || splitName.last_name || "").trim(),
       email: String(user.email || "").trim(),
       password: "",
+      phone_country_code: phoneParts.countryCode,
+      phone_number_input: phoneParts.number,
       role: user.role || "org_user",
       department_id: matchedDepartment ? String(matchedDepartment.id) : "",
       employee_role_id: matchedRole ? String(matchedRole.id) : "",
@@ -505,15 +604,20 @@ export default function BusinessAutopilotUsersPage() {
           last_name: editForm.last_name,
           email: editForm.email,
           password: editForm.password,
+          phone_number: buildCombinedPhoneValue(editForm.phone_country_code, editForm.phone_number_input),
           role: editForm.role,
           department_id: editForm.department_id || null,
           employee_role_id: editForm.employee_role_id || null,
           is_active: Boolean(editForm.is_active)
         })
       });
-      setUsers(data.users || []);
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
       setNotice("User updated successfully.");
       cancelEdit();
     } catch (error) {
@@ -533,9 +637,13 @@ export default function BusinessAutopilotUsersPage() {
       const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
         method: "DELETE"
       });
-      setUsers(data.users || []);
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
       if (String(editForm.membership_id) === String(membershipId)) {
         cancelEdit();
       }
@@ -625,19 +733,48 @@ export default function BusinessAutopilotUsersPage() {
     if (!canManageUsers || saving) {
       return;
     }
+    const basePayload = {
+      ...form,
+      name: buildDisplayName(form.first_name, form.last_name),
+      phone_number: buildCombinedPhoneValue(form.phone_country_code, form.phone_number_input),
+    };
     setSaving(true);
     setNotice("");
     try {
-      const data = await apiFetch("/api/business-autopilot/users", {
-        method: "POST",
-        body: JSON.stringify({
-          ...form,
-          name: buildDisplayName(form.first_name, form.last_name),
-        })
-      });
-      setUsers(data.users || []);
+      let data;
+      try {
+        data = await apiFetch("/api/business-autopilot/users", {
+          method: "POST",
+          body: JSON.stringify(basePayload)
+        });
+      } catch (error) {
+        if (error?.status === 409 && error?.data?.detail === "existing_org_user_requires_confirmation") {
+          const existingProductNames = formatExistingProductList(error?.data?.existing_products || []);
+          const confirmationMessage = existingProductNames
+            ? `This user is already assigned to ${existingProductNames}. The same password will continue to work for Business Autopilot too. Do you want to continue?`
+            : "This user is already assigned in this organization. The same password will continue to work for Business Autopilot too. Do you want to continue?";
+          if (!window.confirm(confirmationMessage)) {
+            setNotice("User creation cancelled.");
+            return;
+          }
+          data = await apiFetch("/api/business-autopilot/users", {
+            method: "POST",
+            body: JSON.stringify({
+              ...basePayload,
+              confirm_existing_user: true,
+            })
+          });
+        } else {
+          throw error;
+        }
+      }
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
       setForm(defaultForm);
       setNotice("User created successfully.");
     } catch (error) {
@@ -1507,121 +1644,158 @@ export default function BusinessAutopilotUsersPage() {
 
               <div className="card p-3">
                 <h6 className="mb-3">Create User</h6>
-                <form ref={userFormRef} className="row g-2" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
-                  <div className="col-12 col-xl-2">
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="First Name"
-                      value={isEditingUser ? editForm.first_name : form.first_name}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, first_name: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, first_name: value }));
-                      }}
-                      required
-                    />
-                  </div>
-                  <div className="col-12 col-xl-2">
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Last Name"
-                      value={isEditingUser ? editForm.last_name : form.last_name}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, last_name: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, last_name: value }));
-                      }}
-                    />
-                  </div>
-                  <div className="col-12 col-xl-2">
-                    <input
-                      type="email"
-                      className="form-control"
-                      placeholder="Official Email"
-                      value={isEditingUser ? editForm.email : form.email}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, email: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, email: value }));
-                      }}
-                      required
-                    />
-                  </div>
-                  <div className="col-12 col-xl-2">
-                    <input
-                      type="password"
-                      className="form-control"
-                      placeholder="Password"
-                      value={isEditingUser ? editForm.password : form.password}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, password: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, password: value }));
-                      }}
-                      minLength={6}
-                      required={!isEditingUser}
-                    />
-                  </div>
-                  <div className="col-12 col-xl-1">
-                    <select
-                      className="form-select"
-                      value={isEditingUser ? editForm.department_id : form.department_id}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, department_id: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, department_id: value }));
-                      }}
-                    >
-                      <option value="">Department</option>
-                      {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-12 col-xl-1">
-                    <select
-                      className="form-select"
-                      value={isEditingUser ? editForm.employee_role_id : form.employee_role_id}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isEditingUser) {
-                          setEditForm((prev) => ({ ...prev, employee_role_id: value }));
-                          return;
-                        }
-                        setForm((prev) => ({ ...prev, employee_role_id: value }));
-                      }}
-                    >
-                      <option value="">Employee Role</option>
-                      {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-12 col-xl-1 d-grid">
-                    <button type="submit" className="btn btn-primary w-100" disabled={isEditingUser ? savingEdit : saving} title={isEditingUser ? "Update User" : "Create User"}>
-                      {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}
-                    </button>
-                  </div>
-                  {isEditingUser ? (
-                    <div className="col-12 col-xl-1 d-grid">
-                      <button type="button" className="btn btn-outline-light" onClick={cancelEdit}>
-                        Cancel
-                      </button>
+                <form ref={userFormRef} className="d-flex flex-column gap-3" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
+                  <div className="row g-2">
+                    <div className="col-12 col-md-6 col-xl-3">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="First Name"
+                        value={isEditingUser ? editForm.first_name : form.first_name}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, first_name: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, first_name: value }));
+                        }}
+                        required
+                      />
                     </div>
-                  ) : null}
+                    <div className="col-12 col-md-6 col-xl-3">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Last Name"
+                        value={isEditingUser ? editForm.last_name : form.last_name}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, last_name: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, last_name: value }));
+                        }}
+                      />
+                    </div>
+                    <div className="col-12 col-xl-4">
+                      <input
+                        type="email"
+                        className="form-control"
+                        placeholder="Official Email"
+                        value={isEditingUser ? editForm.email : form.email}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, email: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, email: value }));
+                        }}
+                        required
+                      />
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Password"
+                        value={isEditingUser ? editForm.password : form.password}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, password: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, password: value }));
+                        }}
+                        minLength={6}
+                        required={!isEditingUser}
+                      />
+                    </div>
+                  </div>
+                  <div className="row g-2">
+                    <div className="col-12 col-md-6 col-xl-4">
+                      <div className="input-group">
+                        <PhoneCountryCodePicker
+                          value={isEditingUser ? editForm.phone_country_code : form.phone_country_code}
+                          onChange={(code) => {
+                            if (isEditingUser) {
+                              setEditForm((prev) => ({ ...prev, phone_country_code: code }));
+                              return;
+                            }
+                            setForm((prev) => ({ ...prev, phone_country_code: code }));
+                          }}
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "120px" }}
+                          ariaLabel="User phone country code"
+                        />
+                        <input
+                          type="tel"
+                          className="form-control"
+                          placeholder="Phone Number"
+                          value={isEditingUser ? editForm.phone_number_input : form.phone_number_input}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (isEditingUser) {
+                              setEditForm((prev) => ({ ...prev, phone_number_input: value }));
+                              return;
+                            }
+                            setForm((prev) => ({ ...prev, phone_number_input: value }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <select
+                        className="form-select"
+                        value={isEditingUser ? editForm.department_id : form.department_id}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, department_id: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, department_id: value }));
+                        }}
+                      >
+                        <option value="">Department</option>
+                        {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <select
+                        className="form-select"
+                        value={isEditingUser ? editForm.employee_role_id : form.employee_role_id}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, employee_role_id: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, employee_role_id: value }));
+                        }}
+                      >
+                        <option value="">Employee Role</option>
+                        {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-12 col-xl-4">
+                      <div className="d-grid d-xl-flex gap-2 h-100">
+                        <button type="submit" className="btn btn-primary flex-fill" disabled={isEditingUser ? savingEdit : saving} title={isEditingUser ? "Update User" : "Create User"}>
+                          {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}
+                        </button>
+                        {isEditingUser ? (
+                          <button type="button" className="btn btn-outline-light flex-fill" onClick={cancelEdit}>
+                            Cancel
+                          </button>
+                        ) : (
+                          <span className="flex-fill d-none d-xl-block" aria-hidden="true"></span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </form>
               </div>
             </>

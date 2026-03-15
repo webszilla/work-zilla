@@ -54,7 +54,7 @@
               <thead>
                 <tr>
                   <th>Product</th>
-                  {% if not is_agent %}
+                  {% if show_account_billing_sections %}
                     <th>Plan</th>
                     <th>Status</th>
                     <th>Billing</th>
@@ -68,7 +68,7 @@
                   {% with slug=sub.product_slug|default:"monitor" %}
                       <tr>
                         <td>{{ sub.product_name|default:branding.display_name }}</td>
-                        {% if not is_agent %}
+                        {% if show_account_billing_sections %}
                           <td>{{ sub.plan.name }}</td>
                           <td>
                             {% if sub.status == "active" %}
@@ -93,7 +93,7 @@
                           </td>
                         {% endif %}
                         <td>
-                          {% if is_agent %}
+                          {% if is_agent or not show_account_billing_sections %}
                             <a class="btn btn-outline btn-sm" href="{{ sub.dashboard_path|default:'/app/' }}">Dashboard</a>
                           {% elif sub.status == "active" or sub.status == "trialing" %}
                             <div class="d-flex flex-wrap gap-2">
@@ -142,7 +142,7 @@
           <a class="btn btn-outline" href="/pricing/">View pricing</a>
         {% endif %}
 
-        {% if not is_agent %}
+        {% if show_account_billing_sections %}
         <div class="mt-4">
           <h3 class="section-title">Bank Transfer Pending</h3>
           {% if pending_payment_rows %}
@@ -192,7 +192,7 @@
         </div>
         {% endif %}
 
-        {% if not is_agent %}
+        {% if show_account_billing_sections %}
         <div class="mt-4">
           <h3 class="section-title">My Renewals</h3>
           {% if pending_renewal_rows %}
@@ -242,7 +242,7 @@
         </div>
         {% endif %}
 
-        {% if expired_subscriptions %}
+        {% if show_account_billing_sections and expired_subscriptions %}
           <div class="mt-4">
             <h3 class="section-title">Expired Plans</h3>
             <div class="table-responsive mt-3">
@@ -250,7 +250,7 @@
                 <thead>
                   <tr>
                     <th>Product</th>
-                    {% if not is_agent %}
+                    {% if show_account_billing_sections %}
                       <th>Plan</th>
                       <th>Status</th>
                       <th>Billing</th>
@@ -264,7 +264,7 @@
                     {% with slug=sub.product_slug|default:"monitor" %}
                         <tr>
                           <td>{{ sub.product_name|default:branding.display_name }}</td>
-                          {% if not is_agent %}
+                          {% if show_account_billing_sections %}
                             <td>{{ sub.plan.name }}</td>
                             <td><span class="badge bg-secondary">Expired</span></td>
                             <td>{{ sub.billing_cycle|title }}</td>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, getCsrfToken } from "../lib/api.js";
+import AiAvatar from "../components/chat/AiAvatar.jsx";
+import { getAiEmotionEmoji, getAiEmotionFromText } from "../components/chat/aiAvatarConfig.js";
 
 const emptyState = {
   loading: true,
@@ -776,36 +778,42 @@ export default function AiChatbotInboxPage() {
                   return (
                     <div
                       key={message.id}
-                      className={`ai-chatbot-message ai-chatbot-message--${message.sender_type}`}
+                      className={`ai-chatbot-message-row ai-chatbot-message-row--${message.sender_type}`}
                     >
-                      {showText ? <div className="ai-chatbot-message__text">{message.text}</div> : null}
-                      {hasAttachment ? (
-                        message.attachment_type?.startsWith("image/") ? (
-                          <a
-                            className="ai-chatbot-attachment"
-                            href={message.attachment_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <img
-                              className="ai-chatbot-attachment__image"
-                              src={message.attachment_url}
-                              alt={message.attachment_name || "Attachment"}
-                            />
-                          </a>
-                        ) : (
-                          <a
-                            className="ai-chatbot-attachment"
-                            href={message.attachment_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {message.attachment_name || "Download attachment"}
-                          </a>
-                        )
+                      {message.sender_type === "bot" ? (
+                        <AiAvatar emotion={getAiEmotionFromText(message.text)} size={40} />
                       ) : null}
-                      <div className="ai-chatbot-message__meta">
-                        {message.sender_type} - {metaTime || "-"}
+                      <div className={`ai-chatbot-message ai-chatbot-message--${message.sender_type}`}>
+                        {showText ? <div className="ai-chatbot-message__text">{message.text}</div> : null}
+                        {hasAttachment ? (
+                          message.attachment_type?.startsWith("image/") ? (
+                            <a
+                              className="ai-chatbot-attachment"
+                              href={message.attachment_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <img
+                                className="ai-chatbot-attachment__image"
+                                src={message.attachment_url}
+                                alt={message.attachment_name || "Attachment"}
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              className="ai-chatbot-attachment"
+                              href={message.attachment_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {message.attachment_name || "Download attachment"}
+                            </a>
+                          )
+                        ) : null}
+                        <div className="ai-chatbot-message__meta">
+                          {message.sender_type === "bot" ? `${getAiEmotionEmoji(getAiEmotionFromText(message.text))} ` : ""}
+                          {message.sender_type} - {metaTime || "-"}
+                        </div>
                       </div>
                     </div>
                   );

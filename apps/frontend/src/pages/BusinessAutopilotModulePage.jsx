@@ -1595,6 +1595,30 @@ function readSharedHrEmployees() {
   }
 }
 
+function findDirectoryItemBySourceUser(users = [], sourceUserId = "", fallbackName = "") {
+  const normalizedUserId = String(sourceUserId || "").trim();
+  const normalizedName = String(fallbackName || "").trim().toLowerCase();
+  return (users || []).find((item) => (
+    (normalizedUserId && String(item?.id || "").trim() === normalizedUserId)
+    || (normalizedName && String(item?.name || "").trim().toLowerCase() === normalizedName)
+  )) || null;
+}
+
+function splitCombinedPhoneValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { countryCode: "+91", number: "" };
+  }
+  const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+  if (match) {
+    return {
+      countryCode: String(match[1] || "+91").trim() || "+91",
+      number: String(match[2] || "").trim(),
+    };
+  }
+  return { countryCode: "+91", number: raw };
+}
+
 function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4649,7 +4673,7 @@ function ProjectManagementModule() {
     }
   }
 
-  function onSubmit(event) {
+  async function onSubmit(event) {
     event.preventDefault();
     const visibleFields = config.fields.filter((field) => {
       const condition = field.conditionalOn;
@@ -4687,6 +4711,7 @@ function ProjectManagementModule() {
     if (activeTab === "attendance" && payload.status !== "Permission") {
       payload.permissionHours = "";
     }
+    const nextRowId = editingId || `${activeTab}_${Date.now()}`;
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
@@ -5715,6 +5740,8 @@ function HrManagementModule() {
     temporarySameAsPermanent: false,
   });
   const [hrUserDirectory, setHrUserDirectory] = useState([]);
+  const [hrDepartmentOptions, setHrDepartmentOptions] = useState([]);
+  const [hrEmployeeRoleOptions, setHrEmployeeRoleOptions] = useState([]);
   const [editingId, setEditingId] = useState("");
   const [hrEmployeeSuggestOpen, setHrEmployeeSuggestOpen] = useState(false);
   const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
@@ -5788,15 +5815,39 @@ function HrManagementModule() {
         const data = await apiFetch("/api/business-autopilot/users");
         if (cancelled) return;
         setHrUserDirectory(Array.isArray(data?.users) ? data.users : []);
+        setHrDepartmentOptions(
+          Array.isArray(data?.departments)
+            ? data.departments
+              .map((item) => ({
+                id: String(item?.id || "").trim(),
+                name: String(item?.name || "").trim(),
+              }))
+              .filter((item) => item.id && item.name)
+            : []
+        );
+        setHrEmployeeRoleOptions(
+          Array.isArray(data?.employee_roles)
+            ? data.employee_roles
+              .map((item) => ({
+                id: String(item?.id || "").trim(),
+                name: String(item?.name || "").trim(),
+              }))
+              .filter((item) => item.id && item.name)
+            : []
+        );
       } catch (_error) {
         if (!cancelled) {
           setHrUserDirectory([]);
+          setHrDepartmentOptions([]);
+          setHrEmployeeRoleOptions([]);
         }
       }
     }
     loadHrUserDirectory();
+    window.addEventListener("focus", loadHrUserDirectory);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", loadHrUserDirectory);
     };
   }, []);
 
@@ -5891,6 +5942,14 @@ function HrManagementModule() {
     });
     return rows.slice(0, 8);
   }, [activeTab, formValues.name, hrUserDirectory]);
+  const hrDepartmentNameOptions = useMemo(
+    () => hrDepartmentOptions.map((item) => item.name).filter(Boolean),
+    [hrDepartmentOptions]
+  );
+  const hrEmployeeRoleNameOptions = useMemo(
+    () => hrEmployeeRoleOptions.map((item) => item.name).filter(Boolean),
+    [hrEmployeeRoleOptions]
+  );
 
   const attendanceDateMeta = useMemo(() => {
     const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
@@ -6013,9 +6072,12 @@ function HrManagementModule() {
     };
 
     if (matchedUser) {
+      const phoneParts = splitCombinedPhoneValue(matchedUser.phone_number || "");
       nextValues.name = String(matchedUser.name || trimmedName).trim();
       nextValues.department = String(matchedUser.department || nextValues.department || "").trim();
       nextValues.designation = String(matchedUser.employee_role || nextValues.designation || "").trim();
+      nextValues.contactCountryCode = phoneParts.countryCode || nextValues.contactCountryCode || "+91";
+      nextValues.contactNumber = phoneParts.number || nextValues.contactNumber || "";
       nextValues.sourceUserId = String(matchedUser.id || "");
       nextValues.sourceUserEmail = String(matchedUser.email || "");
     } else {
@@ -6214,6 +6276,38 @@ function HrManagementModule() {
               </div>
             ) : null}
           </div>
+        ) : activeTab === "employees" && field.key === "department" ? (
+          <select
+            className="form-select"
+            value={formValues[field.key] || ""}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          >
+            <option value="">Select Department</option>
+            {hrDepartmentNameOptions.map((name) => (
+              <option key={`hr-department-${name}`} value={name}>
+                {name}
+              </option>
+            ))}
+            {formValues[field.key] && !hrDepartmentNameOptions.includes(formValues[field.key]) ? (
+              <option value={formValues[field.key]}>{formValues[field.key]}</option>
+            ) : null}
+          </select>
+        ) : activeTab === "employees" && field.key === "designation" ? (
+          <select
+            className="form-select"
+            value={formValues[field.key] || ""}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          >
+            <option value="">Select Employee Role</option>
+            {hrEmployeeRoleNameOptions.map((name) => (
+              <option key={`hr-employee-role-${name}`} value={name}>
+                {name}
+              </option>
+            ))}
+            {formValues[field.key] && !hrEmployeeRoleNameOptions.includes(formValues[field.key]) ? (
+              <option value={formValues[field.key]}>{formValues[field.key]}</option>
+            ) : null}
+          </select>
         ) : activeTab === "employees" && field.type === "phoneCode" ? (
           <div className="input-group">
             <PhoneCountryCodePicker
@@ -6441,7 +6535,7 @@ function HrManagementModule() {
     }
   }
 
-  function onSubmit(event) {
+  async function onSubmit(event) {
     event.preventDefault();
     const visibleFields = config.fields.filter((field) => {
       const condition = field.conditionalOn;
@@ -6494,9 +6588,55 @@ function HrManagementModule() {
       }
       return {
         ...prev,
-        [activeTab]: [{ id: `${activeTab}_${Date.now()}`, ...payload }, ...existing]
+        [activeTab]: [{ id: nextRowId, ...payload }, ...existing]
       };
     });
+    if (activeTab === "employees" && payload.sourceUserId) {
+      const matchedDirectoryUser = findDirectoryItemBySourceUser(hrUserDirectory, payload.sourceUserId, payload.name);
+      const membershipId = String(matchedDirectoryUser?.membership_id || "").trim();
+      const departmentId = hrDepartmentOptions.find((item) => item.name === payload.department)?.id || null;
+      const employeeRoleId = hrEmployeeRoleOptions.find((item) => item.name === payload.designation)?.id || null;
+      if (membershipId) {
+        try {
+          const updateData = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              first_name: String(matchedDirectoryUser?.first_name || "").trim(),
+              last_name: String(matchedDirectoryUser?.last_name || "").trim(),
+              email: String(matchedDirectoryUser?.email || "").trim(),
+              password: "",
+              role: String(matchedDirectoryUser?.role || "org_user").trim() || "org_user",
+              department_id: departmentId,
+              employee_role_id: employeeRoleId,
+              is_active: matchedDirectoryUser?.is_active !== false,
+            }),
+          });
+          setHrUserDirectory(Array.isArray(updateData?.users) ? updateData.users : []);
+          setHrDepartmentOptions(
+            Array.isArray(updateData?.departments)
+              ? updateData.departments
+                .map((item) => ({
+                  id: String(item?.id || "").trim(),
+                  name: String(item?.name || "").trim(),
+                }))
+                .filter((item) => item.id && item.name)
+              : []
+          );
+          setHrEmployeeRoleOptions(
+            Array.isArray(updateData?.employee_roles)
+              ? updateData.employee_roles
+                .map((item) => ({
+                  id: String(item?.id || "").trim(),
+                  name: String(item?.name || "").trim(),
+                }))
+                .filter((item) => item.id && item.name)
+              : []
+          );
+        } catch (_error) {
+          // Keep the HR record saved even if linked user sync fails.
+        }
+      }
+    }
     onCancelEdit();
   }
 

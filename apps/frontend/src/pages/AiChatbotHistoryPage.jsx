@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import AiAvatar from "../components/chat/AiAvatar.jsx";
+import { getAiEmotionEmoji, getAiEmotionFromText } from "../components/chat/aiAvatarConfig.js";
 
 const emptyState = {
   loading: true,
@@ -258,11 +260,17 @@ export default function AiChatbotHistoryPage() {
                       return (
                         <div
                           key={msg.id}
-                          className={`ai-chatbot-message ai-chatbot-message--${msg.sender_type}`}
+                          className={`ai-chatbot-message-row ai-chatbot-message-row--${msg.sender_type}`}
                         >
-                          <div className="ai-chatbot-message__text">{msg.text}</div>
-                          <div className="ai-chatbot-message__meta">
-                            {msg.sender_type} - {metaTime || "-"}
+                          {msg.sender_type === "bot" ? (
+                            <AiAvatar emotion={getAiEmotionFromText(msg.text)} size={40} />
+                          ) : null}
+                          <div className={`ai-chatbot-message ai-chatbot-message--${msg.sender_type}`}>
+                            <div className="ai-chatbot-message__text">{msg.text}</div>
+                            <div className="ai-chatbot-message__meta">
+                              {msg.sender_type === "bot" ? `${getAiEmotionEmoji(getAiEmotionFromText(msg.text))} ` : ""}
+                              {msg.sender_type} - {metaTime || "-"}
+                            </div>
                           </div>
                         </div>
                       );

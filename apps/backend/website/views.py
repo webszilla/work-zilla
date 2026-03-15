@@ -26,6 +26,7 @@ from apps.backend.products.models import Product
 from apps.backend.website import application_downloads
 from core.observability import log_event
 from core.subscription_utils import is_free_plan, is_subscription_active
+from core.access_control import get_access_role, iter_accessible_product_slugs
 from core.models import (
     Organization,
     Plan,
@@ -210,12 +211,62 @@ def _validate_ticket_attachments(files):
 
 
 def _is_org_admin_account(request, org, profile=None):
-    if not request.user.is_authenticated or not org:
+    return _has_account_billing_access(request.user, org, profile)
+
+
+def _has_account_billing_access(user, org, profile=None):
+    if not user.is_authenticated or not org:
         return False
-    if getattr(request.user, "is_staff", False) or getattr(org, "owner_id", None) == request.user.id:
+    if getattr(user, "is_staff", False) or getattr(org, "owner_id", None) == user.id:
         return True
-    profile = profile or UserProfile.objects.filter(user=request.user).first()
+    profile = profile or UserProfile.objects.filter(user=user).first()
     return bool(profile and getattr(profile, "is_org_admin", False))
+
+
+def _accessible_account_product_slugs(user, org, profile=None):
+    if not getattr(user, "is_authenticated", False) or not org:
+        return set()
+    profile = profile or UserProfile.objects.filter(user=user).first()
+    role = get_access_role(user, profile)
+    if role == "ORG_ADMIN":
+        return set()
+    fallback_slugs = set()
+    try:
+        from apps.backend.business_autopilot.api_views import _grant_business_autopilot_access
+        from apps.backend.business_autopilot.models import OrganizationUser
+
+        membership = (
+            OrganizationUser.objects
+            .filter(organization=org, user=user, is_active=True)
+            .only("role")
+            .first()
+        )
+        if membership:
+            _grant_business_autopilot_access(user, getattr(org, "owner", None), membership.role)
+            fallback_slugs.add("business-autopilot-erp")
+    except Exception:
+        pass
+    return {slug for slug in iter_accessible_product_slugs(user) if slug} | fallback_slugs
+
+
+def _filter_rows_by_product_slugs(rows, allowed_slugs, attr_name="product_slug"):
+    if not allowed_slugs:
+        return list(rows)
+    filtered = []
+    for row in rows:
+        slug = getattr(row, attr_name, None) if not isinstance(row, dict) else row.get(attr_name)
+        if slug in allowed_slugs:
+            filtered.append(row)
+    return filtered
+
+
+def _plan_product_slug(plan_obj):
+    if not plan_obj:
+        return "monitor"
+    product_obj = getattr(plan_obj, "product", None)
+    if product_obj and getattr(product_obj, "slug", ""):
+        return product_obj.slug
+    return "monitor"
 
 
 def _purge_closed_tickets(days=45):
@@ -1602,6 +1653,10 @@ def checkout_confirm(request):
 def billing_renew_start(request):
     product_slug = _normalize_product_slug(request.GET.get("product"))
     org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
+        return redirect("/my-account/")
     if org:
         pending_exists = PendingTransfer.objects.filter(
             organization=org,
@@ -1640,6 +1695,10 @@ def billing_renew_view(request):
     context["is_logged_in"] = True
     context["account_section"] = "billing"
     org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
+        return redirect("/my-account/")
 
     plan_id = request.session.get("renew_plan_id")
     product_slug = _normalize_product_slug(request.session.get("renew_product_slug"))
@@ -1690,6 +1749,8 @@ def billing_renew_view(request):
         "addon_price": addon_price,
         "total_price": total_price,
         "has_pending_renewal": pending_renewal,
+        "show_billing_tab": True,
+        "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "public/billing_renew.html", context)
 
@@ -1728,6 +1789,10 @@ def billing_renew_confirm(request):
     notes = (request.POST.get("notes") or "").strip()
 
     org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
+        return redirect("/my-account/")
     if org:
         has_pending = PendingTransfer.objects.filter(
             organization=org,
@@ -1816,6 +1881,10 @@ def billing_addons_manage(request):
     context["is_logged_in"] = True
     context["account_section"] = "billing"
     org = _resolve_org_for_user(request.user)
+    profile = UserProfile.objects.filter(user=request.user).first()
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
+        return redirect("/my-account/")
     product_slug = _normalize_product_slug(request.GET.get("product") or request.POST.get("product"))
     if not product_slug:
         messages.error(request, "Product is required.")
@@ -1938,6 +2007,8 @@ def billing_addons_manage(request):
         "addon_proration_preview": preview,
         "addon_temporary_extra_count": temporary_window["extra"],
         "addon_temporary_extra_until": temporary_window["until"],
+        "show_billing_tab": True,
+        "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "public/billing_addons.html", context)
 
@@ -1950,6 +2021,8 @@ def account_view(request):
     org = _resolve_org_for_user(request.user)
     profile = UserProfile.objects.filter(user=request.user).first()
     show_ticketing_tab = _is_org_admin_account(request, org, profile)
+    can_view_billing = _has_account_billing_access(request.user, org, profile)
+    accessible_product_slugs = _accessible_account_product_slugs(request.user, org, profile)
     is_saas_admin = bool(
         request.user.is_superuser
         or (profile and profile.role in ("superadmin", "super_admin"))
@@ -1958,10 +2031,17 @@ def account_view(request):
     subs = (
         Subscription.objects
         .filter(organization=org)
-        .select_related("plan")
+        .select_related("plan", "plan__product")
         .order_by("-start_date")
     )
     subs = list(subs)
+    if accessible_product_slugs:
+        subs = [
+            sub for sub in subs
+            if _plan_product_slug(getattr(sub, "plan", None)) in accessible_product_slugs
+        ]
+    elif not can_view_billing and not is_agent:
+        subs = []
     storage_subs = []
     try:
         from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
@@ -1973,6 +2053,13 @@ def account_view(request):
         )
         storage_subs = list(storage_subs)
     except Exception:
+        storage_subs = []
+    if accessible_product_slugs:
+        storage_subs = [
+            sub for sub in storage_subs
+            if "storage" in accessible_product_slugs
+        ]
+    elif not can_view_billing and not is_agent:
         storage_subs = []
     if is_agent:
         subs = [
@@ -2048,7 +2135,7 @@ def account_view(request):
         existing_slugs.add(slug)
 
     history_rows = []
-    if not is_agent:
+    if not is_agent and can_view_billing:
         history_rows = (
             SubscriptionHistory.objects
             .filter(organization=org, plan__isnull=False)
@@ -2089,7 +2176,7 @@ def account_view(request):
         sub.can_upgrade = sub.plan_rank < max_rank_by_slug.get(slug, sub.plan_rank)
         sub.is_free_plan = is_free_plan(plan)
     pending_renewal_rows = []
-    if not is_agent:
+    if not is_agent and can_view_billing:
         pending_renewals = (
             PendingTransfer.objects
             .filter(organization=org, status__in=["pending", "draft"], request_type="renew")
@@ -2110,7 +2197,7 @@ def account_view(request):
                 "currency": transfer.currency,
             })
     pending_payment_rows = []
-    if not is_agent:
+    if not is_agent and can_view_billing:
         pending_payments = (
             PendingTransfer.objects
             .filter(organization=org, status__in=["pending", "draft"])
@@ -2130,12 +2217,14 @@ def account_view(request):
                 "amount": transfer.amount,
                 "currency": transfer.currency,
             })
-    approved_transfers = (
-        PendingTransfer.objects
-        .filter(organization=org, status="approved")
-        .select_related("plan", "plan__product")
-        .order_by("-paid_on", "-updated_at", "-id")
-    )
+    approved_transfers = []
+    if can_view_billing:
+        approved_transfers = (
+            PendingTransfer.objects
+            .filter(organization=org, status="approved")
+            .select_related("plan", "plan__product")
+            .order_by("-paid_on", "-updated_at", "-id")
+        )
     base_by_slug = {}
     addon_by_slug = {}
     for transfer in approved_transfers:
@@ -2206,6 +2295,8 @@ def account_view(request):
         "pending_payment_rows": pending_payment_rows,
         "is_saas_admin": is_saas_admin,
         "is_agent": is_agent,
+        "show_billing_tab": can_view_billing and not is_agent,
+        "show_account_billing_sections": can_view_billing and not is_agent,
         "show_ticketing_tab": show_ticketing_tab,
         "pending_renewal_rows": pending_renewal_rows,
         "email_verification_required": bool(request.user.email and not request.user.email_verified),
@@ -2260,6 +2351,9 @@ def billing_view(request):
     if profile and profile.role == "ai_chatbot_agent":
         return redirect("/my-account/")
     org = _resolve_org_for_user(request.user)
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
+        return redirect("/my-account/")
     show_ticketing_tab = _is_org_admin_account(request, org, profile)
     profile = BillingProfile.objects.filter(organization=org).first()
     product_slug = (request.GET.get("product") or "all").strip().lower()
@@ -2460,6 +2554,7 @@ def billing_view(request):
         "billing_phone_number": phone_number,
         "billing_product_slug": product_slug,
         "billing_products": billing_products,
+        "show_billing_tab": True,
         "show_ticketing_tab": show_ticketing_tab,
     })
     return render(request, "public/billing.html", context)
@@ -2474,6 +2569,9 @@ def account_bank_transfer(request, transfer_id=None):
     profile = UserProfile.objects.filter(user=request.user).first()
     if not org:
         messages.error(request, "Organization not found.")
+        return redirect("/my-account/")
+    if not _has_account_billing_access(request.user, org, profile):
+        messages.error(request, "Billing access is available only for organization admins.")
         return redirect("/my-account/")
 
     transfer = None
@@ -2515,6 +2613,7 @@ def account_bank_transfer(request, transfer_id=None):
         "bank_account_details": bank_account_details,
         "seller_upi_id": seller_upi_id,
         "transfer_description": (transfer.notes or "").strip() if transfer and transfer.request_type == "addon" else "",
+        "show_billing_tab": True,
         "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "payments/bank_transfer.html", context)
@@ -2559,6 +2658,7 @@ def profile_view(request):
 
     context.update({
         "profile": profile,
+        "show_billing_tab": _has_account_billing_access(request.user, org, profile),
         "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "public/profile.html", context)
@@ -2783,6 +2883,7 @@ def account_ticketing_view(request):
     context.update({
         "organization": org,
         "profile": profile,
+        "show_billing_tab": True,
         "show_ticketing_tab": True,
         "ticket_product_options": product_options,
         "ticket_rows": ticket_rows,
