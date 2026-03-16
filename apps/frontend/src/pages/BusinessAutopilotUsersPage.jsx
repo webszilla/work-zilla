@@ -100,6 +100,30 @@ const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "sourceUserEmail", label: "Linked User Email" },
 ];
 
+function createEmptySharedPartyForm() {
+  return {
+    id: "",
+    companyName: "",
+    clientName: "",
+    name: "",
+    gstin: "",
+    phoneCountryCode: "+91",
+    phone: "",
+    additionalPhones: [],
+    email: "",
+    additionalEmails: [],
+    billingAddress: "",
+    shippingAddress: "",
+    billingCountry: "India",
+    billingState: "",
+    billingPincode: "",
+    shippingCountry: "India",
+    shippingState: "",
+    shippingPincode: "",
+    billingShippingSame: false,
+  };
+}
+
 function createDefaultRoleAccessRecord() {
   return {
     sections: ROLE_ACCESS_SECTIONS.reduce((acc, item) => {
@@ -173,14 +197,18 @@ function readSharedAccountsData() {
   try {
     const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" ? parsed : { customers: [] };
+    return parsed && typeof parsed === "object" ? parsed : { customers: [], vendors: [] };
   } catch {
-    return { customers: [] };
+    return { customers: [], vendors: [] };
   }
 }
 
 function readSharedAccountsCustomers() {
   return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+function readSharedAccountsVendors() {
+  return (readSharedAccountsData().vendors || []).map((row) => normalizeSharedCustomerRecord(row));
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
@@ -508,32 +536,18 @@ export default function BusinessAutopilotUsersPage() {
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
   const [clientSearch, setClientSearch] = useState("");
   const [clientPage, setClientPage] = useState(1);
+  const [vendorSearch, setVendorSearch] = useState("");
+  const [vendorPage, setVendorPage] = useState(1);
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
+  const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
-  const [clientForm, setClientForm] = useState({
-    id: "",
-    companyName: "",
-    clientName: "",
-    name: "",
-    gstin: "",
-    phoneCountryCode: "+91",
-    phone: "",
-    additionalPhones: [],
-    email: "",
-    additionalEmails: [],
-    billingAddress: "",
-    shippingAddress: "",
-    billingCountry: "India",
-    billingState: "",
-    billingPincode: "",
-    shippingCountry: "India",
-    shippingState: "",
-    shippingPincode: "",
-    billingShippingSame: false,
-  });
+  const [clientForm, setClientForm] = useState(() => createEmptySharedPartyForm());
   const [editingClientId, setEditingClientId] = useState("");
+  const [vendorForm, setVendorForm] = useState(() => createEmptySharedPartyForm());
+  const [editingVendorId, setEditingVendorId] = useState("");
   const clientImportInputRef = useRef(null);
+  const vendorImportInputRef = useRef(null);
   const userFormRef = useRef(null);
   const pageSize = 5;
 
@@ -689,6 +703,7 @@ export default function BusinessAutopilotUsersPage() {
   useEffect(() => {
     function syncSharedCustomers() {
       setSharedCustomers(readSharedAccountsCustomers());
+      setSharedVendors(readSharedAccountsVendors());
     }
     syncSharedCustomers();
     window.addEventListener("storage", syncSharedCustomers);
@@ -727,6 +742,10 @@ export default function BusinessAutopilotUsersPage() {
   useEffect(() => {
     setClientPage(1);
   }, [clientSearch, sharedCustomers.length]);
+
+  useEffect(() => {
+    setVendorPage(1);
+  }, [vendorSearch, sharedVendors.length]);
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -1040,6 +1059,8 @@ export default function BusinessAutopilotUsersPage() {
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
   const billingStateOptions = getStateOptionsForCountry(String(clientForm.billingCountry || "India"));
   const shippingStateOptions = getStateOptionsForCountry(String(clientForm.shippingCountry || "India"));
+  const vendorBillingStateOptions = getStateOptionsForCountry(String(vendorForm.billingCountry || "India"));
+  const vendorShippingStateOptions = getStateOptionsForCountry(String(vendorForm.shippingCountry || "India"));
   const filteredClients = useMemo(() => {
     const q = clientSearch.trim().toLowerCase();
     if (!q) {
@@ -1068,6 +1089,34 @@ export default function BusinessAutopilotUsersPage() {
   const paginatedClients = filteredClients.slice((normalizedClientPage - 1) * pageSize, normalizedClientPage * pageSize);
   const clientStartIndex = filteredClients.length ? (normalizedClientPage - 1) * pageSize + 1 : 0;
   const clientEndIndex = Math.min(normalizedClientPage * pageSize, filteredClients.length);
+  const filteredVendors = useMemo(() => {
+    const q = vendorSearch.trim().toLowerCase();
+    if (!q) {
+      return sharedVendors;
+    }
+    return sharedVendors.filter((row) =>
+      [
+        row.companyName,
+        row.clientName,
+        row.gstin,
+        row.phone,
+        ...formatSharedCustomerPhones(row),
+        row.email,
+        ...formatSharedCustomerEmails(row),
+        row.billingCountry,
+        row.billingState,
+        row.billingPincode,
+        row.shippingCountry,
+        row.shippingState,
+        row.shippingPincode,
+      ].filter(Boolean).join(" ").toLowerCase().includes(q)
+    );
+  }, [sharedVendors, vendorSearch]);
+  const totalVendorPages = Math.max(1, Math.ceil(filteredVendors.length / pageSize));
+  const normalizedVendorPage = Math.min(vendorPage, totalVendorPages);
+  const paginatedVendors = filteredVendors.slice((normalizedVendorPage - 1) * pageSize, normalizedVendorPage * pageSize);
+  const vendorStartIndex = filteredVendors.length ? (normalizedVendorPage - 1) * pageSize + 1 : 0;
+  const vendorEndIndex = Math.min(normalizedVendorPage * pageSize, filteredVendors.length);
 
   function updateRoleAccess(updater) {
     if (!canManageUsers) {
@@ -1086,27 +1135,12 @@ export default function BusinessAutopilotUsersPage() {
 
   function resetClientForm() {
     setEditingClientId("");
-    setClientForm({
-      id: "",
-      companyName: "",
-      clientName: "",
-      name: "",
-      gstin: "",
-      phoneCountryCode: "+91",
-      phone: "",
-      additionalPhones: [],
-      email: "",
-      additionalEmails: [],
-      billingAddress: "",
-      shippingAddress: "",
-      billingCountry: "India",
-      billingState: "",
-      billingPincode: "",
-      shippingCountry: "India",
-      shippingState: "",
-      shippingPincode: "",
-      billingShippingSame: false,
-    });
+    setClientForm(createEmptySharedPartyForm());
+  }
+
+  function resetVendorForm() {
+    setEditingVendorId("");
+    setVendorForm(createEmptySharedPartyForm());
   }
 
   async function saveClient(event) {
@@ -1411,6 +1445,347 @@ export default function BusinessAutopilotUsersPage() {
     }
   }
 
+  async function saveVendor(event) {
+    event.preventDefault();
+    if (!canManageUsers) {
+      return;
+    }
+    const companyName = String(vendorForm.companyName || "").trim();
+    if (!companyName) {
+      return;
+    }
+    const vendorName = String(vendorForm.clientName || "").trim();
+    const primaryPhone = String(vendorForm.phone || "").trim();
+    const primaryEmail = String(vendorForm.email || "").trim();
+    const additionalPhones = (vendorForm.additionalPhones || [])
+      .map((row) => ({ countryCode: String(row.countryCode || "+91").trim() || "+91", number: String(row.number || "").trim() }))
+      .filter((row) => row.number);
+    const additionalEmails = (vendorForm.additionalEmails || [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const billingCountry = String(vendorForm.billingCountry || "").trim() || "India";
+    const billingState = String(vendorForm.billingState || "").trim();
+    const billingPincode = String(vendorForm.billingPincode || "").trim();
+    const useSameShipping = Boolean(vendorForm.billingShippingSame);
+    const shippingAddress = useSameShipping
+      ? String(vendorForm.billingAddress || "").trim()
+      : String(vendorForm.shippingAddress || "").trim();
+    const shippingCountry = useSameShipping
+      ? billingCountry
+      : (String(vendorForm.shippingCountry || "").trim() || "India");
+    const shippingState = useSameShipping
+      ? billingState
+      : String(vendorForm.shippingState || "").trim();
+    const shippingPincode = useSameShipping
+      ? billingPincode
+      : String(vendorForm.shippingPincode || "").trim();
+    const payload = normalizeSharedCustomerRecord({
+      id: editingVendorId || `vendor_${Date.now()}`,
+      companyName,
+      clientName: vendorName,
+      name: companyName,
+      gstin: String(vendorForm.gstin || "").trim(),
+      phoneCountryCode: String(vendorForm.phoneCountryCode || "+91").trim() || "+91",
+      phone: primaryPhone,
+      additionalPhones,
+      phoneList: [
+        ...(primaryPhone ? [{ countryCode: String(vendorForm.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+        ...additionalPhones,
+      ],
+      email: primaryEmail,
+      additionalEmails,
+      emailList: [primaryEmail, ...additionalEmails].filter(Boolean),
+      billingAddress: String(vendorForm.billingAddress || "").trim(),
+      shippingAddress,
+      billingCountry,
+      billingState,
+      billingPincode,
+      shippingCountry,
+      shippingState,
+      shippingPincode,
+      billingShippingSame: useSameShipping,
+      country: billingCountry,
+      state: billingState,
+      pincode: billingPincode,
+    });
+    const nextVendors = editingVendorId
+      ? sharedVendors.map((row) => (row.id === editingVendorId ? { ...row, ...payload } : row))
+      : [payload, ...sharedVendors];
+    const currentData = readSharedAccountsData();
+    const nextData = {
+      ...currentData,
+      vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
+    };
+    setSharedVendors(nextVendors);
+    window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+    try {
+      await apiFetch("/api/business-autopilot/accounts/workspace", {
+        method: "PUT",
+        body: JSON.stringify({ data: nextData }),
+      });
+    } catch {
+      // Keep vendor registration data locally even if server sync fails.
+    }
+    setNotice(editingVendorId ? "Vendor updated successfully." : "Vendor created successfully.");
+    resetVendorForm();
+  }
+
+  function editVendor(row) {
+    const normalized = normalizeSharedCustomerRecord(row);
+    setEditingVendorId(normalized.id);
+    setVendorForm({
+      ...normalized,
+      additionalPhones: Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : [],
+      additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
+    });
+    setActiveTopTab("vendors");
+  }
+
+  async function deleteVendor(vendorId) {
+    if (!canManageUsers) {
+      return;
+    }
+    const nextVendors = sharedVendors.filter((row) => String(row.id) !== String(vendorId));
+    const currentData = readSharedAccountsData();
+    const nextData = {
+      ...currentData,
+      vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
+    };
+    setSharedVendors(nextVendors);
+    window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+    try {
+      await apiFetch("/api/business-autopilot/accounts/workspace", {
+        method: "PUT",
+        body: JSON.stringify({ data: nextData }),
+      });
+    } catch {
+      // Keep vendor registration data locally even if server sync fails.
+    }
+    if (editingVendorId === String(vendorId)) {
+      resetVendorForm();
+    }
+    setNotice("Vendor deleted successfully.");
+  }
+
+  function exportVendorsAsExcelCsv() {
+    const headers = ["Company Name", "Vendor Name", "GSTIN", "Contact Number", "Email ID", "Location"];
+    const csvEscape = (value) => {
+      const raw = String(value ?? "");
+      if (/[",\n]/.test(raw)) {
+        return `"${raw.replace(/"/g, "\"\"")}"`;
+      }
+      return raw;
+    };
+    const lines = [
+      headers.map(csvEscape).join(","),
+      ...filteredVendors.map((row) => [
+        row.companyName || row.name || "",
+        row.clientName || "",
+        row.gstin || "",
+        formatSharedCustomerPhones(row).join(", "),
+        formatSharedCustomerEmails(row).join(", "),
+        [row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", "),
+      ].map(csvEscape).join(",")),
+    ];
+    const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "vendor-registration-list.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportVendorsAsPdf() {
+    const win = window.open("", "_blank", "width=1000,height=700");
+    if (!win) {
+      window.alert("Popup blocked. Please allow popups to export PDF.");
+      return;
+    }
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const rows = filteredVendors.length
+      ? filteredVendors.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.companyName || row.name || "-")}</td>
+            <td>${escapeHtml(row.clientName || "-")}</td>
+            <td>${escapeHtml(row.gstin || "-")}</td>
+            <td>${escapeHtml(formatSharedCustomerPhones(row).join(", ") || "-")}</td>
+            <td>${escapeHtml(formatSharedCustomerEmails(row).join(", ") || "-")}</td>
+            <td>${escapeHtml([row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-")}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="6">No vendors found.</td></tr>`;
+    win.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Vendor Registration List - Export</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+            h2 { margin: 0 0 12px 0; font-size: 20px; }
+            p { margin: 0 0 12px 0; color: #555; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; vertical-align: top; }
+            th { background: #f1f1f1; }
+          </style>
+        </head>
+        <body>
+          <h2>Vendor Registration List</h2>
+          <p>Exported ${escapeHtml(new Date().toLocaleString())}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Company Name</th>
+                <th>Vendor Name</th>
+                <th>GSTIN</th>
+                <th>Contact Number</th>
+                <th>Email ID</th>
+                <th>Location</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    const triggerPrint = () => {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        // ignore print trigger issues
+      }
+    };
+    win.onload = () => {
+      win.setTimeout(triggerPrint, 250);
+    };
+    win.setTimeout(triggerPrint, 500);
+  }
+
+  function triggerVendorImportPicker() {
+    vendorImportInputRef.current?.click();
+  }
+
+  async function onVendorImportFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !canManageUsers) {
+      return;
+    }
+    try {
+      let importedRows = [];
+      const fileName = String(file.name || "").toLowerCase();
+      if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+        importedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+      } else {
+        importedRows = parseCsvRows(await file.text());
+      }
+      const nextRows = importedRows
+        .map((row, rowIndex) => {
+          const getValue = (...keys) => {
+            for (const key of keys) {
+              const match = Object.entries(row || {}).find(
+                ([header]) => normalizeImportHeader(header) === normalizeImportHeader(key)
+              );
+              if (match && String(match[1] || "").trim()) {
+                return String(match[1] || "").trim();
+              }
+            }
+            return "";
+          };
+          const companyName = getValue("Company Name", "Company", "Name");
+          const vendorName = getValue("Vendor Name", "Client Name", "Vendor", "Contact Person");
+          const gstin = getValue("GSTIN");
+          const contactNumberRaw = getValue("Contact Number", "Phone Number", "Phone", "Mobile Number");
+          const emailRaw = getValue("Email ID", "Email", "Email Address");
+          const locationRaw = getValue("Location", "Billing Location", "Address");
+          if (!companyName && !vendorName && !contactNumberRaw && !emailRaw && !locationRaw && !gstin) {
+            return null;
+          }
+          const phoneEntries = contactNumberRaw
+            .split(/[,\n/]+/)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .map((value) => {
+              const phoneMatch = value.match(/^(\+\d{1,4})\s*(.+)$/);
+              if (phoneMatch) {
+                return { countryCode: phoneMatch[1].trim(), number: phoneMatch[2].trim() };
+              }
+              return { countryCode: "+91", number: value };
+            })
+            .filter((item) => item.number);
+          const emailEntries = emailRaw
+            .split(/[,\n/]+/)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean);
+          const locationParts = locationRaw
+            .split(",")
+            .map((value) => String(value || "").trim())
+            .filter(Boolean);
+          const billingState = locationParts[0] || "";
+          const billingCountry = locationParts[1] || "India";
+          const billingPincode = locationParts[2] || "";
+          return normalizeSharedCustomerRecord({
+            id: `vendor_import_${Date.now()}_${rowIndex}`,
+            companyName,
+            clientName: vendorName,
+            name: companyName || vendorName,
+            gstin,
+            phoneCountryCode: phoneEntries[0]?.countryCode || "+91",
+            phone: phoneEntries[0]?.number || "",
+            additionalPhones: phoneEntries.slice(1),
+            phoneList: phoneEntries,
+            email: emailEntries[0] || "",
+            additionalEmails: emailEntries.slice(1),
+            emailList: emailEntries,
+            billingCountry,
+            billingState,
+            billingPincode,
+            shippingCountry: billingCountry,
+            shippingState: billingState,
+            shippingPincode: billingPincode,
+            country: billingCountry,
+            state: billingState,
+            pincode: billingPincode,
+          });
+        })
+        .filter(Boolean);
+      if (!nextRows.length) {
+        window.alert("Imported file is empty or invalid.");
+        return;
+      }
+      const nextVendors = [...nextRows, ...sharedVendors];
+      const currentData = readSharedAccountsData();
+      const nextData = {
+        ...currentData,
+        vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
+      };
+      setSharedVendors(nextVendors);
+      window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+      try {
+        await apiFetch("/api/business-autopilot/accounts/workspace", {
+          method: "PUT",
+          body: JSON.stringify({ data: nextData }),
+        });
+      } catch {
+        // Keep vendor registration data locally even if server sync fails.
+      }
+      setNotice("Vendors imported successfully.");
+    } catch {
+      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+    }
+  }
+
   return (
     <div className="d-flex flex-column gap-3">
       <div>
@@ -1437,6 +1812,13 @@ export default function BusinessAutopilotUsersPage() {
             onClick={() => setActiveTopTab("clients")}
           >
             Clients
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTopTab === "vendors" ? "btn-success" : "btn-outline-light"}`}
+            onClick={() => setActiveTopTab("vendors")}
+          >
+            Vendor Registration
           </button>
         </div>
       </div>
@@ -1791,7 +2173,15 @@ export default function BusinessAutopilotUsersPage() {
                             Cancel
                           </button>
                         ) : (
-                          <span className="flex-fill d-none d-xl-block" aria-hidden="true"></span>
+                          <button
+                            type="button"
+                            className="btn btn-outline-light flex-fill invisible d-none d-xl-block"
+                            disabled
+                            tabIndex={-1}
+                            aria-hidden="true"
+                          >
+                            Cancel
+                          </button>
                         )}
                       </div>
                     </div>
@@ -2038,7 +2428,7 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTopTab === "clients" ? (
         <>
           <div className="card p-3">
             <h6 className="mb-3">{editingClientId ? "Edit Client" : "Create Client"}</h6>
@@ -2296,6 +2686,267 @@ export default function BusinessAutopilotUsersPage() {
                 Showing {clientStartIndex} to {clientEndIndex} of {filteredClients.length} entries
               </div>
               <TablePagination page={normalizedClientPage} totalPages={totalClientPages} onPageChange={setClientPage} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="card p-3">
+            <h6 className="mb-3">{editingVendorId ? "Edit Vendor" : "Create Vendor"}</h6>
+            <form className="d-flex flex-column gap-3" onSubmit={saveVendor}>
+              <div className="row g-3">
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Company Name</label>
+                  <input className="form-control" value={vendorForm.companyName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, companyName: event.target.value, name: event.target.value }))} placeholder="Company name" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">Vendor Name</label>
+                  <input className="form-control" value={vendorForm.clientName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, clientName: event.target.value }))} placeholder="Vendor / Contact person" />
+                </div>
+                <div className="col-12 col-xl-4">
+                  <label className="form-label small text-secondary mb-1">GSTIN</label>
+                  <input className="form-control" value={vendorForm.gstin || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, gstin: event.target.value }))} placeholder="GSTIN" />
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <PhoneCountryCodePicker
+                        value={vendorForm.phoneCountryCode || "+91"}
+                        onChange={(code) => setVendorForm((prev) => ({ ...prev, phoneCountryCode: code }))}
+                        options={DIAL_COUNTRY_PICKER_OPTIONS}
+                        style={{ maxWidth: "220px" }}
+                        ariaLabel="Vendor phone country code"
+                      />
+                      <input className="form-control" value={vendorForm.phone || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Contact Number"
+                        onClick={() => setVendorForm((prev) => ({ ...prev, additionalPhones: [...(prev.additionalPhones || []), { countryCode: "+91", number: "" }] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(vendorForm.additionalPhones || []).map((row, index) => (
+                      <div className="d-flex gap-2" key={`users-vendor-phone-${index}`}>
+                        <PhoneCountryCodePicker
+                          value={row.countryCode || "+91"}
+                          onChange={(code) => setVendorForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, countryCode: code } : item))
+                          }))}
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "220px" }}
+                          ariaLabel="Additional vendor phone country code"
+                        />
+                        <input
+                          className="form-control"
+                          value={row.number || ""}
+                          placeholder="Additional contact number"
+                          onChange={(event) => setVendorForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: event.target.value } : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setVendorForm((prev) => ({
+                            ...prev,
+                            additionalPhones: (prev.additionalPhones || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <div className="d-flex flex-column gap-2">
+                    <div className="d-flex gap-2">
+                      <input className="form-control" value={vendorForm.email || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="Primary email" />
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        title="Add Email ID"
+                        onClick={() => setVendorForm((prev) => ({ ...prev, additionalEmails: [...(prev.additionalEmails || []), ""] }))}
+                      >
+                        +
+                      </button>
+                    </div>
+                    {(vendorForm.additionalEmails || []).map((value, index) => (
+                      <div className="d-flex gap-2" key={`users-vendor-email-${index}`}>
+                        <input
+                          className="form-control"
+                          value={value || ""}
+                          placeholder="Additional email ID"
+                          onChange={(event) => setVendorForm((prev) => ({
+                            ...prev,
+                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? event.target.value : item))
+                          }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => setVendorForm((prev) => ({
+                            ...prev,
+                            additionalEmails: (prev.additionalEmails || []).filter((_, i) => i !== index)
+                          }))}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-12 col-xl-6">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0"
+                        checked={Boolean(vendorForm.billingShippingSame)}
+                        onChange={(event) => setVendorForm((prev) => ({ ...prev, billingShippingSame: event.target.checked }))}
+                      />
+                      Billing and Shipping Same
+                    </label>
+                  </div>
+                  <textarea className="form-control mb-2" rows="2" value={vendorForm.billingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingAddress: event.target.value }))} placeholder="Billing address" />
+                  <div className="d-flex flex-column gap-2">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Country</label>
+                      <select className="form-select" value={vendorForm.billingCountry || "India"} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
+                        {COUNTRY_OPTIONS.map((country) => <option key={`users-vendor-country-${country}`} value={country}>{country}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">State</label>
+                      {vendorBillingStateOptions.length ? (
+                        <select className="form-select" value={vendorForm.billingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingState: event.target.value }))}>
+                          <option value="">Select State</option>
+                          {vendorBillingStateOptions.map((state) => <option key={`users-vendor-state-${state}`} value={state}>{state}</option>)}
+                        </select>
+                      ) : (
+                        <input className="form-control" value={vendorForm.billingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingState: event.target.value }))} placeholder="State / Province / Region" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Pincode</label>
+                      <input className="form-control" value={vendorForm.billingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingPincode: event.target.value }))} placeholder="Pincode" />
+                    </div>
+                  </div>
+                </div>
+                {!vendorForm.billingShippingSame ? (
+                  <div className="col-12 col-xl-6">
+                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <textarea className="form-control mb-2" rows="2" value={vendorForm.shippingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingAddress: event.target.value }))} placeholder="Shipping address" />
+                    <div className="d-flex flex-column gap-2">
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Country</label>
+                        <select className="form-select" value={vendorForm.shippingCountry || "India"} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
+                          {COUNTRY_OPTIONS.map((country) => <option key={`users-vendor-shipping-country-${country}`} value={country}>{country}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">State</label>
+                        {vendorShippingStateOptions.length ? (
+                          <select className="form-select" value={vendorForm.shippingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
+                            <option value="">Select State</option>
+                            {vendorShippingStateOptions.map((state) => <option key={`users-vendor-shipping-state-${state}`} value={state}>{state}</option>)}
+                          </select>
+                        ) : (
+                          <input className="form-control" value={vendorForm.shippingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingState: event.target.value }))} placeholder="State / Province / Region" />
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <input className="form-control" value={vendorForm.shippingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingPincode: event.target.value }))} placeholder="Pincode" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm" disabled={!canManageUsers}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
+                {editingVendorId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetVendorForm}>Cancel</button> : null}
+              </div>
+            </form>
+          </div>
+
+          <div>
+            <h6 className="mb-3">Vendor Registration List</h6>
+            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mb-2">
+              <span className="badge bg-secondary">{filteredVendors.length} vendors</span>
+              <input
+                ref={vendorImportInputRef}
+                type="file"
+                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                className="d-none"
+                onChange={onVendorImportFileChange}
+              />
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerVendorImportPicker} disabled={!canManageUsers}>
+                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                Import
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportVendorsAsExcelCsv}>
+                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                Export
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportVendorsAsPdf}>
+                <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
+                Export
+              </button>
+              <div className="table-search">
+                <i className="bi bi-search" aria-hidden="true" />
+                <input type="search" className="form-control form-control-sm" placeholder="Search vendors" value={vendorSearch} onChange={(event) => setVendorSearch(event.target.value)} />
+              </div>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Company Name</th>
+                    <th>Vendor Name</th>
+                    <th>GSTIN</th>
+                    <th>Contact Number</th>
+                    <th>Email ID</th>
+                    <th>Location</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedVendors.length ? (
+                    paginatedVendors.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.companyName || "-"}</td>
+                        <td>{row.clientName || "-"}</td>
+                        <td>{row.gstin || "-"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerPhones(row).join(", ") || "-"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</td>
+                        <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
+                        <td>
+                          <div className="d-inline-flex gap-2">
+                            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editVendor(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canManageUsers} onClick={() => deleteVendor(row.id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={7}>No vendors found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+              <div className="small text-secondary">
+                Showing {vendorStartIndex} to {vendorEndIndex} of {filteredVendors.length} entries
+              </div>
+              <TablePagination page={normalizedVendorPage} totalPages={totalVendorPages} onPageChange={setVendorPage} />
             </div>
           </div>
         </>

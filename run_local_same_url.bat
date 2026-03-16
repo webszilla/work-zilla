@@ -24,6 +24,9 @@ if errorlevel 1 exit /b 1
 
 if exist "%VENV_PYTHON%" (
   cd /d "%BACKEND_DIR%"
+  echo Applying Django migrations
+  call "%VENV_PYTHON%" manage.py migrate --noinput
+  if errorlevel 1 exit /b 1
   echo Starting WorkZilla local app at http://127.0.0.1:%PORT%
   call "%VENV_PYTHON%" manage.py runserver 127.0.0.1:%PORT%
   exit /b %errorlevel%
@@ -33,6 +36,9 @@ where py >nul 2>nul
 if not errorlevel 1 (
   cd /d "%BACKEND_DIR%"
   echo Repo virtualenv not found. Using launcher `py -3`.
+  echo Applying Django migrations
+  py -3 manage.py migrate --noinput
+  if errorlevel 1 exit /b 1
   py -3 manage.py runserver 127.0.0.1:%PORT%
   exit /b %errorlevel%
 )
@@ -41,6 +47,9 @@ where python >nul 2>nul
 if not errorlevel 1 (
   cd /d "%BACKEND_DIR%"
   echo Repo virtualenv not found. Using PATH `python`.
+  echo Applying Django migrations
+  python manage.py migrate --noinput
+  if errorlevel 1 exit /b 1
   python manage.py runserver 127.0.0.1:%PORT%
   exit /b %errorlevel%
 )

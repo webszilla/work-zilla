@@ -18,7 +18,11 @@ if not exist "%BACKEND_DIR%\manage.py" (
 )
 
 cd /d "%FRONTEND_DIR%"
-call npm install
+if exist package-lock.json (
+  call npm ci
+) else (
+  call npm install
+)
 if errorlevel 1 exit /b 1
 
 set VITE_API_BASE_URL=http://127.0.0.1:8000

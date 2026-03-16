@@ -42,5 +42,7 @@ fi
 . "$VENV_DIR/bin/activate"
 
 cd "$BACKEND_DIR"
+echo "Applying Django migrations"
+python3 manage.py migrate --noinput
 echo "Starting WorkZilla local app at http://127.0.0.1:$PORT"
 exec python3 manage.py runserver 127.0.0.1:"$PORT"

@@ -934,6 +934,13 @@ def _org_ticket_attachment_upload_to(instance, filename):
     return f"org_tickets/{ticket_id}/{stamp}_{safe_name}"
 
 
+def _org_inbox_attachment_upload_to(instance, filename):
+    notification_id = instance.notification_id or "unknown"
+    safe_name = os.path.basename(filename or "attachment")
+    stamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    return f"org_inbox/{notification_id}/{stamp}_{safe_name}"
+
+
 class PendingTransfer(models.Model):
     REQUEST_CHOICES = (
         ("new", "New Account"),
@@ -1130,6 +1137,12 @@ def pending_transfer_receipt_delete(sender, instance, **kwargs):
 
 @receiver(post_delete, sender="core.OrgSupportTicketAttachment")
 def org_ticket_attachment_delete(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
+
+
+@receiver(post_delete, sender="core.AdminNotificationAttachment")
+def org_inbox_attachment_delete(sender, instance, **kwargs):
     if instance.file:
         instance.file.delete(save=False)
 
@@ -1369,6 +1382,14 @@ class AdminNotification(models.Model):
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default="system")
     product_slug = models.CharField(max_length=120, blank=True, default="")
     organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.SET_NULL)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_admin_notifications",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
@@ -1378,6 +1399,26 @@ class AdminNotification(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.event_type})"
+
+
+class AdminNotificationAttachment(models.Model):
+    notification = models.ForeignKey(
+        AdminNotification,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=_org_inbox_attachment_upload_to)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["notification", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Notification #{self.notification_id} attachment"
 
 
 class OrgSupportTicket(models.Model):

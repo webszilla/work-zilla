@@ -12,7 +12,11 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
 fi
 
 cd "$FRONTEND_DIR"
-npm install
+if [ -f package-lock.json ]; then
+  npm ci
+else
+  npm install
+fi
 VITE_API_BASE_URL="http://127.0.0.1:8000" npm run build
 
 rm -rf "$BACKEND_DIR/frontend_dist"

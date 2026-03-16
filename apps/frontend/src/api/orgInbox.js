@@ -10,6 +10,10 @@ export async function fetchOrgInbox({ page = 1, pageSize = 20, productSlug = "" 
   return apiFetch(`/api/dashboard/inbox?${params.toString()}`);
 }
 
+export async function fetchOrgInboxRecipients() {
+  return apiFetch("/api/dashboard/inbox/recipients");
+}
+
 export async function markOrgInboxRead(ids) {
   const payload = Array.isArray(ids) ? { ids } : { id: ids };
   return apiFetch("/api/dashboard/inbox/read", {
@@ -25,6 +29,12 @@ export async function deleteOrgInboxNotification(id) {
 }
 
 export async function composeOrgInboxNotification(payload) {
+  if (typeof FormData !== "undefined" && payload instanceof FormData) {
+    return apiFetch("/api/dashboard/inbox/compose", {
+      method: "POST",
+      body: payload,
+    });
+  }
   return apiFetch("/api/dashboard/inbox/compose", {
     method: "POST",
     body: JSON.stringify(payload || {}),

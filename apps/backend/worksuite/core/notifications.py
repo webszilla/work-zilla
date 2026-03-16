@@ -53,6 +53,8 @@ def create_org_admin_inbox_notification(
     event_type="system",
     product_slug="",
     channel="email",
+    metadata=None,
+    created_by=None,
 ):
     if isinstance(organization, int):
         organization = Organization.objects.filter(id=organization).first()
@@ -69,6 +71,8 @@ def create_org_admin_inbox_notification(
         channel=channel or "email",
         product_slug=(product_slug or "").strip(),
         organization=organization,
+        created_by=created_by,
+        metadata=metadata or {},
     )
     old_ids = list(
         AdminNotification.objects

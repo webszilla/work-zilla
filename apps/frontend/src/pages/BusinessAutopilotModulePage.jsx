@@ -178,6 +178,21 @@ const MODULE_CONTENT = {
   }
 };
 
+const CRM_MEETING_REMINDER_CHANNEL_OPTIONS = ["App Alert", "Email", "SMS", "WhatsApp"];
+const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
+  { value: "5", label: "5 Min" },
+  { value: "10", label: "10 Min" },
+  { value: "15", label: "15 Min" },
+  { value: "30", label: "30 Min" },
+  { value: "60", label: "1 Hr" },
+  { value: "120", label: "2 Hrs" },
+  { value: "180", label: "3 Hrs" },
+  { value: "240", label: "4 Hrs" },
+  { value: "360", label: "6 Hrs" },
+  { value: "480", label: "8 Hrs" },
+  { value: "1440", label: "24 Hrs" },
+];
+
 const CRM_SECTION_CONFIG = {
   leads: {
     label: "Leads",
@@ -230,7 +245,8 @@ const CRM_SECTION_CONFIG = {
     icon: "bi-people-fill",
     columns: [
       { key: "name", label: "Team Name" },
-      { key: "members", label: "Employees" },
+      { key: "departmentSummary", label: "Department" },
+      { key: "employeeCount", label: "Employees" },
       { key: "createdBy", label: "Created By" }
     ],
     fields: [
@@ -314,10 +330,11 @@ const CRM_SECTION_CONFIG = {
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
       { key: "meetingDate", label: "Meeting Date", type: "date" },
       { key: "meetingTime", label: "Meeting Time", type: "time" },
-      { key: "owner", label: "Owner", placeholder: "Sales owner / Team member" },
+      { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
       { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
-      { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: ["App Alert", "Email", "SMS", "WhatsApp"], defaultValue: ["App Alert"] },
-      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: ["5", "10", "15", "30", "60", "120", "1440"], defaultValue: "15" },
+      { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: ["App Alert"] },
+      { key: "reminderDays", label: "Remind Before Days", type: "select", defaultValue: "" },
+      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: "15" },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "Scheduled" }
     ]
   }
@@ -950,6 +967,55 @@ function buildEmptyValues(fields) {
   }, {});
 }
 
+function getCrmMeetingReminderMinuteLabel(value) {
+  const normalizedValue = String(value || "").trim();
+  return CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => option.value === normalizedValue)?.label || normalizedValue;
+}
+
+function getCrmMeetingReminderDayOptions(dateValue) {
+  const normalizedDate = String(dateValue || "").trim();
+  if (!normalizedDate) {
+    return [];
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${normalizedDate}T00:00:00`);
+  if (Number.isNaN(target.getTime())) {
+    return [];
+  }
+  target.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  if (diffDays < 1) {
+    return [];
+  }
+  return Array.from({ length: diffDays }, (_, index) => {
+    const dayCount = index + 1;
+    return {
+      value: String(dayCount),
+      label: `${dayCount} Day${dayCount > 1 ? "s" : ""}`,
+    };
+  });
+}
+
+function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminderMinutes) {
+  const channels = Array.isArray(reminderChannels)
+    ? reminderChannels.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(reminderChannels || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const parts = [];
+  const dayCount = String(reminderDays || "").trim();
+  if (dayCount) {
+    parts.push(`${dayCount} Day${dayCount === "1" ? "" : "s"} before`);
+  }
+  const minuteLabel = getCrmMeetingReminderMinuteLabel(reminderMinutes);
+  if (minuteLabel) {
+    parts.push(`${minuteLabel} before`);
+  }
+  return [channels.join(", "), ...parts].filter(Boolean).join(" • ");
+}
+
 function formatFileSizeLabel(bytes) {
   const size = Number(bytes || 0);
   if (!Number.isFinite(size) || size <= 0) {
@@ -1085,6 +1151,24 @@ function monthToLabel(value) {
   const [year, monthNumber] = month.split("-");
   const date = new Date(Number(year), Number(monthNumber) - 1, 1);
   return Number.isNaN(date.getTime()) ? month : date.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+const PAYSLIP_MONTH_FILTER_OPTIONS = Array.from({ length: 12 }, (_value, index) => {
+  const value = String(index + 1).padStart(2, "0");
+  const label = new Date(2026, index, 1).toLocaleString("en-US", { month: "long" });
+  return { value, label };
+});
+
+function splitPayrollMonthParts(value) {
+  const month = String(value || "").trim();
+  const match = month.match(/^(\d{4})-(\d{2})$/);
+  if (!match) {
+    return { year: "", month: "" };
+  }
+  return {
+    year: match[1],
+    month: match[2],
+  };
 }
 
 function buildPayrollEmployeeCode(sourceUserId) {
@@ -1395,10 +1479,41 @@ function normalizeCrmTeamRecord(row = {}) {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
+  const departmentFilters = Array.isArray(row.departmentFilters)
+    ? row.departmentFilters.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.departmentFilters || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const employeeRoleFilters = Array.isArray(row.employeeRoleFilters)
+    ? row.employeeRoleFilters.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.employeeRoleFilters || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const departmentSummary = departmentFilters.join(", ");
   return {
     ...row,
     members,
+    departmentFilters,
+    employeeRoleFilters,
+    departmentSummary,
+    employeeCount: members.length,
     createdBy: String(row.createdBy || "").trim(),
+  };
+}
+
+function normalizeCrmDirectoryEntry(row = {}) {
+  const name = String(row.name || row.employeeName || "").trim();
+  if (!name) {
+    return null;
+  }
+  return {
+    id: String(row.id || row.sourceUserId || name).trim(),
+    name,
+    department: String(row.department || "").trim(),
+    employeeRole: String(row.employee_role || row.employeeRole || row.designation || "").trim(),
+    email: String(row.email || row.sourceUserEmail || "").trim(),
   };
 }
 
@@ -1630,6 +1745,12 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   const [salaryStructureForm, setSalaryStructureForm] = useState(() => createEmptySalaryStructureForm());
   const [salaryHistoryForm, setSalaryHistoryForm] = useState(() => createEmptySalaryHistoryForm());
   const [payrollRunForm, setPayrollRunForm] = useState(() => createEmptyPayrollRunForm());
+  const [payslipFilters, setPayslipFilters] = useState({
+    monthPicker: "",
+    year: "all",
+    month: "all",
+    user: "all",
+  });
   const [editingStructureId, setEditingStructureId] = useState("");
   const [editingHistoryId, setEditingHistoryId] = useState("");
   const [salaryHistoryEmployeeSearch, setSalaryHistoryEmployeeSearch] = useState("");
@@ -1733,6 +1854,67 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       { label: "Net Payout", value: formatCurrencyAmount(totalNet, payrollCurrency), icon: "bi-cash-stack" },
     ];
   }, [payrollCurrency, workspace.payrollEntries, workspace.payslips]);
+
+  const payslipYearOptions = useMemo(() => {
+    const years = Array.from(
+      new Set(
+        (workspace.payslips || [])
+          .map((row) => splitPayrollMonthParts(row.generatedForMonth).year)
+          .filter(Boolean)
+      )
+    );
+    return years.sort((a, b) => b.localeCompare(a));
+  }, [workspace.payslips]);
+
+  const payslipEmployeeOptions = useMemo(() => {
+    const map = new Map();
+    (workspace.payslips || []).forEach((row) => {
+      const employeeName = String(row.employeeName || "").trim();
+      const sourceUserId = String(row.sourceUserId || "").trim();
+      const key = sourceUserId ? `user:${sourceUserId}` : `name:${employeeName.toLowerCase()}`;
+      if (!employeeName || map.has(key)) {
+        return;
+      }
+      map.set(key, {
+        key,
+        label: buildPayrollEmployeeLabel({
+          employeeName,
+          employeeId: buildPayrollEmployeeCode(sourceUserId),
+          sourceUserId,
+        }),
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [workspace.payslips]);
+
+  const filteredPayslips = useMemo(() => {
+    const monthPickerValue = String(payslipFilters.monthPicker || "").trim();
+    const selectedYear = String(payslipFilters.year || "all").trim();
+    const selectedMonth = String(payslipFilters.month || "all").trim();
+    const selectedUser = String(payslipFilters.user || "all").trim();
+
+    return (workspace.payslips || []).filter((row) => {
+      const generatedMonth = String(row.generatedForMonth || "").trim();
+      const monthParts = splitPayrollMonthParts(generatedMonth);
+      const employeeKey = String(row.sourceUserId || "").trim()
+        ? `user:${String(row.sourceUserId || "").trim()}`
+        : `name:${String(row.employeeName || "").trim().toLowerCase()}`;
+
+      if (monthPickerValue && generatedMonth !== monthPickerValue) {
+        return false;
+      }
+      if (selectedYear !== "all" && monthParts.year !== selectedYear) {
+        return false;
+      }
+      if (selectedMonth !== "all" && monthParts.month !== selectedMonth) {
+        return false;
+      }
+      if (selectedUser !== "all" && employeeKey !== selectedUser) {
+        return false;
+      }
+      return true;
+    });
+  }, [payslipFilters, workspace.payslips]);
 
   useEffect(() => {
     let active = true;
@@ -2187,6 +2369,44 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
 
   function downloadPayslipPdf(payslipId) {
     window.open(`/api/business-autopilot/payroll/payslips/${payslipId}/pdf`, "_blank", "noopener,noreferrer");
+  }
+
+  function onPayslipMonthPickerChange(value) {
+    const monthValue = String(value || "").trim();
+    const monthParts = splitPayrollMonthParts(monthValue);
+    setPayslipFilters((prev) => ({
+      ...prev,
+      monthPicker: monthValue,
+      year: monthParts.year || "all",
+      month: monthParts.month || "all",
+    }));
+  }
+
+  function onPayslipYearFilterChange(value) {
+    const nextYear = String(value || "all").trim() || "all";
+    setPayslipFilters((prev) => ({
+      ...prev,
+      year: nextYear,
+      monthPicker: nextYear !== "all" && prev.month !== "all" ? `${nextYear}-${prev.month}` : "",
+    }));
+  }
+
+  function onPayslipMonthFilterChange(value) {
+    const nextMonth = String(value || "all").trim() || "all";
+    setPayslipFilters((prev) => ({
+      ...prev,
+      month: nextMonth,
+      monthPicker: prev.year !== "all" && nextMonth !== "all" ? `${prev.year}-${nextMonth}` : "",
+    }));
+  }
+
+  function resetPayslipFilters() {
+    setPayslipFilters({
+      monthPicker: "",
+      year: "all",
+      month: "all",
+      user: "all",
+    });
   }
 
   if (loading) {
@@ -2713,8 +2933,8 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         {saveError ? <div className="small text-danger">{saveError}</div> : null}
         <SearchablePaginatedTableCard
           title="Payslips"
-          badgeLabel={`${(workspace.payslips || []).length} items`}
-          rows={workspace.payslips || []}
+          badgeLabel={`${filteredPayslips.length}/${(workspace.payslips || []).length} items`}
+          rows={filteredPayslips}
           columns={[
             { key: "slipNumber", label: "Slip Number" },
             { key: "employeeName", label: "Employee" },
@@ -2722,12 +2942,79 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
             { key: "currency", label: "Currency" },
             { key: "generatedAt", label: "Generated At" },
           ]}
+          headerBottom={(
+            <div className="row g-2">
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">Month Picker</label>
+                <input
+                  type="month"
+                  className="form-control"
+                  value={payslipFilters.monthPicker}
+                  onChange={(event) => onPayslipMonthPickerChange(event.target.value)}
+                />
+              </div>
+              <div className="col-6 col-md-2">
+                <label className="form-label small text-secondary mb-1">Year</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.year}
+                  onChange={(event) => onPayslipYearFilterChange(event.target.value)}
+                >
+                  <option value="all">All Years</option>
+                  {payslipYearOptions.map((year) => (
+                    <option key={`payslip-year-${year}`} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-6 col-md-2">
+                <label className="form-label small text-secondary mb-1">Month</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.month}
+                  onChange={(event) => onPayslipMonthFilterChange(event.target.value)}
+                >
+                  <option value="all">All Months</option>
+                  {PAYSLIP_MONTH_FILTER_OPTIONS.map((option) => (
+                    <option key={`payslip-month-${option.value}`} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">User</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.user}
+                  onChange={(event) => setPayslipFilters((prev) => ({ ...prev, user: event.target.value }))}
+                >
+                  <option value="all">All Users</option>
+                  {payslipEmployeeOptions.map((option) => (
+                    <option key={`payslip-user-${option.key}`} value={option.key}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-2 d-flex align-items-end">
+                <button type="button" className="btn btn-outline-light btn-sm w-100" onClick={resetPayslipFilters}>
+                  Reset Filters
+                </button>
+              </div>
+            </div>
+          )}
           searchPlaceholder="Search payslips"
-          noRowsText="No payslips generated yet."
-          searchBy={(row) => [row.slipNumber, row.employeeName, row.generatedForMonth, row.currency].join(" ")}
+          noRowsText={(workspace.payslips || []).length ? "No payslips match the selected filters." : "No payslips generated yet."}
+          searchBy={(row) => [
+            row.slipNumber,
+            row.employeeName,
+            buildPayrollEmployeeCode(row.sourceUserId),
+            row.generatedForMonth,
+            monthToLabel(row.generatedForMonth),
+            row.currency,
+          ].join(" ")}
           renderCells={(row) => [
             <span className="fw-semibold">{row.slipNumber || "-"}</span>,
-            row.employeeName || "-",
+            <div>
+              <div>{row.employeeName || "-"}</div>
+              <div className="small text-secondary">{buildPayrollEmployeeCode(row.sourceUserId) || "-"}</div>
+            </div>,
             monthToLabel(row.generatedForMonth),
             row.currency || payrollCurrency,
             row.generatedAt ? new Date(row.generatedAt).toLocaleString() : "-",
@@ -2759,7 +3046,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
           </div>
         ))}
       </div>
-      <div className="card p-3">
+	            <div className="card p-3" ref={sectionKey === activeSection ? sectionFormRef : null}>
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <div>
             <h6 className="mb-1">Run Payroll</h6>
@@ -3320,6 +3607,7 @@ function CrmOnePageModule() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [meetingPopup, setMeetingPopup] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [meetingStatusTab, setMeetingStatusTab] = useState("all");
   const [forms, setForms] = useState(() =>
@@ -3331,7 +3619,24 @@ function CrmOnePageModule() {
     Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, ""]))
   );
   const [crmUserDirectory, setCrmUserDirectory] = useState([]);
+  const [crmDepartmentDirectory, setCrmDepartmentDirectory] = useState([]);
+  const [crmEmployeeRoleDirectory, setCrmEmployeeRoleDirectory] = useState([]);
   const [currentUserName, setCurrentUserName] = useState("Current User");
+  const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
+  const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
+  const [teamCategorySearch, setTeamCategorySearch] = useState("");
+  const [teamCategorySearchOpen, setTeamCategorySearchOpen] = useState(false);
+  const [teamMemberSearch, setTeamMemberSearch] = useState("");
+  const [teamMemberSearchOpen, setTeamMemberSearchOpen] = useState(false);
+  const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
+  const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
+  const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
+  const [meetingEmployeeSearch, setMeetingEmployeeSearch] = useState("");
+  const [meetingEmployeeSearchOpen, setMeetingEmployeeSearchOpen] = useState(false);
+  const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
+  const [leadAssignedUserSearch, setLeadAssignedUserSearch] = useState("");
+  const [leadAssignedUserSearchOpen, setLeadAssignedUserSearchOpen] = useState(false);
+  const sectionFormRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -3362,6 +3667,8 @@ function CrmOnePageModule() {
         ]);
         if (!active) return;
         setCrmUserDirectory(Array.isArray(usersData?.users) ? usersData.users : []);
+        setCrmDepartmentDirectory(Array.isArray(usersData?.departments) ? usersData.departments : []);
+        setCrmEmployeeRoleDirectory(Array.isArray(usersData?.employee_roles) ? usersData.employee_roles : []);
         const name = String(
           authData?.user?.first_name
           || authData?.user?.username
@@ -3372,6 +3679,8 @@ function CrmOnePageModule() {
       } catch {
         if (!active) return;
         setCrmUserDirectory([]);
+        setCrmDepartmentDirectory([]);
+        setCrmEmployeeRoleDirectory([]);
         setCurrentUserName("Current User");
       }
     })();
@@ -3385,6 +3694,47 @@ function CrmOnePageModule() {
       setMeetingPopup(null);
     }
   }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "teams") {
+      resetCrmTeamBuilderState();
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "leads") {
+      setLeadCompanySearchOpen(false);
+      setLeadAssignedUserSearch("");
+      setLeadAssignedUserSearchOpen(false);
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "meetings") {
+      setMeetingCompanySearchOpen(false);
+      setMeetingReminderChannelSearch("");
+      setMeetingReminderChannelSearchOpen(false);
+      setMeetingEmployeeSearch("");
+      setMeetingEmployeeSearchOpen(false);
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    const reminderDayOptions = getCrmMeetingReminderDayOptions(forms.meetings?.meetingDate);
+    const selectedReminderDay = String(forms.meetings?.reminderDays || "").trim();
+    if (!selectedReminderDay) {
+      return;
+    }
+    if (!reminderDayOptions.some((option) => option.value === selectedReminderDay)) {
+      setForms((prev) => ({
+        ...prev,
+        meetings: {
+          ...prev.meetings,
+          reminderDays: "",
+        },
+      }));
+    }
+  }, [forms.meetings?.meetingDate, forms.meetings?.reminderDays]);
 
   const stats = useMemo(() => {
     const leads = moduleData.leads || [];
@@ -3411,9 +3761,38 @@ function CrmOnePageModule() {
     () => Array.from(new Set((moduleData.teams || []).map((row) => String(row?.name || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [moduleData.teams]
   );
+  const crmDirectoryOptions = useMemo(() => {
+    const map = new Map();
+    const sharedHrEmployees = readSharedHrEmployees();
+    [...(crmUserDirectory || []), ...sharedHrEmployees].forEach((row) => {
+      const normalized = normalizeCrmDirectoryEntry(row);
+      if (!normalized) {
+        return;
+      }
+      const key = normalized.email || normalized.id || normalized.name.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, normalized);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [crmUserDirectory]);
   const crmUserOptions = useMemo(
-    () => Array.from(new Set((crmUserDirectory || []).map((row) => String(row?.name || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [crmUserDirectory]
+    () => Array.from(new Set(crmDirectoryOptions.map((row) => row.name))).sort((a, b) => a.localeCompare(b)),
+    [crmDirectoryOptions]
+  );
+  const crmDepartmentOptions = useMemo(
+    () => Array.from(new Set([
+      ...(crmDepartmentDirectory || []).map((row) => String(row?.name || "").trim()),
+      ...crmDirectoryOptions.map((row) => row.department),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [crmDepartmentDirectory, crmDirectoryOptions]
+  );
+  const crmEmployeeRoleOptions = useMemo(
+    () => Array.from(new Set([
+      ...(crmEmployeeRoleDirectory || []).map((row) => String(row?.name || "").trim()),
+      ...crmDirectoryOptions.map((row) => row.employeeRole),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [crmDirectoryOptions, crmEmployeeRoleDirectory]
   );
   const sharedCustomerOptions = useMemo(() => readSharedAccountsCustomers(), [activeSection, moduleData.contacts, moduleData.teams, crmUserDirectory]);
 
@@ -3427,12 +3806,36 @@ function CrmOnePageModule() {
     }));
   }
 
+  function resetCrmTeamBuilderState() {
+    setSelectedTeamDepartments([]);
+    setSelectedTeamEmployeeRoles([]);
+    setTeamCategorySearch("");
+    setTeamCategorySearchOpen(false);
+    setTeamMemberSearch("");
+    setTeamMemberSearchOpen(false);
+  }
+
   function resetSectionForm(sectionKey) {
     setEditingIds((prev) => ({ ...prev, [sectionKey]: "" }));
     setForms((prev) => ({
       ...prev,
       [sectionKey]: buildEmptyValues(CRM_SECTION_CONFIG[sectionKey].fields),
     }));
+    if (sectionKey === "teams") {
+      resetCrmTeamBuilderState();
+    }
+    if (sectionKey === "leads") {
+      setLeadCompanySearchOpen(false);
+      setLeadAssignedUserSearch("");
+      setLeadAssignedUserSearchOpen(false);
+    }
+    if (sectionKey === "meetings") {
+      setMeetingCompanySearchOpen(false);
+      setMeetingReminderChannelSearch("");
+      setMeetingReminderChannelSearchOpen(false);
+      setMeetingEmployeeSearch("");
+      setMeetingEmployeeSearchOpen(false);
+    }
   }
 
   function onEdit(sectionKey, row) {
@@ -3460,6 +3863,29 @@ function CrmOnePageModule() {
       }
     });
     setForms((prev) => ({ ...prev, [sectionKey]: nextValues }));
+    if (sectionKey === "teams") {
+      setSelectedTeamDepartments(Array.isArray(normalizedRow.departmentFilters) ? normalizedRow.departmentFilters : []);
+      setSelectedTeamEmployeeRoles(Array.isArray(normalizedRow.employeeRoleFilters) ? normalizedRow.employeeRoleFilters : []);
+      setTeamCategorySearch("");
+      setTeamCategorySearchOpen(false);
+      setTeamMemberSearch("");
+      setTeamMemberSearchOpen(false);
+    }
+    if (sectionKey === "leads") {
+      setLeadCompanySearchOpen(false);
+      setLeadAssignedUserSearch("");
+      setLeadAssignedUserSearchOpen(false);
+    }
+    if (sectionKey === "meetings") {
+      setMeetingCompanySearchOpen(false);
+      setMeetingReminderChannelSearch("");
+      setMeetingReminderChannelSearchOpen(false);
+      setMeetingEmployeeSearch("");
+      setMeetingEmployeeSearchOpen(false);
+    }
+    window.requestAnimationFrame(() => {
+      sectionFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function onDelete(sectionKey, rowId) {
@@ -3470,6 +3896,26 @@ function CrmOnePageModule() {
     if (editingIds[sectionKey] === rowId) {
       resetSectionForm(sectionKey);
     }
+  }
+
+  function openDeleteConfirm(sectionKey, row) {
+    setDeleteConfirm({
+      sectionKey,
+      rowId: row.id,
+      label: String(row?.name || row?.subject || row?.title || row?.dealName || row?.company || row?.relatedTo || "this item").trim(),
+    });
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirm(null);
+  }
+
+  function confirmDelete() {
+    if (!deleteConfirm) {
+      return;
+    }
+    onDelete(deleteConfirm.sectionKey, deleteConfirm.rowId);
+    setDeleteConfirm(null);
   }
 
   function onSubmit(sectionKey, event) {
@@ -3486,6 +3932,9 @@ function CrmOnePageModule() {
         return String(values.assignType || "User").trim().toLowerCase() === "team"
           ? !String(values.assignedTeam || "").trim()
           : false;
+      }
+      if (sectionKey === "meetings" && field.key === "reminderDays") {
+        return false;
       }
       if (field.type === "multiselect") {
         return !Array.isArray(values[field.key]) || values[field.key].length === 0;
@@ -3513,11 +3962,23 @@ function CrmOnePageModule() {
     }
     if (sectionKey === "teams") {
       payload.createdBy = String(currentUserName || "Current User").trim();
+      payload.departmentFilters = [...selectedTeamDepartments];
+      payload.employeeRoleFilters = [...selectedTeamEmployeeRoles];
       payload = normalizeCrmTeamRecord(payload);
     }
     if (sectionKey === "meetings") {
+      const meetingOwners = Array.isArray(payload.owner)
+        ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
+        : String(payload.owner || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
+      payload.owner = meetingOwners.join(", ");
       payload.reminderSummary = `${reminderChannels.join(", ")} • ${payload.reminderMinutes} min before`;
+      payload.reminderChannel = reminderChannels;
+      payload.reminderDays = String(payload.reminderDays || "").trim();
+      payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
     }
     const editingId = editingIds[sectionKey];
     setModuleData((prev) => {
@@ -3534,6 +3995,120 @@ function CrmOnePageModule() {
       };
     });
     resetSectionForm(sectionKey);
+  }
+
+  function toggleCrmTeamCategory(categoryType, value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    const isDepartment = categoryType === "department";
+    const currentValues = isDepartment ? selectedTeamDepartments : selectedTeamEmployeeRoles;
+    const nextCategoryValues = currentValues.includes(normalizedValue)
+      ? currentValues.filter((item) => item !== normalizedValue)
+      : [...currentValues, normalizedValue];
+    if (isDepartment) {
+      setSelectedTeamDepartments(nextCategoryValues);
+    } else {
+      setSelectedTeamEmployeeRoles(nextCategoryValues);
+    }
+
+    setForms((prev) => {
+      const currentMembers = Array.isArray(prev.teams?.members) ? prev.teams.members : [];
+      const matches = crmDirectoryOptions
+        .filter((item) => (
+          isDepartment
+            ? nextCategoryValues.includes(String(item.department || "").trim())
+            : nextCategoryValues.includes(String(item.employeeRole || "").trim())
+        ))
+        .map((item) => item.name);
+      return {
+        ...prev,
+        teams: {
+          ...prev.teams,
+          members: Array.from(new Set([...currentMembers, ...matches])),
+        },
+      };
+    });
+  }
+
+  function toggleCrmTeamMember(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentMembers = Array.isArray(prev.teams?.members) ? prev.teams.members : [];
+      const nextMembers = currentMembers.includes(normalizedValue)
+        ? currentMembers.filter((member) => member !== normalizedValue)
+        : [...currentMembers, normalizedValue];
+      return {
+        ...prev,
+        teams: {
+          ...prev.teams,
+          members: nextMembers,
+        },
+      };
+    });
+  }
+
+  function toggleLeadAssignedUser(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => ({
+      ...prev,
+      leads: {
+        ...prev.leads,
+        assignedUser: String(prev.leads?.assignedUser || "").trim() === normalizedValue ? "" : normalizedValue,
+      },
+    }));
+  }
+
+  function toggleMeetingEmployee(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentOwners = Array.isArray(prev.meetings?.owner)
+        ? prev.meetings.owner
+        : String(prev.meetings?.owner || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      const nextOwners = currentOwners.includes(normalizedValue)
+        ? currentOwners.filter((item) => item !== normalizedValue)
+        : [...currentOwners, normalizedValue];
+      return {
+        ...prev,
+        meetings: {
+          ...prev.meetings,
+          owner: nextOwners,
+        },
+      };
+    });
+  }
+
+  function toggleMeetingReminderChannel(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentChannels = Array.isArray(prev.meetings?.reminderChannel) ? prev.meetings.reminderChannel : [];
+      const nextChannels = currentChannels.includes(normalizedValue)
+        ? currentChannels.filter((item) => item !== normalizedValue)
+        : [...currentChannels, normalizedValue];
+      return {
+        ...prev,
+        meetings: {
+          ...prev.meetings,
+          reminderChannel: nextChannels,
+        },
+      };
+    });
   }
 
   function importRows(sectionKey, importedRows) {
@@ -3584,13 +4159,26 @@ function CrmOnePageModule() {
           }
           if (column.key === "reminderSummary") {
             payload.reminderSummary = value;
-            const reminderMatch = value.match(/^(.*?)\s*[•-]\s*(\d+)\s*min/i);
-            if (reminderMatch) {
-              payload.reminderChannel = reminderMatch[1]
+            const reminderSegments = value.split("•").map((item) => item.trim()).filter(Boolean);
+            if (reminderSegments.length) {
+              payload.reminderChannel = reminderSegments[0]
                 .split(",")
                 .map((item) => item.trim())
                 .filter(Boolean);
-              payload.reminderMinutes = reminderMatch[2];
+              const reminderMeta = reminderSegments.slice(1).join(" • ").toLowerCase();
+              const reminderDayMatch = reminderMeta.match(/(\d+)\s*day/i);
+              if (reminderDayMatch) {
+                payload.reminderDays = reminderDayMatch[1];
+              }
+              const reminderMinuteOption = CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => reminderMeta.includes(option.label.toLowerCase()));
+              if (reminderMinuteOption) {
+                payload.reminderMinutes = reminderMinuteOption.value;
+              } else {
+                const reminderMatch = reminderMeta.match(/(\d+)\s*min/i);
+                if (reminderMatch) {
+                  payload.reminderMinutes = reminderMatch[1];
+                }
+              }
             }
             return;
           }
@@ -3605,8 +4193,9 @@ function CrmOnePageModule() {
               .map((item) => item.trim())
               .filter(Boolean);
           payload.reminderChannel = reminderChannels.length ? reminderChannels : defaultValues.reminderChannel;
+          payload.reminderDays = String(payload.reminderDays || "").trim();
           payload.reminderSummary = payload.reminderSummary
-            || `${payload.reminderChannel.join(", ")} • ${payload.reminderMinutes} min before`;
+            || buildCrmMeetingReminderSummary(payload.reminderChannel, payload.reminderDays, payload.reminderMinutes);
         }
 
         return payload;
@@ -3755,6 +4344,7 @@ function CrmOnePageModule() {
         const editingId = editingIds[sectionKey] || "";
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
+        const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads" && leadCompanyQuery
           ? (moduleData.contacts || []).filter((contact) => {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
@@ -3767,365 +4357,1011 @@ function CrmOnePageModule() {
               return haystack.includes(leadCompanyQuery);
             }).slice(0, 6)
           : [];
+        const showLeadCompanySuggestions = sectionKey === "leads" && leadCompanySearchOpen;
+        const meetingCrmContactMatches = sectionKey === "meetings" && meetingCompanyQuery
+          ? (moduleData.contacts || []).filter((contact) => {
+              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              return haystack.includes(meetingCompanyQuery);
+            }).slice(0, 6)
+          : [];
+        const meetingCustomerMatches = sectionKey === "meetings" && meetingCompanyQuery
+          ? sharedCustomerOptions.filter((customer) => {
+              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+              return haystack.includes(meetingCompanyQuery);
+            }).slice(0, 6)
+          : [];
+        const selectedLeadAssignedUsers = sectionKey === "leads"
+          ? [String(formValues.assignedUser || "").trim()].filter(Boolean)
+          : [];
+        const filteredLeadAssignedUsers = sectionKey === "leads"
+          ? crmDirectoryOptions.filter((item) => {
+              const normalizedSearch = String(leadAssignedUserSearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const showLeadAssignedUserSuggestions = sectionKey === "leads" && leadAssignedUserSearchOpen;
+        const selectedMeetingEmployees = sectionKey === "meetings"
+          ? (
+              Array.isArray(formValues.owner)
+                ? formValues.owner
+                : String(formValues.owner || "").split(",")
+            ).map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        const filteredMeetingEmployees = sectionKey === "meetings"
+          ? crmDirectoryOptions.filter((item) => {
+              const normalizedSearch = String(meetingEmployeeSearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const selectedMeetingReminderChannels = sectionKey === "meetings"
+          ? (Array.isArray(formValues.reminderChannel) ? formValues.reminderChannel : [])
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
+          : [];
+        const filteredMeetingReminderChannels = sectionKey === "meetings"
+          ? CRM_MEETING_REMINDER_CHANNEL_OPTIONS.filter((option) => {
+              const normalizedSearch = String(meetingReminderChannelSearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return option.toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const meetingReminderDayOptions = sectionKey === "meetings"
+          ? getCrmMeetingReminderDayOptions(formValues.meetingDate)
+          : [];
+        const selectedTeamMembers = sectionKey === "teams" && Array.isArray(formValues.members)
+          ? formValues.members.map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        const normalizedTeamCategorySearch = String(teamCategorySearch || "").trim().toLowerCase();
+        const filteredTeamDepartments = sectionKey === "teams"
+          ? crmDepartmentOptions.filter((option) => {
+              if (!normalizedTeamCategorySearch) {
+                return true;
+              }
+              return option.toLowerCase().includes(normalizedTeamCategorySearch);
+            })
+          : [];
+        const filteredTeamEmployeeRoles = sectionKey === "teams"
+          ? crmEmployeeRoleOptions.filter((option) => {
+              if (!normalizedTeamCategorySearch) {
+                return true;
+              }
+              return option.toLowerCase().includes(normalizedTeamCategorySearch);
+            })
+          : [];
+        const showTeamCategorySuggestions = sectionKey === "teams" && teamCategorySearchOpen;
+        const showTeamMemberSuggestions = sectionKey === "teams" && teamMemberSearchOpen;
+        const availableTeamMembers = sectionKey === "teams"
+          ? crmDirectoryOptions.filter((item) => {
+              const normalizedSearch = String(teamMemberSearch || "").trim().toLowerCase();
+              const matchesDepartment = !selectedTeamDepartments.length || selectedTeamDepartments.includes(String(item.department || "").trim());
+              const matchesRole = !selectedTeamEmployeeRoles.length || selectedTeamEmployeeRoles.includes(String(item.employeeRole || "").trim());
+              if (!matchesDepartment) {
+                return false;
+              }
+              if (!matchesRole) {
+                return false;
+              }
+              if (!normalizedSearch) {
+                return true;
+              }
+              const haystack = [
+                item.name,
+                item.department,
+                item.employeeRole,
+                item.email,
+              ].join(" ").toLowerCase();
+              return haystack.includes(normalizedSearch);
+            })
+          : [];
+        const selectedTeamMemberCards = sectionKey === "teams"
+          ? selectedTeamMembers.map((member) => ({ name: member }))
+          : [];
         return (
-          <div key={sectionKey} className="d-flex flex-column gap-3">
+		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
+		            <div className={sectionKey === "teams" ? "col-12 col-xl-3" : ""}>
             <div className="card p-3">
               <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={(event) => onSubmit(sectionKey, event)}>
-                <div className="row g-3">
-                  {config.fields.map((field) => (
-                    <Fragment key={`${sectionKey}-${field.key}`}>
-                      {hasPhoneCountryCodeField && field.key === "phoneCountryCode"
-                        ? null
-                        : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "User").trim().toLowerCase() !== "user"
-                        ? null
-                        : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "User").trim().toLowerCase() !== "team"
-                        ? null
-                        : (
-                      <div
-                        className={
-                          sectionKey === "leads"
-                            ? (
-                                field.key === "name" || field.key === "company"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "phone"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "assignType"
-                                  ? "col-12 col-md-6 col-xl-1"
-                                  : field.key === "assignedUser" || field.key === "assignedTeam"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "stage" || field.key === "status"
-                                  ? "col-12 col-md-6 col-xl-1"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "teams"
-                            ? (
-                                field.key === "name"
-                                  ? "col-12 col-md-6 col-xl-4"
-                                  : field.key === "members"
-                                  ? "col-12 col-md-6 col-xl-6"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "activities"
-                            ? (
-                                field.key === "activityType" || field.key === "relatedTo"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "date"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "owner"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "notes"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "contacts"
-                            ? (
-                                field.key === "name" || field.key === "company" || field.key === "email"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "phone"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "tag"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "deals"
-                            ? (
-                                field.key === "dealName" || field.key === "company"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "stage"
-                                  ? "col-12 col-md-6 col-xl-1"
-                                  : field.key === "amount"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "status"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "followUps"
-                            ? (
-                                field.key === "subject" || field.key === "relatedTo"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "dueDate"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "owner"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "status"
-                                  ? "col-12 col-md-6 col-xl-1"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : sectionKey === "meetings"
-                            ? (
-                                field.key === "title" || field.key === "companyOrClientName"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "relatedTo"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "meetingDate" || field.key === "meetingTime"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : field.key === "owner"
-                                  ? "col-12 col-md-6 col-xl-3"
-                                  : field.key === "meetingMode" || field.key === "reminderChannel" || field.key === "reminderMinutes" || field.key === "status"
-                                  ? "col-12 col-md-6 col-xl-2"
-                                  : "col-12 col-md-6 col-xl-4"
-                              )
-                            : "col-12 col-md-6 col-xl-4"
-                        }
-                        key={`${sectionKey}-${field.key}`}
-                      >
-                        <label className="form-label small text-secondary mb-1">{field.label}</label>
-                        {(() => {
-                          const skipField = false;
-                          if (skipField) {
-                            return null;
-                          }
-                          if (hasPhoneCountryCodeField && field.key === "phone") {
-                            return (
-                              <div className="input-group">
-                                <PhoneCountryCodePicker
-                                  value={formValues.phoneCountryCode || "+91"}
-                                  onChange={(code) => setField(sectionKey, "phoneCountryCode", code)}
-                                  options={DIAL_COUNTRY_PICKER_OPTIONS}
-                                  style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
-                                  ariaLabel="CRM country code"
-                                />
-                                <input
-                                  type="text"
-                                  className="form-control"
-                                  placeholder={field.placeholder}
-                                  value={formValues.phone || ""}
-                                  onChange={(event) => setField(sectionKey, "phone", event.target.value)}
-                                />
-                              </div>
-                            );
-                          }
-                          if (sectionKey === "leads" && field.key === "company") {
-                            return (
-                              <div className="crm-inline-suggestions-wrap">
-                                <input
-                                  type="text"
-                                  className="form-control"
-                                  placeholder={field.placeholder}
-                                  value={formValues[field.key] || ""}
-                                  onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                                />
-                                {(crmContactMatches.length || customerMatches.length) ? (
-                                  <div className="crm-inline-suggestions">
-                                    {crmContactMatches.length ? (
-                                      <div className="crm-inline-suggestions__group">
-                                        <div className="crm-inline-suggestions__title">CRM Contacts</div>
-                                        {crmContactMatches.map((contact) => (
-                                          <button
-                                            key={`crm-contact-${contact.id}`}
-                                            type="button"
-                                            className="crm-inline-suggestions__item"
-                                            onClick={() => {
-                                              setForms((prev) => ({
-                                                ...prev,
-                                                leads: {
-                                                  ...prev.leads,
-                                                  name: String(contact.name || "").trim(),
-                                                  company: String(contact.company || "").trim(),
-                                                  phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
-                                                  phone: String(contact.phone || "").trim(),
-                                                },
-                                              }));
-                                            }}
-                                          >
-                                            <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                            <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                    {customerMatches.length ? (
-                                      <div className="crm-inline-suggestions__group">
-                                        <div className="crm-inline-suggestions__title">Clients</div>
-                                        {customerMatches.map((customer) => (
-                                          <button
-                                            key={`crm-customer-${customer.id}`}
-                                            type="button"
-                                            className="crm-inline-suggestions__item"
-                                            onClick={() => {
-                                              setForms((prev) => ({
-                                                ...prev,
-                                                leads: {
-                                                  ...prev.leads,
-                                                  name: String(customer.clientName || customer.name || "").trim(),
-                                                  company: String(customer.companyName || customer.name || "").trim(),
-                                                  phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
-                                                  phone: String(customer.phone || "").trim(),
-                                                },
-                                              }));
-                                            }}
-                                          >
-                                            <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                            <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
-                                          </button>
-                                        ))}
+                {sectionKey === "teams" ? (
+                  <div className="d-flex flex-column gap-3">
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Team Name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Type a new team name"
+                        value={formValues.name || ""}
+                        onChange={(event) => setField(sectionKey, "name", event.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="form-label small text-secondary mb-2">Select Department</label>
+                      <div className="crm-inline-suggestions-wrap">
+                        <input
+                          type="search"
+                          className="form-control"
+                          autoComplete="off"
+                          placeholder="Search department or employee role"
+                          value={teamCategorySearch}
+                          onFocus={() => setTeamCategorySearchOpen(true)}
+                          onBlur={() => window.setTimeout(() => setTeamCategorySearchOpen(false), 120)}
+                          onChange={(event) => {
+                            setTeamCategorySearch(event.target.value);
+                            setTeamCategorySearchOpen(true);
+                          }}
+                        />
+                        {showTeamCategorySuggestions ? (
+                          <div className="crm-inline-suggestions" style={{ maxHeight: "320px", overflowY: "auto" }}>
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Department List</div>
+                              {filteredTeamDepartments.length ? filteredTeamDepartments.map((option) => (
+                                <button
+                                  key={`crm-team-department-checkbox-${option}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => toggleCrmTeamCategory("department", option)}
+                                >
+                                  <span className="d-flex align-items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input mt-0"
+                                      checked={selectedTeamDepartments.includes(option)}
+                                      readOnly
+                                    />
+                                    <span className="crm-inline-suggestions__item-main">{option}</span>
+                                  </span>
+                                </button>
+                              )) : (
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No departments found</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Employee Role List</div>
+                              {filteredTeamEmployeeRoles.length ? filteredTeamEmployeeRoles.map((option) => (
+                                <button
+                                  key={`crm-team-role-checkbox-${option}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => toggleCrmTeamCategory("employeeRole", option)}
+                                >
+                                  <span className="d-flex align-items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input mt-0"
+                                      checked={selectedTeamEmployeeRoles.includes(option)}
+                                      readOnly
+                                    />
+                                    <span className="crm-inline-suggestions__item-main">{option}</span>
+                                  </span>
+                                </button>
+                              )) : (
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No employee roles found</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      {(selectedTeamDepartments.length || selectedTeamEmployeeRoles.length) ? (
+                        <div className="d-flex flex-wrap gap-2 mt-2">
+                          {selectedTeamDepartments.map((option) => (
+                            <span
+                              key={`selected-team-department-${option}`}
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                aria-label={`Remove department ${option}`}
+                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                onClick={() => toggleCrmTeamCategory("department", option)}
+                              >
+                                -
+                              </button>
+                              <span>Dept: {option}</span>
+                            </span>
+                          ))}
+                          {selectedTeamEmployeeRoles.map((option) => (
+                            <span
+                              key={`selected-team-role-${option}`}
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                aria-label={`Remove employee role ${option}`}
+                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                onClick={() => toggleCrmTeamCategory("employeeRole", option)}
+                              >
+                                -
+                              </button>
+                              <span>Role: {option}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="small text-secondary mt-2">
+                        Selecting categories will add matching employees to this team. You can still remove any employee below.
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Available Employees</label>
+                      <div className="crm-inline-suggestions-wrap">
+                        <input
+                          type="search"
+                          className="form-control"
+                          autoComplete="off"
+                          placeholder="Search and select employees"
+                          value={teamMemberSearch}
+                          onFocus={() => setTeamMemberSearchOpen(true)}
+                          onBlur={() => window.setTimeout(() => setTeamMemberSearchOpen(false), 120)}
+                          onChange={(event) => {
+                            setTeamMemberSearch(event.target.value);
+                            setTeamMemberSearchOpen(true);
+                          }}
+                        />
+                        {showTeamMemberSuggestions ? (
+                          <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Employee List</div>
+                              {availableTeamMembers.length ? availableTeamMembers.map((employee) => (
+                                <button
+                                  key={`crm-team-available-${employee.id}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => toggleCrmTeamMember(employee.name)}
+                                >
+                                  <span className="d-flex align-items-start gap-2">
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input mt-1"
+                                      checked={selectedTeamMembers.includes(employee.name)}
+                                      readOnly
+                                    />
+                                    <span>
+                                      <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
+                                      <span className="crm-inline-suggestions__item-sub">
+                                        {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
+                                      </span>
+                                    </span>
+                                  </span>
+                                </button>
+                              )) : (
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No employees found</span>
+                                  <span className="crm-inline-suggestions__item-sub">Try another search or change the selected categories.</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="form-label small text-secondary mb-2">Selected Employees</label>
+                      <div className="d-flex flex-wrap gap-2">
+                        {selectedTeamMemberCards.length ? selectedTeamMemberCards.map((member) => {
+                          return (
+                            <span
+                              key={`crm-team-selected-${member.name}`}
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                aria-label={`Remove ${member.name}`}
+                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                onClick={() => toggleCrmTeamMember(member.name)}
+                              >
+                                -
+                              </button>
+                              <span className="fw-semibold">{member.name}</span>
+                            </span>
+                          );
+                        }) : (
+                          <div className="small text-secondary">No employees selected yet.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="d-flex gap-2 flex-wrap">
+                      <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                        {editingId ? "Update" : "Create"}
+                      </button>
+                      {editingId ? (
+                        <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <Fragment>
+                    <div className="row g-3">
+                      {config.fields.map((field) => (
+                        <Fragment key={`${sectionKey}-${field.key}`}>
+                          {hasPhoneCountryCodeField && field.key === "phoneCountryCode"
+                            ? null
+                            : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "User").trim().toLowerCase() !== "user"
+                            ? null
+                            : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "User").trim().toLowerCase() !== "team"
+                            ? null
+                            : (
+                          <div
+                            className={
+                              sectionKey === "leads"
+                                ? (
+                                    field.key === "name" || field.key === "company"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "phone"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "assignType"
+                                      ? "col-12 col-md-6 col-xl-1"
+                                      : field.key === "assignedUser" || field.key === "assignedTeam"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "stage" || field.key === "status"
+                                      ? "col-12 col-md-6 col-xl-1"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : sectionKey === "activities"
+                                ? (
+                                    field.key === "activityType" || field.key === "relatedTo"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "date"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "owner"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "notes"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : sectionKey === "contacts"
+                                ? (
+                                    field.key === "name" || field.key === "company" || field.key === "email"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "phone"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "tag"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : sectionKey === "deals"
+                                ? (
+                                    field.key === "dealName" || field.key === "company"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "stage"
+                                      ? "col-12 col-md-6 col-xl-1"
+                                      : field.key === "amount"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "status"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : sectionKey === "followUps"
+                                ? (
+                                    field.key === "subject" || field.key === "relatedTo"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "dueDate"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "owner"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "status"
+                                      ? "col-12 col-md-6 col-xl-1"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : sectionKey === "meetings"
+                                ? (
+                                    field.key === "title" || field.key === "companyOrClientName"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "relatedTo"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "meetingDate" || field.key === "meetingTime"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "owner"
+                                      ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "meetingMode" || field.key === "reminderChannel" || field.key === "reminderDays" || field.key === "reminderMinutes" || field.key === "status"
+                                      ? "col-12 col-md-6 col-xl-2"
+                                      : "col-12 col-md-6 col-xl-4"
+                                  )
+                                : "col-12 col-md-6 col-xl-4"
+                            }
+                            key={`${sectionKey}-${field.key}`}
+                          >
+                            <label className="form-label small text-secondary mb-1">{field.label}</label>
+                            {(() => {
+                              if (hasPhoneCountryCodeField && field.key === "phone") {
+                                return (
+                                  <div className="input-group">
+                                    <PhoneCountryCodePicker
+                                      value={formValues.phoneCountryCode || "+91"}
+                                      onChange={(code) => setField(sectionKey, "phoneCountryCode", code)}
+                                      options={DIAL_COUNTRY_PICKER_OPTIONS}
+                                      style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
+                                      ariaLabel="CRM country code"
+                                    />
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder={field.placeholder}
+                                      value={formValues.phone || ""}
+                                      onChange={(event) => setField(sectionKey, "phone", event.target.value)}
+                                    />
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "leads" && field.key === "company") {
+                                return (
+                                  <div className="crm-inline-suggestions-wrap">
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      onFocus={() => setLeadCompanySearchOpen(true)}
+                                      onBlur={() => window.setTimeout(() => setLeadCompanySearchOpen(false), 120)}
+                                      onChange={(event) => {
+                                        setField(sectionKey, field.key, event.target.value);
+                                        setLeadCompanySearchOpen(true);
+                                      }}
+                                    />
+                                    {showLeadCompanySuggestions && (crmContactMatches.length || customerMatches.length) ? (
+                                      <div className="crm-inline-suggestions">
+                                        {crmContactMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                            {crmContactMatches.map((contact) => (
+                                              <button
+                                                key={`crm-contact-${contact.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setForms((prev) => ({
+                                                    ...prev,
+                                                    leads: {
+                                                      ...prev.leads,
+                                                      name: String(contact.name || "").trim(),
+                                                      company: String(contact.company || "").trim(),
+                                                      phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
+                                                      phone: String(contact.phone || "").trim(),
+                                                    },
+                                                  }));
+                                                  setLeadCompanySearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                        {customerMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Clients</div>
+                                            {customerMatches.map((customer) => (
+                                              <button
+                                                key={`crm-customer-${customer.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setForms((prev) => ({
+                                                    ...prev,
+                                                    leads: {
+                                                      ...prev.leads,
+                                                      name: String(customer.clientName || customer.name || "").trim(),
+                                                      company: String(customer.companyName || customer.name || "").trim(),
+                                                      phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
+                                                      phone: String(customer.phone || "").trim(),
+                                                    },
+                                                  }));
+                                                  setLeadCompanySearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
                                       </div>
                                     ) : null}
                                   </div>
-                                ) : null}
-                              </div>
-                            );
-                          }
-                          if (field.type === "datalist") {
-                            return (
-                              <Fragment>
+                                );
+                              }
+                              if (sectionKey === "leads" && field.key === "assignedUser") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search user name"
+                                        value={leadAssignedUserSearch}
+                                        onFocus={() => setLeadAssignedUserSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setLeadAssignedUserSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setLeadAssignedUserSearch(event.target.value);
+                                          setLeadAssignedUserSearchOpen(true);
+                                        }}
+                                      />
+                                      {showLeadAssignedUserSuggestions ? (
+                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Users</div>
+                                            {filteredLeadAssignedUsers.length ? filteredLeadAssignedUsers.map((user) => (
+                                              <button
+                                                key={`lead-assigned-user-${user.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleLeadAssignedUser(user.name)}
+                                              >
+                                                <span className="d-flex align-items-start gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-1"
+                                                    checked={selectedLeadAssignedUsers.includes(user.name)}
+                                                    readOnly
+                                                  />
+                                                  <span>
+                                                    <span className="crm-inline-suggestions__item-main d-block">{user.name}</span>
+                                                    <span className="crm-inline-suggestions__item-sub">
+                                                      {[user.department, user.employeeRole].filter(Boolean).join(" / ") || user.email || "-"}
+                                                    </span>
+                                                  </span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No users found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedLeadAssignedUsers.length ? selectedLeadAssignedUsers.map((userName) => (
+                                        <span
+                                          key={`lead-selected-user-${userName}`}
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            aria-label={`Remove ${userName}`}
+                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                            onClick={() => toggleLeadAssignedUser(userName)}
+                                          >
+                                            -
+                                          </button>
+                                          <span>{userName}</span>
+                                        </span>
+                                      )) : null}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "meetings" && field.key === "companyOrClientName") {
+                                return (
+                                  <div className="crm-inline-suggestions-wrap">
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      autoComplete="off"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      onFocus={() => setMeetingCompanySearchOpen(true)}
+                                      onBlur={() => window.setTimeout(() => setMeetingCompanySearchOpen(false), 120)}
+                                      onChange={(event) => {
+                                        setField(sectionKey, field.key, event.target.value);
+                                        setMeetingCompanySearchOpen(true);
+                                      }}
+                                    />
+                                    {meetingCompanySearchOpen && (meetingCrmContactMatches.length || meetingCustomerMatches.length) ? (
+                                      <div className="crm-inline-suggestions">
+                                        {meetingCrmContactMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                            {meetingCrmContactMatches.map((contact) => (
+                                              <button
+                                                key={`meeting-crm-contact-${contact.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                  setMeetingCompanySearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                        {meetingCustomerMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Clients</div>
+                                            {meetingCustomerMatches.map((customer) => (
+                                              <button
+                                                key={`meeting-customer-${customer.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setField(sectionKey, field.key, String(customer.companyName || customer.clientName || customer.name || "").trim());
+                                                  setMeetingCompanySearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "meetings" && field.key === "owner") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search employees"
+                                        value={meetingEmployeeSearch}
+                                        onFocus={() => setMeetingEmployeeSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setMeetingEmployeeSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setMeetingEmployeeSearch(event.target.value);
+                                          setMeetingEmployeeSearchOpen(true);
+                                        }}
+                                      />
+                                      {meetingEmployeeSearchOpen ? (
+                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Employees</div>
+                                            {filteredMeetingEmployees.length ? filteredMeetingEmployees.map((employee) => (
+                                              <button
+                                                key={`meeting-employee-${employee.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleMeetingEmployee(employee.name)}
+                                              >
+                                                <span className="d-flex align-items-start gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-1"
+                                                    checked={selectedMeetingEmployees.includes(employee.name)}
+                                                    readOnly
+                                                  />
+                                                  <span>
+                                                    <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
+                                                    <span className="crm-inline-suggestions__item-sub">
+                                                      {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
+                                                    </span>
+                                                  </span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No employees found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedMeetingEmployees.length ? selectedMeetingEmployees.map((employeeName) => (
+                                        <span
+                                          key={`meeting-selected-employee-${employeeName}`}
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            aria-label={`Remove ${employeeName}`}
+                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                            onClick={() => toggleMeetingEmployee(employeeName)}
+                                          >
+                                            -
+                                          </button>
+                                          <span>{employeeName}</span>
+                                        </span>
+                                      )) : (
+                                        <div className="small text-secondary">No employees selected yet.</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "meetings" && field.key === "reminderChannel") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search reminder channel"
+                                        value={meetingReminderChannelSearch}
+                                        onFocus={() => setMeetingReminderChannelSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setMeetingReminderChannelSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setMeetingReminderChannelSearch(event.target.value);
+                                          setMeetingReminderChannelSearchOpen(true);
+                                        }}
+                                      />
+                                      {meetingReminderChannelSearchOpen ? (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Reminder Channels</div>
+                                            {filteredMeetingReminderChannels.length ? filteredMeetingReminderChannels.map((option) => (
+                                              <button
+                                                key={`meeting-reminder-channel-${option}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleMeetingReminderChannel(option)}
+                                              >
+                                                <span className="d-flex align-items-center gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-0"
+                                                    checked={selectedMeetingReminderChannels.includes(option)}
+                                                    readOnly
+                                                  />
+                                                  <span className="crm-inline-suggestions__item-main">{option}</span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No reminder channels found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedMeetingReminderChannels.length ? selectedMeetingReminderChannels.map((option) => (
+                                        <span
+                                          key={`meeting-selected-reminder-channel-${option}`}
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            aria-label={`Remove ${option}`}
+                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                            onClick={() => toggleMeetingReminderChannel(option)}
+                                          >
+                                            -
+                                          </button>
+                                          <span>{option}</span>
+                                        </span>
+                                      )) : (
+                                        <div className="small text-secondary">No reminder channel selected yet.</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "meetings" && field.key === "reminderDays") {
+                                return (
+                                  <select
+                                    className="form-select"
+                                    value={formValues[field.key] || ""}
+                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                    disabled={!meetingReminderDayOptions.length}
+                                  >
+                                    <option value="">{meetingReminderDayOptions.length ? "Select remind before days" : "Select meeting date first"}</option>
+                                    {meetingReminderDayOptions.map((option) => (
+                                      <option key={`meeting-reminder-day-${option.value}`} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                );
+                              }
+                              if (sectionKey === "meetings" && field.key === "reminderMinutes") {
+                                return (
+                                  <select
+                                    className="form-select"
+                                    value={formValues[field.key] || field.defaultValue || ""}
+                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                  >
+                                    {CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => (
+                                      <option key={`meeting-reminder-minute-${option.value}`} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                );
+                              }
+                              if (field.type === "datalist") {
+                                return (
+                                  <Fragment>
+                                    <input
+                                      type="text"
+                                      list={`${sectionKey}-${field.key}-datalist`}
+                                      className="form-control datalist-readable-input"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                    />
+                                    <datalist id={`${sectionKey}-${field.key}-datalist`}>
+                                      {field.datalistSource === "crmContacts"
+                                        ? (moduleData.contacts || []).flatMap((contact) => {
+                                            const options = [];
+                                            if (String(contact.name || "").trim()) options.push(contact.name.trim());
+                                            if (String(contact.company || "").trim()) options.push(contact.company.trim());
+                                            return options;
+                                          }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
+                                            <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                          ))
+                                        : field.datalistSource === "erpUsers"
+                                        ? crmUserOptions.map((value) => (
+                                            <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                          ))
+                                        : null}
+                                    </datalist>
+                                  </Fragment>
+                                );
+                              }
+                              if (field.type === "multiselect") {
+                                return (
+                                  <select
+                                    className="form-select"
+                                    multiple
+                                    size={1}
+                                    value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
+                                    onChange={(event) => {
+                                      const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
+                                      setField(sectionKey, field.key, selectedValues);
+                                    }}
+                                  >
+                                    {((field.optionSource === "erpUsers" ? crmUserOptions : field.options) || []).map((option) => (
+                                      <option key={option} value={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                );
+                              }
+                              if (field.type === "select") {
+                                return (
+                                  <select
+                                    className="form-select"
+                                    value={formValues[field.key] || field.defaultValue || ""}
+                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                  >
+                                    <option value="">Select {field.label}</option>
+                                    {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
+                                      <option key={option} value={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                );
+                              }
+                              if (field.type === "date" || field.type === "time") {
+                                return (
+                                  <input
+                                    type={field.type}
+                                    className="form-control"
+                                    value={formValues[field.key] || ""}
+                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+                                  />
+                                );
+                              }
+                              return (
                                 <input
                                   type="text"
-                                  list={`${sectionKey}-${field.key}-datalist`}
-                                  className="form-control datalist-readable-input"
+                                  className="form-control"
                                   placeholder={field.placeholder}
                                   value={formValues[field.key] || ""}
                                   onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                 />
-                                <datalist id={`${sectionKey}-${field.key}-datalist`}>
-                                  {field.datalistSource === "crmContacts"
-                                    ? (moduleData.contacts || []).flatMap((contact) => {
-                                        const options = [];
-                                        if (String(contact.name || "").trim()) options.push(contact.name.trim());
-                                        if (String(contact.company || "").trim()) options.push(contact.company.trim());
-                                        return options;
-                                      }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
-                                        <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                      ))
-                                    : field.datalistSource === "erpUsers"
-                                    ? crmUserOptions.map((value) => (
-                                        <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                      ))
-                                    : null}
-                                </datalist>
-                              </Fragment>
-                            );
-                          }
-                          if (field.type === "multiselect") {
-                            return (
-                              <select
-                                className="form-select"
-                                multiple
-                                size={1}
-                                value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
-                                onChange={(event) => {
-                                  const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
-                                  setField(sectionKey, field.key, selectedValues);
-                                }}
-                              >
-                                {((field.optionSource === "erpUsers" ? crmUserOptions : field.options) || []).map((option) => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            );
-                          }
-                          if (field.type === "select") {
-                            return (
-                              <select
-                                className="form-select"
-                                value={formValues[field.key] || field.defaultValue || ""}
-                                onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                              >
-                                <option value="">Select {field.label}</option>
-                                {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            );
-                          }
-                          if (field.type === "date" || field.type === "time") {
-                            return (
-                              <input
-                                type={field.type}
-                                className="form-control"
-                                value={formValues[field.key] || ""}
-                                onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                              />
-                            );
-                          }
-                          return (
-                            <input
-                              type="text"
-                              className="form-control"
-                              placeholder={field.placeholder}
-                              value={formValues[field.key] || ""}
-                              onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                            />
-                          );
-                        })()}
-                      </div>
-                      )}
-                      {(sectionKey === "leads" || sectionKey === "teams" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || field.key === "members" || (sectionKey === "activities" && field.key === "notes")) ? (
-                        <div
-                            className={
-                              sectionKey === "leads"
-                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                              : sectionKey === "teams"
-                              ? "col-12 col-md-6 col-xl-2 d-flex align-items-end"
-                              : sectionKey === "deals"
-                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                              : sectionKey === "followUps"
-                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                              : sectionKey === "activities"
-                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                              : sectionKey === "meetings"
-                              ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                              : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
-                          }
-                        >
-                          <div className="d-flex gap-2 flex-wrap w-100">
-                            <button
-                              type="submit"
-                              className={`btn btn-success btn-sm ${
-                                ["leads", "contacts", "teams", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
-                                  ? "single-row-form-submit-btn"
-                                  : ""
-                              }`}
+                              );
+                            })()}
+                          </div>
+                          )}
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                            <div
+                                className={
+                                  sectionKey === "leads"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  : sectionKey === "deals"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  : sectionKey === "followUps"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  : sectionKey === "activities"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  : sectionKey === "meetings"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
+                              }
                             >
-                              {editingId ? "Update" : "Create"}
-                            </button>
-                            {editingId ? (
-                              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
-                                Cancel
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-                      {sectionKey === "contacts" && field.key === "tag" ? (
-                        <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
-                          <div className="d-flex gap-2 flex-wrap w-100">
-                            <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
-                              {editingId ? "Update" : "Create"}
-                            </button>
-                            {editingId ? (
-                              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
-                                Cancel
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-                    </Fragment>
-                  ))}
-                </div>
-                {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "teams" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
-                  <div className="d-flex gap-2">
-                    <button type="submit" className="btn btn-success btn-sm">
-                      {editingId ? "Update" : "Create"}
-                    </button>
-                    {editingId ? (
-                      <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
-                        Cancel
-                      </button>
+                              <div className="d-flex gap-2 flex-wrap w-100">
+                                <button
+                                  type="submit"
+                                  className={`btn btn-success btn-sm ${
+                                    ["leads", "contacts", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
+                                      ? "single-row-form-submit-btn"
+                                      : ""
+                                  }`}
+                                >
+                                  {editingId ? "Update" : "Create"}
+                                </button>
+                                {editingId ? (
+                                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                                    Cancel
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                          {sectionKey === "contacts" && field.key === "tag" ? (
+                            <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
+                              <div className="d-flex gap-2 flex-wrap w-100">
+                                <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                                  {editingId ? "Update" : "Create"}
+                                </button>
+                                {editingId ? (
+                                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                                    Cancel
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </Fragment>
+                      ))}
+                    </div>
+                    {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-success btn-sm">
+                          {editingId ? "Update" : "Create"}
+                        </button>
+                        {editingId ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
-                  </div>
-                ) : null}
+                  </Fragment>
+                )}
               </form>
             </div>
+            </div>
 
+		            <div className={sectionKey === "teams" ? "col-12 col-xl-9" : ""}>
             <SearchablePaginatedTableCard
               title={`${config.label} List`}
               badgeLabel={`${filteredRows.length} items`}
               rows={filteredRows}
               columns={config.columns}
-              withoutOuterCard
+              withoutOuterCard={sectionKey !== "teams"}
               searchPlaceholder={`Search ${config.label.toLowerCase()}`}
               noRowsText={`No ${config.label.toLowerCase()} yet.`}
               enableExport
@@ -4171,47 +5407,57 @@ function CrmOnePageModule() {
                   if (!phone) return "";
                   return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
                 }
-                if (sectionKey === "teams" && column.key === "members") {
-                  return Array.isArray(row.members) ? row.members.join(", ") : String(row.members || "");
-                }
                 if (sectionKey === "meetings" && column.key === "meetingTime") {
                   return formatTimeToAmPm(row[column.key]);
                 }
                 if (column.key === "reminderSummary") {
-                  const reminderChannels = Array.isArray(row.reminderChannel)
-                    ? row.reminderChannel.join(", ")
-                    : String(row.reminderChannel || "");
-                  return row.reminderSummary || `${reminderChannels} ${row.reminderMinutes ? `• ${row.reminderMinutes} min before` : ""}`.trim();
+                  return row.reminderSummary || buildCrmMeetingReminderSummary(row.reminderChannel, row.reminderDays, row.reminderMinutes);
                 }
                 return row[column.key] || "";
               }}
-              renderCells={(row) =>
-                config.columns.map((column) => {
-                  if (column.key === "phone") {
-                    const phone = String(row.phone || "").trim();
-                    if (!phone) return "-";
-                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
-                  }
-                  if (sectionKey === "teams" && column.key === "members") {
-                    return Array.isArray(row.members) && row.members.length ? row.members.join(", ") : "-";
-                  }
-                  if (sectionKey === "meetings" && column.key === "meetingTime") {
-                    return formatTimeToAmPm(row[column.key]);
-                  }
-                  return row[column.key] || "-";
-                })
+	              renderCells={(row) =>
+	                config.columns.map((column) => {
+	                  if (column.key === "phone") {
+	                    const phone = String(row.phone || "").trim();
+	                    if (!phone) return "-";
+	                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
+	                  }
+	                  if (sectionKey === "leads" && column.key === "assignedTo") {
+	                    const assignedUsers = String(row.assignedUser || row.assignedTo || "")
+	                      .split(",")
+	                      .map((item) => item.trim())
+	                      .filter(Boolean);
+	                    if (String(row.assignType || "").trim().toLowerCase() === "user" && assignedUsers.length > 1) {
+	                      return (
+	                        <button
+	                          type="button"
+	                          className="btn btn-link btn-sm p-0 align-baseline"
+	                          onClick={() => onEdit(sectionKey, row)}
+	                        >
+	                          {assignedUsers.length} Employees
+	                        </button>
+	                      );
+	                    }
+	                    return row[column.key] || "-";
+	                  }
+	                  if (sectionKey === "meetings" && column.key === "meetingTime") {
+	                    return formatTimeToAmPm(row[column.key]);
+	                  }
+	                  return row[column.key] || "-";
+	                })
               }
               renderActions={(row) => (
                 <div className="d-inline-flex gap-2">
                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEdit(sectionKey, row)}>
                     Edit
                   </button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDelete(sectionKey, row.id)}>
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => openDeleteConfirm(sectionKey, row)}>
                     Delete
                   </button>
                 </div>
               )}
             />
+            </div>
 
             {sectionKey === "meetings" ? (
               <div className="card p-3">
@@ -4331,12 +5577,42 @@ function CrmOnePageModule() {
               </div>
               <div className="col-6">
                 <div className="text-secondary">Reminder</div>
-                <div className="fw-semibold">{meetingPopup.reminderSummary || `${Array.isArray(meetingPopup.reminderChannel) ? meetingPopup.reminderChannel.join(", ") : (meetingPopup.reminderChannel || "-")} • ${meetingPopup.reminderMinutes || "-"} min before`}</div>
+                <div className="fw-semibold">{meetingPopup.reminderSummary || buildCrmMeetingReminderSummary(meetingPopup.reminderChannel, meetingPopup.reminderDays, meetingPopup.reminderMinutes) || "-"}</div>
               </div>
               <div className="col-6">
                 <div className="text-secondary">Status</div>
                 <div className="fw-semibold">{meetingPopup.status || "-"}</div>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {deleteConfirm ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={closeDeleteConfirm}>
+          <div
+            className="modal-panel"
+            style={{ width: "min(420px, 92vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Delete Confirmation</h5>
+                <div className="small text-secondary">This action cannot be undone.</div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeDeleteConfirm}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="mb-3">
+              Are you sure you want to delete <span className="fw-semibold">{deleteConfirm.label || "this item"}</span>?
+            </div>
+            <div className="d-flex justify-content-end gap-2">
+              <button type="button" className="btn btn-outline-light" onClick={closeDeleteConfirm}>
+                No
+              </button>
+              <button type="button" className="btn btn-danger" onClick={confirmDelete}>
+                Yes
+              </button>
             </div>
           </div>
         </div>

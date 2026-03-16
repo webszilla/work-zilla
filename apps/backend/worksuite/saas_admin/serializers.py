@@ -163,6 +163,16 @@ def _normalized_payment_message(item, transfer, product_name):
     return details
 
 
+def _serialize_notification_attachment(item):
+    return {
+        "id": item.id,
+        "name": item.file.name.rsplit("/", 1)[-1] if item.file else "",
+        "url": item.file.url if item.file else "",
+        "size": int(getattr(getattr(item, "file", None), "size", 0) or 0),
+        "created_at": _format_datetime(item.created_at),
+    }
+
+
 def serialize_notification(item):
     org_owner = item.organization.owner if item.organization and getattr(item.organization, "owner", None) else None
     org_admin_name = ""
@@ -194,11 +204,20 @@ def serialize_notification(item):
             query["product"] = product_name
         approval_url = f"/saas-admin/billing?{urlencode(query)}#billing-activity"
     message = _normalized_payment_message(item, transfer, product_name)
+    metadata = getattr(item, "metadata", None) or {}
+    attachments_manager = getattr(item, "attachments", None)
+    attachments = []
+    if attachments_manager is not None:
+        try:
+            attachments = [_serialize_notification_attachment(attachment) for attachment in attachments_manager.all()]
+        except Exception:
+            attachments = []
 
     return {
         "id": item.id,
         "title": item.title,
         "message": message,
+        "message_html": message,
         "event_type": item.event_type,
         "audience": getattr(item, "audience", "saas_admin"),
         "channel": getattr(item, "channel", "system"),
@@ -213,4 +232,6 @@ def serialize_notification(item):
         "transfer_id": transfer.id if transfer else None,
         "approval_status": transfer.status if transfer else "",
         "approval_url": approval_url,
+        "metadata": metadata,
+        "attachments": attachments,
     }

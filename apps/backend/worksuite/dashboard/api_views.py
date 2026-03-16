@@ -34,6 +34,7 @@ from reportlab.pdfgen import canvas
 from core.models import (
     AdminActivity,
     AdminNotification,
+    AdminNotificationAttachment,
     CompanyPrivacySettings,
     Employee,
     OrganizationSettings,
@@ -68,6 +69,7 @@ from core.notifications import create_org_admin_inbox_notification
 from core.access_control import iter_accessible_product_slugs
 from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+from apps.backend.business_autopilot.models import OrganizationDepartment, OrganizationEmployeeRole, OrganizationUser
 
 
 User = get_user_model()
@@ -83,6 +85,34 @@ PUBLIC_DOMAIN_RE = re.compile(
 )
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+INBOX_MAX_ATTACHMENTS = 10
+INBOX_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+INBOX_ALLOWED_ATTACHMENT_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".pdf",
+    ".xls",
+    ".xlsx",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".zip",
+}
+INBOX_ALLOWED_ATTACHMENT_MIME_PREFIXES = ("image/",)
+INBOX_ALLOWED_ATTACHMENT_MIME_TYPES = {
+    "application/pdf",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+}
 PRODUCT_LABEL_OVERRIDES = {
     "monitor": "Work Suite",
     "worksuite": "Work Suite",
@@ -405,6 +435,212 @@ def _is_org_admin_user(request, org):
     )
 
 
+def _normalize_member_department(value):
+    return _normalize_text(value)
+
+
+def _get_org_member_queryset(org):
+    return (
+        OrganizationUser.objects
+        .select_related("user")
+        .filter(organization=org, is_active=True)
+        .order_by("user__first_name", "user__last_name", "user__username", "id")
+    )
+
+
+def _build_org_inbox_recipient_options(org):
+    memberships = list(_get_org_member_queryset(org))
+    department_names = {
+        _normalize_member_department(row.name)
+        for row in OrganizationDepartment.objects.filter(organization=org, is_active=True).order_by("name")
+        if _normalize_member_department(row.name)
+    }
+    department_names.update(
+        _normalize_member_department(member.department)
+        for member in memberships
+        if _normalize_member_department(member.department)
+    )
+    employee_role_names = {
+        _normalize_text(row.name)
+        for row in OrganizationEmployeeRole.objects.filter(organization=org, is_active=True).order_by("name")
+        if _normalize_text(row.name)
+    }
+    employee_role_names.update(
+        _normalize_text(member.employee_role)
+        for member in memberships
+        if _normalize_text(member.employee_role)
+    )
+    users = []
+    for membership in memberships:
+        user = membership.user
+        if not user:
+            continue
+        display_name = (
+            f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+            or getattr(user, "username", "")
+            or getattr(user, "email", "")
+            or f"User {user.id}"
+        )
+        users.append({
+            "id": user.id,
+            "name": display_name,
+            "email": getattr(user, "email", "") or "",
+            "department": _normalize_member_department(membership.department),
+            "employee_role": _normalize_text(membership.employee_role),
+        })
+    departments = [{"name": name} for name in sorted(department_names, key=str.lower)]
+    employee_roles = [{"name": name} for name in sorted(employee_role_names, key=str.lower)]
+    return {"users": users, "departments": departments, "employee_roles": employee_roles}
+
+
+def _validate_inbox_attachments(files):
+    if len(files) > INBOX_MAX_ATTACHMENTS:
+        return f"Maximum {INBOX_MAX_ATTACHMENTS} attachments allowed."
+    for file_obj in files:
+        size = int(getattr(file_obj, "size", 0) or 0)
+        if size > INBOX_MAX_ATTACHMENT_BYTES:
+            return "Each attachment must be 10MB or smaller."
+        content_type = str(getattr(file_obj, "content_type", "") or "").lower()
+        _, extension = os.path.splitext(str(getattr(file_obj, "name", "") or ""))
+        extension = extension.lower()
+        is_allowed_mime = (
+            content_type in INBOX_ALLOWED_ATTACHMENT_MIME_TYPES
+            or any(content_type.startswith(prefix) for prefix in INBOX_ALLOWED_ATTACHMENT_MIME_PREFIXES)
+        )
+        if extension not in INBOX_ALLOWED_ATTACHMENT_EXTENSIONS and not is_allowed_mime:
+            return "Allowed attachments: image, PDF, Excel, Word and ZIP files only."
+    return ""
+
+
+def _normalize_sent_to_type(value):
+    sent_to_type = str(value or "").strip().lower()
+    return sent_to_type if sent_to_type in {"all_members", "department", "user"} else "all_members"
+
+
+def _normalize_multi_value(items):
+    values = []
+    seen = set()
+    for item in items or []:
+        normalized = _normalize_text(item)
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        values.append(normalized)
+    return values
+
+
+def _parse_inbox_recipient_metadata(request, org):
+    sent_to_type = _normalize_sent_to_type(request.POST.get("sent_to_type") or request.POST.get("sentTo"))
+    option_data = _build_org_inbox_recipient_options(org)
+    allowed_departments = {
+        str(item["name"]).strip().lower(): str(item["name"]).strip()
+        for item in option_data["departments"]
+    }
+    allowed_employee_roles = {
+        str(item["name"]).strip().lower(): str(item["name"]).strip()
+        for item in option_data.get("employee_roles", [])
+    }
+    allowed_users = {int(item["id"]): item for item in option_data["users"]}
+
+    department_names = []
+    for value in request.POST.getlist("department_names"):
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        canonical = allowed_departments.get(normalized.lower())
+        if canonical and canonical not in department_names:
+            department_names.append(canonical)
+
+    employee_role_names = []
+    for value in request.POST.getlist("employee_role_names"):
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        canonical = allowed_employee_roles.get(normalized.lower())
+        if canonical and canonical not in employee_role_names:
+            employee_role_names.append(canonical)
+
+    user_ids = []
+    user_names = []
+    for raw_value in request.POST.getlist("user_ids"):
+        try:
+            user_id = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        matched = allowed_users.get(user_id)
+        if not matched or user_id in user_ids:
+            continue
+        user_ids.append(user_id)
+        user_names.append(matched["name"])
+
+    if sent_to_type == "department" and not department_names and not employee_role_names:
+        raise ValidationError("Select at least one department or employee role.")
+    if sent_to_type == "user" and not user_ids:
+        raise ValidationError("Select at least one user.")
+
+    return {
+        "sent_to_type": sent_to_type,
+        "department_names": department_names,
+        "employee_role_names": employee_role_names,
+        "user_ids": user_ids,
+        "user_names": user_names,
+    }
+
+
+def _notification_visible_to_user(item, user, org, is_org_admin=False):
+    if not item or item.organization_id != getattr(org, "id", None):
+        return False
+    metadata = getattr(item, "metadata", None) or {}
+    sent_to_type = _normalize_sent_to_type(metadata.get("sent_to_type"))
+    if sent_to_type == "all_members":
+        return True
+    if is_org_admin and getattr(item, "created_by_id", None) == getattr(user, "id", None):
+        return True
+    if sent_to_type == "user":
+        user_ids = {
+            int(value)
+            for value in metadata.get("user_ids", [])
+            if str(value).isdigit()
+        }
+        return getattr(user, "id", None) in user_ids
+    membership = (
+        OrganizationUser.objects
+        .filter(organization=org, user=user, is_active=True)
+        .only("department", "employee_role")
+        .first()
+    )
+    user_department = _normalize_member_department(getattr(membership, "department", ""))
+    user_employee_role = _normalize_text(getattr(membership, "employee_role", ""))
+    target_departments = {
+        _normalize_member_department(value).lower()
+        for value in metadata.get("department_names", [])
+        if _normalize_member_department(value)
+    }
+    target_employee_roles = {
+        _normalize_text(value).lower()
+        for value in metadata.get("employee_role_names", [])
+        if _normalize_text(value)
+    }
+    return bool(
+        (user_department and user_department.lower() in target_departments)
+        or (user_employee_role and user_employee_role.lower() in target_employee_roles)
+    )
+
+
+def _filter_visible_notifications(queryset, user, org, is_org_admin=False):
+    visible_ids = [
+        item.id
+        for item in queryset
+        if _notification_visible_to_user(item, user, org, is_org_admin=is_org_admin)
+    ]
+    if not visible_ids:
+        return []
+    return list(queryset.filter(id__in=visible_ids))
+
+
 def _get_org_or_error(request):
     org = dashboard_views.get_active_org(request)
     if not org:
@@ -565,6 +801,7 @@ def org_inbox_list(request):
     if not allowed:
         return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
     org = org_or_error
+    is_org_admin = _is_org_admin_user(request, org)
 
     try:
         page = max(int(request.GET.get("page", 1)), 1)
@@ -579,18 +816,20 @@ def org_inbox_list(request):
     requested_product = _normalize_product_slug(request.GET.get("product"), default="")
     queryset = (
         AdminNotification.objects
-        .select_related("organization")
+        .select_related("organization", "created_by")
+        .prefetch_related("attachments")
         .filter(is_deleted=False, audience="org_admin", organization=org)
         .order_by("-created_at", "-id")
     )
     if requested_product:
         queryset = queryset.filter(product_slug=requested_product)
-    total = queryset.count()
+    visible_notifications = _filter_visible_notifications(queryset, request.user, org, is_org_admin=is_org_admin)
+    total = len(visible_notifications)
     start = (page - 1) * page_size
     end = start + page_size
-    results = [serialize_notification(item) for item in queryset[start:end]]
+    results = [serialize_notification(item) for item in visible_notifications[start:end]]
     total_pages = max(math.ceil(total / page_size), 1)
-    unread_count = queryset.filter(is_read=False).count()
+    unread_count = len([item for item in visible_notifications if not item.is_read])
     return JsonResponse({
         "results": results,
         "page": page,
@@ -599,6 +838,18 @@ def org_inbox_list(request):
         "total_pages": total_pages,
         "unread_count": unread_count,
     })
+
+
+@login_required
+@require_http_methods(["GET"])
+def org_inbox_recipient_options(request):
+    allowed, org_or_error = _org_inbox_permission(request)
+    if not allowed:
+        return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
+    org = org_or_error
+    if not _is_org_admin_user(request, org):
+        return JsonResponse({"error": "admin_only"}, status=403)
+    return JsonResponse(_build_org_inbox_recipient_options(org))
 
 
 @login_required
@@ -619,11 +870,18 @@ def org_inbox_mark_read(request):
     ids = [int(item) for item in ids if str(item).isdigit()]
     if not ids:
         return JsonResponse({"error": "no_ids"}, status=400)
-    updated = (
+    is_org_admin = _is_org_admin_user(request, org)
+    notifications = (
         AdminNotification.objects
         .filter(id__in=ids, audience="org_admin", organization=org)
-        .update(is_read=True)
+        .order_by("-created_at", "-id")
     )
+    visible_ids = [
+        item.id
+        for item in notifications
+        if _notification_visible_to_user(item, request.user, org, is_org_admin=is_org_admin)
+    ]
+    updated = AdminNotification.objects.filter(id__in=visible_ids).update(is_read=True)
     return JsonResponse({"status": "ok", "updated": updated})
 
 
@@ -634,11 +892,15 @@ def org_inbox_delete(request, notification_id):
     if not allowed:
         return org_or_error if org_or_error is not None else HttpResponseForbidden("Access denied.")
     org = org_or_error
-    updated = (
+    is_org_admin = _is_org_admin_user(request, org)
+    notification = (
         AdminNotification.objects
         .filter(id=notification_id, audience="org_admin", organization=org)
-        .update(is_deleted=True)
+        .first()
     )
+    if not notification or not _notification_visible_to_user(notification, request.user, org, is_org_admin=is_org_admin):
+        return JsonResponse({"error": "not_found"}, status=404)
+    updated = AdminNotification.objects.filter(id=notification_id).update(is_deleted=True)
     if not updated:
         return JsonResponse({"error": "not_found"}, status=404)
     return JsonResponse({"status": "ok"})
@@ -662,15 +924,11 @@ def org_inbox_compose(request):
     if not is_org_admin:
         return JsonResponse({"error": "admin_only"}, status=403)
 
-    try:
-        data = json.loads(request.body.decode("utf-8")) if request.body else {}
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid_json"}, status=400)
-
-    title = _normalize_text(data.get("title") or data.get("subject") or "")
-    message = str(data.get("message") or "").strip()
-    channel = _normalize_text(data.get("channel") or "email").lower() or "email"
-    product_slug = _normalize_product_slug(data.get("product_slug"), default="monitor")
+    title = _normalize_text(request.POST.get("title") or request.POST.get("subject") or "")
+    message = str(request.POST.get("message") or "").strip()
+    channel = _normalize_text(request.POST.get("channel") or "email").lower() or "email"
+    product_slug = _normalize_product_slug(request.POST.get("product_slug"), default="monitor")
+    attachments = list(request.FILES.getlist("attachments"))
     if channel not in {"email", "system", "whatsapp"}:
         channel = "email"
 
@@ -678,6 +936,13 @@ def org_inbox_compose(request):
         return _json_error("title_required", status=400)
     if not message:
         return _json_error("message_required", status=400)
+    attachment_error = _validate_inbox_attachments(attachments)
+    if attachment_error:
+        return _json_error(attachment_error, status=400)
+    try:
+        metadata = _parse_inbox_recipient_metadata(request, org)
+    except ValidationError as exc:
+        return _json_error(" ".join(exc.messages), status=400)
 
     item = create_org_admin_inbox_notification(
         title=title,
@@ -686,13 +951,28 @@ def org_inbox_compose(request):
         event_type="system",
         product_slug=product_slug,
         channel=channel,
+        metadata=metadata,
+        created_by=request.user,
     )
     if not item:
         return _json_error("unable_to_create_notification", status=500)
+    for attachment in attachments:
+        AdminNotificationAttachment.objects.create(
+            notification=item,
+            file=attachment,
+            uploaded_by=request.user,
+        )
+    item = (
+        AdminNotification.objects
+        .select_related("organization", "created_by")
+        .prefetch_related("attachments")
+        .filter(id=item.id)
+        .first()
+    )
 
     return JsonResponse({
         "status": "ok",
-        "message": "Notification sent to all organization users inbox.",
+        "message": "Notification sent successfully.",
         "notification": serialize_notification(item),
     })
 

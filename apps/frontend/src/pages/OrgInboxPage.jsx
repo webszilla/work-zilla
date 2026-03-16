@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   fetchOrgInbox,
+  fetchOrgInboxRecipients,
   markOrgInboxRead,
   deleteOrgInboxNotification,
   composeOrgInboxNotification,
@@ -27,6 +28,12 @@ const emptyState = {
 
 const TICKET_MAX_ATTACHMENTS = 5;
 const TICKET_MAX_BYTES = 2 * 1024 * 1024;
+const INBOX_MAX_ATTACHMENTS = 10;
+const INBOX_MAX_BYTES = 10 * 1024 * 1024;
+const INBOX_ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.xls,.xlsx,.csv,.doc,.docx,.zip";
+const INBOX_ALLOWED_ATTACHMENT_EXTENSIONS = new Set(
+  INBOX_ATTACHMENT_ACCEPT.split(",").map((value) => value.trim().toLowerCase())
+);
 const INBOX_RETENTION_NOTE = "Auto cleanup: Older inbox messages are automatically deleted when inbox exceeds 100 notifications (same rule for all products).";
 const ENQUIRY_STATUS_TABS = [
   { key: "new", label: "New" },
@@ -99,6 +106,79 @@ function validateImageFiles(fileList) {
   return "";
 }
 
+function validateInboxFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (files.length > INBOX_MAX_ATTACHMENTS) {
+    return `Maximum ${INBOX_MAX_ATTACHMENTS} attachments allowed.`;
+  }
+  for (const file of files) {
+    if (file.size > INBOX_MAX_BYTES) {
+      return "Each attachment must be 10MB or smaller.";
+    }
+    const fileName = String(file.name || "").toLowerCase();
+    const extension = fileName.includes(".") ? `.${fileName.split(".").pop()}` : "";
+    const isImage = String(file.type || "").toLowerCase().startsWith("image/");
+    if (!isImage && !INBOX_ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+      return "Allowed attachments: image, PDF, Excel, Word and ZIP files only.";
+    }
+  }
+  return "";
+}
+
+function createEmptyComposeForm() {
+  return {
+    title: "",
+    message: "",
+    channel: "email",
+    sentToType: "all_members",
+    departmentNames: [],
+    employeeRoleNames: [],
+    userIds: [],
+    attachments: [],
+  };
+}
+
+function buildInboxComposeFormData({
+  title,
+  message,
+  channel,
+  productSlug,
+  sentToType,
+  departmentNames,
+  employeeRoleNames,
+  userIds,
+  attachments,
+}) {
+  const formData = new FormData();
+  formData.set("title", title || "");
+  formData.set("message", message || "");
+  formData.set("channel", channel || "email");
+  formData.set("product_slug", productSlug || "");
+  formData.set("sent_to_type", sentToType || "all_members");
+  Array.from(departmentNames || []).forEach((value) => {
+    formData.append("department_names", value);
+  });
+  Array.from(employeeRoleNames || []).forEach((value) => {
+    formData.append("employee_role_names", value);
+  });
+  Array.from(userIds || []).forEach((value) => {
+    formData.append("user_ids", String(value));
+  });
+  Array.from(attachments || []).forEach((file) => {
+    formData.append("attachments", file);
+  });
+  return formData;
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!size) return "0 KB";
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${Math.max(size / 1024, 0.1).toFixed(1)} KB`;
+}
+
 function buildTicketFormData({ category, subject, message, priority, productSlug, attachments }) {
   const formData = new FormData();
   formData.set("category", category || "support");
@@ -134,8 +214,17 @@ export default function OrgInboxPage({ productSlug = "" }) {
   const [inboxPage, setInboxPage] = useState(1);
   const [autoRefreshInbox, setAutoRefreshInbox] = useState(false);
   const [showComposeInbox, setShowComposeInbox] = useState(false);
-  const [composeForm, setComposeForm] = useState({ title: "", message: "", channel: "email" });
+  const [composeForm, setComposeForm] = useState(createEmptyComposeForm);
   const [composeState, setComposeState] = useState({ sending: false, error: "", success: "" });
+  const [composeRecipientOptions, setComposeRecipientOptions] = useState({
+    loading: false,
+    error: "",
+    users: [],
+    departments: [],
+    employee_roles: [],
+  });
+  const [composeRecipientSearch, setComposeRecipientSearch] = useState("");
+  const [composeRecipientSearchOpen, setComposeRecipientSearchOpen] = useState(false);
 
   const [ticketState, setTicketState] = useState(emptyState);
   const [ticketPage, setTicketPage] = useState(1);
@@ -176,6 +265,34 @@ export default function OrgInboxPage({ productSlug = "" }) {
     () => inboxItems.find((item) => item.id === selectedInboxId) || null,
     [inboxItems, selectedInboxId]
   );
+  const composeUserOptionById = useMemo(
+    () => Object.fromEntries((composeRecipientOptions.users || []).map((item) => [Number(item.id), item])),
+    [composeRecipientOptions.users]
+  );
+  const filteredComposeRecipientOptions = useMemo(() => {
+    const query = String(composeRecipientSearch || "").trim().toLowerCase();
+    if (composeForm.sentToType === "department") {
+      const departments = (composeRecipientOptions.departments || []).filter((item) =>
+        !query ? true : String(item.name || "").toLowerCase().includes(query)
+      );
+      const employeeRoles = (composeRecipientOptions.employee_roles || []).filter((item) =>
+        !query ? true : String(item.name || "").toLowerCase().includes(query)
+      );
+      return { departments, employeeRoles };
+    }
+    if (composeForm.sentToType === "user") {
+      const options = composeRecipientOptions.users || [];
+      if (!query) return options;
+      return options.filter((item) => {
+        const haystack = [item.name, item.email, item.department, item.employee_role]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+    return { departments: [], employeeRoles: [] };
+  }, [composeRecipientOptions, composeRecipientSearch, composeForm.sentToType]);
   const feedbackItems = feedbackState.data?.items || [];
   const feedbackTotalPages = feedbackState.data?.pagination?.total_pages || 1;
   const selectedFeedbackItem = useMemo(
@@ -217,6 +334,28 @@ export default function OrgInboxPage({ productSlug = "" }) {
         loading: false,
         error: error?.message || "Unable to load inbox.",
         data: null,
+      });
+    }
+  }
+
+  async function loadComposeRecipientOptions() {
+    setComposeRecipientOptions((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      const data = await fetchOrgInboxRecipients();
+      setComposeRecipientOptions({
+        loading: false,
+        error: "",
+        users: Array.isArray(data?.users) ? data.users : [],
+        departments: Array.isArray(data?.departments) ? data.departments : [],
+        employee_roles: Array.isArray(data?.employee_roles) ? data.employee_roles : [],
+      });
+    } catch (error) {
+      setComposeRecipientOptions({
+        loading: false,
+        error: error?.message || "Unable to load recipients.",
+        users: [],
+        departments: [],
+        employee_roles: [],
       });
     }
   }
@@ -307,6 +446,12 @@ export default function OrgInboxPage({ productSlug = "" }) {
     loadInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProductSlug, inboxPage]);
+
+  useEffect(() => {
+    if (!showComposeInbox) return;
+    loadComposeRecipientOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showComposeInbox]);
 
   useEffect(() => {
     loadTickets();
@@ -488,24 +633,74 @@ export default function OrgInboxPage({ productSlug = "" }) {
     }
   }
 
+  function toggleComposeDepartment(departmentName) {
+    setComposeForm((prev) => {
+      const nextDepartments = prev.departmentNames.includes(departmentName)
+        ? prev.departmentNames.filter((item) => item !== departmentName)
+        : [...prev.departmentNames, departmentName];
+      return { ...prev, departmentNames: nextDepartments };
+    });
+  }
+
+  function toggleComposeEmployeeRole(employeeRoleName) {
+    setComposeForm((prev) => {
+      const nextEmployeeRoles = prev.employeeRoleNames.includes(employeeRoleName)
+        ? prev.employeeRoleNames.filter((item) => item !== employeeRoleName)
+        : [...prev.employeeRoleNames, employeeRoleName];
+      return { ...prev, employeeRoleNames: nextEmployeeRoles };
+    });
+  }
+
+  function toggleComposeUser(userId) {
+    const numericUserId = Number(userId);
+    setComposeForm((prev) => {
+      const nextUserIds = prev.userIds.includes(numericUserId)
+        ? prev.userIds.filter((item) => item !== numericUserId)
+        : [...prev.userIds, numericUserId];
+      return { ...prev, userIds: nextUserIds };
+    });
+  }
+
   async function handleComposeSubmit(event) {
     event.preventDefault();
     const title = String(composeForm.title || "").trim();
-    const message = String(composeForm.message || "").trim();
-    if (!title || !message) {
+    const message = String(composeForm.message || "");
+    if (!title || !htmlToPlainText(message)) {
       setComposeState({ sending: false, error: "Subject and message are required.", success: "" });
+      return;
+    }
+    if (composeForm.sentToType === "department" && !composeForm.departmentNames.length && !composeForm.employeeRoleNames.length) {
+      setComposeState({ sending: false, error: "Select at least one department or employee role.", success: "" });
+      return;
+    }
+    if (composeForm.sentToType === "user" && !composeForm.userIds.length) {
+      setComposeState({ sending: false, error: "Select at least one user.", success: "" });
+      return;
+    }
+    const attachmentError = validateInboxFiles(composeForm.attachments);
+    if (attachmentError) {
+      showUploadAlert(attachmentError);
+      setComposeState({ sending: false, error: attachmentError, success: "" });
       return;
     }
     setComposeState({ sending: true, error: "", success: "" });
     try {
-      await composeOrgInboxNotification({
+      const formData = buildInboxComposeFormData({
         title,
         message,
         channel: composeForm.channel || "email",
-        product_slug: currentProductSlug,
+        productSlug: currentProductSlug,
+        sentToType: composeForm.sentToType,
+        departmentNames: composeForm.departmentNames,
+        employeeRoleNames: composeForm.employeeRoleNames,
+        userIds: composeForm.userIds,
+        attachments: composeForm.attachments,
       });
-      setComposeForm({ title: "", message: "", channel: "email" });
-      setComposeState({ sending: false, error: "", success: "Message sent to all users inbox." });
+      await composeOrgInboxNotification(formData);
+      setComposeForm(createEmptyComposeForm());
+      setComposeRecipientSearch("");
+      setComposeRecipientSearchOpen(false);
+      setComposeState({ sending: false, error: "", success: "Message sent successfully." });
       setShowComposeInbox(false);
       await loadInbox({ keepSelection: false });
     } catch (error) {
@@ -1209,60 +1404,308 @@ export default function OrgInboxPage({ productSlug = "" }) {
             <div className="card mt-3 p-3">
               <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
                 <h6 className="mb-0">Compose Admin Message</h6>
-                <span className="badge bg-secondary">Send to all users inbox</span>
+                <span className="badge bg-secondary">
+                  {composeForm.sentToType === "department"
+                    ? "Send to department inbox"
+                    : composeForm.sentToType === "user"
+                      ? "Send to selected users"
+                      : "Send to all users inbox"}
+                </span>
               </div>
               <form className="d-flex flex-column gap-3" onSubmit={handleComposeSubmit}>
-                <div className="row g-3">
-                  <div className="col-12 col-lg-6">
-                    <label className="form-label small text-secondary mb-1">Subject</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Enter subject"
-                      value={composeForm.title}
-                      onChange={(event) => setComposeForm((prev) => ({ ...prev, title: event.target.value }))}
-                    />
+                <div className="row g-3 align-items-start">
+                  <div className="col-12 col-lg-4">
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Subject</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="Enter subject"
+                          value={composeForm.title}
+                          onChange={(event) => setComposeForm((prev) => ({ ...prev, title: event.target.value }))}
+                        />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Channel</label>
+                        <select
+                          className="form-select"
+                          value={composeForm.channel}
+                          onChange={(event) =>
+                            setComposeForm((prev) => ({
+                              ...prev,
+                              channel: event.target.value,
+                              attachments: event.target.value === "email" ? prev.attachments : [],
+                            }))
+                          }
+                        >
+                          <option value="email">Email</option>
+                          <option value="system">System</option>
+                          <option value="whatsapp">WhatsApp</option>
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Sent To</label>
+                        <select
+                          className="form-select"
+                          value={composeForm.sentToType}
+                          onChange={(event) => {
+                            const nextType = event.target.value;
+                            setComposeForm((prev) => ({
+                              ...prev,
+                              sentToType: nextType,
+                              departmentNames: nextType === "department" ? prev.departmentNames : [],
+                              employeeRoleNames: nextType === "department" ? prev.employeeRoleNames : [],
+                              userIds: nextType === "user" ? prev.userIds : [],
+                            }));
+                            setComposeRecipientSearch("");
+                            setComposeRecipientSearchOpen(false);
+                          }}
+                        >
+                          <option value="all_members">All Member</option>
+                          <option value="department">Department</option>
+                          <option value="user">User</option>
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <div className="position-relative">
+                          <label className="form-label small text-secondary mb-1">
+                            {composeForm.sentToType === "department" ? "Select Department" : "Select User"}
+                          </label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder={composeForm.sentToType === "department" ? "Search department or employee role" : "Search users"}
+                            value={composeRecipientSearch}
+                            disabled={composeForm.sentToType === "all_members"}
+                            onFocus={() => {
+                              if (composeForm.sentToType !== "all_members") {
+                                setComposeRecipientSearchOpen(true);
+                              }
+                            }}
+                            onChange={(event) => {
+                              setComposeRecipientSearch(event.target.value);
+                              setComposeRecipientSearchOpen(true);
+                            }}
+                          />
+                          {composeRecipientSearchOpen && composeForm.sentToType !== "all_members" ? (
+                            <div
+                              className="border rounded bg-white mt-1 p-2 position-absolute start-0 end-0"
+                              style={{ zIndex: 20, maxHeight: "220px", overflowY: "auto", boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)" }}
+                            >
+                              {composeRecipientOptions.loading ? (
+                                <div className="small text-secondary px-1 py-2">Loading options...</div>
+                              ) : composeRecipientOptions.error ? (
+                                <div className="small text-danger px-1 py-2">{composeRecipientOptions.error}</div>
+                              ) : composeForm.sentToType === "department" ? (
+                                filteredComposeRecipientOptions.departments.length || filteredComposeRecipientOptions.employeeRoles.length ? (
+                                  <>
+                                    <div className="small fw-semibold text-uppercase text-dark px-1 pt-1 pb-2" style={{ letterSpacing: "0.08em" }}>
+                                      Department List
+                                    </div>
+                                    {filteredComposeRecipientOptions.departments.length ? (
+                                      filteredComposeRecipientOptions.departments.map((item) => {
+                                        const departmentName = String(item.name || "");
+                                        const checked = composeForm.departmentNames.includes(departmentName);
+                                        return (
+                                          <label key={`dept-${departmentName}`} className="d-flex align-items-center gap-2 px-1 py-2 rounded" style={{ cursor: "pointer" }}>
+                                            <input
+                                              type="checkbox"
+                                              className="form-check-input mt-0"
+                                              checked={checked}
+                                              onChange={() => toggleComposeDepartment(departmentName)}
+                                            />
+                                            <span>{departmentName}</span>
+                                          </label>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="small text-secondary px-1 py-2">No departments found.</div>
+                                    )}
+                                    <div className="small fw-semibold text-uppercase text-dark px-1 pt-3 pb-2" style={{ letterSpacing: "0.08em" }}>
+                                      Employee Role List
+                                    </div>
+                                    {filteredComposeRecipientOptions.employeeRoles.length ? (
+                                      filteredComposeRecipientOptions.employeeRoles.map((item) => {
+                                        const employeeRoleName = String(item.name || "");
+                                        const checked = composeForm.employeeRoleNames.includes(employeeRoleName);
+                                        return (
+                                          <label key={`role-${employeeRoleName}`} className="d-flex align-items-center gap-2 px-1 py-2 rounded" style={{ cursor: "pointer" }}>
+                                            <input
+                                              type="checkbox"
+                                              className="form-check-input mt-0"
+                                              checked={checked}
+                                              onChange={() => toggleComposeEmployeeRole(employeeRoleName)}
+                                            />
+                                            <span>{employeeRoleName}</span>
+                                          </label>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="small text-secondary px-1 py-2">No employee roles found.</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="small text-secondary px-1 py-2">No matching options.</div>
+                                )
+                              ) : filteredComposeRecipientOptions.length ? (
+                                filteredComposeRecipientOptions.map((item) => {
+                                  const checked = composeForm.userIds.includes(Number(item.id));
+                                  return (
+                                    <label key={item.id} className="d-flex align-items-start gap-2 px-1 py-2 rounded" style={{ cursor: "pointer" }}>
+                                      <input
+                                        type="checkbox"
+                                        className="form-check-input mt-1"
+                                        checked={checked}
+                                        onChange={() => toggleComposeUser(item.id)}
+                                      />
+                                      <span>
+                                        <span className="d-block fw-semibold text-dark">{item.name}</span>
+                                        <span className="d-block small text-secondary">
+                                          {[item.department, item.employee_role, item.email].filter(Boolean).join(" • ") || "User"}
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })
+                              ) : (
+                                <div className="small text-secondary px-1 py-2">No matching options.</div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      {(composeForm.sentToType === "department" && (composeForm.departmentNames.length || composeForm.employeeRoleNames.length)) || (composeForm.sentToType === "user" && composeForm.userIds.length) ? (
+                        <div className="col-12">
+                          <div className="d-flex flex-wrap gap-2">
+                            {composeForm.sentToType === "department"
+                              ? [
+                                  ...composeForm.departmentNames.map((item) => (
+                                    <button
+                                      key={`dept-pill-${item}`}
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm rounded-pill"
+                                      onClick={() => toggleComposeDepartment(item)}
+                                    >
+                                      <span className="me-1">-</span>
+                                      Dept: {item}
+                                    </button>
+                                  )),
+                                  ...composeForm.employeeRoleNames.map((item) => (
+                                    <button
+                                      key={`role-pill-${item}`}
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm rounded-pill"
+                                      onClick={() => toggleComposeEmployeeRole(item)}
+                                    >
+                                      <span className="me-1">-</span>
+                                      Role: {item}
+                                    </button>
+                                  )),
+                                ]
+                              : composeForm.userIds.map((item) => {
+                                  const userOption = composeUserOptionById[item];
+                                  if (!userOption) return null;
+                                  return (
+                                    <button
+                                      key={item}
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm rounded-pill"
+                                      onClick={() => toggleComposeUser(item)}
+                                    >
+                                      <span className="me-1">-</span>
+                                      {userOption.name}
+                                    </button>
+                                  );
+                                })}
+                          </div>
+                        </div>
+                      ) : null}
+                      {composeForm.channel === "email" ? (
+                        <div className="col-12">
+                          <label className="form-label small text-secondary mb-1">Attachments</label>
+                          <input
+                            type="file"
+                            className="form-control"
+                            accept={INBOX_ATTACHMENT_ACCEPT}
+                            multiple
+                            onChange={(event) => {
+                              const files = Array.from(event.target.files || []);
+                              setComposeForm((prev) => ({ ...prev, attachments: files }));
+                            }}
+                          />
+                          <div className="small text-secondary mt-1">Up to 10 files, max 10MB each. Image, PDF, Excel, Word and ZIP allowed.</div>
+                          {composeForm.attachments.length ? (
+                            <div className="d-flex flex-wrap gap-2 mt-2">
+                              {composeForm.attachments.map((file) => (
+                                <button
+                                  key={`${file.name}-${file.size}`}
+                                  type="button"
+                                  className="btn btn-outline-secondary btn-sm rounded-pill"
+                                  onClick={() =>
+                                    setComposeForm((prev) => ({
+                                      ...prev,
+                                      attachments: prev.attachments.filter(
+                                        (item) => !(item.name === file.name && item.size === file.size && item.lastModified === file.lastModified)
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  <span className="me-1">-</span>
+                                  {file.name} ({formatFileSize(file.size)})
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="col-12">
+                        <div className="d-flex gap-2">
+                          <button type="submit" className="btn btn-primary btn-sm" disabled={composeState.sending}>
+                            {composeState.sending ? "Sending..." : "Send Message"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-light btn-sm"
+                            disabled={composeState.sending}
+                            onClick={() => {
+                              setShowComposeInbox(false);
+                              setComposeForm(createEmptyComposeForm());
+                              setComposeRecipientSearch("");
+                              setComposeRecipientSearchOpen(false);
+                              setComposeState((prev) => ({ ...prev, error: "" }));
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="col-12 col-lg-3">
-                    <label className="form-label small text-secondary mb-1">Channel</label>
-                    <select
-                      className="form-select"
-                      value={composeForm.channel}
-                      onChange={(event) => setComposeForm((prev) => ({ ...prev, channel: event.target.value }))}
-                    >
-                      <option value="email">Email</option>
-                      <option value="system">System</option>
-                      <option value="whatsapp">WhatsApp</option>
-                    </select>
+                  <div className="col-12 col-lg-8">
+                    <label className="form-label small text-secondary mb-1">
+                      {composeForm.channel === "email" ? "Email Message Body" : "Message"}
+                    </label>
+                    {composeForm.channel === "email" ? (
+                      <TinyHtmlEditor
+                        label=""
+                        value={composeForm.message}
+                        onChange={(value) => setComposeForm((prev) => ({ ...prev, message: value }))}
+                        placeholder="Write email message with HTML formatting"
+                        minHeight={280}
+                      />
+                    ) : (
+                      <textarea
+                        className="form-control"
+                        rows={10}
+                        placeholder="Write message for selected members..."
+                        value={composeForm.message}
+                        onChange={(event) => setComposeForm((prev) => ({ ...prev, message: event.target.value }))}
+                      />
+                    )}
                   </div>
-                </div>
-                <div>
-                  <label className="form-label small text-secondary mb-1">Message</label>
-                  <textarea
-                    className="form-control"
-                    rows={4}
-                    placeholder="Write message for all users..."
-                    value={composeForm.message}
-                    onChange={(event) => setComposeForm((prev) => ({ ...prev, message: event.target.value }))}
-                  />
                 </div>
                 {composeState.error ? <div className="alert alert-danger py-2 mb-0">{composeState.error}</div> : null}
-                <div className="d-flex gap-2">
-                  <button type="submit" className="btn btn-primary btn-sm" disabled={composeState.sending}>
-                    {composeState.sending ? "Sending..." : "Send to All Users"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline-light btn-sm"
-                    disabled={composeState.sending}
-                    onClick={() => {
-                      setShowComposeInbox(false);
-                      setComposeState((prev) => ({ ...prev, error: "" }));
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
               </form>
             </div>
           ) : null}
@@ -1295,7 +1738,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           {item.is_read ? "Read" : "Unread"}
                         </span>
                       </div>
-                      <div className="inbox-item-message">{truncate(item.message, 90)}</div>
+                      <div className="inbox-item-message">{truncate(item.message_html || item.message, 90)}</div>
                     </button>
                   ))
                 ) : (
@@ -1329,7 +1772,22 @@ export default function OrgInboxPage({ productSlug = "" }) {
                       Delete
                     </button>
                   </div>
-                  <div className="inbox-detail-body">{selectedInboxItem.message || "-"}</div>
+                  <div className="inbox-detail-body" dangerouslySetInnerHTML={{ __html: selectedInboxItem.message_html || selectedInboxItem.message || "-" }} />
+                  {selectedInboxItem.attachments?.length ? (
+                    <div className="d-flex flex-wrap gap-2 mt-3">
+                      {selectedInboxItem.attachments.map((attachment) => (
+                        <a
+                          key={attachment.id}
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-outline-light btn-sm"
+                        >
+                          {attachment.name} ({formatFileSize(attachment.size)})
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div className="text-secondary p-4">Select a notification to view details.</div>

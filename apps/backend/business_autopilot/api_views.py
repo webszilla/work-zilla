@@ -51,7 +51,7 @@ DEFAULT_ERP_MODULES = [
 ]
 
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
-ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
+ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
@@ -734,6 +734,7 @@ def _serialize_modules(org):
 def _default_accounts_workspace():
     return {
         "customers": [],
+        "vendors": [],
         "itemMasters": [],
         "gstTemplates": [],
         "billingTemplates": [],
