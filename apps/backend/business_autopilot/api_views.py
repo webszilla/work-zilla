@@ -1,4 +1,6 @@
+import calendar
 import json
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Optional
@@ -6,7 +8,7 @@ import requests
 
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
-from django.db import DatabaseError, OperationalError, transaction
+from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.shortcuts import render
 from django.utils import timezone
 from reportlab.lib.pagesizes import A4
@@ -15,7 +17,7 @@ from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
 from apps.backend.products.models import Product
-from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription
+from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription
 
 from .models import (
     Module,
@@ -29,6 +31,9 @@ from .models import (
     PayrollSettings,
     Payslip,
     SalaryStructure,
+    Subscription,
+    SubscriptionCategory,
+    SubscriptionSubCategory,
 )
 
 
@@ -56,6 +61,8 @@ ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
+SUBSCRIPTION_STATUS_OPTIONS = ("Active", "Expired", "Cancelled")
+
 
 
 def _get_business_autopilot_product():
@@ -346,7 +353,7 @@ def _get_active_erp_subscription(org):
         return None
     now = timezone.now()
     rows = (
-        Subscription.objects
+        OrgSubscription.objects
         .filter(organization=org, plan__product__slug="business-autopilot-erp")
         .select_related("plan", "plan__product")
         .order_by("-start_date", "-id")
@@ -753,6 +760,130 @@ def _normalize_accounts_workspace(payload):
     return base
 
 
+def _parse_iso_date(value):
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    try:
+        parsed = date.fromisoformat(normalized)
+        return parsed
+    except ValueError:
+        return None
+
+
+def _normalize_subscription_status(value):
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "active": "Active",
+        "expired": "Expired",
+        "cancelled": "Cancelled",
+        "canceled": "Cancelled",
+    }
+    return mapping.get(normalized, "Active")
+
+
+def _calculate_next_billing_date(start_date):
+    if not isinstance(start_date, date):
+        return None
+    next_month = start_date.month + 1
+    year = start_date.year
+    while next_month > 12:
+        year += 1
+        next_month -= 12
+    next_day = min(
+        start_date.day,
+        calendar.monthrange(year, next_month)[1]
+    )
+    return date(year, next_month, next_day)
+
+
+def _effective_subscription_status(status, end_date):
+    normalized_status = _normalize_subscription_status(status)
+    if normalized_status == "Cancelled":
+        return "Cancelled"
+    today = timezone.localdate()
+    if end_date and end_date < today:
+        return "Expired"
+    return "Active"
+
+
+def _get_accounts_customer_lookup(org):
+    workspace = _get_accounts_workspace(org)
+    rows = workspace.data.get("customers") if isinstance(workspace.data, dict) else []
+    if not isinstance(rows, list):
+        return {}
+    lookup = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        customer_id = str(row.get("id") or "").strip()
+        if not customer_id:
+            continue
+        customer_name = str(row.get("companyName") or row.get("name") or row.get("clientName") or "").strip()
+        if not customer_name:
+            contact_name = str(row.get("clientName") or "").strip()
+            if contact_name:
+                customer_name = contact_name
+        if not customer_name:
+            continue
+        lookup[customer_id] = customer_name
+    return lookup
+
+
+def _serialize_subscription_category(row):
+    return {
+        "id": row.id,
+        "name": row.name,
+        "description": row.description or "",
+        "createdAt": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def _serialize_subscription_sub_category(row):
+    return {
+        "id": row.id,
+        "name": row.name,
+        "description": row.description or "",
+        "categoryId": row.category_id,
+        "categoryName": row.category.name if row.category else "",
+        "createdAt": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def _serialize_subscription(row, customer_lookup=None):
+    if customer_lookup is None:
+        customer_lookup = {}
+    customer_id = row.customer_id
+    customer_name = ""
+    if customer_id is not None:
+        customer_name = customer_lookup.get(str(customer_id), "")
+    return {
+        "id": row.id,
+        "subscriptionTitle": row.subscription_title,
+        "categoryId": row.category_id,
+        "categoryName": row.category.name if row.category else "",
+        "subCategoryId": row.sub_category_id,
+        "subCategoryName": row.sub_category.name if row.sub_category else "",
+        "customerId": customer_id,
+        "customerName": customer_name,
+        "emailAlertDays": _normalize_subscription_alert_days(row.email_alert_days),
+        "whatsappAlertDays": _normalize_subscription_alert_days(row.whatsapp_alert_days),
+        "emailAlertAssignTo": _serialize_subscription_alert_assignees(row.email_alert_assign_to),
+        "whatsappAlertAssignTo": _serialize_subscription_alert_assignees(row.whatsapp_alert_assign_to),
+        "planDurationDays": row.plan_duration_days,
+        "paymentDescription": row.payment_description or "",
+        "amount": _decimal_to_string(row.amount),
+        "currency": row.currency or "INR",
+        "startDate": row.start_date.isoformat() if row.start_date else "",
+        "endDate": row.end_date.isoformat() if row.end_date else "",
+        "nextBillingDate": row.next_billing_date.isoformat() if row.next_billing_date else "",
+        "status": _effective_subscription_status(row.status, row.end_date),
+        "createdBy": str(row.created_by_id or ""),
+        "createdAt": row.created_at.isoformat() if row.created_at else "",
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
 def _get_accounts_workspace(org):
     workspace, _ = AccountsWorkspace.objects.get_or_create(
         organization=org,
@@ -767,6 +898,177 @@ def _to_decimal(value):
         return Decimal(str(value or 0))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _normalize_subscription_alert_days(value):
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        source = value.strip()
+        if not source:
+            return []
+        items = [part.strip() for part in source.replace(";", ",").split(",") if part.strip()]
+        if len(items) == 1 and "," not in source and ";" not in source and source.isdigit():
+            items = [source]
+        candidates = items
+    elif isinstance(value, (list, tuple, set)):
+        candidates = value
+    else:
+        candidates = [value]
+
+    def _coerce_item(item):
+        try:
+            number = int(str(item).strip())
+        except (TypeError, ValueError):
+            return None
+        if number < 0:
+            return None
+        return str(number)
+
+    normalized = []
+    for item in candidates:
+        if str(item).strip() == "":
+            continue
+        normalized_item = _coerce_item(item)
+        if normalized_item is None:
+            return None
+        if normalized_item not in normalized:
+            normalized.append(normalized_item)
+    return normalized
+
+
+def _normalize_subscription_alert_assignees(value):
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        return None
+    normalized = []
+    seen = set()
+    for row in value:
+        if isinstance(row, dict):
+            raw_type = str(row.get("type") or "").strip().lower()
+            raw_value = str(row.get("value") or row.get("name") or row.get("label") or "").strip()
+            raw_label = str(row.get("label") or row.get("name") or raw_value).strip()
+            if raw_type == "user":
+                user_id = _coerce_positive_int(row.get("id") or row.get("value"))
+                if not user_id or not raw_value:
+                    return None
+                recipient_key = f"user:{user_id}"
+                if recipient_key in seen:
+                    continue;
+                normalized.append({
+                    "type": "user",
+                    "value": str(user_id),
+                    "label": raw_label
+                })
+                seen.add(recipient_key)
+            elif raw_type == "department":
+                if not raw_value:
+                    return None
+                recipient_key = f"department:{raw_value.lower()}"
+                if recipient_key in seen:
+                    continue;
+                normalized.append({
+                    "type": "department",
+                    "value": raw_value,
+                    "label": raw_value
+                })
+                seen.add(recipient_key)
+            else:
+                return None
+        elif isinstance(row, str):
+            raw_value = row.strip()
+            if not raw_value:
+                continue
+            if raw_value.lower().startswith("user:"):
+                raw_text = raw_value.split(":", 1)[1].strip()
+                user_id = _coerce_positive_int(raw_text)
+                if not user_id:
+                    return None
+                recipient_key = f"user:{user_id}"
+                if recipient_key in seen:
+                    continue;
+                normalized.append({
+                    "type": "user",
+                    "value": str(user_id),
+                    "label": raw_text
+                })
+                seen.add(recipient_key)
+            elif raw_value.lower().startswith("department:"):
+                raw_text = raw_value.split(":", 1)[1].strip()
+                if not raw_text:
+                    return None
+                recipient_key = f"department:{raw_text.lower()}"
+                if recipient_key in seen:
+                    continue;
+                normalized.append({
+                    "type": "department",
+                    "value": raw_text,
+                    "label": raw_text
+                })
+                seen.add(recipient_key)
+            else:
+                return None
+        else:
+            return None
+    return normalized
+
+
+def _serialize_subscription_alert_assignees(value):
+    return _normalize_subscription_alert_assignees(value) or []
+
+
+def _coerce_subscription_alert_assignees(value):
+    normalized = _normalize_subscription_alert_assignees(value)
+    if normalized is None:
+        return None
+    return normalized
+
+
+def _get_org_admin_alert_recipients(org):
+    if not org:
+        return []
+    rows = (
+        OrganizationUser.objects
+        .filter(organization=org, role="company_admin", is_active=True, user__is_active=True)
+        .select_related("user")
+    )
+    recipients = []
+    seen = set()
+    for row in rows:
+        user_id = _coerce_positive_int(row.user_id)
+        if not user_id:
+            continue
+        recipient_key = f"user:{user_id}"
+        if recipient_key in seen:
+            continue
+        label = _get_org_user_display_name(row.user)
+        recipients.append({
+            "type": "user",
+            "value": str(user_id),
+            "label": label
+        })
+        seen.add(recipient_key)
+    return recipients
+
+
+def _merge_subscription_alert_recipients(primary, org):
+    merged = []
+    seen = set()
+    for entry in list(primary or []) + list(_get_org_admin_alert_recipients(org) or []):
+        if not isinstance(entry, dict):
+            continue
+        entry_type = str(entry.get("type") or "").strip().lower()
+        entry_value = str(entry.get("value") or "").strip()
+        if not entry_type or not entry_value:
+            continue
+        key = f"{entry_type}:{entry_value.lower()}"
+        if key in seen:
+            continue
+        merged.append(entry)
+        seen.add(key)
+    return merged
 
 
 def _document_totals(document, gst_templates_by_id):
@@ -1775,7 +2077,480 @@ def accounts_workspace(request):
             "data": _normalize_accounts_workspace(workspace.data),
             "updated_at": workspace.updated_at.isoformat() if workspace.updated_at else "",
         }
+)
+
+
+def _coerce_positive_int(value):
+    number = _coerce_int(value)
+    return number if number and number > 0 else None
+
+
+def _coerce_non_negative_int(value):
+    number = _coerce_int(value)
+    if number is None:
+        return None
+    return number if number >= 0 else None
+
+
+def _coerce_subscription_alert_days(value):
+    source_values = _normalize_subscription_alert_days(value)
+    if source_values is None:
+        return None
+    return [int(item) for item in source_values]
+
+
+def _serialize_accounts_customer_options(org):
+    workspace = _get_accounts_workspace(org)
+    rows = workspace.data.get("customers") if isinstance(workspace.data, dict) else []
+    if not isinstance(rows, list):
+        return []
+    options = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        customer_id = str(row.get("id") or "").strip()
+        if not customer_id:
+            continue
+        customer_name = str(row.get("companyName") or row.get("name") or row.get("clientName") or "").strip()
+        if not customer_name:
+            continue
+        options.append({
+            "id": customer_id,
+            "name": customer_name,
+        })
+    return options
+
+
+@require_http_methods(["GET", "POST"])
+def accounts_subscription_categories(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method == "POST" and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if request.method == "GET":
+        rows = list(
+            SubscriptionCategory.objects
+            .filter(organization=org)
+            .order_by("name", "id")
+        )
+        return JsonResponse({"categories": [_serialize_subscription_category(row) for row in rows]})
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"detail": "name_required"}, status=400)
+
+    description = str(payload.get("description") or "").strip()
+    try:
+        row = SubscriptionCategory.objects.create(
+            organization=org,
+            name=name,
+            description=description,
+        )
+    except IntegrityError:
+        return JsonResponse({"detail": "category_exists"}, status=409)
+
+    return JsonResponse(
+        {
+            "category": _serialize_subscription_category(row),
+        },
+        status=201,
     )
+
+
+@require_http_methods(["GET", "PUT", "DELETE"])
+def accounts_subscription_category_detail(request, category_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    row = SubscriptionCategory.objects.filter(organization=org, id=category_id).first()
+    if not row:
+        return JsonResponse({"detail": "category_not_found"}, status=404)
+
+    if request.method == "GET":
+        return JsonResponse({"category": _serialize_subscription_category(row)})
+
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"detail": "name_required"}, status=400)
+
+        description = str(payload.get("description") or "").strip()
+        row.name = name
+        row.description = description
+        try:
+            row.save(update_fields=["name", "description"])
+        except IntegrityError:
+            return JsonResponse({"detail": "category_exists"}, status=409)
+        return JsonResponse({"category": _serialize_subscription_category(row)})
+
+    row.delete()
+    return JsonResponse({"deleted": True})
+
+
+@require_http_methods(["GET", "POST"])
+def accounts_subscription_sub_categories(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method == "POST" and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if request.method == "GET":
+        rows = list(
+            SubscriptionSubCategory.objects
+            .filter(organization=org)
+            .select_related("category")
+            .order_by("category_id", "name", "id")
+        )
+        return JsonResponse({"subCategories": [_serialize_subscription_sub_category(row) for row in rows]})
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    category_id = _coerce_positive_int(payload.get("categoryId") or payload.get("category_id"))
+    if not category_id:
+        return JsonResponse({"detail": "category_required"}, status=400)
+    category = SubscriptionCategory.objects.filter(organization=org, id=category_id).first()
+    if not category:
+        return JsonResponse({"detail": "category_not_found"}, status=404)
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"detail": "name_required"}, status=400)
+
+    description = str(payload.get("description") or "").strip()
+    try:
+        row = SubscriptionSubCategory.objects.create(
+            organization=org,
+            category=category,
+            name=name,
+            description=description,
+        )
+    except IntegrityError:
+        return JsonResponse({"detail": "sub_category_exists"}, status=409)
+
+    return JsonResponse(
+        {
+            "subCategory": _serialize_subscription_sub_category(row),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["GET", "PUT", "DELETE"])
+def accounts_subscription_sub_category_detail(request, sub_category_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    row = SubscriptionSubCategory.objects.filter(organization=org, id=sub_category_id).select_related("category").first()
+    if not row:
+        return JsonResponse({"detail": "sub_category_not_found"}, status=404)
+
+    if request.method == "GET":
+        return JsonResponse({"subCategory": _serialize_subscription_sub_category(row)})
+
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"detail": "name_required"}, status=400)
+        category_id = _coerce_positive_int(payload.get("categoryId") or payload.get("category_id"))
+        if category_id:
+            category = SubscriptionCategory.objects.filter(organization=org, id=category_id).first()
+            if not category:
+                return JsonResponse({"detail": "category_not_found"}, status=404)
+            row.category = category
+
+        row.name = name
+        row.description = str(payload.get("description") or "").strip()
+        try:
+            row.save(update_fields=["category", "name", "description"])
+        except IntegrityError:
+            return JsonResponse({"detail": "sub_category_exists"}, status=409)
+        return JsonResponse({"subCategory": _serialize_subscription_sub_category(row)})
+
+    row.delete()
+    return JsonResponse({"deleted": True})
+
+
+@require_http_methods(["GET", "POST"])
+def accounts_subscriptions(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method == "POST" and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    customer_lookup = _get_accounts_customer_lookup(org)
+
+    if request.method == "GET":
+        rows = list(
+            Subscription.objects
+            .filter(organization=org)
+            .select_related("category", "sub_category", "created_by")
+            .order_by("-created_at")
+        )
+        payload = {
+            "subscriptions": [_serialize_subscription(row, customer_lookup=customer_lookup) for row in rows],
+            "categoryOptions": [_serialize_subscription_category(row) for row in SubscriptionCategory.objects.filter(organization=org).order_by("name")],
+            "subCategoryOptions": [_serialize_subscription_sub_category(row) for row in SubscriptionSubCategory.objects.filter(organization=org).select_related("category").order_by("category_id", "name")],
+            "customerOptions": _serialize_accounts_customer_options(org),
+        }
+        return JsonResponse(payload)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    start_date = _parse_iso_date(payload.get("startDate") or payload.get("start_date"))
+    if not start_date:
+        return JsonResponse({"detail": "start_date_required"}, status=400)
+
+    end_date = _parse_iso_date(payload.get("endDate") or payload.get("end_date"))
+    status = _normalize_subscription_status(payload.get("status"))
+    category_id = _coerce_positive_int(payload.get("categoryId") or payload.get("category_id"))
+    sub_category_id = _coerce_positive_int(payload.get("subCategoryId") or payload.get("sub_category_id"))
+
+    category = None
+    if category_id:
+        category = SubscriptionCategory.objects.filter(organization=org, id=category_id).first()
+        if not category:
+            return JsonResponse({"detail": "category_not_found"}, status=404)
+
+    sub_category = None
+    if sub_category_id:
+        sub_category = SubscriptionSubCategory.objects.filter(organization=org, id=sub_category_id).first()
+        if not sub_category:
+            return JsonResponse({"detail": "sub_category_not_found"}, status=404)
+        if category and sub_category.category_id != category.id:
+            return JsonResponse({"detail": "sub_category_category_mismatch"}, status=400)
+
+    customer_id = _coerce_positive_int(payload.get("customerId") or payload.get("customer_id"))
+    raw_plan_duration_days = payload.get("planDurationDays", payload.get("plan_duration_days", 30))
+    plan_duration_days = _coerce_positive_int(raw_plan_duration_days)
+    if raw_plan_duration_days is not None and plan_duration_days is None and str(raw_plan_duration_days).strip() not in ("", "None", "null"):
+        return JsonResponse({"detail": "plan_duration_invalid"}, status=400)
+    amount = _to_decimal(payload.get("amount"))
+    currency = str(payload.get("currency") or org.currency or "INR").strip().upper() or "INR"
+    payment_description = str(payload.get("paymentDescription") or payload.get("payment_description") or "").strip()
+    subscription_title = str(payload.get("subscriptionTitle") or payload.get("subscription_title") or "").strip()
+    if not subscription_title:
+        return JsonResponse({"detail": "subscription_title_required"}, status=400)
+    raw_email_alert_recipients = payload.get("emailAlertAssignTo") if "emailAlertAssignTo" in payload else payload.get("email_alert_assign_to")
+    raw_whatsapp_alert_recipients = payload.get("whatsappAlertAssignTo") if "whatsappAlertAssignTo" in payload else payload.get("whatsapp_alert_assign_to")
+    email_alert_recipients = _coerce_subscription_alert_assignees(raw_email_alert_recipients)
+    if raw_email_alert_recipients is not None and email_alert_recipients is None:
+        return JsonResponse({"detail": "email_alert_assign_to_invalid"}, status=400)
+    whatsapp_alert_recipients = _coerce_subscription_alert_assignees(raw_whatsapp_alert_recipients)
+    if raw_whatsapp_alert_recipients is not None and whatsapp_alert_recipients is None:
+        return JsonResponse({"detail": "whatsapp_alert_assign_to_invalid"}, status=400)
+    email_alert_recipients = _merge_subscription_alert_recipients(email_alert_recipients, org)
+    whatsapp_alert_recipients = _merge_subscription_alert_recipients(whatsapp_alert_recipients, org)
+    raw_email_alert_days = payload.get("emailAlertDays") if "emailAlertDays" in payload else payload.get("email_alert_days")
+    raw_whatsapp_alert_days = payload.get("whatsappAlertDays") if "whatsappAlertDays" in payload else payload.get("whatsapp_alert_days")
+    email_alert_days = _coerce_subscription_alert_days(raw_email_alert_days)
+    if raw_email_alert_days is not None and raw_email_alert_days != "" and email_alert_days is None:
+        return JsonResponse({"detail": "email_alert_days_invalid"}, status=400)
+    if email_alert_days:
+        email_alert_days = email_alert_days[:1]
+    whatsapp_alert_days = _coerce_subscription_alert_days(raw_whatsapp_alert_days)
+    if raw_whatsapp_alert_days is not None and raw_whatsapp_alert_days != "" and whatsapp_alert_days is None:
+        return JsonResponse({"detail": "whatsapp_alert_days_invalid"}, status=400)
+    if whatsapp_alert_days:
+        whatsapp_alert_days = whatsapp_alert_days[:1]
+
+    next_billing_date = _calculate_next_billing_date(start_date)
+
+    row = Subscription.objects.create(
+        organization=org,
+        category=category,
+        sub_category=sub_category,
+        subscription_title=subscription_title,
+        customer_id=customer_id,
+        plan_duration_days=plan_duration_days,
+        payment_description=payment_description,
+        amount=amount,
+        currency=currency,
+        start_date=start_date,
+        end_date=end_date,
+        email_alert_days=email_alert_days,
+        whatsapp_alert_days=whatsapp_alert_days,
+        email_alert_assign_to=email_alert_recipients,
+        whatsapp_alert_assign_to=whatsapp_alert_recipients,
+        next_billing_date=next_billing_date,
+        status=status,
+        created_by=request.user,
+    )
+    return JsonResponse(
+        {
+            "subscription": _serialize_subscription(row, customer_lookup=_get_accounts_customer_lookup(org)),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["GET", "PUT", "DELETE"])
+def accounts_subscription_detail(request, subscription_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None}, status=404)
+    if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    row = (
+        Subscription.objects
+        .filter(organization=org, id=subscription_id)
+        .select_related("category", "sub_category", "created_by")
+        .first()
+    )
+    if not row:
+        return JsonResponse({"detail": "subscription_not_found"}, status=404)
+
+    if request.method == "GET":
+        return JsonResponse({"subscription": _serialize_subscription(row, customer_lookup=_get_accounts_customer_lookup(org))})
+
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+
+        start_date = _parse_iso_date(payload.get("startDate") or payload.get("start_date"))
+        if start_date:
+            row.start_date = start_date
+        end_date = _parse_iso_date(payload.get("endDate") or payload.get("end_date"))
+
+        row.subscription_title = str(payload.get("subscriptionTitle") or payload.get("subscription_title") or row.subscription_title).strip() or row.subscription_title
+        row.payment_description = str(payload.get("paymentDescription") or payload.get("payment_description") or row.payment_description).strip()
+        amount = payload.get("amount")
+        if amount is not None:
+            row.amount = _to_decimal(amount)
+        if "planDurationDays" in payload or "plan_duration_days" in payload:
+            raw_plan_duration_days = payload.get("planDurationDays", payload.get("plan_duration_days"))
+            plan_duration_days = _coerce_positive_int(raw_plan_duration_days)
+            if plan_duration_days is None and str(raw_plan_duration_days).strip() not in ("", "None", "null"):
+                return JsonResponse({"detail": "plan_duration_invalid"}, status=400)
+            row.plan_duration_days = plan_duration_days
+        row.currency = str(payload.get("currency") or row.currency).strip().upper() or "INR"
+        row.status = _normalize_subscription_status(payload.get("status") or row.status)
+        row.customer_id = _coerce_positive_int(payload.get("customerId") or payload.get("customer_id")) or row.customer_id
+        if "emailAlertDays" in payload or "email_alert_days" in payload:
+            raw_email_alert_days = payload.get("emailAlertDays") if "emailAlertDays" in payload else payload.get("email_alert_days")
+            email_alert_days = _coerce_subscription_alert_days(raw_email_alert_days)
+            if raw_email_alert_days is not None and raw_email_alert_days != "" and email_alert_days is None:
+                return JsonResponse({"detail": "email_alert_days_invalid"}, status=400)
+            if email_alert_days:
+                email_alert_days = email_alert_days[:1]
+            row.email_alert_days = email_alert_days
+        if "whatsappAlertDays" in payload or "whatsapp_alert_days" in payload:
+            raw_whatsapp_alert_days = payload.get("whatsappAlertDays") if "whatsappAlertDays" in payload else payload.get("whatsapp_alert_days")
+            whatsapp_alert_days = _coerce_subscription_alert_days(raw_whatsapp_alert_days)
+            if raw_whatsapp_alert_days is not None and raw_whatsapp_alert_days != "" and whatsapp_alert_days is None:
+                return JsonResponse({"detail": "whatsapp_alert_days_invalid"}, status=400)
+            if whatsapp_alert_days:
+                whatsapp_alert_days = whatsapp_alert_days[:1]
+            row.whatsapp_alert_days = whatsapp_alert_days
+        if "emailAlertAssignTo" in payload or "email_alert_assign_to" in payload:
+            raw_email_alert_recipients = payload.get("emailAlertAssignTo") if "emailAlertAssignTo" in payload else payload.get("email_alert_assign_to")
+            email_alert_recipients = _coerce_subscription_alert_assignees(raw_email_alert_recipients)
+            if raw_email_alert_recipients is not None and email_alert_recipients is None:
+                return JsonResponse({"detail": "email_alert_assign_to_invalid"}, status=400)
+            row.email_alert_assign_to = _merge_subscription_alert_recipients(email_alert_recipients, org)
+        if "whatsappAlertAssignTo" in payload or "whatsapp_alert_assign_to" in payload:
+            raw_whatsapp_alert_recipients = payload.get("whatsappAlertAssignTo") if "whatsappAlertAssignTo" in payload else payload.get("whatsapp_alert_assign_to")
+            whatsapp_alert_recipients = _coerce_subscription_alert_assignees(raw_whatsapp_alert_recipients)
+            if raw_whatsapp_alert_recipients is not None and whatsapp_alert_recipients is None:
+                return JsonResponse({"detail": "whatsapp_alert_assign_to_invalid"}, status=400)
+            row.whatsapp_alert_assign_to = _merge_subscription_alert_recipients(whatsapp_alert_recipients, org)
+
+        category_id_raw = "categoryId" in payload and payload.get("categoryId")
+        category_id = _coerce_positive_int(payload.get("categoryId") if category_id_raw else payload.get("category_id"))
+        if category_id_raw:
+            if not category_id:
+                return JsonResponse({"detail": "category_invalid"}, status=400)
+            category = SubscriptionCategory.objects.filter(organization=org, id=category_id).first()
+            if not category:
+                return JsonResponse({"detail": "category_not_found"}, status=404)
+            row.category = category
+
+        sub_category_id_raw = "subCategoryId" in payload and payload.get("subCategoryId")
+        sub_category_id = _coerce_positive_int(payload.get("subCategoryId") if sub_category_id_raw else payload.get("sub_category_id"))
+        if sub_category_id_raw:
+            if not sub_category_id:
+                return JsonResponse({"detail": "sub_category_invalid"}, status=400)
+            sub_category = SubscriptionSubCategory.objects.filter(organization=org, id=sub_category_id).first()
+            if not sub_category:
+                return JsonResponse({"detail": "sub_category_not_found"}, status=404)
+            if row.category_id and sub_category.category_id != row.category_id:
+                return JsonResponse({"detail": "sub_category_category_mismatch"}, status=400)
+            row.sub_category = sub_category
+
+        if start_date:
+            row.next_billing_date = _calculate_next_billing_date(row.start_date)
+        else:
+            row.next_billing_date = _calculate_next_billing_date(row.start_date)
+        if end_date is not None:
+            row.end_date = end_date
+
+        row.save(update_fields=[
+            "category",
+            "sub_category",
+            "subscription_title",
+            "email_alert_assign_to",
+            "whatsapp_alert_assign_to",
+            "plan_duration_days",
+            "email_alert_days",
+            "whatsapp_alert_days",
+            "customer_id",
+            "payment_description",
+            "amount",
+            "currency",
+            "start_date",
+            "end_date",
+            "next_billing_date",
+            "status",
+        ])
+        return JsonResponse({"subscription": _serialize_subscription(row, customer_lookup=_get_accounts_customer_lookup(org))})
+
+    row.delete()
+    return JsonResponse({"deleted": True})
 
 
 @require_http_methods(["GET", "POST"])

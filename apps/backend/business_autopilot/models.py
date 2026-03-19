@@ -124,6 +124,104 @@ class AccountsWorkspace(models.Model):
         return f"AccountsWorkspace(org={self.organization_id})"
 
 
+class SubscriptionCategory(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_subscription_categories",
+    )
+    name = models.CharField(max_length=160)
+    description = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("organization", "name")
+        ordering = ("name",)
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.name}"
+
+
+class SubscriptionSubCategory(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_subscription_sub_categories",
+    )
+    category = models.ForeignKey(
+        SubscriptionCategory,
+        on_delete=models.CASCADE,
+        related_name="subscription_sub_categories",
+    )
+    name = models.CharField(max_length=160)
+    description = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("organization", "category", "name")
+        ordering = ("category_id", "name")
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.category_id} - {self.name}"
+
+
+class Subscription(models.Model):
+    STATUS_CHOICES = (
+        ("Active", "Active"),
+        ("Expired", "Expired"),
+        ("Cancelled", "Cancelled"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_subscriptions",
+    )
+    category = models.ForeignKey(
+        SubscriptionCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="subscriptions",
+    )
+    sub_category = models.ForeignKey(
+        SubscriptionSubCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="subscriptions",
+    )
+    subscription_title = models.CharField(max_length=255)
+    customer_id = models.BigIntegerField(null=True, blank=True)
+    email_alert_days = models.JSONField(null=True, blank=True, default=list)
+    whatsapp_alert_days = models.JSONField(null=True, blank=True, default=list)
+    plan_duration_days = models.PositiveIntegerField(null=True, blank=True)
+    payment_description = models.TextField(blank=True, default="")
+    amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    currency = models.CharField(max_length=10, default="INR")
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    next_billing_date = models.DateField(null=True, blank=True)
+    email_alert_assign_to = models.JSONField(null=True, blank=True, default=list)
+    whatsapp_alert_assign_to = models.JSONField(null=True, blank=True, default=list)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Active")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_created_subscriptions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.subscription_title}"
+
+
 class PayrollSettings(models.Model):
     organization = models.OneToOneField(
         "core.Organization",

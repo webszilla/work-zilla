@@ -1343,6 +1343,21 @@ function AppShell({ state, productPrefix, productSlug }) {
             )}
           />
           <Route
+            path="/accounts/subscriptions"
+            element={renderRouteElement(
+              <Suspense fallback={<div className="card p-3">Loading module...</div>}>
+                <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" initialTab="subscriptions" />
+              </Suspense>,
+              {
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  autopilotModules.some((module) => module.slug === "accounts") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", isAdmin),
+              }
+            )}
+          />
+          <Route
             path="/accounts"
             element={renderRouteElement(
               <Suspense fallback={<div className="card p-3">Loading module...</div>}>
@@ -2047,6 +2062,7 @@ export default function App() {
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
     { prefix: "/storage", slug: "storage", label: "Online Storage" },
     { prefix: "/imposition", slug: "imposition-software", label: "Print Marks" },
+    { prefix: "/business-autopilot-erp", slug: "business-autopilot-erp", label: "Business Autopilot", redirectPrefix: "/business-autopilot" },
     { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot" },
     { prefix: "/whatsapp-automation", slug: "whatsapp-automation", label: "Whatsapp Automation" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },

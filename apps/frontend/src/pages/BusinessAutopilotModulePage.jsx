@@ -192,6 +192,9 @@ const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
   { value: "480", label: "8 Hrs" },
   { value: "1440", label: "24 Hrs" },
 ];
+const CRM_FOLLOWUP_RELATED_TO_TYPES = ["Lead", "CRM Contact", "Client"];
+const CRM_FOLLOWUP_STATUS_TABS = ["pending", "missed", "completed"];
+const CRM_FOLLOWUP_AUTO_DELETE_DAYS = 90;
 
 const CRM_SECTION_CONFIG = {
   leads: {
@@ -288,7 +291,7 @@ const CRM_SECTION_CONFIG = {
       { key: "subject", label: "Subject", placeholder: "Demo callback / pricing follow-up" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
       { key: "dueDate", label: "Due Date", type: "date" },
-      { key: "owner", label: "Owner", placeholder: "Sales owner" },
+      { key: "owner", label: "Employee", placeholder: "Search employee" },
       { key: "status", label: "Status", type: "select", options: ["Pending", "Completed", "Missed"], defaultValue: "Pending" }
     ]
   },
@@ -668,10 +671,11 @@ const TICKETING_TAB_CONFIG = {
     ],
     fields: [
       { key: "ticketNo", label: "Ticket No", placeholder: "TK-1001" },
+      { key: "clientCompany", label: "Client / Company", type: "datalist", datalistSource: "accountsCustomers", placeholder: "Search client or company" },
       { key: "subject", label: "Subject", placeholder: "Customer login issue" },
       { key: "mainCategory", label: "Category", placeholder: "Select category" },
       { key: "subCategory", label: "Sub Category", placeholder: "Select sub category" },
-      { key: "status", label: "Status", placeholder: "Open / In Progress / Closed" },
+      { key: "status", label: "Status", type: "select", options: ["Open", "Process", "Hold", "Closed"], defaultValue: "Open" },
       { key: "description", label: "Description", type: "textarea", placeholder: "Ticket description / issue details" }
     ]
   }
@@ -761,6 +765,34 @@ const ESTIMATE_STATUS_OPTIONS = ["Draft", "Sent", "Approved", "Rejected", "Conve
 const INVOICE_STATUS_OPTIONS = ["Draft", "Sent", "Partially Paid", "Paid", "Overdue", "Cancelled"];
 const INVOICE_PAYMENT_STATUS_OPTIONS = ["Pending", "Partially Paid", "Paid", "Failed", "Refunded"];
 const INVOICE_DELIVERY_STATUS_OPTIONS = ["Pending", "Packed", "Shipped", "Completed", "Cancelled"];
+const SUBSCRIPTION_STATUS_OPTIONS = ["Active", "Expired", "Cancelled"];
+const SUBSCRIPTION_LIST_STATUS_TABS = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "expired", label: "Expired" },
+  { key: "cancelled", label: "Cancelled" },
+  { key: "expiring_30", label: "30 Days" },
+  { key: "expiring_15", label: "15 Days" },
+  { key: "expiring_7", label: "7 Days" }
+];
+const SUBSCRIPTION_PLAN_DURATION_OPTIONS = [
+  { label: "Custom", value: "custom" },
+  { label: "1 Month", value: "30" },
+  { label: "3 Months", value: "90" },
+  { label: "6 Months", value: "180" },
+  { label: "1 Year", value: "365" },
+  { label: "2 Years", value: "730" },
+  { label: "3 Years", value: "1095" }
+];
+const SUBSCRIPTION_ALERT_OPTIONS = [
+  { value: "", label: "Select" },
+  { value: "15", label: "15 Days Before" },
+  { value: "10", label: "10 Days Before" },
+  { value: "7", label: "7 Days Before" },
+  { value: "2", label: "2 Days Before" },
+  { value: "1", label: "One Day Before" },
+  { value: "0", label: "Same day" }
+];
 
 const DEFAULT_ACCOUNTS_DATA = {
   customers: [
@@ -932,6 +964,159 @@ function createEmptyBillingDocument(kind = "invoice") {
     deliveryStatus: kind === "invoice" ? "Pending" : "",
     inventoryCommitted: false,
     items: [createEmptyDocLine()]
+  };
+}
+
+function createEmptySubscriptionCategory() {
+  return {
+    id: "",
+    name: "",
+    description: ""
+  };
+}
+
+function createEmptySubscriptionSubCategory() {
+  return {
+    id: "",
+    categoryId: "",
+    name: "",
+    description: ""
+  };
+}
+
+function getNextBillingDateFromStart(startDate) {
+  const normalizedStart = String(startDate || "").trim();
+  if (!normalizedStart) {
+    return "";
+  }
+  const date = new Date(`${normalizedStart}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const next = new Date(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  if (Number.isNaN(next.getTime())) {
+    return "";
+  }
+  return next.toISOString().slice(0, 10);
+}
+
+function getDaysUntilDate(dateValue) {
+  const normalizedDate = String(dateValue || "").trim();
+  if (!normalizedDate) {
+    return null;
+  }
+  const target = new Date(`${normalizedDate}T00:00:00`);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function getSubscriptionAlertOptionLabel(value) {
+  const normalizedValue = String(value || "").trim();
+  return SUBSCRIPTION_ALERT_OPTIONS.find((option) => String(option.value) === normalizedValue)?.label || "";
+}
+
+function normalizeSubscriptionAlertAssignees(value) {
+  const seen = new Set();
+  const normalized = [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const type = String(entry.type || "").trim().toLowerCase();
+    const recipientValue = String(entry.value || "").trim();
+    const recipientLabel = String(entry.label || entry.name || "").trim() || recipientValue;
+    if (!type || !recipientValue || !["user", "department"].includes(type)) {
+      return;
+    }
+    const key = `${type}:${recipientValue.toLowerCase()}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push({
+      type,
+      value: recipientValue,
+      label: recipientLabel,
+    });
+  });
+  return normalized;
+}
+
+function getSubscriptionAlertAssigneeLabel(assignee = {}) {
+  return String(assignee.label || assignee.name || "").trim() || String(assignee.value || "").trim() || "Unknown";
+}
+
+function normalizeSubscriptionAlertAssigneeSearch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeSubscriptionAlertDays(value) {
+  const normalizedValues = [];
+  const pushIfValid = (item) => {
+    const normalized = String(item || "").trim();
+    if (!normalized) {
+      return;
+    }
+    const number = Number(normalized);
+    if (Number.isNaN(number) || !Number.isInteger(number) || number < 0) {
+      return;
+    }
+    if (!normalizedValues.includes(normalized)) {
+      normalizedValues.push(normalized);
+    }
+  };
+  if (Array.isArray(value)) {
+    value.forEach(pushIfValid);
+    return normalizedValues;
+  }
+  if (typeof value === "number") {
+    pushIfValid(value);
+    return normalizedValues;
+  }
+  const asString = String(value || "").trim();
+  if (!asString) {
+    return normalizedValues;
+  }
+  if (asString.includes(",")) {
+    asString
+      .split(",")
+      .map((item) => item.trim())
+      .forEach(pushIfValid);
+    return normalizedValues;
+  }
+  pushIfValid(asString);
+  return normalizedValues;
+}
+
+function createEmptySubscriptionForm({ currency = "INR" } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: "",
+    categoryId: "",
+    subCategoryId: "",
+    subscriptionTitle: "",
+    customerName: "",
+    customerId: "",
+    planDuration: "30",
+    planDurationDays: "",
+    paymentDescription: "",
+    amount: "",
+    currency: String(currency || "INR").trim().toUpperCase() || "INR",
+    startDate: today,
+    endDate: "",
+    nextBillingDate: "",
+    status: "Active",
+    emailAlertDays: [],
+    whatsappAlertDays: [],
+    emailAlertAssignees: [],
+    whatsappAlertAssignees: []
   };
 }
 
@@ -1435,6 +1620,21 @@ function isValidHrData(value) {
 
 function isValidCrmData(value) {
   return value && typeof value === "object" && Object.keys(CRM_SECTION_CONFIG).every((key) => !value[key] || Array.isArray(value[key]));
+}
+
+function parseTeamMemberList(rawMembers) {
+  if (Array.isArray(rawMembers)) {
+    return rawMembers
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+  if (typeof rawMembers === "string") {
+    return rawMembers
+      .split(/[,;]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 function normalizeCrmData(value) {
@@ -2462,7 +2662,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                   <div className="fw-semibold">{organizationProfileForm.timezone || "-"}</div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3" style={{ paddingTop: "25px" }}>
                 <button type="button" className="btn btn-outline-light btn-sm" onClick={openCompanyProfileSettings}>
                   Edit in Company Profile
                 </button>
@@ -2917,7 +3117,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                   </table>
                 </div>
               )}
-              <div className="mt-3">
+              <div className="mt-3" style={{ paddingTop: "25px" }}>
                 <button type="button" className="btn btn-outline-light btn-sm" onClick={closeSalaryHistoryDetailsModal}>Close</button>
               </div>
             </div>
@@ -3164,6 +3364,45 @@ function getCurrentTimeHm() {
   return `${hh}:${mm}`;
 }
 
+function getDateFromIso(value) {
+  const dateString = String(value || "").trim();
+  if (!dateString) {
+    return null;
+  }
+  const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const [, year, month, day] = match;
+  const parsedDate = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+  return parsedDate;
+}
+
+function isDateOlderThanDays(value, days) {
+  const comparedDate = getDateFromIso(value);
+  if (!comparedDate) {
+    return false;
+  }
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - days);
+  return comparedDate < cutoff;
+}
+
+function getFollowUpCompletedDate(row) {
+  return (
+    row && (
+      row.completedDate
+      || row.completedOn
+      || row.completedAt
+      || (String(row.status || "").trim().toLowerCase() === "completed" ? row.dueDate : "")
+    )
+  );
+}
+
 function computeWorkedDuration(inTime, outTime) {
   const start = String(inTime || "").trim();
   const end = String(outTime || "").trim();
@@ -3259,6 +3498,35 @@ function parseCsvRows(text) {
         return acc;
       }, {})
     );
+}
+
+function parseMultiSelectImportValue(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+  if (typeof value !== "string") {
+    return [];
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return [];
+  }
+  if ((normalized.startsWith("[") && normalized.endsWith("]")) || normalized.includes("|")) {
+    try {
+      const parsed = JSON.parse(normalized);
+      return parseMultiSelectImportValue(parsed);
+    } catch (_error) {
+      // Fallback to delimiter split.
+    }
+  }
+  return normalized
+    .split(/[\n;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.replace(/^"|"$/g, "").trim())
+    .filter(Boolean);
 }
 
 function normalizeSpreadsheetRows(rows) {
@@ -3610,6 +3878,7 @@ function CrmOnePageModule() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [meetingStatusTab, setMeetingStatusTab] = useState("all");
+  const [followUpStatusTab, setFollowUpStatusTab] = useState("all");
   const [forms, setForms] = useState(() =>
     Object.fromEntries(
       Object.entries(CRM_SECTION_CONFIG).map(([key, config]) => [key, buildEmptyValues(config.fields)])
@@ -3624,6 +3893,7 @@ function CrmOnePageModule() {
   const [currentUserName, setCurrentUserName] = useState("Current User");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
+  const [teamMembersPopup, setTeamMembersPopup] = useState(null);
   const [teamCategorySearch, setTeamCategorySearch] = useState("");
   const [teamCategorySearchOpen, setTeamCategorySearchOpen] = useState(false);
   const [teamMemberSearch, setTeamMemberSearch] = useState("");
@@ -3636,6 +3906,11 @@ function CrmOnePageModule() {
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
   const [leadAssignedUserSearch, setLeadAssignedUserSearch] = useState("");
   const [leadAssignedUserSearchOpen, setLeadAssignedUserSearchOpen] = useState(false);
+  const [followUpRelatedToType, setFollowUpRelatedToType] = useState(CRM_FOLLOWUP_RELATED_TO_TYPES[0]);
+  const [followUpRelatedToSearch, setFollowUpRelatedToSearch] = useState("");
+  const [followUpRelatedToSearchOpen, setFollowUpRelatedToSearchOpen] = useState(false);
+  const [followUpOwnerSearch, setFollowUpOwnerSearch] = useState("");
+  const [followUpOwnerSearchOpen, setFollowUpOwnerSearchOpen] = useState(false);
   const sectionFormRef = useRef(null);
 
   useEffect(() => {
@@ -3688,6 +3963,28 @@ function CrmOnePageModule() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const followUps = Array.isArray(moduleData.followUps) ? moduleData.followUps : [];
+    const rowsToKeep = followUps.filter((row) => {
+      const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+      if (normalizedStatus !== "completed") {
+        return true;
+      }
+      const completedDate = getFollowUpCompletedDate(row);
+      if (!completedDate) {
+        return true;
+      }
+      return !isDateOlderThanDays(completedDate, CRM_FOLLOWUP_AUTO_DELETE_DAYS);
+    });
+    if (rowsToKeep.length === followUps.length) {
+      return;
+    }
+    setModuleData((prev) => ({
+      ...prev,
+      followUps: rowsToKeep,
+    }));
+  }, [moduleData.followUps]);
 
   useEffect(() => {
     if (activeSection !== "meetings") {
@@ -3795,6 +4092,17 @@ function CrmOnePageModule() {
     [crmDirectoryOptions, crmEmployeeRoleDirectory]
   );
   const sharedCustomerOptions = useMemo(() => readSharedAccountsCustomers(), [activeSection, moduleData.contacts, moduleData.teams, crmUserDirectory]);
+  const sharedCustomerDatalistOptions = useMemo(
+    () => sharedCustomerOptions
+      .flatMap((row) => [
+        String(row.companyName || row.name || "").trim(),
+        String(row.clientName || "").trim(),
+        getSharedCustomerDisplayName(row),
+      ])
+      .filter(Boolean)
+      .filter((value, index, list) => list.indexOf(value) === index),
+    [sharedCustomerOptions]
+  );
 
   function setField(sectionKey, fieldKey, value) {
     setForms((prev) => ({
@@ -3835,6 +4143,13 @@ function CrmOnePageModule() {
       setMeetingReminderChannelSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
+    }
+    if (sectionKey === "followUps") {
+      setFollowUpRelatedToType(CRM_FOLLOWUP_RELATED_TO_TYPES[0]);
+      setFollowUpRelatedToSearch("");
+      setFollowUpRelatedToSearchOpen(false);
+      setFollowUpOwnerSearch("");
+      setFollowUpOwnerSearchOpen(false);
     }
   }
 
@@ -3882,6 +4197,39 @@ function CrmOnePageModule() {
       setMeetingReminderChannelSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
+    }
+    if (sectionKey === "followUps") {
+      const normalizedRelatedTo = String(normalizedRow.relatedTo || "").trim();
+      const normalizedRelatedToLower = normalizedRelatedTo.toLowerCase();
+      const isLeadMatch = (moduleData.leads || []).some((lead) => {
+        const leadMatch = String(lead.name || "").trim().toLowerCase() === normalizedRelatedToLower
+          || String(lead.company || "").trim().toLowerCase() === normalizedRelatedToLower;
+        return leadMatch;
+      });
+      const isContactMatch = (moduleData.contacts || []).some((contact) => {
+        const contactMatch = String(contact.name || "").trim().toLowerCase() === normalizedRelatedToLower
+          || String(contact.company || "").trim().toLowerCase() === normalizedRelatedToLower;
+        return contactMatch;
+      });
+      const isClientMatch = sharedCustomerOptions.some((customer) => {
+        const name = String(getSharedCustomerDisplayName(customer) || "").trim().toLowerCase();
+        const company = String(customer.companyName || "").trim().toLowerCase();
+        const client = String(customer.clientName || "").trim().toLowerCase();
+        return normalizedRelatedToLower === name || normalizedRelatedToLower === company || normalizedRelatedToLower === client;
+      });
+      setFollowUpRelatedToType(
+        isLeadMatch
+          ? CRM_FOLLOWUP_RELATED_TO_TYPES[0]
+          : isContactMatch
+            ? CRM_FOLLOWUP_RELATED_TO_TYPES[1]
+            : isClientMatch
+              ? CRM_FOLLOWUP_RELATED_TO_TYPES[2]
+              : CRM_FOLLOWUP_RELATED_TO_TYPES[0]
+      );
+      setFollowUpRelatedToSearch(normalizedRelatedTo);
+      setFollowUpRelatedToSearchOpen(false);
+      setFollowUpOwnerSearch(String(normalizedRow.owner || "").trim());
+      setFollowUpOwnerSearchOpen(false);
     }
     window.requestAnimationFrame(() => {
       sectionFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3944,6 +4292,7 @@ function CrmOnePageModule() {
     if (hasEmptyField) {
       return;
     }
+    const editingId = editingIds[sectionKey];
     let payload = {};
     config.fields.forEach((field) => {
       if (field.type === "multiselect") {
@@ -3980,13 +4329,26 @@ function CrmOnePageModule() {
       payload.reminderDays = String(payload.reminderDays || "").trim();
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
     }
-    const editingId = editingIds[sectionKey];
+    if (sectionKey === "followUps") {
+      const normalizedStatus = String(payload.status || "").trim().toLowerCase();
+      const existingFollowUp = editingId ? (moduleData.followUps || []).find((row) => String(row.id) === String(editingId)) : null;
+      const existingCompletedDate = existingFollowUp ? String(getFollowUpCompletedDate(existingFollowUp) || "").trim() : "";
+      if (normalizedStatus === "completed") {
+        payload.completedDate = existingCompletedDate || getTodayIsoDate();
+      } else {
+        payload.completedDate = "";
+      }
+    }
     setModuleData((prev) => {
       const rows = prev[sectionKey] || [];
       if (editingId) {
         return {
           ...prev,
-          [sectionKey]: rows.map((row) => (row.id === editingId ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName } : row)),
+          [sectionKey]: rows.map((row) => (
+            String(row.id) === String(editingId)
+              ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName }
+              : row
+          )),
         };
       }
       return {
@@ -4066,6 +4428,24 @@ function CrmOnePageModule() {
     }));
   }
 
+  function toggleFollowUpOwner(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    const currentOwner = String(forms.followUps?.owner || "").trim();
+    const nextOwner = currentOwner === normalizedValue ? "" : normalizedValue;
+    setForms((prev) => ({
+      ...prev,
+      followUps: {
+        ...prev.followUps,
+        owner: nextOwner,
+      },
+    }));
+    setFollowUpOwnerSearch(nextOwner);
+    setFollowUpOwnerSearchOpen(false);
+  }
+
   function toggleMeetingEmployee(value) {
     const normalizedValue = String(value || "").trim();
     if (!normalizedValue) {
@@ -4118,6 +4498,11 @@ function CrmOnePageModule() {
       columnByHeader.set(normalizeImportHeader(column.label), column);
       columnByHeader.set(normalizeImportHeader(column.key), column);
     });
+    const fieldByHeader = new Map();
+    config.fields.forEach((field) => {
+      fieldByHeader.set(normalizeImportHeader(field.label), field);
+      fieldByHeader.set(normalizeImportHeader(field.key), field);
+    });
 
     const defaultValues = buildEmptyValues(config.fields);
     const nextRows = importedRows
@@ -4129,11 +4514,22 @@ function CrmOnePageModule() {
 
         Object.entries(row || {}).forEach(([header, rawValue]) => {
           const column = columnByHeader.get(normalizeImportHeader(header));
-          if (!column) {
+          const field = fieldByHeader.get(normalizeImportHeader(header));
+          if (!column && !field) {
             return;
           }
           const value = String(rawValue || "").trim();
-          if (column.key === "phone") {
+          const fieldMeta = field?.type === "multiselect" ? field : field || column;
+          const fieldKey = fieldMeta?.key || column?.key;
+          if (!fieldKey) {
+            return;
+          }
+          if (sectionKey === "teams" && fieldKey === "members" && /^\d+$/.test(value)) {
+            payload.members = [];
+            payload.employeeCount = value;
+            return;
+          }
+          if (fieldKey === "phone") {
             const phoneMatch = value.match(/^(\+\d{1,4})\s+(.+)$/);
             if (phoneMatch) {
               payload.phoneCountryCode = phoneMatch[1].trim();
@@ -4143,7 +4539,7 @@ function CrmOnePageModule() {
             }
             return;
           }
-          if (sectionKey === "meetings" && column.key === "meetingTime") {
+          if (sectionKey === "meetings" && fieldKey === "meetingTime") {
             const twelveHourMatch = value.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
             if (twelveHourMatch) {
               let hours = Number(twelveHourMatch[1]);
@@ -4157,7 +4553,7 @@ function CrmOnePageModule() {
             }
             return;
           }
-          if (column.key === "reminderSummary") {
+          if (fieldKey === "reminderSummary") {
             payload.reminderSummary = value;
             const reminderSegments = value.split("•").map((item) => item.trim()).filter(Boolean);
             if (reminderSegments.length) {
@@ -4182,7 +4578,7 @@ function CrmOnePageModule() {
             }
             return;
           }
-          payload[column.key] = value;
+          payload[fieldKey] = fieldMeta?.type === "multiselect" ? parseMultiSelectImportValue(value) : value;
         });
 
         if (sectionKey === "meetings") {
@@ -4202,6 +4598,12 @@ function CrmOnePageModule() {
       })
       .filter((row) =>
         config.columns.some((column) => String(row[column.key] || "").trim() !== "")
+          || config.fields.some((field) => {
+            if (field.type === "multiselect") {
+              return Array.isArray(row[field.key]) && row[field.key].length > 0;
+            }
+            return String(row[field.key] || "").trim() !== "";
+          })
       );
 
     if (!nextRows.length) {
@@ -4252,6 +4654,22 @@ function CrmOnePageModule() {
 
   function closeMeetingPopup() {
     setMeetingPopup(null);
+  }
+
+  function openTeamMembersPopup(row) {
+    const members = Array.from(new Set(parseTeamMemberList(row?.members)));
+    const count = Number.isFinite(parseInt(String(row?.employeeCount || "").trim(), 10))
+      ? parseInt(String(row?.employeeCount || "").trim(), 10)
+      : members.length;
+    setTeamMembersPopup({
+      name: String(row?.name || "Team").trim(),
+      members,
+      count,
+    });
+  }
+
+  function closeTeamMembersPopup() {
+    setTeamMembersPopup(null);
   }
 
   return (
@@ -4309,6 +4727,10 @@ function CrmOnePageModule() {
           { key: "rescheduled", label: "Rescheduled" },
           { key: "cancelled", label: "Cancelled" },
         ];
+        const followUpStatusTabs = [
+          { key: "all", label: "All" },
+          ...CRM_FOLLOWUP_STATUS_TABS.map((status) => ({ key: status, label: `${status[0].toUpperCase()}${status.slice(1)}` })),
+        ];
         const filteredRows = sectionKey === "leads"
           ? rows.filter((row) => {
               if (leadStatusTab === "all") {
@@ -4322,6 +4744,13 @@ function CrmOnePageModule() {
                 return true;
               }
               return String(row.status || "").trim().toLowerCase() === meetingStatusTab;
+            })
+          : sectionKey === "followUps"
+          ? rows.filter((row) => {
+              if (followUpStatusTab === "all") {
+                return true;
+              }
+              return String(row.status || "").trim().toLowerCase() === followUpStatusTab;
             })
           : rows;
         const leadTabCounts = sectionKey === "leads"
@@ -4340,6 +4769,14 @@ function CrmOnePageModule() {
               return acc;
             }, {})
           : {};
+        const followUpTabCounts = sectionKey === "followUps"
+          ? followUpStatusTabs.reduce((acc, tab) => {
+              acc[tab.key] = tab.key === "all"
+                ? rows.length
+                : rows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+              return acc;
+            }, {})
+          : {};
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
@@ -4350,6 +4787,39 @@ function CrmOnePageModule() {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
               return haystack.includes(leadCompanyQuery);
             }).slice(0, 6)
+          : [];
+        const followUpRelatedToQuery = sectionKey === "followUps" ? String(followUpRelatedToSearch || formValues.relatedTo || "").trim().toLowerCase() : "";
+        const hasFollowUpRelatedToQuery = Boolean(followUpRelatedToQuery);
+        const followUpRelatedToMatches = sectionKey === "followUps"
+          ? followUpRelatedToType === CRM_FOLLOWUP_RELATED_TO_TYPES[0]
+            ? (moduleData.leads || []).map((lead) => ({
+              id: lead.id,
+              label: String(lead.name || lead.company || "").trim() || "Unnamed Lead",
+              subText: String(lead.company || lead.name || "").trim() || "-",
+              value: String(lead.name || lead.company || "").trim(),
+              haystack: `${String(lead.name || "").trim()} ${String(lead.company || "").trim()} ${String(lead.phone || "").trim()}`.toLowerCase(),
+            }))
+              .filter((lead) => !hasFollowUpRelatedToQuery || lead.haystack.includes(followUpRelatedToQuery))
+              .slice(0, 6)
+            : followUpRelatedToType === CRM_FOLLOWUP_RELATED_TO_TYPES[1]
+              ? (moduleData.contacts || []).map((contact) => ({
+                id: contact.id,
+                label: String(contact.name || "").trim() || "Unnamed Contact",
+                subText: String(contact.company || contact.email || "").trim() || "-",
+                value: String(contact.name || contact.company || "").trim(),
+                haystack: `${String(contact.name || "").trim()} ${String(contact.company || "").trim()} ${String(contact.email || "").trim()}`.toLowerCase(),
+              })).filter((contact) => !hasFollowUpRelatedToQuery || contact.haystack.includes(followUpRelatedToQuery)).slice(0, 6)
+              : sharedCustomerOptions.map((customer) => {
+                const label = getSharedCustomerDisplayName(customer);
+                const haystack = `${label || ""} ${String(customer.companyName || "").trim()} ${String(customer.clientName || "").trim()} ${String(customer.email || "").trim()}`.toLowerCase();
+                return {
+                  id: customer.id,
+                  label,
+                  subText: String(customer.companyName || customer.clientName || "").trim() || "-",
+                  value: String(label || customer.companyName || customer.clientName || "").trim(),
+                  haystack,
+                };
+              }).filter((customer) => !hasFollowUpRelatedToQuery || customer.haystack.includes(followUpRelatedToQuery)).slice(0, 6)
           : [];
         const customerMatches = sectionKey === "leads" && leadCompanyQuery
           ? sharedCustomerOptions.filter((customer) => {
@@ -4399,6 +4869,18 @@ function CrmOnePageModule() {
               return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
             })
           : [];
+        const selectedFollowUpOwner = sectionKey === "followUps" ? String(formValues.owner || "").trim() : "";
+        const filteredFollowUpOwners = sectionKey === "followUps"
+          ? crmDirectoryOptions.filter((item) => {
+              const normalizedSearch = String(followUpOwnerSearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const showFollowUpRelatedToSuggestions = sectionKey === "followUps" && followUpRelatedToSearchOpen;
+        const showFollowUpOwnerSuggestions = sectionKey === "followUps" && followUpOwnerSearchOpen;
         const selectedMeetingReminderChannels = sectionKey === "meetings"
           ? (Array.isArray(formValues.reminderChannel) ? formValues.reminderChannel : [])
             .map((item) => String(item || "").trim())
@@ -4681,8 +5163,11 @@ function CrmOnePageModule() {
                       </div>
                     </div>
 
-                    <div className="d-flex gap-2 flex-wrap">
-                      <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                    <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center" : "d-flex gap-2 flex-wrap"}>
+                      <button
+                        type="submit"
+                        className={sectionKey === "leads" ? "btn btn-success btn-sm" : "btn btn-success btn-sm single-row-form-submit-btn"}
+                      >
                         {editingId ? "Update" : "Create"}
                       </button>
                       {editingId ? (
@@ -4754,16 +5239,18 @@ function CrmOnePageModule() {
                                       ? "col-12 col-md-6 col-xl-2"
                                       : "col-12 col-md-6 col-xl-4"
                                   )
-                                : sectionKey === "followUps"
+                                  : sectionKey === "followUps"
                                 ? (
                                     field.key === "subject" || field.key === "relatedTo"
-                                      ? "col-12 col-md-6 col-xl-3"
+                                      ? field.key === "relatedTo"
+                                        ? "col-12 col-md-6 col-xl-4"
+                                        : "col-12 col-md-6 col-xl-2"
                                       : field.key === "dueDate"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "owner"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "status"
-                                      ? "col-12 col-md-6 col-xl-1"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : "col-12 col-md-6 col-xl-4"
                                   )
                                 : sectionKey === "meetings"
@@ -4957,6 +5444,143 @@ function CrmOnePageModule() {
                                           <span>{userName}</span>
                                         </span>
                                       )) : null}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "followUps" && field.key === "relatedTo") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="input-group">
+                                      <select
+                                        className="form-select"
+                                        style={{ maxWidth: "170px" }}
+                                        value={followUpRelatedToType}
+                                        onChange={(event) => {
+                                          setFollowUpRelatedToType(event.target.value);
+                                          setFollowUpRelatedToSearch("");
+                                          setField(sectionKey, "relatedTo", "");
+                                        }}
+                                      >
+                                        {CRM_FOLLOWUP_RELATED_TO_TYPES.map((type) => (
+                                          <option key={`follow-up-related-to-type-${type}`} value={type}>{type}</option>
+                                        ))}
+                                      </select>
+                                      <input
+                                        type="text"
+                                        className="form-control"
+                                        placeholder={field.placeholder}
+                                        value={followUpRelatedToSearch}
+                                        onFocus={() => setFollowUpRelatedToSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setFollowUpRelatedToSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setFollowUpRelatedToSearch(event.target.value);
+                                          setField(sectionKey, field.key, event.target.value);
+                                          setFollowUpRelatedToSearchOpen(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="crm-inline-suggestions-wrap">
+                                      {showFollowUpRelatedToSuggestions && followUpRelatedToMatches.length ? (
+                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">{followUpRelatedToType}</div>
+                                            {followUpRelatedToMatches.map((item) => (
+                                              <button
+                                                key={`follow-up-related-to-${item.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setField(sectionKey, "relatedTo", item.value);
+                                                  setFollowUpRelatedToSearch(item.value);
+                                                  setFollowUpRelatedToSearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{item.label}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{item.subText}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "followUps" && field.key === "owner") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search employees"
+                                        value={followUpOwnerSearch}
+                                        onFocus={() => setFollowUpOwnerSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setFollowUpOwnerSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setFollowUpOwnerSearch(event.target.value);
+                                          setField(sectionKey, field.key, event.target.value);
+                                          setFollowUpOwnerSearchOpen(true);
+                                        }}
+                                      />
+                                      {showFollowUpOwnerSuggestions ? (
+                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Employees</div>
+                                            {filteredFollowUpOwners.length ? filteredFollowUpOwners.map((employee) => (
+                                              <button
+                                                key={`follow-up-owner-${employee.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleFollowUpOwner(employee.name)}
+                                              >
+                                                <span className="d-flex align-items-start gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-1"
+                                                    checked={selectedFollowUpOwner === employee.name}
+                                                    readOnly
+                                                  />
+                                                  <span>
+                                                    <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
+                                                    <span className="crm-inline-suggestions__item-sub">
+                                                      {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
+                                                    </span>
+                                                  </span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No employees found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedFollowUpOwner ? (
+                                        <span
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            aria-label={`Remove ${selectedFollowUpOwner}`}
+                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                                            onClick={() => toggleFollowUpOwner(selectedFollowUpOwner)}
+                                          >
+                                            -
+                                          </button>
+                                          <span>{selectedFollowUpOwner}</span>
+                                        </span>
+                                      ) : (
+                                        <div className="small text-secondary">No owner selected yet.</div>
+                                      )}
                                     </div>
                                   </div>
                                 );
@@ -5223,10 +5847,14 @@ function CrmOnePageModule() {
                                             <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
                                           ))
                                         : field.datalistSource === "erpUsers"
-                                        ? crmUserOptions.map((value) => (
-                                            <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                          ))
-                                        : null}
+                                          ? crmUserOptions.map((value) => (
+                                              <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                            ))
+                                          : field.datalistSource === "accountsCustomers"
+                                            ? sharedCustomerDatalistOptions.map((value) => (
+                                                <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+                                              ))
+                                          : null}
                                     </datalist>
                                   </Fragment>
                                 );
@@ -5285,11 +5913,11 @@ function CrmOnePageModule() {
                             })()}
                           </div>
                           )}
-                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) && sectionKey !== "followUps" ? (
                             <div
-                                className={
-                                  sectionKey === "leads"
-                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                              className={
+                                sectionKey === "leads"
+                                  ? "col-12 col-md-6 col-xl-3 d-flex align-items-end"
                                   : sectionKey === "deals"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : sectionKey === "followUps"
@@ -5301,12 +5929,12 @@ function CrmOnePageModule() {
                                   : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
                               }
                             >
-                              <div className="d-flex gap-2 flex-wrap w-100">
+                              <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center" : "d-flex gap-2 flex-wrap w-100"}>
                                 <button
                                   type="submit"
                                   className={`btn btn-success btn-sm ${
                                     ["leads", "contacts", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
-                                      ? "single-row-form-submit-btn"
+                                      ? (sectionKey === "leads" ? "" : "single-row-form-submit-btn")
                                       : ""
                                   }`}
                                 >
@@ -5337,6 +5965,29 @@ function CrmOnePageModule() {
                         </Fragment>
                       ))}
                     </div>
+                    {sectionKey === "followUps" ? (
+                      <div className="row">
+                        <div className="col-12 col-sm-2">
+                          <button
+                            type="submit"
+                            className="btn btn-success btn-sm w-100"
+                          >
+                            {editingId ? "Update" : "Create"}
+                          </button>
+                        </div>
+                        {editingId ? (
+                          <div className="col-12 col-sm-2">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm w-100"
+                              onClick={() => resetSectionForm(sectionKey)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                       <div className="d-flex gap-2">
                         <button type="submit" className="btn btn-success btn-sm">
@@ -5386,6 +6037,24 @@ function CrmOnePageModule() {
                     Closed and converted leads older than 180 days will be automatically deleted.
                   </div>
                 </div>
+              ) : sectionKey === "followUps" ? (
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
+                    {followUpStatusTabs.map((tab) => (
+                      <button
+                        key={`followup-status-tab-${tab.key}`}
+                        type="button"
+                        className={`btn btn-sm ${followUpStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                        onClick={() => setFollowUpStatusTab(tab.key)}
+                      >
+                        {tab.label} ({followUpTabCounts[tab.key] || 0})
+                      </button>
+                    ))}
+                  </div>
+                  <div className="small text-secondary">
+                    Completed follow-ups older than 90 days are automatically deleted.
+                  </div>
+                </div>
               ) : sectionKey === "meetings" ? (
                 <div className="d-flex flex-wrap gap-2">
                   {meetingStatusTabs.map((tab) => (
@@ -5422,12 +6091,12 @@ function CrmOnePageModule() {
 	                    if (!phone) return "-";
 	                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
 	                  }
-	                  if (sectionKey === "leads" && column.key === "assignedTo") {
-	                    const assignedUsers = String(row.assignedUser || row.assignedTo || "")
-	                      .split(",")
-	                      .map((item) => item.trim())
-	                      .filter(Boolean);
-	                    if (String(row.assignType || "").trim().toLowerCase() === "user" && assignedUsers.length > 1) {
+                  if (sectionKey === "leads" && column.key === "assignedTo") {
+                    const assignedUsers = String(row.assignedUser || row.assignedTo || "")
+                      .split(",")
+                      .map((item) => item.trim())
+                      .filter(Boolean);
+                    if (String(row.assignType || "").trim().toLowerCase() === "user" && assignedUsers.length > 1) {
 	                      return (
 	                        <button
 	                          type="button"
@@ -5436,13 +6105,29 @@ function CrmOnePageModule() {
 	                        >
 	                          {assignedUsers.length} Employees
 	                        </button>
-	                      );
-	                    }
-	                    return row[column.key] || "-";
-	                  }
-	                  if (sectionKey === "meetings" && column.key === "meetingTime") {
-	                    return formatTimeToAmPm(row[column.key]);
-	                  }
+                      );
+                    }
+                    return row[column.key] || "-";
+                  }
+                  if (sectionKey === "teams" && column.key === "employeeCount") {
+                    const members = parseTeamMemberList(row?.members);
+                    const count = Number.isFinite(parseInt(String(row?.employeeCount || "").trim(), 10))
+                      ? parseInt(String(row.employeeCount || "").trim(), 10)
+                      : members.length;
+                    const label = count === 1 ? "1 Employee" : `${count} Employees`;
+                    return (
+                      <button
+                        type="button"
+                        className="btn btn-link btn-sm p-0 align-baseline"
+                        onClick={() => openTeamMembersPopup(row)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  }
+                  if (sectionKey === "meetings" && column.key === "meetingTime") {
+                    return formatTimeToAmPm(row[column.key]);
+                  }
 	                  return row[column.key] || "-";
 	                })
               }
@@ -5583,6 +6268,55 @@ function CrmOnePageModule() {
                 <div className="text-secondary">Status</div>
                 <div className="fw-semibold">{meetingPopup.status || "-"}</div>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {teamMembersPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeTeamMembersPopup}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(420px, 92vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Team Employees</h5>
+                <div className="small text-secondary">{teamMembersPopup.name || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeTeamMembersPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div>
+              {teamMembersPopup.members.length ? (
+                <div className="table-responsive">
+                  <table className="table table-sm table-bordered mb-0 align-middle">
+                    <tbody>
+                      {(() => {
+                        const half = Math.ceil(teamMembersPopup.members.length / 2);
+                        const leftColumn = teamMembersPopup.members.slice(0, half);
+                        const rightColumn = teamMembersPopup.members.slice(half);
+                        const rows = Math.max(leftColumn.length, rightColumn.length);
+                        return Array.from({ length: rows }).map((_, rowIndex) => (
+                          <tr key={`team-member-row-${rowIndex}`}>
+                            <td className="p-2">{leftColumn[rowIndex] || "-"}</td>
+                            <td className="p-2">{rightColumn[rowIndex] || "-"}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="small text-secondary">No employees found.</div>
+              )}
             </div>
           </div>
         </div>
@@ -6053,7 +6787,7 @@ function ProjectManagementModule() {
 
       {activeTab === "customers" ? (
         <>
-          <div className="card p-3">
+          <div className="card p-3" style={{ paddingTop: "20px" }}>
             <h6 className="mb-3">{editingProjectClientId ? "Edit Client" : "Create Client"}</h6>
             <form className="d-flex flex-column gap-3" onSubmit={saveProjectClient}>
               <div className="row g-3">
@@ -8561,6 +9295,7 @@ function CategoryCrudModule({
   const [categoryEditingIds, setCategoryEditingIds] = useState({ mainCategories: "", subCategories: "" });
   const [categoryNotice, setCategoryNotice] = useState("");
   const [departmentOptions, setDepartmentOptions] = useState([]);
+  const [ticketingClientSearchOpen, setTicketingClientSearchOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -8618,6 +9353,7 @@ function CategoryCrudModule({
     if (activeTab === "categories") {
       return;
     }
+    setTicketingClientSearchOpen(false);
     setFormValues(buildEmptyValues(tabConfig[activeTab].fields));
   }, [activeTab, tabConfig]);
 
@@ -8651,6 +9387,22 @@ function CategoryCrudModule({
   const currentRows = activeTab === "categories" ? [] : (moduleData[activeTab] || []);
   const isInventoryItemsTab = storageKey === STOCKS_STORAGE_KEY && activeTab === "items";
   const isTicketingTicketsTab = storageKey === TICKETING_STORAGE_KEY && activeTab === "tickets";
+  const sharedTicketingCustomers = useMemo(
+    () => isTicketingTicketsTab ? readSharedAccountsCustomers() : [],
+    [activeTab]
+  );
+  const ticketingClientQuery = String(formValues.clientCompany || "").trim().toLowerCase();
+  const ticketingClientMatches = useMemo(
+    () => isTicketingTicketsTab
+      ? (ticketingClientQuery
+          ? sharedTicketingCustomers.filter((customer) => {
+            const haystack = `${customer.companyName || customer.name || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+            return haystack.includes(ticketingClientQuery);
+          }).slice(0, 8)
+          : sharedTicketingCustomers.slice(0, 8))
+      : [],
+    [isTicketingTicketsTab, sharedTicketingCustomers, ticketingClientQuery]
+  );
   const inventoryMainCategoryOptions = useMemo(
     () => Array.from(new Set((moduleData.mainCategories || []).map((row) => String(row?.name || "").trim()).filter(Boolean))),
     [moduleData.mainCategories]
@@ -9036,15 +9788,15 @@ function CategoryCrudModule({
                         subCategory: "col-12 col-md-6 col-xl-3",
                         qty: "col-12 col-md-3 col-xl-1",
                       }[field.key] || "col-12 col-md-6 col-xl-2")
-                    : isTicketingTicketsTab
-                      ? ({
-                          ticketNo: "col-12 col-md-6 col-xl-2",
-                          subject: "col-12 col-md-6 col-xl-3",
-                          mainCategory: "col-12 col-md-6 col-xl-2",
-                          subCategory: "col-12 col-md-6 col-xl-2",
-                          status: "col-12 col-md-6 col-xl-2",
-                          description: "col-12",
-                        }[field.key] || "col-12 col-md-6 col-xl-3")
+                  : isTicketingTicketsTab
+                    ? ({
+                        ticketNo: "col-12 col-md-6 col-xl-1",
+                        subject: "col-12 col-md-6 col-xl-3",
+                        mainCategory: "col-12 col-md-6 col-xl-2",
+                        subCategory: "col-12 col-md-6 col-xl-2",
+                        status: "col-12 col-md-6 col-xl-1",
+                        description: "col-12",
+                      }[field.key] || "col-12 col-md-6 col-xl-3")
                     : "col-12 col-md-6 col-xl-3"
                 }
                 key={field.key}
@@ -9082,6 +9834,56 @@ function CategoryCrudModule({
                       </option>
                     ))}
                   </select>
+                ) : isTicketingTicketsTab && field.key === "clientCompany" ? (
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      autoComplete="off"
+                      placeholder={field.placeholder}
+                      value={formValues[field.key] || ""}
+                      onFocus={() => setTicketingClientSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setTicketingClientSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        onChangeField(field.key, event.target.value);
+                        setTicketingClientSearchOpen(true);
+                      }}
+                    />
+                    {ticketingClientSearchOpen ? (
+                      ticketingClientMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Clients</div>
+                            {ticketingClientMatches.map((customer) => {
+                              const label = getSharedCustomerDisplayName(customer);
+                              const value = String(customer.companyName || customer.clientName || customer.name || "").trim();
+                              return (
+                                <button
+                                  key={`ticketing-client-${customer.id || `${label}-${value}`}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    onChangeField(field.key, String(label || value).trim());
+                                    setTicketingClientSearchOpen(false);
+                                  }}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{label || value || "-"}</span>
+                                  <span className="crm-inline-suggestions__item-sub">{value || label || "-"}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No clients found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
                 ) : isTicketingTicketsTab && field.key === "subCategory" ? (
                   <select
                     className="form-select"
@@ -9092,6 +9894,19 @@ function CategoryCrudModule({
                     {ticketingSubCategoryOptions.map((name) => (
                       <option key={`ticket-sub-${name}`} value={name}>
                         {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : isTicketingTicketsTab && field.key === "status" ? (
+                  <select
+                    className="form-select"
+                    value={formValues[field.key] || field.defaultValue || ""}
+                    onChange={(event) => onChangeField(field.key, event.target.value)}
+                  >
+                    <option value="">Select Status</option>
+                    {["Open", "Process", "Hold", "Closed"].map((statusOption) => (
+                      <option key={`ticket-status-${statusOption}`} value={statusOption}>
+                        {statusOption}
                       </option>
                     ))}
                   </select>
@@ -9311,8 +10126,8 @@ function StocksManagementModule() {
   );
 }
 
-function AccountsErpModule() {
-  const [activeTab, setActiveTab] = useState("overview");
+function AccountsErpModule({ initialTab = "overview" }) {
+  const [activeTab, setActiveTab] = useState(initialTab || "overview");
   const [overviewDocTab, setOverviewDocTab] = useState("invoice");
   const [moduleData, setModuleData] = useState(DEFAULT_ACCOUNTS_DATA);
   const [orgBillingCountry, setOrgBillingCountry] = useState("India");
@@ -9396,8 +10211,47 @@ function AccountsErpModule() {
       return DEFAULT_STOCKS_DATA;
     }
   });
+  const [orgBillingCurrency, setOrgBillingCurrency] = useState("INR");
+  const [subscriptionCategories, setSubscriptionCategories] = useState([]);
+  const [subscriptionSubCategories, setSubscriptionSubCategories] = useState([]);
+  const [subscriptionCustomers, setSubscriptionCustomers] = useState([]);
+  const [subscriptionList, setSubscriptionList] = useState([]);
+  const [subscriptionCategoryForm, setSubscriptionCategoryForm] = useState(createEmptySubscriptionCategory());
+  const [subscriptionSubCategoryForm, setSubscriptionSubCategoryForm] = useState(createEmptySubscriptionSubCategory());
+  const [subscriptionForm, setSubscriptionForm] = useState(createEmptySubscriptionForm({ currency: orgBillingCurrency }));
+  const [editingSubscriptionCategoryId, setEditingSubscriptionCategoryId] = useState("");
+  const [editingSubscriptionSubCategoryId, setEditingSubscriptionSubCategoryId] = useState("");
+  const [editingSubscriptionId, setEditingSubscriptionId] = useState("");
+  const [subscriptionView, setSubscriptionView] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [subscriptionStatusTab, setSubscriptionStatusTab] = useState("all");
+  const [subscriptionEmailAlertSearch, setSubscriptionEmailAlertSearch] = useState("");
+  const [subscriptionEmailAlertSearchOpen, setSubscriptionEmailAlertSearchOpen] = useState(false);
+  const [subscriptionWhatsappAlertSearch, setSubscriptionWhatsappAlertSearch] = useState("");
+  const [subscriptionWhatsappAlertSearchOpen, setSubscriptionWhatsappAlertSearchOpen] = useState(false);
+  const [subscriptionAssignSearch, setSubscriptionAssignSearch] = useState("");
+  const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
+  const isValidAccountsTab = new Set([
+    "overview",
+    "invoices",
+    "estimates",
+    "gst",
+    "templates",
+    "items",
+    "customers",
+    "subscriptions"
+  ]);
+
+  useEffect(() => {
+    const nextTab = isValidAccountsTab.has(String(initialTab || "overview").trim().toLowerCase())
+      ? String(initialTab || "overview").trim().toLowerCase()
+      : "overview";
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [initialTab]);
 
   useEffect(() => {
     let active = true;
@@ -9490,6 +10344,43 @@ function AccountsErpModule() {
     });
   }, [editingGstId, taxUi.defaultScope]);
 
+  async function refreshSubscriptionData() {
+    try {
+      setSubscriptionLoading(true);
+      const [categoryResponse, subCategoryResponse, subscriptionResponse] = await Promise.all([
+        apiFetch("/api/business-autopilot/accounts/subscription-categories"),
+        apiFetch("/api/business-autopilot/accounts/sub-categories"),
+        apiFetch("/api/business-autopilot/accounts/subscriptions")
+      ]);
+      const categories = Array.isArray(categoryResponse?.categories) ? categoryResponse.categories : [];
+      const subCategories = Array.isArray(subCategoryResponse?.subCategories) ? subCategoryResponse.subCategories : [];
+      const subscriptionRows = Array.isArray(subscriptionResponse?.subscriptions) ? subscriptionResponse.subscriptions : [];
+      const subscriptionCustomerRows = Array.isArray(subscriptionResponse?.customerOptions)
+        ? subscriptionResponse.customerOptions
+        : [];
+      setSubscriptionCategories(categories);
+      setSubscriptionSubCategories(subCategories);
+      setSubscriptionList(subscriptionRows);
+      setSubscriptionCustomers(subscriptionCustomerRows);
+    } catch (_error) {
+      // keep local state empty and do not block UI for empty/default response
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await refreshSubscriptionData();
+      } catch (_error) {
+        // keep UI resilient when backend returns no subscription rows yet
+      }
+    })();
+    return () => {
+    };
+  }, []);
+
   useEffect(() => {
     let active = true;
     (async () => {
@@ -9497,8 +10388,13 @@ function AccountsErpModule() {
         const data = await apiFetch("/api/dashboard/billing-profile");
         if (!active) return;
         const country = String(data?.profile?.country || "").trim();
+        const currency = String(data?.profile?.currency || "").trim();
         if (country) {
           setOrgBillingCountry(country);
+        }
+        if (currency) {
+          setOrgBillingCurrency(currency);
+          setSubscriptionForm((prev) => (!editingSubscriptionId && !String(prev.id || "").trim() ? { ...prev, currency } : prev));
         }
       } catch {
         // keep default India when billing profile is unavailable
@@ -9590,6 +10486,496 @@ function AccountsErpModule() {
   );
   const billingStateOptions = getStateOptionsForCountry(String(customerForm.billingCountry || "India"));
   const shippingStateOptions = getStateOptionsForCountry(String(customerForm.shippingCountry || "India"));
+  const subscriptionCustomerOptions = useMemo(
+    () => {
+      if (subscriptionCustomers.length) {
+        return subscriptionCustomers;
+      }
+      return (moduleData.customers || []).map((row) => ({
+        id: String(row.id || ""),
+        name: String(row.companyName || row.name || row.clientName || "").trim()
+      })).filter((row) => row.id && row.name);
+    },
+    [moduleData.customers, subscriptionCustomers]
+  );
+  const getCategoryName = (categoryId) => {
+    const normalizedCategoryId = String(categoryId || "").trim();
+    if (!normalizedCategoryId) {
+      return "";
+    }
+    const match = (subscriptionCategories || []).find((row) => String(row?.id || "").trim() === normalizedCategoryId);
+    return match ? String(match.name || "").trim() : "";
+  };
+  const subscriptionSubCategoryOptions = useMemo(
+    () => {
+      const categoryId = String(subscriptionForm.categoryId || "").trim();
+      if (!categoryId) {
+        return subscriptionSubCategories;
+      }
+      return subscriptionSubCategories.filter((row) => String(row?.categoryId || "").trim() === categoryId);
+    },
+    [subscriptionForm.categoryId, subscriptionSubCategories]
+  );
+  const subscriptionCustomerSelectOptions = useMemo(
+    () => subscriptionCustomerOptions
+      .map((row) => {
+        const customerId = String(row?.id || "").trim();
+        const customerName = String(row?.name || "").trim();
+        if (!customerId || !customerName) {
+          return null;
+        }
+        return { id: customerId, name: customerName };
+      })
+      .filter(Boolean),
+    [subscriptionCustomerOptions]
+  );
+  const subscriptionAlertDepartmentOptions = useMemo(
+    () => Array.from(new Set((erpUsersForSales || []).map((row) => String(row?.department || "").trim()).filter(Boolean)))
+      .map((name) => ({ type: "department", value: name, label: name }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [erpUsersForSales]
+  );
+  const subscriptionAlertUserOptions = useMemo(
+    () => (erpUsersForSales || [])
+      .filter((row) => Boolean(String(row?.name || "").trim()))
+      .map((row) => ({
+        type: "user",
+        value: String(row?.id || "").trim(),
+        label: String(row?.name || "").trim(),
+        email: String(row?.email || "").trim(),
+        department: String(row?.department || "").trim()
+      }))
+      .filter((row) => Boolean(row.value))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [erpUsersForSales]
+  );
+  const normalizedSubscriptionAssignSearch = normalizeSubscriptionAlertAssigneeSearch(subscriptionAssignSearch);
+  const filteredSubscriptionAssignDepartmentOptions = useMemo(() => {
+    if (!normalizedSubscriptionAssignSearch) {
+      return subscriptionAlertDepartmentOptions;
+    }
+    return subscriptionAlertDepartmentOptions.filter((option) => option.label.toLowerCase().includes(normalizedSubscriptionAssignSearch));
+  }, [normalizedSubscriptionAssignSearch, subscriptionAlertDepartmentOptions]);
+  const filteredSubscriptionAssignUserOptions = useMemo(() => {
+    if (!normalizedSubscriptionAssignSearch) {
+      return subscriptionAlertUserOptions;
+    }
+    return subscriptionAlertUserOptions.filter((option) =>
+      `${option.label} ${option.email} ${option.department}`.toLowerCase().includes(normalizedSubscriptionAssignSearch)
+    );
+  }, [normalizedSubscriptionAssignSearch, subscriptionAlertUserOptions]);
+  const subscriptionCustomerNameById = useMemo(() => {
+    const map = new Map();
+    subscriptionCustomerSelectOptions.forEach((row) => {
+      map.set(String(row.id || ""), String(row.name || ""));
+    });
+    return map;
+  }, [subscriptionCustomerSelectOptions]);
+  const normalizedSubscriptionEmailAlertSearch = String(subscriptionEmailAlertSearch || "").trim().toLowerCase();
+  const normalizedSubscriptionWhatsappAlertSearch = String(subscriptionWhatsappAlertSearch || "").trim().toLowerCase();
+  const filteredSubscriptionEmailAlertOptions = useMemo(
+    () => SUBSCRIPTION_ALERT_OPTIONS
+      .filter((option) => String(option.value || "").trim())
+      .filter((option) => {
+        if (!normalizedSubscriptionEmailAlertSearch) {
+          return true;
+        }
+        return option.label.toLowerCase().includes(normalizedSubscriptionEmailAlertSearch);
+      }),
+    [normalizedSubscriptionEmailAlertSearch]
+  );
+  const filteredSubscriptionWhatsappAlertOptions = useMemo(
+    () => SUBSCRIPTION_ALERT_OPTIONS
+      .filter((option) => String(option.value || "").trim())
+      .filter((option) => {
+        if (!normalizedSubscriptionWhatsappAlertSearch) {
+          return true;
+        }
+        return option.label.toLowerCase().includes(normalizedSubscriptionWhatsappAlertSearch);
+      }),
+    [normalizedSubscriptionWhatsappAlertSearch]
+  );
+  const normalizedSubscriptionEmailAlertDays = normalizeSubscriptionAlertDays(subscriptionForm.emailAlertDays);
+  const normalizedSubscriptionWhatsappAlertDays = normalizeSubscriptionAlertDays(subscriptionForm.whatsappAlertDays);
+  const normalizedSubscriptionEmailAlertAssignees = normalizeSubscriptionAlertAssignees(subscriptionForm.emailAlertAssignees);
+  const normalizedSubscriptionWhatsappAlertAssignees = normalizeSubscriptionAlertAssignees(subscriptionForm.whatsappAlertAssignees);
+  const defaultCurrency = String(orgBillingCurrency || "INR").trim().toUpperCase() || "INR";
+  const normalizedSubscriptionStatusTab = String(subscriptionStatusTab || "all").trim().toLowerCase();
+  const filteredSubscriptionList = useMemo(() => {
+    if (normalizedSubscriptionStatusTab === "all") {
+      return subscriptionList;
+    }
+    if (normalizedSubscriptionStatusTab === "expiring_30" || normalizedSubscriptionStatusTab === "expiring_15" || normalizedSubscriptionStatusTab === "expiring_7") {
+      const limitDays = Number(normalizedSubscriptionStatusTab.split("_")[1]);
+      return subscriptionList.filter((row) => {
+        if (String(row?.status || "").trim().toLowerCase() === "cancelled") {
+          return false;
+        }
+        const daysToExpiry = getDaysUntilDate(row?.endDate);
+        return typeof daysToExpiry === "number" && daysToExpiry >= 0 && daysToExpiry <= limitDays;
+      });
+    }
+    return subscriptionList.filter((row) => String(row?.status || "").trim().toLowerCase() === normalizedSubscriptionStatusTab);
+  }, [normalizedSubscriptionStatusTab, subscriptionList]);
+  const subscriptionStatusTabCounts = useMemo(() => {
+    const counts = {
+      all: subscriptionList.length,
+      active: 0,
+      expired: 0,
+      cancelled: 0,
+      expiring_30: 0,
+      expiring_15: 0,
+      expiring_7: 0
+    };
+    subscriptionList.forEach((row) => {
+      const key = String(row?.status || "").trim().toLowerCase();
+      if (key === "active" || key === "expired" || key === "cancelled") {
+        counts[key] += 1;
+      }
+      const endDaysLeft = getDaysUntilDate(row?.endDate);
+      if (row?.endDate && String(row?.status || "").trim().toLowerCase() !== "cancelled") {
+        if (endDaysLeft !== null && endDaysLeft >= 0) {
+          if (endDaysLeft <= 30) {
+            counts.expiring_30 += 1;
+          }
+          if (endDaysLeft <= 15) {
+            counts.expiring_15 += 1;
+          }
+          if (endDaysLeft <= 7) {
+            counts.expiring_7 += 1;
+          }
+        }
+      }
+    });
+    return counts;
+  }, [subscriptionList]);
+
+  function toggleSubscriptionAssignee(assignee) {
+    setSubscriptionForm((prev) => {
+      const normalizedAssignee = normalizeSubscriptionAlertAssignees([assignee]);
+      if (!normalizedAssignee.length) {
+        return prev;
+      }
+      const current = normalizeSubscriptionAlertAssignees(prev.emailAlertAssignees);
+      const target = normalizedAssignee[0];
+      const exists = current.some((row) => String(row.type) === String(target.type) && String(row.value) === String(target.value));
+      return {
+        ...prev,
+        emailAlertAssignees: exists ? current.filter((row) => !(String(row.type) === String(target.type) && String(row.value) === String(target.value))) : [...current, target],
+        whatsappAlertAssignees: exists ? current.filter((row) => !(String(row.type) === String(target.type) && String(row.value) === String(target.value))) : [...current, target]
+      };
+    });
+    setSubscriptionAssignSearch("");
+    setSubscriptionAssignSearchOpen(false);
+  }
+
+  function resetSubscriptionCategoryForm() {
+    setEditingSubscriptionCategoryId("");
+    setSubscriptionCategoryForm(createEmptySubscriptionCategory());
+  }
+
+  function resetSubscriptionSubCategoryForm() {
+    setEditingSubscriptionSubCategoryId("");
+    setSubscriptionSubCategoryForm(createEmptySubscriptionSubCategory());
+  }
+
+  function resetSubscriptionForm() {
+    setEditingSubscriptionId("");
+    setSubscriptionForm(createEmptySubscriptionForm({ currency: defaultCurrency }));
+  }
+
+  function updateSubscriptionFormField(key, value) {
+    if (key === "emailAlertDays" || key === "whatsappAlertDays") {
+      const normalized = normalizeSubscriptionAlertDays(value);
+      setSubscriptionForm((prev) => ({ ...prev, [key]: normalized.length ? [normalized[0]] : [] }));
+      return;
+    }
+    if (key === "emailAlertAssignees" || key === "whatsappAlertAssignees") {
+      setSubscriptionForm((prev) => ({
+        ...prev,
+        [key]: normalizeSubscriptionAlertAssignees(Array.isArray(value) ? value : []),
+      }));
+      return;
+    }
+    if (key === "startDate") {
+      setSubscriptionForm((prev) => ({
+        ...prev,
+        startDate: value,
+        nextBillingDate: getNextBillingDateFromStart(value)
+      }));
+      return;
+    }
+    if (key === "planDuration") {
+      setSubscriptionForm((prev) => ({
+        ...prev,
+        planDuration: value,
+        planDurationDays: value === "custom" ? prev.planDurationDays : ""
+      }));
+      return;
+    }
+    if (key === "categoryId") {
+      setSubscriptionForm((prev) => ({
+        ...prev,
+        categoryId: value,
+        subCategoryId: ""
+      }));
+      return;
+    }
+    setSubscriptionForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveSubscriptionCategory(event) {
+    event.preventDefault();
+    const name = String(subscriptionCategoryForm.name || "").trim();
+    if (!name) {
+      return;
+    }
+    const payload = {
+      name,
+      description: String(subscriptionCategoryForm.description || "").trim()
+    };
+    try {
+      if (editingSubscriptionCategoryId) {
+        const response = await apiFetch(`/api/business-autopilot/accounts/subscription-categories/${editingSubscriptionCategoryId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.category;
+        if (saved) {
+          setSubscriptionCategories((prev) => prev.map((row) => (String(row.id) === String(saved.id) ? saved : row)));
+        }
+      } else {
+        const response = await apiFetch("/api/business-autopilot/accounts/subscription-categories", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.category;
+        if (saved) {
+          setSubscriptionCategories((prev) => [{ ...saved }, ...prev]);
+        }
+      }
+      resetSubscriptionCategoryForm();
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to save subscription category.");
+    }
+  }
+
+  async function saveSubscriptionSubCategory(event) {
+    event.preventDefault();
+    const name = String(subscriptionSubCategoryForm.name || "").trim();
+    const categoryId = String(subscriptionSubCategoryForm.categoryId || "").trim();
+    if (!name || !categoryId) {
+      return;
+    }
+    const payload = {
+      name,
+      categoryId,
+      description: String(subscriptionSubCategoryForm.description || "").trim()
+    };
+    try {
+      if (editingSubscriptionSubCategoryId) {
+        const response = await apiFetch(`/api/business-autopilot/accounts/sub-categories/${editingSubscriptionSubCategoryId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.subCategory;
+        if (saved) {
+          setSubscriptionSubCategories((prev) => prev.map((row) => (String(row.id) === String(saved.id) ? saved : row)));
+        }
+      } else {
+        const response = await apiFetch("/api/business-autopilot/accounts/sub-categories", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.subCategory;
+        if (saved) {
+          setSubscriptionSubCategories((prev) => [{ ...saved }, ...prev]);
+        }
+      }
+      resetSubscriptionSubCategoryForm();
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to save subscription sub category.");
+    }
+  }
+
+  async function deleteSubscriptionCategory(id) {
+    if (!window.confirm("Delete this subscription category? Existing subscriptions may be unlinked automatically.")) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/business-autopilot/accounts/subscription-categories/${id}`, { method: "DELETE" });
+      setSubscriptionCategories((prev) => prev.filter((row) => String(row.id || "") !== String(id || "")));
+      setSubscriptionSubCategories((prev) => prev.filter((row) => String(row.categoryId || "") !== String(id || "")));
+      setSubscriptionList((prev) => prev.filter((row) => String(row.categoryId || "") !== String(id || "")));
+      if (editingSubscriptionCategoryId === id) {
+        resetSubscriptionCategoryForm();
+      }
+      if (String(subscriptionSubCategoryForm.categoryId || "") === String(id || "")) {
+        resetSubscriptionSubCategoryForm();
+      }
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to delete subscription category.");
+    }
+  }
+
+  async function deleteSubscriptionSubCategory(id) {
+    if (!window.confirm("Delete this subscription sub category?")) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/business-autopilot/accounts/sub-categories/${id}`, { method: "DELETE" });
+      setSubscriptionSubCategories((prev) => prev.filter((row) => String(row.id || "") !== String(id || "")));
+      setSubscriptionList((prev) => prev.map((row) => (
+        String(row.subCategoryId || "") === String(id || "") ? { ...row, subCategoryId: "" } : row
+      )));
+      if (editingSubscriptionSubCategoryId === id) {
+        resetSubscriptionSubCategoryForm();
+      }
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to delete subscription sub category.");
+    }
+  }
+
+  async function saveSubscription(event) {
+    event.preventDefault();
+    const normalizedPlanDuration = String(subscriptionForm.planDuration || "").trim();
+    const planDurationDays = normalizedPlanDuration === "custom"
+      ? String(subscriptionForm.planDurationDays || "").trim()
+      : normalizedPlanDuration;
+    const payload = {
+      categoryId: String(subscriptionForm.categoryId || "").trim(),
+      subCategoryId: String(subscriptionForm.subCategoryId || "").trim(),
+      subscriptionTitle: String(subscriptionForm.subscriptionTitle || "").trim(),
+      planDurationDays,
+      customerId: String(subscriptionForm.customerId || "").trim(),
+      paymentDescription: String(subscriptionForm.paymentDescription || "").trim(),
+      amount: String(subscriptionForm.amount || "0").trim(),
+      currency: String(subscriptionForm.currency || defaultCurrency).trim().toUpperCase() || defaultCurrency,
+      startDate: String(subscriptionForm.startDate || "").trim(),
+      endDate: String(subscriptionForm.endDate || "").trim() || "",
+      status: String(subscriptionForm.status || "Active").trim() || "Active",
+      emailAlertDays: normalizeSubscriptionAlertDays(subscriptionForm.emailAlertDays),
+      whatsappAlertDays: normalizeSubscriptionAlertDays(subscriptionForm.whatsappAlertDays),
+      emailAlertAssignTo: normalizedSubscriptionEmailAlertAssignees,
+      whatsappAlertAssignTo: normalizedSubscriptionWhatsappAlertAssignees
+    };
+    if (!payload.categoryId || !payload.subCategoryId || !payload.subscriptionTitle || !payload.customerId || !payload.startDate) {
+      return;
+    }
+    if (normalizedPlanDuration && normalizedPlanDuration !== "custom" && !/^(30|90|180|365|730|1095)$/.test(planDurationDays)) {
+      return;
+    }
+    if (normalizedPlanDuration === "custom" && (!/^\d+$/.test(planDurationDays) || Number(planDurationDays) < 1)) {
+      return;
+    }
+    payload.nextBillingDate = getNextBillingDateFromStart(payload.startDate);
+    if (!payload.nextBillingDate) {
+      return;
+    }
+    try {
+      if (editingSubscriptionId) {
+        const response = await apiFetch(`/api/business-autopilot/accounts/subscriptions/${editingSubscriptionId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.subscription;
+        if (saved) {
+          setSubscriptionList((prev) => prev.map((row) => (String(row.id) === String(saved.id) ? saved : row)));
+        }
+      } else {
+        const response = await apiFetch("/api/business-autopilot/accounts/subscriptions", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        const saved = response?.subscription;
+        if (saved) {
+          setSubscriptionList((prev) => [saved, ...prev]);
+        }
+      }
+      resetSubscriptionForm();
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to save subscription.");
+    }
+  }
+
+  function editSubscriptionCategory(row) {
+    setEditingSubscriptionCategoryId(String(row.id || "").trim());
+    setSubscriptionCategoryForm({
+      id: row.id,
+      name: row.name || "",
+      description: row.description || ""
+    });
+    setActiveTab("subscriptions");
+  }
+
+  function editSubscriptionSubCategory(row) {
+    setEditingSubscriptionSubCategoryId(String(row.id || "").trim());
+    setSubscriptionSubCategoryForm({
+      id: row.id,
+      categoryId: String(row.categoryId || ""),
+      name: row.name || "",
+      description: row.description || ""
+    });
+    setActiveTab("subscriptions");
+  }
+
+  function editSubscription(row) {
+    setEditingSubscriptionId(String(row.id || "").trim());
+    const existingCustomerId = String(row.customerId || "").trim();
+    const normalizedDuration = String(row.planDurationDays || row.planDuration || "").trim();
+    const isPresetDuration = ["30", "90", "180", "365", "730", "1095"].includes(normalizedDuration);
+    setSubscriptionForm({
+      id: row.id,
+      categoryId: String(row.categoryId || ""),
+      subCategoryId: String(row.subCategoryId || ""),
+      subscriptionTitle: row.subscriptionTitle || "",
+      planDuration: isPresetDuration ? normalizedDuration : "custom",
+      planDurationDays: isPresetDuration ? "" : normalizedDuration,
+      customerId: existingCustomerId,
+      customerName: subscriptionCustomerNameById.get(existingCustomerId) || String(row.customerName || "").trim(),
+      paymentDescription: row.paymentDescription || "",
+      amount: String(row.amount || ""),
+      currency: String(row.currency || defaultCurrency).trim().toUpperCase() || defaultCurrency,
+      startDate: row.startDate || "",
+      endDate: row.endDate || "",
+      nextBillingDate: row.nextBillingDate || getNextBillingDateFromStart(row.startDate),
+      status: row.status || "Active",
+      emailAlertDays: normalizeSubscriptionAlertDays(row.emailAlertDays),
+      whatsappAlertDays: normalizeSubscriptionAlertDays(row.whatsappAlertDays),
+      emailAlertAssignees: normalizeSubscriptionAlertAssignees(row.emailAlertAssignTo),
+      whatsappAlertAssignees: normalizeSubscriptionAlertAssignees(row.whatsappAlertAssignTo)
+    });
+    setActiveTab("subscriptions");
+  }
+
+  async function deleteSubscription(id) {
+    if (!window.confirm("Delete this subscription?")) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/business-autopilot/accounts/subscriptions/${id}`, { method: "DELETE" });
+      setSubscriptionList((prev) => prev.filter((row) => String(row.id || "") !== String(id || "")));
+      if (editingSubscriptionId === String(id || "")) {
+        resetSubscriptionForm();
+      }
+      await refreshSubscriptionData();
+    } catch (error) {
+      window.alert(error?.message || "Unable to delete subscription.");
+    }
+  }
+
+  function openSubscriptionView(row) {
+    setSubscriptionView(row);
+  }
+
+  function closeSubscriptionView() {
+    setSubscriptionView(null);
+  }
 
   function normalizeCustomerRecord(row = {}) {
     const legacyPhone = String(row.phone || "").trim();
@@ -10785,8 +12171,9 @@ function AccountsErpModule() {
             { key: "estimates", label: "Estimates" },
             { key: "gst", label: taxUi.templatesLabel },
             { key: "templates", label: "Billing Templates" },
+            { key: "items", label: "Items" },
             { key: "customers", label: "Clients" },
-            { key: "items", label: "Items" }
+            { key: "subscriptions", label: "Subscriptions" }
           ].map((tab) => (
             <button
               key={tab.key}
@@ -11572,6 +12959,684 @@ function AccountsErpModule() {
           />
         </>
       ) : null}
+
+      {activeTab === "subscriptions" ? (
+        <>
+          <div className="row g-3">
+            <div className="col-12 col-xl-6">
+              <div className="card p-3">
+                <h6 className="mb-3">{editingSubscriptionCategoryId ? "Edit Category" : "Create Category"}</h6>
+                <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionCategory}>
+                  <div className="row g-3">
+                    <div className="col-12">
+                      <label className="form-label small text-secondary mb-1">Category Name</label>
+                      <input
+                        className="form-control"
+                        value={subscriptionCategoryForm.name || ""}
+                        onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, name: event.target.value }))}
+                        placeholder="Cloud Hosting"
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small text-secondary mb-1">Description</label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        value={subscriptionCategoryForm.description || ""}
+                        onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, description: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm">
+                      {editingSubscriptionCategoryId ? "Update" : "Create"}
+                    </button>
+                    {editingSubscriptionCategoryId ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        onClick={resetSubscriptionCategoryForm}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              </div>
+
+              <div className="mt-3" style={{ paddingTop: "25px" }}>
+                <SearchablePaginatedTableCard
+                  title="Subscription Categories"
+                  badgeLabel={`${subscriptionCategories.length} items`}
+                  rows={subscriptionCategories}
+                  withoutOuterCard
+                  columns={[
+                    { key: "name", label: "Category" },
+                    { key: "description", label: "Description" }
+                  ]}
+                  searchPlaceholder="Search subscription categories"
+                  noRowsText="No categories yet."
+                  searchBy={(row) => `${row.name} ${row.description}`}
+                  renderCells={(row) => [row.name || "-", row.description || "-"]}
+                  renderActions={(row) => (
+                    <div className="d-inline-flex gap-2">
+                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionCategory(row)}>
+                        Edit
+                      </button>
+                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionCategory(row.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                />
+              </div>
+            </div>
+
+            <div className="col-12 col-xl-6">
+              <div className="card p-3">
+                <h6 className="mb-3">{editingSubscriptionSubCategoryId ? "Edit Sub Category" : "Create Sub Category"}</h6>
+                <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionSubCategory}>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Category</label>
+                      <select
+                        className="form-select"
+                        value={subscriptionSubCategoryForm.categoryId || ""}
+                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, categoryId: event.target.value }))}
+                      >
+                        <option value="">Select Category</option>
+                        {subscriptionCategories.map((row) => (
+                          <option key={row.id} value={row.id}>{row.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Sub Category Name</label>
+                      <input
+                        className="form-control"
+                        value={subscriptionSubCategoryForm.name || ""}
+                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, name: event.target.value }))}
+                        placeholder="Basic Plan"
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small text-secondary mb-1">Description</label>
+                      <textarea
+                        className="form-control"
+                        rows={3}
+                        value={subscriptionSubCategoryForm.description || ""}
+                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, description: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm">
+                      {editingSubscriptionSubCategoryId ? "Update" : "Create"}
+                    </button>
+                    {editingSubscriptionSubCategoryId ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        onClick={resetSubscriptionSubCategoryForm}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              </div>
+
+              <div className="mt-3" style={{ paddingTop: "25px" }}>
+                <SearchablePaginatedTableCard
+                  title="Subscription Sub Categories"
+                  badgeLabel={`${subscriptionSubCategories.length} items`}
+                  rows={subscriptionSubCategories}
+                  withoutOuterCard
+                  columns={[
+                    { key: "categoryName", label: "Category" },
+                    { key: "name", label: "Sub Category" },
+                    { key: "description", label: "Description" }
+                  ]}
+                  searchPlaceholder="Search subscription sub categories"
+                  noRowsText="No sub categories yet."
+                  searchBy={(row) => `${row.categoryName || getCategoryName(row.categoryId)} ${row.name} ${row.description}`}
+                  renderCells={(row) => [row.categoryName || getCategoryName(row.categoryId) || "-", row.name || "-", row.description || "-"]}
+                  renderActions={(row) => (
+                    <div className="d-inline-flex gap-2">
+                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionSubCategory(row)}>
+                        Edit
+                      </button>
+                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionSubCategory(row.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-3">
+            <h6 className="mb-3">{editingSubscriptionId ? "Edit Subscription" : "Create Subscription"}</h6>
+            <form className="d-flex flex-column gap-3" onSubmit={saveSubscription}>
+              <div className="row g-3">
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Subscription Title</label>
+                  <input
+                    className="form-control"
+                    value={subscriptionForm.subscriptionTitle || ""}
+                    onChange={(event) => updateSubscriptionFormField("subscriptionTitle", event.target.value)}
+                    placeholder="CRM Premium Plan"
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Category</label>
+                  <select
+                    className="form-select"
+                    value={subscriptionForm.categoryId || ""}
+                    onChange={(event) => updateSubscriptionFormField("categoryId", event.target.value)}
+                  >
+                    <option value="">Select Category</option>
+                    {subscriptionCategories.map((row) => (
+                      <option key={row.id} value={row.id}>{row.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Sub Category</label>
+                  <select
+                    className="form-select"
+                    value={subscriptionForm.subCategoryId || ""}
+                    onChange={(event) => updateSubscriptionFormField("subCategoryId", event.target.value)}
+                  >
+                    <option value="">Select Sub Category</option>
+                    {subscriptionSubCategoryOptions.map((row) => (
+                        <option key={row.id} value={row.id}>{row.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Client</label>
+                  <input
+                    className="form-control datalist-readable-input"
+                    list="subscription-client-list"
+                    value={subscriptionForm.customerName || ""}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const selectedClient = subscriptionCustomerSelectOptions.find(
+                        (row) => String(row.name || "").trim().toLowerCase() === String(nextValue || "").trim().toLowerCase()
+                      );
+                      updateSubscriptionFormField("customerName", nextValue);
+                      updateSubscriptionFormField("customerId", selectedClient?.id || "");
+                    }}
+                    placeholder="Search client"
+                  />
+                  <datalist id="subscription-client-list">
+                    {subscriptionCustomerSelectOptions.map((row) => (
+                      <option key={`subscription-client-${row.id}`} value={row.name} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Plan Duration</label>
+                  <select
+                    className="form-select"
+                    value={subscriptionForm.planDuration || "30"}
+                    onChange={(event) => updateSubscriptionFormField("planDuration", event.target.value)}
+                  >
+                    {SUBSCRIPTION_PLAN_DURATION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  {subscriptionForm.planDuration === "custom" ? (
+                    <div className="mt-2">
+                      <label className="form-label small text-secondary mb-1">Duration (Days)</label>
+                      <input
+                        className="form-control"
+                        value={subscriptionForm.planDurationDays || ""}
+                        onChange={(event) => updateSubscriptionFormField("planDurationDays", event.target.value)}
+                        placeholder="Enter days"
+                        type="number"
+                        min="1"
+                        step="1"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label small text-secondary mb-1">Payment Description</label>
+                  <input
+                    className="form-control"
+                    value={subscriptionForm.paymentDescription || ""}
+                    onChange={(event) => updateSubscriptionFormField("paymentDescription", event.target.value)}
+                    placeholder="Monthly recurring payment"
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Amount</label>
+                  <input
+                    className="form-control"
+                    value={subscriptionForm.amount || ""}
+                    onChange={(event) => updateSubscriptionFormField("amount", event.target.value)}
+                    placeholder="0.00"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Currency</label>
+                  <input
+                    className="form-control"
+                    value={subscriptionForm.currency || defaultCurrency}
+                    onChange={(event) => updateSubscriptionFormField("currency", event.target.value)}
+                    placeholder="INR"
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={subscriptionForm.startDate || ""}
+                    onChange={(event) => updateSubscriptionFormField("startDate", event.target.value)}
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">End Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={subscriptionForm.endDate || ""}
+                    onChange={(event) => updateSubscriptionFormField("endDate", event.target.value)}
+                  />
+                </div>
+                <div className="col-12 col-md-3">
+                  <label className="form-label small text-secondary mb-1">Status</label>
+                  <select
+                    className="form-select"
+                    value={subscriptionForm.status || "Active"}
+                    onChange={(event) => updateSubscriptionFormField("status", event.target.value)}
+                  >
+                    {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-12 col-md-3 d-flex align-items-end">
+                  <div className="d-flex gap-2 w-100">
+                    <button type="submit" className="btn btn-success btn-sm w-100">
+                      {editingSubscriptionId ? "Update Subscription" : "Create Subscription"}
+                    </button>
+                    {editingSubscriptionId ? (
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSubscriptionForm}>
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div className="mt-4" style={{ paddingTop: "25px" }}>
+            <SearchablePaginatedTableCard
+              title="Subscription List"
+              badgeLabel={`${filteredSubscriptionList.length} records`}
+              rows={filteredSubscriptionList}
+              columns={[
+                { key: "subscriptionTitle", label: "Subscription Title" },
+                { key: "customerName", label: "Customer" },
+                { key: "amount", label: "Amount" },
+                { key: "startDate", label: "Start Date" },
+                { key: "endDate", label: "End Date" },
+                { key: "status", label: "Status" }
+              ]}
+              searchPlaceholder="Search subscriptions"
+              noRowsText="No subscriptions yet."
+              searchBy={(row) => `${row.subscriptionTitle} ${row.customerName} ${row.amount} ${row.startDate} ${row.endDate} ${row.status}`}
+              headerBottom={(
+                <div className="d-flex flex-wrap gap-2">
+                  {SUBSCRIPTION_LIST_STATUS_TABS.map((tab) => (
+                    <button
+                      key={`subscription-status-tab-${tab.key}`}
+                      type="button"
+                      className={`btn btn-sm ${subscriptionStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                      onClick={() => setSubscriptionStatusTab(tab.key)}
+                    >
+                      {tab.label} ({subscriptionStatusTabCounts[tab.key] || 0})
+                    </button>
+                  ))}
+                </div>
+              )}
+              renderCells={(row) => [
+                <span className="fw-semibold">{row.subscriptionTitle || "-"}</span>,
+                row.customerName || "-",
+                `${String(row.currency || defaultCurrency).trim() || defaultCurrency} ${String(row.amount || "0").trim()}`,
+                row.startDate || "-",
+                row.endDate || "-",
+                row.status || "Active"
+              ]}
+              renderActions={(row) => (
+                <div className="d-inline-flex gap-2">
+                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openSubscriptionView(row)}>View</button>
+                  <button type="button" className="btn btn-sm btn-outline-success" onClick={() => editSubscription(row)}>Edit</button>
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
+                </div>
+              )}
+            />
+          </div>
+
+          <div id="subscription-alert-setting" className="card p-3 mt-4">
+            <h6 className="mb-3">Subscription Alert Setting</h6>
+            <div className="row g-3">
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">Email Alert</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    type="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search email alert days"
+                    value={subscriptionEmailAlertSearch}
+                    onFocus={() => setSubscriptionEmailAlertSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setSubscriptionEmailAlertSearchOpen(false), 120)}
+                    onChange={(event) => {
+                      setSubscriptionEmailAlertSearch(event.target.value);
+                      setSubscriptionEmailAlertSearchOpen(true);
+                    }}
+                  />
+                  {subscriptionEmailAlertSearchOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Email Alert</div>
+                        {filteredSubscriptionEmailAlertOptions.length ? filteredSubscriptionEmailAlertOptions
+                          .filter((option) => !normalizedSubscriptionEmailAlertDays.includes(String(option.value || "").trim()))
+                          .map((option) => (
+                          <button
+                            key={`subscription-alert-email-${option.value}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              const nextValue = String(option.value || "").trim();
+                              if (!nextValue) {
+                                return;
+                              }
+                              updateSubscriptionFormField("emailAlertDays", [nextValue]);
+                              setSubscriptionEmailAlertSearch("");
+                              setSubscriptionEmailAlertSearchOpen(false);
+                            }}
+                          >
+                            <span className="d-flex align-items-center gap-2">
+                              <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                            </span>
+                          </button>
+                        )) : (
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No alerts found</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                {normalizedSubscriptionEmailAlertDays.length ? (
+                  <div className="d-flex flex-wrap gap-2 mt-2">
+                    {normalizedSubscriptionEmailAlertDays.map((value) => (
+                      <span
+                        key={`selected-email-alert-${value}`}
+                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                          aria-label={`Remove email alert ${value}`}
+                          style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                          onClick={() => {
+                            updateSubscriptionFormField(
+                              "emailAlertDays",
+                              normalizedSubscriptionEmailAlertDays.filter((rowValue) => String(rowValue) !== String(value))
+                            );
+                            setSubscriptionEmailAlertSearch("");
+                          }}
+                        >
+                          <i className="bi bi-x-lg" aria-hidden="true" />
+                        </button>
+                        <span>{getSubscriptionAlertOptionLabel(value)}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">Whatsapp Alert</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    type="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search whatsapp alert days"
+                    value={subscriptionWhatsappAlertSearch}
+                    onFocus={() => setSubscriptionWhatsappAlertSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setSubscriptionWhatsappAlertSearchOpen(false), 120)}
+                    onChange={(event) => {
+                      setSubscriptionWhatsappAlertSearch(event.target.value);
+                      setSubscriptionWhatsappAlertSearchOpen(true);
+                    }}
+                  />
+                  {subscriptionWhatsappAlertSearchOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Whatsapp Alert</div>
+                        {filteredSubscriptionWhatsappAlertOptions.length ? filteredSubscriptionWhatsappAlertOptions
+                          .filter((option) => !normalizedSubscriptionWhatsappAlertDays.includes(String(option.value || "").trim()))
+                          .map((option) => (
+                          <button
+                            key={`subscription-alert-whatsapp-${option.value}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              const nextValue = String(option.value || "").trim();
+                              if (!nextValue) {
+                                return;
+                              }
+                              updateSubscriptionFormField("whatsappAlertDays", [nextValue]);
+                              setSubscriptionWhatsappAlertSearch("");
+                              setSubscriptionWhatsappAlertSearchOpen(false);
+                            }}
+                          >
+                            <span className="d-flex align-items-center gap-2">
+                          <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                            </span>
+                          </button>
+                        )) : (
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No alerts found</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                {normalizedSubscriptionWhatsappAlertDays.length ? (
+                  <div className="d-flex flex-wrap gap-2 mt-2">
+                    {normalizedSubscriptionWhatsappAlertDays.map((value) => (
+                      <span
+                        key={`selected-whatsapp-alert-${value}`}
+                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                          aria-label={`Remove whatsapp alert ${value}`}
+                          style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                          onClick={() => {
+                            updateSubscriptionFormField(
+                              "whatsappAlertDays",
+                              normalizedSubscriptionWhatsappAlertDays.filter((rowValue) => String(rowValue) !== String(value))
+                            );
+                            setSubscriptionWhatsappAlertSearch("");
+                          }}
+                        >
+                          <i className="bi bi-x-lg" aria-hidden="true" />
+                        </button>
+                        <span>{getSubscriptionAlertOptionLabel(value)}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">Assign To</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    type="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search department or user"
+                    value={subscriptionAssignSearch}
+                    onFocus={() => setSubscriptionAssignSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setSubscriptionAssignSearchOpen(false), 120)}
+                    onChange={(event) => {
+                      setSubscriptionAssignSearch(event.target.value);
+                      setSubscriptionAssignSearchOpen(true);
+                    }}
+                  />
+                  {subscriptionAssignSearchOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      {filteredSubscriptionAssignDepartmentOptions.length ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Departments</div>
+                          {filteredSubscriptionAssignDepartmentOptions.map((option) => (
+                            <button
+                              key={`subscription-alert-department-${option.value}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => toggleSubscriptionAssignee(option)}
+                            >
+                              <span className="d-flex align-items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input mt-0"
+                                  checked={normalizedSubscriptionEmailAlertAssignees.some((row) => row.type === "department" && String(row.value) === String(option.value))}
+                                  readOnly
+                                />
+                                <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {filteredSubscriptionAssignUserOptions.length ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Users</div>
+                          {filteredSubscriptionAssignUserOptions.map((option) => (
+                            <button
+                              key={`subscription-alert-user-${option.type}-${option.value}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => toggleSubscriptionAssignee(option)}
+                            >
+                              <span className="d-flex align-items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input mt-0"
+                                  checked={normalizedSubscriptionEmailAlertAssignees.some((row) => row.type === "user" && String(row.value) === String(option.value))}
+                                  readOnly
+                                />
+                                <span>
+                                  <span className="crm-inline-suggestions__item-main d-block">{option.label}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {[option.department, option.email].filter(Boolean).join(" / ") || "No details"}
+                                  </span>
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(!filteredSubscriptionAssignDepartmentOptions.length && !filteredSubscriptionAssignUserOptions.length) ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No department or user found</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="d-flex flex-wrap gap-2 mt-2">
+                  {normalizedSubscriptionEmailAlertAssignees.length ? normalizedSubscriptionEmailAlertAssignees.map((assignee) => (
+                    <span
+                      key={`selected-subscription-alert-assignee-${assignee.type}-${assignee.value}`}
+                      className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                        aria-label={`Remove ${getSubscriptionAlertAssigneeLabel(assignee)}`}
+                        style={{ width: "18px", height: "18px", lineHeight: 1 }}
+                        onClick={() => toggleSubscriptionAssignee(assignee)}
+                      >
+                        <i className="bi bi-x-lg" aria-hidden="true" />
+                      </button>
+                      <span>{getSubscriptionAlertAssigneeLabel(assignee)}</span>
+                    </span>
+                  )) : (
+                    <div className="small text-secondary">No assignees selected yet.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {subscriptionLoading ? <div className="text-secondary small">Loading subscriptions...</div> : null}
+        </>
+      ) : null}
+
+      {subscriptionView ? (
+        <div
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeSubscriptionView}
+        >
+          <div className="card p-3" style={{ width: "min(720px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+              <h5 className="mb-0">Subscription Details</h5>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeSubscriptionView}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="row g-3">
+              <div className="col-12 col-md-6">
+                <div><strong>Title:</strong> {subscriptionView.subscriptionTitle || "-"}</div>
+                <div><strong>Category:</strong> {subscriptionView.categoryName || "-"}</div>
+                <div><strong>Sub Category:</strong> {subscriptionView.subCategoryName || "-"}</div>
+                <div><strong>Status:</strong> {subscriptionView.status || "Active"}</div>
+              </div>
+              <div className="col-12 col-md-6">
+                <div><strong>Customer:</strong> {subscriptionView.customerName || "-"}</div>
+                <div>
+                  <strong>Amount:</strong> {(subscriptionView.currency || defaultCurrency).trim() || defaultCurrency} {String(subscriptionView.amount || "0").trim()}
+                </div>
+                <div><strong>Start Date:</strong> {subscriptionView.startDate || "-"}</div>
+                <div><strong>End Date:</strong> {subscriptionView.endDate || "-"}</div>
+                <div><strong>Next Billing:</strong> {subscriptionView.nextBillingDate || "-"}</div>
+              </div>
+              <div className="col-12">
+                <div><strong>Payment Description:</strong></div>
+                <p className="mb-0 text-secondary">
+                  {subscriptionView.paymentDescription || "No description added."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -11610,7 +13675,7 @@ function StandardModule({ heading, moduleData }) {
   );
 }
 
-export default function BusinessAutopilotModulePage({ moduleKey = "crm", title }) {
+export default function BusinessAutopilotModulePage({ moduleKey = "crm", title, initialTab }) {
   const moduleData = MODULE_CONTENT[moduleKey] || MODULE_CONTENT.crm;
   const heading = title || moduleData.title;
 
@@ -11633,7 +13698,7 @@ export default function BusinessAutopilotModulePage({ moduleKey = "crm", title }
     return <StocksManagementModule />;
   }
   if (moduleKey === "accounts") {
-    return <AccountsErpModule />;
+    return <AccountsErpModule initialTab={initialTab} />;
   }
 
   return <StandardModule heading={heading} moduleData={moduleData} />;

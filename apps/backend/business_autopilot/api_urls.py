@@ -17,6 +17,24 @@ urlpatterns = [
     path("payroll/workspace", api_views.payroll_workspace, name="business_autopilot_payroll_workspace"),
     path("payroll/payslips/<int:payslip_id>/pdf", api_views.payroll_payslip_pdf, name="business_autopilot_payroll_payslip_pdf"),
     path("accounts/workspace", api_views.accounts_workspace, name="business_autopilot_accounts_workspace"),
+    path("accounts/subscription-categories", api_views.accounts_subscription_categories, name="business_autopilot_accounts_subscription_categories"),
+    path(
+        "accounts/subscription-categories/<int:category_id>",
+        api_views.accounts_subscription_category_detail,
+        name="business_autopilot_accounts_subscription_category_detail",
+    ),
+    path("accounts/sub-categories", api_views.accounts_subscription_sub_categories, name="business_autopilot_accounts_subscription_sub_categories"),
+    path(
+        "accounts/sub-categories/<int:sub_category_id>",
+        api_views.accounts_subscription_sub_category_detail,
+        name="business_autopilot_accounts_subscription_sub_category_detail",
+    ),
+    path("accounts/subscriptions", api_views.accounts_subscriptions, name="business_autopilot_accounts_subscriptions"),
+    path(
+        "accounts/subscriptions/<int:subscription_id>",
+        api_views.accounts_subscription_detail,
+        name="business_autopilot_accounts_subscription_detail",
+    ),
     path(
         "accounts/documents/<slug:doc_type>/<str:doc_id>/print",
         api_views.accounts_document_print,
