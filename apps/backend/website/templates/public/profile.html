@@ -23,6 +23,7 @@
         <h2 class="section-title">Profile Details</h2>
         <form class="mt-3" method="post" data-account-form>
           {% csrf_token %}
+          <input type="hidden" name="form_action" value="profile">
           <input type="hidden" name="phone_number" data-phone-hidden value="{{ profile.phone_number|default:'' }}">
           <div class="form-grid">
             <div class="form-field">
@@ -48,6 +49,29 @@
             </div>
           </div>
           <button class="btn btn-outline mt-3" type="submit">Save Profile</button>
+        </form>
+
+        <hr class="my-4">
+
+        <h2 class="section-title">Reset Password</h2>
+        <form class="mt-3" method="post">
+          {% csrf_token %}
+          <input type="hidden" name="form_action" value="password">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Current Password</label>
+              <input type="password" name="current_password" autocomplete="current-password" required>
+            </div>
+            <div class="form-field">
+              <label>New Password</label>
+              <input type="password" name="new_password" autocomplete="new-password" required>
+            </div>
+            <div class="form-field">
+              <label>Confirm New Password</label>
+              <input type="password" name="confirm_password" autocomplete="new-password" required>
+            </div>
+          </div>
+          <button class="btn btn-outline mt-3" type="submit">Update Password</button>
         </form>
     </div>
   </div>

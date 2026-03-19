@@ -2386,13 +2386,9 @@ def accounts_subscriptions(request):
     email_alert_days = _coerce_subscription_alert_days(raw_email_alert_days)
     if raw_email_alert_days is not None and raw_email_alert_days != "" and email_alert_days is None:
         return JsonResponse({"detail": "email_alert_days_invalid"}, status=400)
-    if email_alert_days:
-        email_alert_days = email_alert_days[:1]
     whatsapp_alert_days = _coerce_subscription_alert_days(raw_whatsapp_alert_days)
     if raw_whatsapp_alert_days is not None and raw_whatsapp_alert_days != "" and whatsapp_alert_days is None:
         return JsonResponse({"detail": "whatsapp_alert_days_invalid"}, status=400)
-    if whatsapp_alert_days:
-        whatsapp_alert_days = whatsapp_alert_days[:1]
 
     next_billing_date = _calculate_next_billing_date(start_date)
 
@@ -2476,16 +2472,12 @@ def accounts_subscription_detail(request, subscription_id: int):
             email_alert_days = _coerce_subscription_alert_days(raw_email_alert_days)
             if raw_email_alert_days is not None and raw_email_alert_days != "" and email_alert_days is None:
                 return JsonResponse({"detail": "email_alert_days_invalid"}, status=400)
-            if email_alert_days:
-                email_alert_days = email_alert_days[:1]
             row.email_alert_days = email_alert_days
         if "whatsappAlertDays" in payload or "whatsapp_alert_days" in payload:
             raw_whatsapp_alert_days = payload.get("whatsappAlertDays") if "whatsappAlertDays" in payload else payload.get("whatsapp_alert_days")
             whatsapp_alert_days = _coerce_subscription_alert_days(raw_whatsapp_alert_days)
             if raw_whatsapp_alert_days is not None and raw_whatsapp_alert_days != "" and whatsapp_alert_days is None:
                 return JsonResponse({"detail": "whatsapp_alert_days_invalid"}, status=400)
-            if whatsapp_alert_days:
-                whatsapp_alert_days = whatsapp_alert_days[:1]
             row.whatsapp_alert_days = whatsapp_alert_days
         if "emailAlertAssignTo" in payload or "email_alert_assign_to" in payload:
             raw_email_alert_recipients = payload.get("emailAlertAssignTo") if "emailAlertAssignTo" in payload else payload.get("email_alert_assign_to")

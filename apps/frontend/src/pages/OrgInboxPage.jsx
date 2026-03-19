@@ -1483,6 +1483,11 @@ export default function OrgInboxPage({ productSlug = "" }) {
                                 setComposeRecipientSearchOpen(true);
                               }
                             }}
+                            onClick={() => {
+                              if (composeForm.sentToType !== "all_members") {
+                                setComposeRecipientSearchOpen(true);
+                              }
+                            }}
                             onChange={(event) => {
                               setComposeRecipientSearch(event.target.value);
                               setComposeRecipientSearchOpen(true);

@@ -2796,6 +2796,11 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                             setSalaryHistoryEmployeeSearchOpen(true);
                           }
                         }}
+                        onClick={() => {
+                          if (canEditSalaryHistory) {
+                            setSalaryHistoryEmployeeSearchOpen(true);
+                          }
+                        }}
                         onBlur={() => window.setTimeout(() => setSalaryHistoryEmployeeSearchOpen(false), 120)}
                         onChange={(event) => {
                           const nextValue = event.target.value;
@@ -4782,8 +4787,11 @@ function CrmOnePageModule() {
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
-        const crmContactMatches = sectionKey === "leads" && leadCompanyQuery
+        const crmContactMatches = sectionKey === "leads"
           ? (moduleData.contacts || []).filter((contact) => {
+              if (!leadCompanyQuery) {
+                return true;
+              }
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
               return haystack.includes(leadCompanyQuery);
             }).slice(0, 6)
@@ -4821,8 +4829,11 @@ function CrmOnePageModule() {
                 };
               }).filter((customer) => !hasFollowUpRelatedToQuery || customer.haystack.includes(followUpRelatedToQuery)).slice(0, 6)
           : [];
-        const customerMatches = sectionKey === "leads" && leadCompanyQuery
+        const customerMatches = sectionKey === "leads"
           ? sharedCustomerOptions.filter((customer) => {
+              if (!leadCompanyQuery) {
+                return true;
+              }
               const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
               return haystack.includes(leadCompanyQuery);
             }).slice(0, 6)
@@ -4975,6 +4986,7 @@ function CrmOnePageModule() {
                           placeholder="Search department or employee role"
                           value={teamCategorySearch}
                           onFocus={() => setTeamCategorySearchOpen(true)}
+                          onClick={() => setTeamCategorySearchOpen(true)}
                           onBlur={() => window.setTimeout(() => setTeamCategorySearchOpen(false), 120)}
                           onChange={(event) => {
                             setTeamCategorySearch(event.target.value);
@@ -5091,6 +5103,7 @@ function CrmOnePageModule() {
                           placeholder="Search and select employees"
                           value={teamMemberSearch}
                           onFocus={() => setTeamMemberSearchOpen(true)}
+                          onClick={() => setTeamMemberSearchOpen(true)}
                           onBlur={() => window.setTimeout(() => setTeamMemberSearchOpen(false), 120)}
                           onChange={(event) => {
                             setTeamMemberSearch(event.target.value);
@@ -5302,73 +5315,82 @@ function CrmOnePageModule() {
                                       placeholder={field.placeholder}
                                       value={formValues[field.key] || ""}
                                       onFocus={() => setLeadCompanySearchOpen(true)}
+                          onClick={() => setLeadCompanySearchOpen(true)}
                                       onBlur={() => window.setTimeout(() => setLeadCompanySearchOpen(false), 120)}
                                       onChange={(event) => {
                                         setField(sectionKey, field.key, event.target.value);
                                         setLeadCompanySearchOpen(true);
                                       }}
                                     />
-                                    {showLeadCompanySuggestions && (crmContactMatches.length || customerMatches.length) ? (
-                                      <div className="crm-inline-suggestions">
-                                        {crmContactMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
-                                            {crmContactMatches.map((contact) => (
-                                              <button
-                                                key={`crm-contact-${contact.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setForms((prev) => ({
-                                                    ...prev,
-                                                    leads: {
-                                                      ...prev.leads,
-                                                      name: String(contact.name || "").trim(),
-                                                      company: String(contact.company || "").trim(),
-                                                      phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
-                                                      phone: String(contact.phone || "").trim(),
-                                                    },
-                                                  }));
-                                                  setLeadCompanySearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                              </button>
-                                            ))}
+                                    {showLeadCompanySuggestions ? (
+                                      (crmContactMatches.length || customerMatches.length) ? (
+                                        <div className="crm-inline-suggestions">
+                                          {crmContactMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                              {crmContactMatches.map((contact) => (
+                                                <button
+                                                  key={`crm-contact-${contact.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setForms((prev) => ({
+                                                      ...prev,
+                                                      leads: {
+                                                        ...prev.leads,
+                                                        name: String(contact.name || "").trim(),
+                                                        company: String(contact.company || "").trim(),
+                                                        phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
+                                                        phone: String(contact.phone || "").trim(),
+                                                      },
+                                                    }));
+                                                    setLeadCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                          {customerMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Clients</div>
+                                              {customerMatches.map((customer) => (
+                                                <button
+                                                  key={`crm-customer-${customer.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setForms((prev) => ({
+                                                      ...prev,
+                                                      leads: {
+                                                        ...prev.leads,
+                                                        name: String(customer.clientName || customer.name || "").trim(),
+                                                        company: String(customer.companyName || customer.name || "").trim(),
+                                                        phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
+                                                        phone: String(customer.phone || "").trim(),
+                                                      },
+                                                    }));
+                                                    setLeadCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__item">
+                                            <span className="crm-inline-suggestions__item-main">No company results found</span>
                                           </div>
-                                        ) : null}
-                                        {customerMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">Clients</div>
-                                            {customerMatches.map((customer) => (
-                                              <button
-                                                key={`crm-customer-${customer.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setForms((prev) => ({
-                                                    ...prev,
-                                                    leads: {
-                                                      ...prev.leads,
-                                                      name: String(customer.clientName || customer.name || "").trim(),
-                                                      company: String(customer.companyName || customer.name || "").trim(),
-                                                      phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
-                                                      phone: String(customer.phone || "").trim(),
-                                                    },
-                                                  }));
-                                                  setLeadCompanySearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        ) : null}
-                                      </div>
+                                        </div>
+                                      )
                                     ) : null}
                                   </div>
                                 );
@@ -5384,6 +5406,7 @@ function CrmOnePageModule() {
                                         placeholder="Search user name"
                                         value={leadAssignedUserSearch}
                                         onFocus={() => setLeadAssignedUserSearchOpen(true)}
+                          onClick={() => setLeadAssignedUserSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setLeadAssignedUserSearchOpen(false), 120)}
                                         onChange={(event) => {
                                           setLeadAssignedUserSearch(event.target.value);
@@ -5472,6 +5495,7 @@ function CrmOnePageModule() {
                                         placeholder={field.placeholder}
                                         value={followUpRelatedToSearch}
                                         onFocus={() => setFollowUpRelatedToSearchOpen(true)}
+                          onClick={() => setFollowUpRelatedToSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setFollowUpRelatedToSearchOpen(false), 120)}
                                         onChange={(event) => {
                                           setFollowUpRelatedToSearch(event.target.value);
@@ -5519,6 +5543,7 @@ function CrmOnePageModule() {
                                         placeholder="Search employees"
                                         value={followUpOwnerSearch}
                                         onFocus={() => setFollowUpOwnerSearchOpen(true)}
+                          onClick={() => setFollowUpOwnerSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setFollowUpOwnerSearchOpen(false), 120)}
                                         onChange={(event) => {
                                           setFollowUpOwnerSearch(event.target.value);
@@ -5595,6 +5620,7 @@ function CrmOnePageModule() {
                                       placeholder={field.placeholder}
                                       value={formValues[field.key] || ""}
                                       onFocus={() => setMeetingCompanySearchOpen(true)}
+                          onClick={() => setMeetingCompanySearchOpen(true)}
                                       onBlur={() => window.setTimeout(() => setMeetingCompanySearchOpen(false), 120)}
                                       onChange={(event) => {
                                         setField(sectionKey, field.key, event.target.value);
@@ -5659,6 +5685,7 @@ function CrmOnePageModule() {
                                         placeholder="Search employees"
                                         value={meetingEmployeeSearch}
                                         onFocus={() => setMeetingEmployeeSearchOpen(true)}
+                          onClick={() => setMeetingEmployeeSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setMeetingEmployeeSearchOpen(false), 120)}
                                         onChange={(event) => {
                                           setMeetingEmployeeSearch(event.target.value);
@@ -5736,6 +5763,7 @@ function CrmOnePageModule() {
                                         placeholder="Search reminder channel"
                                         value={meetingReminderChannelSearch}
                                         onFocus={() => setMeetingReminderChannelSearchOpen(true)}
+                          onClick={() => setMeetingReminderChannelSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setMeetingReminderChannelSearchOpen(false), 120)}
                                         onChange={(event) => {
                                           setMeetingReminderChannelSearch(event.target.value);
@@ -7061,6 +7089,7 @@ function ProjectManagementModule() {
                           value={formValues[field.key] || ""}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
                           onFocus={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
+                          onClick={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
                           onBlur={() => {
                             window.setTimeout(() => setShowProjectClientSuggestions(false), 120);
                           }}
@@ -8211,6 +8240,7 @@ function HrManagementModule() {
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
               onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
+                          onClick={() => setAttendanceEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
               onChange={(event) => {
                 onChangeField(field.key, event.target.value);
@@ -8255,6 +8285,7 @@ function HrManagementModule() {
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
               onFocus={() => setHrEmployeeSuggestOpen(true)}
+                          onClick={() => setHrEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setHrEmployeeSuggestOpen(false), 120)}
               onChange={(event) => {
                 onChangeField(field.key, event.target.value);
@@ -9124,7 +9155,7 @@ function HrManagementModule() {
                 <>
                   <button
                     type="button"
-                    className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-secondary"}`}
+                    className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-outline-primary"}`}
                     onClick={() => openAttendanceTaskModal(row)}
                   >
                     Task
@@ -9843,6 +9874,7 @@ function CategoryCrudModule({
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
                       onFocus={() => setTicketingClientSearchOpen(true)}
+                          onClick={() => setTicketingClientSearchOpen(true)}
                       onBlur={() => window.setTimeout(() => setTicketingClientSearchOpen(false), 120)}
                       onChange={(event) => {
                         onChangeField(field.key, event.target.value);
@@ -10225,6 +10257,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   const [subscriptionView, setSubscriptionView] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionStatusTab, setSubscriptionStatusTab] = useState("all");
+  const [subscriptionClientSearchOpen, setSubscriptionClientSearchOpen] = useState(false);
   const [subscriptionEmailAlertSearch, setSubscriptionEmailAlertSearch] = useState("");
   const [subscriptionEmailAlertSearchOpen, setSubscriptionEmailAlertSearchOpen] = useState(false);
   const [subscriptionWhatsappAlertSearch, setSubscriptionWhatsappAlertSearch] = useState("");
@@ -10529,6 +10562,18 @@ function AccountsErpModule({ initialTab = "overview" }) {
       .filter(Boolean),
     [subscriptionCustomerOptions]
   );
+  const normalizedSubscriptionClientSearch = String(subscriptionForm.customerName || "").trim().toLowerCase();
+  const filteredSubscriptionCustomerSelectOptions = useMemo(
+    () => {
+      if (!normalizedSubscriptionClientSearch) {
+        return subscriptionCustomerSelectOptions;
+      }
+      return subscriptionCustomerSelectOptions.filter((row) =>
+        String(row.name || "").toLowerCase().includes(normalizedSubscriptionClientSearch)
+      );
+    },
+    [normalizedSubscriptionClientSearch, subscriptionCustomerSelectOptions]
+  );
   const subscriptionAlertDepartmentOptions = useMemo(
     () => Array.from(new Set((erpUsersForSales || []).map((row) => String(row?.department || "").trim()).filter(Boolean)))
       .map((name) => ({ type: "department", value: name, label: name }))
@@ -10669,6 +10714,22 @@ function AccountsErpModule({ initialTab = "overview" }) {
     setSubscriptionAssignSearchOpen(false);
   }
 
+  function toggleSubscriptionAlertDay(key, value) {
+    const targetKey = key === "whatsappAlertDays" ? "whatsappAlertDays" : "emailAlertDays";
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setSubscriptionForm((prev) => {
+      const current = normalizeSubscriptionAlertDays(prev[targetKey]);
+      const exists = current.includes(normalizedValue);
+      return {
+        ...prev,
+        [targetKey]: exists ? current.filter((rowValue) => rowValue !== normalizedValue) : [...current, normalizedValue],
+      };
+    });
+  }
+
   function resetSubscriptionCategoryForm() {
     setEditingSubscriptionCategoryId("");
     setSubscriptionCategoryForm(createEmptySubscriptionCategory());
@@ -10687,7 +10748,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function updateSubscriptionFormField(key, value) {
     if (key === "emailAlertDays" || key === "whatsappAlertDays") {
       const normalized = normalizeSubscriptionAlertDays(value);
-      setSubscriptionForm((prev) => ({ ...prev, [key]: normalized.length ? [normalized[0]] : [] }));
+      setSubscriptionForm((prev) => ({ ...prev, [key]: normalized }));
       return;
     }
     if (key === "emailAlertAssignees" || key === "whatsappAlertAssignees") {
@@ -13157,25 +13218,56 @@ function AccountsErpModule({ initialTab = "overview" }) {
                   </div>
                 <div className="col-12 col-md-3">
                   <label className="form-label small text-secondary mb-1">Client</label>
-                  <input
-                    className="form-control datalist-readable-input"
-                    list="subscription-client-list"
-                    value={subscriptionForm.customerName || ""}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      const selectedClient = subscriptionCustomerSelectOptions.find(
-                        (row) => String(row.name || "").trim().toLowerCase() === String(nextValue || "").trim().toLowerCase()
-                      );
-                      updateSubscriptionFormField("customerName", nextValue);
-                      updateSubscriptionFormField("customerId", selectedClient?.id || "");
-                    }}
-                    placeholder="Search client"
-                  />
-                  <datalist id="subscription-client-list">
-                    {subscriptionCustomerSelectOptions.map((row) => (
-                      <option key={`subscription-client-${row.id}`} value={row.name} />
-                    ))}
-                  </datalist>
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      className="form-control"
+                      autoComplete="off"
+                      value={subscriptionForm.customerName || ""}
+                      onFocus={() => setSubscriptionClientSearchOpen(true)}
+                      onClick={() => setSubscriptionClientSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setSubscriptionClientSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        const selectedClient = subscriptionCustomerSelectOptions.find(
+                          (row) => String(row.name || "").trim().toLowerCase() === String(nextValue || "").trim().toLowerCase()
+                        );
+                        updateSubscriptionFormField("customerName", nextValue);
+                        updateSubscriptionFormField("customerId", selectedClient?.id || "");
+                        setSubscriptionClientSearchOpen(true);
+                      }}
+                      placeholder="Search client"
+                    />
+                    {subscriptionClientSearchOpen ? (
+                      filteredSubscriptionCustomerSelectOptions.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Clients</div>
+                            {filteredSubscriptionCustomerSelectOptions.map((row) => (
+                              <button
+                                key={`subscription-client-${row.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  updateSubscriptionFormField("customerName", row.name);
+                                  updateSubscriptionFormField("customerId", row.id);
+                                  setSubscriptionClientSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{row.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No clients found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
                 </div>
                 <div className="col-12 col-md-3">
                   <label className="form-label small text-secondary mb-1">Plan Duration</label>
@@ -13203,7 +13295,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     </div>
                   ) : null}
                 </div>
-                <div className="col-12 col-md-6">
+                <div className="col-12 col-md-5">
                   <label className="form-label small text-secondary mb-1">Payment Description</label>
                   <input
                     className="form-control"
@@ -13212,7 +13304,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     placeholder="Monthly recurring payment"
                   />
                 </div>
-                <div className="col-12 col-md-3">
+                <div className="col-12 col-md-2">
                   <label className="form-label small text-secondary mb-1">Amount</label>
                   <input
                     className="form-control"
@@ -13224,7 +13316,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     step="0.01"
                   />
                 </div>
-                <div className="col-12 col-md-3">
+                <div className="col-12 col-md-2">
                   <label className="form-label small text-secondary mb-1">Currency</label>
                   <input
                     className="form-control"
@@ -13263,7 +13355,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     ))}
                   </select>
                 </div>
-                <div className="col-12 col-md-3 d-flex align-items-end">
+                <div className="col-12 col-md-2 d-flex align-items-end">
                   <div className="d-flex gap-2 w-100">
                     <button type="submit" className="btn btn-success btn-sm w-100">
                       {editingSubscriptionId ? "Update Subscription" : "Create Subscription"}
@@ -13340,6 +13432,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     placeholder="Search email alert days"
                     value={subscriptionEmailAlertSearch}
                     onFocus={() => setSubscriptionEmailAlertSearchOpen(true)}
+                          onClick={() => setSubscriptionEmailAlertSearchOpen(true)}
                     onBlur={() => window.setTimeout(() => setSubscriptionEmailAlertSearchOpen(false), 120)}
                     onChange={(event) => {
                       setSubscriptionEmailAlertSearch(event.target.value);
@@ -13350,29 +13443,27 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
                       <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Email Alert</div>
-                        {filteredSubscriptionEmailAlertOptions.length ? filteredSubscriptionEmailAlertOptions
-                          .filter((option) => !normalizedSubscriptionEmailAlertDays.includes(String(option.value || "").trim()))
-                          .map((option) => (
-                          <button
-                            key={`subscription-alert-email-${option.value}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              const nextValue = String(option.value || "").trim();
-                              if (!nextValue) {
-                                return;
-                              }
-                              updateSubscriptionFormField("emailAlertDays", [nextValue]);
-                              setSubscriptionEmailAlertSearch("");
-                              setSubscriptionEmailAlertSearchOpen(false);
-                            }}
-                          >
-                            <span className="d-flex align-items-center gap-2">
-                              <span className="crm-inline-suggestions__item-main">{option.label}</span>
-                            </span>
-                          </button>
-                        )) : (
+                        {filteredSubscriptionEmailAlertOptions.length ? filteredSubscriptionEmailAlertOptions.map((option) => {
+                          const nextValue = String(option.value || "").trim();
+                          const checked = normalizedSubscriptionEmailAlertDays.includes(nextValue);
+                          return (
+                            <button
+                              key={`subscription-alert-email-${option.value}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                toggleSubscriptionAlertDay("emailAlertDays", nextValue);
+                                setSubscriptionEmailAlertSearch("");
+                              }}
+                            >
+                              <span className="d-flex align-items-center gap-2">
+                                <input type="checkbox" className="form-check-input mt-0" checked={checked} readOnly />
+                                <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                              </span>
+                            </button>
+                          );
+                        }) : (
                           <div className="crm-inline-suggestions__item">
                             <span className="crm-inline-suggestions__item-main">No alerts found</span>
                           </div>
@@ -13419,6 +13510,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     placeholder="Search whatsapp alert days"
                     value={subscriptionWhatsappAlertSearch}
                     onFocus={() => setSubscriptionWhatsappAlertSearchOpen(true)}
+                          onClick={() => setSubscriptionWhatsappAlertSearchOpen(true)}
                     onBlur={() => window.setTimeout(() => setSubscriptionWhatsappAlertSearchOpen(false), 120)}
                     onChange={(event) => {
                       setSubscriptionWhatsappAlertSearch(event.target.value);
@@ -13429,29 +13521,27 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
                       <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Whatsapp Alert</div>
-                        {filteredSubscriptionWhatsappAlertOptions.length ? filteredSubscriptionWhatsappAlertOptions
-                          .filter((option) => !normalizedSubscriptionWhatsappAlertDays.includes(String(option.value || "").trim()))
-                          .map((option) => (
-                          <button
-                            key={`subscription-alert-whatsapp-${option.value}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              const nextValue = String(option.value || "").trim();
-                              if (!nextValue) {
-                                return;
-                              }
-                              updateSubscriptionFormField("whatsappAlertDays", [nextValue]);
-                              setSubscriptionWhatsappAlertSearch("");
-                              setSubscriptionWhatsappAlertSearchOpen(false);
-                            }}
-                          >
-                            <span className="d-flex align-items-center gap-2">
-                          <span className="crm-inline-suggestions__item-main">{option.label}</span>
-                            </span>
-                          </button>
-                        )) : (
+                        {filteredSubscriptionWhatsappAlertOptions.length ? filteredSubscriptionWhatsappAlertOptions.map((option) => {
+                          const nextValue = String(option.value || "").trim();
+                          const checked = normalizedSubscriptionWhatsappAlertDays.includes(nextValue);
+                          return (
+                            <button
+                              key={`subscription-alert-whatsapp-${option.value}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                toggleSubscriptionAlertDay("whatsappAlertDays", nextValue);
+                                setSubscriptionWhatsappAlertSearch("");
+                              }}
+                            >
+                              <span className="d-flex align-items-center gap-2">
+                                <input type="checkbox" className="form-check-input mt-0" checked={checked} readOnly />
+                                <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                              </span>
+                            </button>
+                          );
+                        }) : (
                           <div className="crm-inline-suggestions__item">
                             <span className="crm-inline-suggestions__item-main">No alerts found</span>
                           </div>
@@ -13498,6 +13588,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     placeholder="Search department or user"
                     value={subscriptionAssignSearch}
                     onFocus={() => setSubscriptionAssignSearchOpen(true)}
+                          onClick={() => setSubscriptionAssignSearchOpen(true)}
                     onBlur={() => window.setTimeout(() => setSubscriptionAssignSearchOpen(false), 120)}
                     onChange={(event) => {
                       setSubscriptionAssignSearch(event.target.value);

@@ -1,6 +1,9 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.views import redirect_to_login
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, redirect
@@ -2628,33 +2631,60 @@ def profile_view(request):
     org = _resolve_org_for_user(request.user)
 
     if request.method == "POST":
+        form_action = str(request.POST.get("form_action") or "profile").strip().lower()
+        if form_action == "password":
+            current_password = str(request.POST.get("current_password") or "").strip()
+            new_password = str(request.POST.get("new_password") or "").strip()
+            confirm_password = str(request.POST.get("confirm_password") or "").strip()
+            if not current_password:
+                messages.error(request, "Current password is required.")
+            elif not new_password:
+                messages.error(request, "New password is required.")
+            elif not confirm_password:
+                messages.error(request, "Confirm password is required.")
+            elif new_password != confirm_password:
+                messages.error(request, "New password and confirm password must match.")
+            elif not request.user.check_password(current_password):
+                messages.error(request, "Current password is incorrect.")
+            else:
+                try:
+                    validate_password(new_password, user=request.user)
+                    request.user.set_password(new_password)
+                    request.user.save(update_fields=["password"])
+                    update_session_auth_hash(request, request.user)
+                    messages.success(request, "Password updated successfully.")
+                except ValidationError as error:
+                    messages.error(request, " ".join(error.messages))
+            return redirect("/my-account/profile/")
+
         phone_number = (request.POST.get("phone_number") or "").strip()
         if not phone_number:
             messages.error(request, "Phone number is required.")
-        else:
-            request.user.first_name = (request.POST.get("first_name") or "").strip()
-            request.user.last_name = (request.POST.get("last_name") or "").strip()
-            email = (request.POST.get("email") or "").strip()
-            if email:
-                old_email = (request.user.email or "").strip().lower()
-                new_email = email.lower()
-                if old_email != new_email:
-                    if User.objects.filter(email__iexact=new_email).exclude(id=request.user.id).exists():
-                        messages.error(request, "Email already in use.")
-                        context.update({"profile": profile})
-                        return render(request, "public/profile.html", context)
-                    request.user.email_verified = False
-                    request.user.email_verified_at = None
-                request.user.email = email
-            request.user.save()
-            if email and old_email != new_email:
-                send_email_verification(request.user, request=request, force=True)
+            return redirect("/my-account/profile/")
 
-            if not profile:
-                profile = UserProfile(user=request.user)
-            profile.phone_number = phone_number
-            profile.save()
-            messages.success(request, "Profile updated.")
+        request.user.first_name = (request.POST.get("first_name") or "").strip()
+        request.user.last_name = (request.POST.get("last_name") or "").strip()
+        email = (request.POST.get("email") or "").strip()
+        if email:
+            old_email = (request.user.email or "").strip().lower()
+            new_email = email.lower()
+            if old_email != new_email:
+                if User.objects.filter(email__iexact=new_email).exclude(id=request.user.id).exists():
+                    messages.error(request, "Email already in use.")
+                    return redirect("/my-account/profile/")
+                request.user.email_verified = False
+                request.user.email_verified_at = None
+            request.user.email = email
+        request.user.save()
+        if email and old_email != new_email:
+            send_email_verification(request.user, request=request, force=True)
+
+        if not profile:
+            profile = UserProfile(user=request.user)
+        profile.phone_number = phone_number
+        profile.save()
+        messages.success(request, "Profile updated.")
+        return redirect("/my-account/profile/")
 
     context.update({
         "profile": profile,
