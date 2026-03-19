@@ -9,19 +9,19 @@ echo "Deploying code to ${SERVER_HOST}:${SERVER_PROJECT_PATH}"
 
 cd "$(dirname "$0")/.."
 
-ssh "$SERVER_HOST" 'bash -s' <<EOF
+ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' bash -s" <<'EOF'
 set -euo pipefail
 
-min_free_mb="$SERVER_MIN_FREE_MB"
+min_free_mb="${SERVER_MIN_FREE_MB:-1024}"
 
 check_free_mb() {
-  df -Pm / | awk 'NR==2 {print \$4}'
+  df -Pm / | awk 'NR==2 {print $4}'
 }
 
 truncate_file_if_exists() {
-  local file_path="\$1"
-  if [ -f "\$file_path" ]; then
-    truncate -s 0 "\$file_path" || true
+  local file_path="$1"
+  if [ -f "$file_path" ]; then
+    truncate -s 0 "$file_path" || true
   fi
 }
 
@@ -61,29 +61,29 @@ GUARD_EOF
 
 run_preflight_cleanup() {
   local before_free after_free
-  before_free="\$(check_free_mb)"
-  echo "Preflight free space before cleanup: \${before_free} MB"
+  before_free="$(check_free_mb)"
+  echo "Preflight free space before cleanup: ${before_free} MB"
 
   truncate_file_if_exists "/opt/openpanel/docker/data/op-ch-logs/clickhouse-server.log"
   truncate_file_if_exists "/opt/openpanel/docker/data/op-ch-logs/clickhouse-server.err.log"
   rm -f /opt/openpanel/docker/data/op-ch-logs/*.gz || true
 
-  clickhouse_id=\$(docker ps -aqf "name=^openpanel-op-ch-1$" | head -n 1 || true)
-  if [ -n "\${clickhouse_id}" ]; then
-    truncate_file_if_exists "/var/lib/docker/containers/\${clickhouse_id}/\${clickhouse_id}-json.log"
+  clickhouse_id=$(docker ps -aqf "name=^openpanel-op-ch-1$" | head -n 1 || true)
+  if [ -n "${clickhouse_id}" ]; then
+    truncate_file_if_exists "/var/lib/docker/containers/${clickhouse_id}/${clickhouse_id}-json.log"
   fi
 
   journalctl --vacuum-size=200M >/dev/null 2>&1 || true
   apt-get clean >/dev/null 2>&1 || true
-  rm -f "\$SERVER_PROJECT_PATH/.git/index.lock" >/dev/null 2>&1 || true
+  rm -f "${SERVER_PROJECT_PATH}/.git/index.lock" >/dev/null 2>&1 || true
 
   ensure_disk_guard_cron
   /usr/local/bin/workzilla_log_guard.sh >/dev/null 2>&1 || true
 
-  after_free="\$(check_free_mb)"
-  echo "Preflight free space after cleanup: \${after_free} MB"
-  if [ "\${after_free}" -lt "\${min_free_mb}" ]; then
-    echo "ERROR: Free disk below threshold (\${after_free} MB < \${min_free_mb} MB). Aborting deploy for safety."
+  after_free="$(check_free_mb)"
+  echo "Preflight free space after cleanup: ${after_free} MB"
+  if [ "${after_free}" -lt "${min_free_mb}" ]; then
+    echo "ERROR: Free disk below threshold (${after_free} MB < ${min_free_mb} MB). Aborting deploy for safety."
     exit 1
   fi
 }
@@ -114,7 +114,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   sleep 1
 done
 
-echo "Live SHA: \$(git rev-parse --short HEAD)"
+echo "Live SHA: $(git rev-parse --short HEAD)"
 echo "Gunicorn:"
 pgrep -af "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000"
 EOF
