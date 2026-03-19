@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your add-on request is received.
@@ -8,5 +10,4 @@ Payment Status: {{ payment_status }}
 
 {{ status_note }}
 
-Thanks,
-Work Zilla Work Suite
+{% include "emails/_email_footer.txt" %}

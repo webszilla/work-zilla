@@ -1526,6 +1526,10 @@ function createEmptyProjectExpense() {
     date: getTodayIsoDate(),
     payee: "",
     notes: "",
+    attachmentName: "",
+    attachmentType: "",
+    attachmentSizeLabel: "",
+    attachmentSize: 0,
   };
 }
 
@@ -1538,6 +1542,10 @@ function normalizeProjectExpenseRecord(row = {}) {
     date: String(row.date || getTodayIsoDate()).trim() || getTodayIsoDate(),
     payee: String(row.payee || "").trim(),
     notes: String(row.notes || "").trim(),
+    attachmentName: String(row.attachmentName || "").trim(),
+    attachmentType: String(row.attachmentType || "").trim(),
+    attachmentSizeLabel: String(row.attachmentSizeLabel || "").trim(),
+    attachmentSize: Number(row.attachmentSize || 0),
   };
 }
 
@@ -1860,6 +1868,29 @@ function readSharedAccountsData() {
 
 function readSharedAccountsCustomers() {
   return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+function normalizeSharedVendorDisplayName(row = {}) {
+  const vendorName = String(
+    row.vendorName
+      || row.companyName
+      || row.name
+      || row.contactName
+      || row.clientName
+      || ""
+  ).trim();
+  if (!vendorName) {
+    return "";
+  }
+  return vendorName;
+}
+
+function readSharedAccountsVendors() {
+  const accountData = readSharedAccountsData();
+  const rows = Array.isArray(accountData?.vendors) ? accountData.vendors : [];
+  return rows
+    .map((row) => normalizeSharedVendorDisplayName(row))
+    .filter(Boolean);
 }
 
 function readSharedCrmContacts() {
@@ -7266,9 +7297,11 @@ function ProjectDetailPage() {
   const [editingExpenseId, setEditingExpenseId] = useState("");
   const [crmTeams, setCrmTeams] = useState(() => readSharedCrmTeams());
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
+  const [accountsVendors, setAccountsVendors] = useState(() => readSharedAccountsVendors());
   const [erpUsers, setErpUsers] = useState([]);
   const [customTeamInput, setCustomTeamInput] = useState("");
   const [customEmployeeInput, setCustomEmployeeInput] = useState("");
+  const [expensePayeeSearchOpen, setExpensePayeeSearchOpen] = useState(false);
 
   useEffect(() => {
     setModuleData(readProjectWorkspaceData());
@@ -7282,6 +7315,7 @@ function ProjectDetailPage() {
     function syncSharedDirectories() {
       setCrmTeams(readSharedCrmTeams());
       setHrEmployees(readSharedHrEmployees());
+      setAccountsVendors(readSharedAccountsVendors());
     }
     syncSharedDirectories();
     window.addEventListener("storage", syncSharedDirectories);
@@ -7347,6 +7381,32 @@ function ProjectDetailPage() {
     ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [erpUsers, hrEmployees, projectDetail.employees]
   );
+  const vendorOptions = useMemo(
+    () => Array.from(new Set([
+      ...accountsVendors.map((item) => String(item || "").trim()),
+      ...(projectDetail.expenses || []).map((row) => String(row?.payee || "").trim()),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [accountsVendors, projectDetail.expenses]
+  );
+  const normalizedExpensePayeeSearch = String(expenseForm.payee || "").trim().toLowerCase();
+  const filteredExpenseVendorOptions = useMemo(
+    () => vendorOptions.filter((option) => {
+      if (!normalizedExpensePayeeSearch) {
+        return true;
+      }
+      return option.toLowerCase().includes(normalizedExpensePayeeSearch);
+    }),
+    [normalizedExpensePayeeSearch, vendorOptions]
+  );
+  const filteredExpenseEmployeeOptions = useMemo(
+    () => employeeOptions.filter((option) => {
+      if (!normalizedExpensePayeeSearch) {
+        return true;
+      }
+      return option.toLowerCase().includes(normalizedExpensePayeeSearch);
+    }),
+    [employeeOptions, normalizedExpensePayeeSearch]
+  );
 
   function updateProjectDetails(updater) {
     setModuleData((prev) => {
@@ -7411,6 +7471,30 @@ function ProjectDetailPage() {
     });
     setEditingExpenseId("");
     setExpenseForm(createEmptyProjectExpense());
+  }
+
+  function handleExpenseAttachmentChange(file) {
+    if (!file) {
+      return;
+    }
+    const lowerName = String(file.name || "").trim().toLowerCase();
+    const hasValidType = String(file.type || "").startsWith("image/") || String(file.type || "").trim() === "application/pdf";
+    const hasValidExtension = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"].some((ext) => lowerName.endsWith(ext));
+    if (!hasValidType && !hasValidExtension) {
+      showUploadAlert("Expense attachment must be an image or PDF.");
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      showUploadAlert("Expense attachment size must be under 1 MB.");
+      return;
+    }
+    setExpenseForm((prev) => ({
+      ...prev,
+      attachmentName: file.name || "expense-attachment",
+      attachmentType: file.type || "",
+      attachmentSizeLabel: formatFileSizeLabel(file.size),
+      attachmentSize: file.size,
+    }));
   }
 
   function editExpense(row) {
@@ -7664,11 +7748,89 @@ function ProjectDetailPage() {
               </div>
               <div className="col-12 col-md-4">
                 <label className="form-label small text-secondary mb-1">Payee / Vendor</label>
-                <input className="form-control" value={expenseForm.payee || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, payee: event.target.value }))} placeholder="Vendor or employee name" />
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    className="form-control"
+                    value={expenseForm.payee || ""}
+                    onFocus={() => setExpensePayeeSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setExpensePayeeSearchOpen(false), 120)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setExpenseForm((prev) => ({ ...prev, payee: value }));
+                      setExpensePayeeSearchOpen(true);
+                    }}
+                    placeholder="Vendor or employee name"
+                  />
+                  {expensePayeeSearchOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      {filteredExpenseVendorOptions.length ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Vendors</div>
+                          {filteredExpenseVendorOptions.map((vendor) => (
+                            <button
+                              key={`project-expense-payee-vendor-${vendor}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setExpenseForm((prev) => ({ ...prev, payee: vendor }));
+                                setExpensePayeeSearchOpen(false);
+                              }}
+                            >
+                              <span className="crm-inline-suggestions__item-main">{vendor}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {filteredExpenseEmployeeOptions.length ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Employees</div>
+                          {filteredExpenseEmployeeOptions.map((employee) => (
+                            <button
+                              key={`project-expense-payee-employee-${employee}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setExpenseForm((prev) => ({ ...prev, payee: employee }));
+                                setExpensePayeeSearchOpen(false);
+                              }}
+                            >
+                              <span className="crm-inline-suggestions__item-main">{employee}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(!filteredExpenseVendorOptions.length && !filteredExpenseEmployeeOptions.length) ? (
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No vendor or employee found</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <div className="col-12 col-md-8">
+              <div className="col-12 col-md-4">
                 <label className="form-label small text-secondary mb-1">Notes</label>
                 <input className="form-control" value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional expense note" />
+              </div>
+              <div className="col-12 col-md-4">
+                <label className="form-label small text-secondary mb-1">File Upload</label>
+                <input
+                  type="file"
+                  className="form-control"
+                  accept="image/*,.pdf"
+                  onChange={(event) => handleExpenseAttachmentChange(event.target.files?.[0])}
+                />
+                {expenseForm.attachmentName ? (
+                  <div className="small text-secondary mt-2">
+                    <i className="bi bi-paperclip me-1" aria-hidden="true" />
+                    {expenseForm.attachmentName}
+                    {expenseForm.attachmentSizeLabel ? ` (${expenseForm.attachmentSizeLabel})` : ""}
+                  </div>
+                ) : null}
               </div>
               <div className="col-12 d-flex gap-2">
                 <button type="submit" className="btn btn-success btn-sm">{editingExpenseId ? "Update Expense" : "Add Expense"}</button>

@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your payment proof has been approved.
@@ -7,5 +9,4 @@ Billing Cycle: {{ billing_cycle }}
 Amount: {{ currency }} {{ amount }}
 Status: Approved
 
-Thanks,
-Work Zilla Team
+{% include "emails/_email_footer.txt" %}

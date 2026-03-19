@@ -102,6 +102,36 @@ class WhatsAppCloudSettings(models.Model):
         return cls.objects.create(provider="meta_whatsapp_cloud")
 
 
+class AmazonSESSettings(models.Model):
+    provider = models.CharField(max_length=40, default="amazon_ses", unique=True)
+    is_active = models.BooleanField(default=False)
+    aws_region = models.CharField(max_length=40, default="us-east-1")
+    access_key_id = models.CharField(max_length=128, blank=True, default="")
+    secret_access_key = models.TextField(blank=True, default="")
+    smtp_username = models.CharField(max_length=128, blank=True, default="")
+    smtp_password = models.TextField(blank=True, default="")
+    sender_email = models.EmailField(max_length=254, blank=True, default="")
+    sender_name = models.CharField(max_length=120, blank=True, default="")
+    reply_to_email = models.EmailField(max_length=254, blank=True, default="")
+    configuration_set = models.CharField(max_length=120, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Amazon SES Settings"
+        verbose_name_plural = "Amazon SES Settings"
+
+    def __str__(self):
+        return "Amazon SES Settings"
+
+    @classmethod
+    def get_solo(cls):
+        obj = cls.objects.filter(provider="amazon_ses").first()
+        if obj:
+            return obj
+        return cls.objects.create(provider="amazon_ses")
+
+
 class SystemBackupManagerSettings(models.Model):
     SCHEDULE_CHOICES = (
         ("daily", "Daily"),

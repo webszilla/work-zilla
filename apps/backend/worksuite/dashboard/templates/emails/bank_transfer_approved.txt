@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your bank transfer has been approved.
@@ -8,5 +10,4 @@ Amount: {{ currency }} {{ amount }}
 Reference: {{ reference_no }}
 Status: Approved
 
-Thanks,
-Work Zilla Work Suite
+{% include "emails/_email_footer.txt" %}

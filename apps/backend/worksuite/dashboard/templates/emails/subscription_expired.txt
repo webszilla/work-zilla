@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your subscription has expired.
@@ -7,5 +9,4 @@ End Date: {{ end_date }}
 
 Please renew to continue access.
 
-Thanks,
-Work Zilla Work Suite
+{% include "emails/_email_footer.txt" %}

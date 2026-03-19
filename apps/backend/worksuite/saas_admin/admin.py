@@ -9,6 +9,7 @@ from .models import (
     Product,
     MonitorOrgProductEntitlement,
     OpenAISettings,
+    AmazonSESSettings,
     GlobalMediaStorageSettings,
     BackupRetentionSettings,
     OrganizationBackupRetentionOverride,
@@ -83,6 +84,13 @@ class OpenAISettingsAdmin(admin.ModelAdmin):
     list_display = ("provider", "model", "is_active", "updated_at")
     list_filter = ("is_active",)
     search_fields = ("provider", "model")
+
+
+@admin.register(AmazonSESSettings)
+class AmazonSESSettingsAdmin(admin.ModelAdmin):
+    list_display = ("provider", "is_active", "aws_region", "sender_email", "sender_name", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("provider", "sender_email", "sender_name")
 
 
 @admin.register(GlobalMediaStorageSettings)

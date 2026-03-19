@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Weekly SaaS Admin Report
 Generated at: {{ generated_at }}
 
@@ -25,3 +27,5 @@ Signups - One Month: {{ product.signups.month }}
 Signups - One Year: {{ product.signups.year }}
 Signups - All Time: {{ product.signups.all_time }}
 {% endfor %}
+
+{% include "emails/_email_footer.txt" %}

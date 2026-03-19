@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your product is now active.
@@ -7,5 +9,4 @@ Plan: {{ plan_name }}
 
 You can now access your dashboard from My Account.
 
-Thanks,
-Work Zilla Team
+{% include "emails/_email_footer.txt" %}

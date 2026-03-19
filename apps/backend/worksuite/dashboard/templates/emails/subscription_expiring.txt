@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your subscription is expiring soon.
@@ -9,5 +11,4 @@ Days left: {{ days_left }}
 
 Please renew to avoid interruption.
 
-Thanks,
-Work Zilla
+{% include "emails/_email_footer.txt" %}

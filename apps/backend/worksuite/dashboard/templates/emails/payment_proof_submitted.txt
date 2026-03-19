@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your payment proof has been submitted successfully.
@@ -9,5 +11,4 @@ Status: Awaiting admin approval
 
 You will receive another email once approved or rejected.
 
-Thanks,
-Work Zilla Team
+{% include "emails/_email_footer.txt" %}

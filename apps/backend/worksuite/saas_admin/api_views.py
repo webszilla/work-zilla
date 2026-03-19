@@ -55,6 +55,7 @@ from .models import (
     MonitorOrgProductEntitlement,
     Product,
     OpenAISettings,
+    AmazonSESSettings,
     WhatsAppCloudSettings,
     GlobalMediaStorageSettings,
     BackupRetentionSettings,
@@ -4566,6 +4567,25 @@ def _serialize_whatsapp_cloud_settings(settings_obj):
     }
 
 
+def _serialize_ses_settings(settings_obj):
+    return {
+        "provider": "amazon_ses",
+        "is_active": bool(settings_obj.is_active),
+        "aws_region": settings_obj.aws_region or "us-east-1",
+        "access_key_id_masked": _mask_secret(settings_obj.access_key_id),
+        "has_secret_access_key": bool(settings_obj.secret_access_key),
+        "has_access_key_id": bool(settings_obj.access_key_id),
+        "secret_access_key_masked": _mask_secret(settings_obj.secret_access_key),
+        "smtp_username": settings_obj.smtp_username or "",
+        "has_smtp_password": bool(settings_obj.smtp_password),
+        "sender_email": settings_obj.sender_email or "",
+        "sender_name": settings_obj.sender_name or "",
+        "reply_to_email": settings_obj.reply_to_email or "",
+        "configuration_set": settings_obj.configuration_set or "",
+        "updated_at": _format_datetime(settings_obj.updated_at),
+    }
+
+
 @login_required
 @require_http_methods(["GET", "PUT"])
 def whatsapp_cloud_settings(request):
@@ -4634,6 +4654,61 @@ def whatsapp_cloud_settings(request):
     settings_obj.save()
 
     return JsonResponse(_serialize_whatsapp_cloud_settings(settings_obj))
+
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+def ses_settings(request):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = AmazonSESSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse(_serialize_ses_settings(settings_obj))
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    aws_region = str(payload.get("aws_region", "") or "").strip()
+    access_key_id = str(payload.get("access_key_id", "") or "").strip()
+    secret_access_key = str(payload.get("secret_access_key", "") or "").strip()
+    smtp_username = str(payload.get("smtp_username", "") or "").strip()
+    smtp_password = str(payload.get("smtp_password", "") or "").strip()
+    sender_email = str(payload.get("sender_email", "") or "").strip()
+    sender_name = str(payload.get("sender_name", "") or "").strip()
+    reply_to_email = str(payload.get("reply_to_email", "") or "").strip()
+    configuration_set = str(payload.get("configuration_set", "") or "").strip()
+    is_active = bool(payload.get("is_active", False))
+
+    if is_active and not access_key_id and not settings_obj.access_key_id:
+        return JsonResponse({"access_key_id": ["required"], "detail": "AWS Access Key ID is required."}, status=400)
+    if is_active and not secret_access_key and not settings_obj.secret_access_key:
+        return JsonResponse({"secret_access_key": ["required"], "detail": "AWS Secret Access Key is required."}, status=400)
+    if is_active and not aws_region:
+        return JsonResponse({"aws_region": ["required"], "detail": "AWS Region is required."}, status=400)
+    if is_active and not sender_email:
+        return JsonResponse({"sender_email": ["required"], "detail": "Sender Email is required."}, status=400)
+
+    if aws_region:
+        settings_obj.aws_region = aws_region
+    if access_key_id:
+        settings_obj.access_key_id = access_key_id
+    if secret_access_key:
+        settings_obj.secret_access_key = secret_access_key
+    if smtp_username or payload.get("smtp_username") is not None:
+        settings_obj.smtp_username = smtp_username
+    if smtp_password or payload.get("smtp_password") is not None:
+        settings_obj.smtp_password = smtp_password
+    settings_obj.sender_email = sender_email
+    settings_obj.sender_name = sender_name
+    settings_obj.reply_to_email = reply_to_email
+    settings_obj.configuration_set = configuration_set
+    settings_obj.is_active = is_active
+    settings_obj.save()
+
+    return JsonResponse(_serialize_ses_settings(settings_obj))
 
 
 @login_required

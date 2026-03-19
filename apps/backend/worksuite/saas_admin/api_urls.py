@@ -10,6 +10,7 @@ urlpatterns = [
     path("ai-chatbot/openai/settings", api_views.ai_chatbot_openai_settings, name="saas_admin_ai_chatbot_openai_settings"),
     path("ai-chatbot/openai/test", api_views.ai_chatbot_openai_test, name="saas_admin_ai_chatbot_openai_test"),
     path("settings/whatsapp-cloud", api_views.whatsapp_cloud_settings, name="saas_admin_whatsapp_cloud_settings"),
+    path("settings/ses", api_views.ses_settings, name="saas_admin_ses_settings"),
     path("settings/retention-policy", api_views.retention_policy_settings, name="saas_admin_retention_policy"),
     path("settings/media-storage", api_views.media_storage_settings, name="saas_admin_media_storage_settings"),
     path("settings/application-downloads", api_views.application_downloads_settings, name="saas_admin_application_downloads"),

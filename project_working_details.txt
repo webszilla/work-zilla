@@ -143,6 +143,16 @@ IMPORTANT SECURITY NOTE
 - Keep secrets in secure vault/environment variables.
 - OpenAdmin URL noted for ops context: http://89.167.16.104:2087/
 
+SES CREDENTIALS (SECURE NOTES)
+- Do not paste AWS/SES access keys in `project_working_details.txt` or any repo file.
+- Save the values in local environment variables / secrets manager only.
+- For Django, export before run (example):
+  - `export AWS_ACCESS_KEY_ID=<access_key>`
+  - `export AWS_SECRET_ACCESS_KEY=<secret_key>`
+  - `export SES_REGION=us-east-1`
+- Then load SES keys in app settings from env (or platform secrets) and save via:
+  - Amazon SES page in SaaS Admin -> /saas-admin/ses
+
 ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
 - Maintain below block on each production publish:
   - Published at (UTC):

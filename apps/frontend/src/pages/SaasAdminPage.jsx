@@ -29,6 +29,12 @@ export default function SaasAdminPage() {
       timeout_seconds: 15
     }
   });
+  const [sesState, setSesState] = useState({
+    loading: false,
+    loaded: false,
+    error: "",
+    data: null
+  });
   const [setupState, setSetupState] = useState({
     importing: false,
     downloading: false,
@@ -111,6 +117,48 @@ export default function SaasAdminPage() {
     const onFocus = () => {
       if (active && window.location.pathname.endsWith("/saas-admin")) {
         loadWhatsAppSettings();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname !== "/saas-admin") {
+      return;
+    }
+    let active = true;
+    async function loadSesSettings() {
+      try {
+        const data = await apiFetch("/api/saas-admin/settings/ses");
+        if (!active) {
+          return;
+        }
+        setSesState({
+          loading: false,
+          loaded: true,
+          error: "",
+          data
+        });
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setSesState((prev) => ({
+          ...prev,
+          loading: false,
+          loaded: true,
+          error: error?.message || "Unable to load Amazon SES settings."
+        }));
+      }
+    }
+    loadSesSettings();
+    const onFocus = () => {
+      if (active && window.location.pathname.endsWith("/saas-admin")) {
+        loadSesSettings();
       }
     };
     window.addEventListener("focus", onFocus);
@@ -550,6 +598,29 @@ export default function SaasAdminPage() {
                           Configure
                         </Link>
                         {whatsAppState.data?.is_active ? (
+                          <span className="wz-status-pill align-self-center">Active</span>
+                        ) : (
+                          <span className="wz-status-pill wz-status-pill--muted align-self-center">Inactive</span>
+                        )}
+                      </div>
+                  </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-envelope-check" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">Amazon SES</h5>
+                      <p className="text-secondary mb-2">
+                        Configure AWS SES API connection and email sender settings for transactional mail.
+                      </p>
+                      <div className="d-flex flex-wrap gap-2 mb-2">
+                        <Link
+                          to="/saas-admin/ses"
+                          className="btn btn-primary btn-sm"
+                        >
+                          Configure
+                        </Link>
+                        {sesState.data?.is_active ? (
                           <span className="wz-status-pill align-self-center">Active</span>
                         ) : (
                           <span className="wz-status-pill wz-status-pill--muted align-self-center">Inactive</span>

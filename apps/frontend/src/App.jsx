@@ -55,6 +55,7 @@ import SaasAdminServerMonitoringPage from "./pages/SaasAdminServerMonitoringPage
 import SaasAdminServerMonitoringDetailPage from "./pages/SaasAdminServerMonitoringDetailPage.jsx";
 import SaasAdminServerMonitoringSettingsPage from "./pages/SaasAdminServerMonitoringSettingsPage.jsx";
 import SaasAdminServerMonitoringAlertsPage from "./pages/SaasAdminServerMonitoringAlertsPage.jsx";
+import SaasAdminSESSettingsPage from "./pages/SaasAdminSESSettingsPage.jsx";
 import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
 import OrgMediaLibraryPage from "./pages/OrgMediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
@@ -331,6 +332,7 @@ const saasAdminPages = [
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
+  { key: "ses", label: "Amazon SES", path: "/saas-admin/ses", icon: "bi-envelope-paper" },
   { key: "application-downloads", label: "App Downloads", path: "/saas-admin/application-downloads", icon: "bi-cloud-arrow-down" },
   { key: "server-monitoring", label: "Server Monitoring", path: "/saas-admin/server-monitoring", icon: "bi-cpu" },
   { key: "referrals", label: "Referrals", path: "/saas-admin/referrals", icon: "bi-people" },
@@ -444,6 +446,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isStorageSection = location.pathname.startsWith("/saas-admin/storage");
   const isApplicationDownloadsSection = location.pathname.startsWith("/saas-admin/application-downloads");
   const isBackupActivitySection = location.pathname.startsWith("/saas-admin/backup-activity");
+  const isSESSection = location.pathname.startsWith("/saas-admin/ses");
   const isServerMonitoringSection = location.pathname.startsWith("/saas-admin/server-monitoring");
   const isReferralsSection = location.pathname.startsWith("/saas-admin/referrals");
   const isProfileSection = location.pathname.startsWith("/saas-admin/profile");
@@ -458,6 +461,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     !isStorageSection &&
     !isApplicationDownloadsSection &&
     !isBackupActivitySection &&
+    !isSESSection &&
     !isServerMonitoringSection &&
     !isReferralsSection &&
     !isProfileSection &&
@@ -1033,6 +1037,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                     isActive = isProductsSection;
                   } else if (item.key === "organizations") {
                     isActive = isOrganizationsSection;
+                  } else if (item.key === "ses") {
+                    isActive = isSESSection;
                   } else if (item.key === "server-monitoring") {
                     isActive = isServerMonitoringSection;
                   } else if (item.key === "application-downloads") {
@@ -1667,6 +1673,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/saas-admin/storage"
             element={isSaasAdmin ? <SaasAdminStorageSettingsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/saas-admin/ses"
+            element={isSaasAdmin ? <SaasAdminSESSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/saas-admin/whatsapp-cloud"

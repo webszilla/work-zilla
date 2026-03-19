@@ -1,3 +1,5 @@
+{% include "emails/_email_header.txt" %}
+
 Hello {{ name }},
 
 Your account has been deleted.
@@ -7,5 +9,4 @@ Reason: {{ reason }}
 
 If you have questions, contact support.
 
-Thanks,
-Work Zilla Work Suite
+{% include "emails/_email_footer.txt" %}
