@@ -355,8 +355,13 @@ function setupPhoneFields(form) {
   const hiddenInput = form.querySelector("[data-phone-hidden]");
   const initialHidden = hiddenInput?.value || "";
   const initialParts = splitPhoneValue(initialHidden);
+  const preferNativePicker = String(countryInput?.dataset?.phonePicker || "").toLowerCase() === "native";
 
-  buildPhoneCountryPicker(countryInput);
+  if (!preferNativePicker) {
+    buildPhoneCountryPicker(countryInput);
+  } else {
+    decoratePhoneCountryOptions(countryInput);
+  }
 
   if (countryInput && !countryInput.value) {
     countryInput.value = initialParts.code || "+91";

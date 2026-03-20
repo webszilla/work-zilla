@@ -1,4 +1,3 @@
-{% include "emails/_email_header.txt" %}
 
 Hello {{ name }},
 
@@ -9,4 +8,7 @@ End Date: {{ end_date }}
 
 Please renew to continue access.
 
-{% include "emails/_email_footer.txt" %}
+
+Thanks,
+Work Zilla Team
+support@getworkzilla.com / www.getworkzilla.com

@@ -157,6 +157,7 @@ def public_products(request):
         .order_by("sort_order", "name")
     )
     public_order_map = {}
+    allowed_public_slugs = set()
     try:
         saas_order_rows = (
             SaaSAdminProduct.objects
@@ -164,12 +165,27 @@ def public_products(request):
             .order_by("sort_order", "name")
             .values("slug", "sort_order")
         )
+        normalized_saas_rows = [
+            _normalize_saas_admin_public_slug(row.get("slug"))
+            for row in saas_order_rows
+        ]
+        normalized_saas_rows = [slug for slug in normalized_saas_rows if slug and slug != "ai-chat-widget"]
         public_order_map = {
-            _normalize_saas_admin_public_slug(row["slug"]): index
-            for index, row in enumerate(saas_order_rows, start=1)
+            slug: index
+            for index, slug in enumerate(normalized_saas_rows, start=1)
         }
+        allowed_public_slugs = set(normalized_saas_rows)
     except (OperationalError, ProgrammingError):
         public_order_map = {}
+        allowed_public_slugs = set()
+
+    if allowed_public_slugs:
+        products = [
+            product
+            for product in products
+            if _public_product_slug(product.slug) in allowed_public_slugs
+        ]
+
     products.sort(
         key=lambda product: (
             public_order_map.get(_public_product_slug(product.slug), 10_000),

@@ -98,14 +98,6 @@ def site_nav_context(request):
             "href": f"/products/{public_slug}/",
         })
 
-    # Ensure Print Marks is present in public products dropdown.
-    if "imposition-software" not in seen_slugs:
-        product_links.append({
-            "slug": "imposition-software",
-            "name": "Print Marks",
-            "href": "/products/imposition-software/",
-        })
-
     if not request.user.is_authenticated:
         return {"site_nav": {"is_authenticated": False, "product_links": product_links}}
     profile = UserProfile.objects.filter(user=request.user).first()

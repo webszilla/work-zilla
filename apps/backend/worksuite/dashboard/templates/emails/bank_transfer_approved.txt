@@ -1,4 +1,3 @@
-{% include "emails/_email_header.txt" %}
 
 Hello {{ name }},
 
@@ -10,4 +9,7 @@ Amount: {{ currency }} {{ amount }}
 Reference: {{ reference_no }}
 Status: Approved
 
-{% include "emails/_email_footer.txt" %}
+
+Thanks,
+Work Zilla Team
+support@getworkzilla.com / www.getworkzilla.com

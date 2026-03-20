@@ -1,4 +1,3 @@
-{% include "emails/_email_header.txt" %}
 
 Weekly SaaS Admin Report
 Generated at: {{ generated_at }}
@@ -28,4 +27,7 @@ Signups - One Year: {{ product.signups.year }}
 Signups - All Time: {{ product.signups.all_time }}
 {% endfor %}
 
-{% include "emails/_email_footer.txt" %}
+
+Thanks,
+Work Zilla Team
+support@getworkzilla.com / www.getworkzilla.com

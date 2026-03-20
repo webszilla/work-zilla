@@ -56,9 +56,19 @@ def send_email_verification(user, request=None, force=False):
     if user.email_verified and not force:
         return False
 
-    token = secrets.token_urlsafe(32)
+    now = timezone.now()
+    existing_token = str(getattr(user, "email_verification_token", "") or "").strip()
+    existing_sent_at = getattr(user, "email_verification_sent_at", None)
+    existing_is_fresh = bool(
+        existing_token
+        and existing_sent_at
+        and (now - existing_sent_at) <= timedelta(days=7)
+    )
+
+    # Reuse active token during normal resend so older verification mails remain valid.
+    token = existing_token if (existing_is_fresh and not force) else secrets.token_urlsafe(32)
     user.email_verification_token = token
-    user.email_verification_sent_at = timezone.now()
+    user.email_verification_sent_at = now
     if force:
         user.email_verified = False
         user.email_verified_at = None

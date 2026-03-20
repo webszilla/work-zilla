@@ -56,8 +56,8 @@ export default function SaasAdminSESSettingsPage() {
           form: {
             is_active: Boolean(data?.is_active),
             aws_region: data?.aws_region || "us-east-1",
-            access_key_id: data?.access_key_id_masked || "",
-            secret_access_key: data?.secret_access_key_masked || "",
+            access_key_id: data?.access_key_id || "",
+            secret_access_key: data?.secret_access_key || "",
             smtp_username: data?.smtp_username || "",
             smtp_password: "",
             sender_email: data?.sender_email || "",
@@ -94,14 +94,12 @@ export default function SaasAdminSESSettingsPage() {
 
   const onSave = async () => {
     setState((prev) => ({ ...prev, saving: true, error: "", success: "" }));
-    const maskedAccessKey = state.data?.access_key_id_masked || "";
-    const maskedSecretKey = state.data?.secret_access_key_masked || "";
     try {
       const payload = {
         is_active: Boolean(state.form.is_active),
         aws_region: state.form.aws_region,
-        access_key_id: state.form.access_key_id === maskedAccessKey ? "" : state.form.access_key_id,
-        secret_access_key: state.form.secret_access_key === maskedSecretKey ? "" : state.form.secret_access_key,
+        access_key_id: state.form.access_key_id,
+        secret_access_key: state.form.secret_access_key,
         smtp_username: state.form.smtp_username,
         smtp_password: state.form.smtp_password,
         sender_email: state.form.sender_email,
@@ -120,8 +118,8 @@ export default function SaasAdminSESSettingsPage() {
         data,
         form: {
           ...prev.form,
-          access_key_id: data?.access_key_id_masked || "",
-          secret_access_key: data?.secret_access_key_masked || "",
+          access_key_id: data?.access_key_id || "",
+          secret_access_key: data?.secret_access_key || "",
           smtp_password: "",
           is_active: Boolean(data?.is_active),
           aws_region: data?.aws_region || prev.form.aws_region,
@@ -139,20 +137,6 @@ export default function SaasAdminSESSettingsPage() {
         error: error?.message || "Unable to save Amazon SES settings."
       }));
     }
-  };
-
-  const onAccessKeyFocus = () => {
-    setState((prev) => ({
-      ...prev,
-      form: { ...prev.form, access_key_id: "" }
-    }));
-  };
-
-  const onSecretKeyFocus = () => {
-    setState((prev) => ({
-      ...prev,
-      form: { ...prev.form, secret_access_key: "" }
-    }));
   };
 
   if (state.loading) {
@@ -221,8 +205,7 @@ export default function SaasAdminSESSettingsPage() {
               className="form-control"
               value={state.form.access_key_id}
               onChange={onChange("access_key_id")}
-              onFocus={onAccessKeyFocus}
-              placeholder={state.data?.access_key_id_masked ? "Keep existing access key" : "AKIA..."}
+              placeholder="AKIA..."
               autoComplete="off"
             />
           </div>
@@ -234,8 +217,7 @@ export default function SaasAdminSESSettingsPage() {
               className="form-control"
               value={state.form.secret_access_key}
               onChange={onChange("secret_access_key")}
-              onFocus={onSecretKeyFocus}
-              placeholder={state.data?.has_secret_access_key ? "Leave blank to keep existing key" : "Your AWS secret"}
+              placeholder="Your AWS secret"
               autoComplete="new-password"
             />
           </div>

@@ -1,4 +1,3 @@
-{% include "emails/_email_header.txt" %}
 
 Hello {{ name }},
 
@@ -9,4 +8,7 @@ Reason: {{ reason }}
 
 If you have questions, contact support.
 
-{% include "emails/_email_footer.txt" %}
+
+Thanks,
+Work Zilla Team
+support@getworkzilla.com / www.getworkzilla.com

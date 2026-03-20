@@ -82,7 +82,10 @@
               <label class="form-label">Mobile Number</label>
               <input type="hidden" name="phone_number" data-phone-hidden value="">
               <div class="phone-input-group">
-                <input type="text" name="phone_country" class="form-control" list="phone-country-options" data-phone-country placeholder="+91" value="+91" required>
+                <select name="phone_country" class="form-select" data-phone-country data-phone-picker="native" required>
+                  <option value="+91" selected>India +91</option>
+                  {% include "partials/phone_country_options.html" %}
+                </select>
                 <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="" required>
               </div>
               {% if form and form.phone_number.errors %}
@@ -118,9 +121,6 @@
           </p>
 
       </form>
-      <datalist id="phone-country-options">
-        {% include "partials/phone_country_options.html" %}
-      </datalist>
   </div>
 
 </div>

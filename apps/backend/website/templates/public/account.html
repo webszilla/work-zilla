@@ -42,7 +42,7 @@
                 <button type="submit" class="btn btn-outline btn-sm">Update + Send Verification</button>
               </div>
             </form>
-            <form class="mt-2" method="post" action="/my-account/verification/resend/">
+            <form class="mt-2 js-resend-verification-form" method="post" action="/my-account/verification/resend/">
               {% csrf_token %}
               <button type="submit" class="btn btn-outline btn-sm">Resend Verification Email</button>
             </form>
@@ -473,6 +473,12 @@
     if (verifyToggle && verifyForm) {
       verifyToggle.addEventListener("click", function () {
         verifyForm.classList.toggle("d-none");
+      });
+    }
+    var resendVerificationForm = document.querySelector(".js-resend-verification-form");
+    if (resendVerificationForm) {
+      resendVerificationForm.addEventListener("submit", function () {
+        window.alert("Verification email has been sent. Please check your inbox and spam folder.");
       });
     }
     document.addEventListener("keydown", function (event) {

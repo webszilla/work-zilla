@@ -22,6 +22,7 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "status", "sort_order", "created_at")
     search_fields = ("name", "slug")
     list_filter = ("status",)
+    list_editable = ("status", "sort_order")
     ordering = ("sort_order", "name")
     change_list_template = "admin/saas_admin/product/change_list.html"
 

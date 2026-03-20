@@ -12,7 +12,7 @@ from django.http import JsonResponse, HttpResponse, Http404
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
-from django.db.utils import OperationalError
+from django.db.utils import OperationalError, ProgrammingError
 import json
 from datetime import timedelta, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -26,6 +26,7 @@ from apps.backend.enquiries.views import build_enquiry_context
 from apps.backend.brand.models import ProductRouteMapping
 from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.products.models import Product
+from saas_admin.models import Product as SaaSAdminProduct
 from apps.backend.website import application_downloads
 from core.observability import log_event
 from core.subscription_utils import is_free_plan, is_subscription_active
@@ -695,7 +696,20 @@ def _normalize_product_slug(value, default="monitor"):
     slug = (value or "").strip().lower()
     if slug in {"worksuite", "work-suite"}:
         return "monitor"
+    if slug == "online-storage":
+        return "storage"
     return slug or default
+
+
+def _normalize_saas_slug_to_public(value):
+    slug = str(value or "").strip().lower()
+    if slug in {"work-suite", "worksuite"}:
+        return "worksuite"
+    if slug == "online-storage":
+        return "storage"
+    if slug in {"imposition", "imposition software"}:
+        return "imposition-software"
+    return slug
 
 
 def _dashboard_path_for_product(value):
@@ -791,20 +805,42 @@ def _org_has_used_free_trial(org, product_slug):
 
 def _base_context(request):
     context = build_enquiry_context(request)
-    live_public_product_slugs = [
-        "monitor",
-        "ai-chatbot",
-        "whatsapp-automation",
-        "storage",  # Online Storage
-        "online-storage",  # compatibility alias if slug is renamed later
-        "business-autopilot-erp",
-        "imposition-software",
-    ]
-    product_order = {slug: idx for idx, slug in enumerate(live_public_product_slugs)}
-    products = list(
-        Product.objects.filter(is_active=True, slug__in=live_public_product_slugs)
-    )
-    products.sort(key=lambda p: (product_order.get(p.slug, 999), (p.name or "").lower()))
+    products = []
+    try:
+        saas_rows = (
+            SaaSAdminProduct.objects
+            .filter(status="active")
+            .order_by("sort_order", "name")
+            .values("slug")
+        )
+        ordered_internal_slugs = []
+        seen = set()
+        for row in saas_rows:
+            public_slug = _normalize_saas_slug_to_public(row.get("slug"))
+            internal_slug = _normalize_product_slug(public_slug, default="")
+            if not internal_slug or internal_slug in {"ai-chat-widget", "digital-card"}:
+                continue
+            if internal_slug in seen:
+                continue
+            seen.add(internal_slug)
+            ordered_internal_slugs.append(internal_slug)
+
+        product_map = {
+            item.slug: item
+            for item in Product.objects.filter(is_active=True, slug__in=ordered_internal_slugs)
+        }
+        products = [product_map[slug] for slug in ordered_internal_slugs if slug in product_map]
+    except (OperationalError, ProgrammingError):
+        products = []
+
+    if not products:
+        products = list(
+            Product.objects
+            .filter(is_active=True)
+            .exclude(slug="ai-chat-widget")
+            .order_by("sort_order", "name")
+        )
+
     context["products"] = products
     context["is_logged_in"] = request.user.is_authenticated
     if request.user.is_authenticated:
@@ -2314,7 +2350,7 @@ def account_resend_verification(request):
     if request.user.email_verified:
         messages.info(request, "Email already verified.")
         return redirect("/my-account/")
-    sent = send_email_verification(request.user, request=request, force=True)
+    sent = send_email_verification(request.user, request=request, force=False)
     if sent:
         messages.success(request, f"Verification email sent to {request.user.email}.")
     else:

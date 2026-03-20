@@ -1,10 +1,35 @@
 from django.http import Http404
 from django.shortcuts import render, redirect
+from django.db.utils import OperationalError, ProgrammingError
 
 from .models import Product
 from apps.backend.enquiries.views import build_enquiry_context
 from apps.backend.brand.models import ProductRouteMapping
+from saas_admin.models import Product as SaaSAdminProduct
 from django.db import connection
+
+
+def _saas_slug_candidates_for_internal_product(slug):
+    normalized = (slug or "").strip().lower()
+    if normalized == "monitor":
+        return {"monitor", "worksuite", "work-suite"}
+    if normalized == "storage":
+        return {"storage", "online-storage"}
+    if normalized == "business-autopilot-erp":
+        return {"business-autopilot-erp", "business-autopilot"}
+    if normalized == "imposition-software":
+        return {"imposition-software", "imposition", "imposition software"}
+    return {normalized} if normalized else set()
+
+
+def _is_public_product_enabled_in_saas(slug):
+    candidates = _saas_slug_candidates_for_internal_product(slug)
+    if not candidates:
+        return False
+    try:
+        return SaaSAdminProduct.objects.filter(slug__in=candidates, status="active").exists()
+    except (OperationalError, ProgrammingError):
+        return True
 
 
 def product_marketing_view(request, slug):
@@ -48,6 +73,10 @@ def product_marketing_view(request, slug):
         product_slug = route.product.internal_code_name
     else:
         product_slug = "monitor" if raw_slug == "worksuite" else raw_slug
+
+    if not _is_public_product_enabled_in_saas(product_slug):
+        raise Http404()
+
     product = Product.objects.filter(slug=product_slug, is_active=True).first()
     if not product:
         raise Http404()
