@@ -108,6 +108,32 @@ class ProductAuthorizationMiddlewareTests(TestCase):
         self.assertEqual(allowed_payload["subscriptions"][0]["product_slug"], "ai-chatbot")
         self.assertEqual(allowed_payload["subscriptions"][0]["permission"], "edit")
 
+    def test_auth_subscriptions_returns_multiple_products_for_same_login(self):
+        self._create_subscription()
+        digital_product, _ = Product.objects.get_or_create(
+            slug="digital-automation",
+            defaults={"name": "Digital Automation"},
+        )
+        digital_plan = Plan.objects.create(name="DA Starter", product=digital_product)
+        owner = User.objects.create_user(username="owner-multi@example.com", email="owner-multi@example.com", password="pw123456")
+        UserProfile.objects.create(user=owner, organization=self.org, role="org_admin")
+        Subscription.objects.create(
+            user=owner,
+            organization=self.org,
+            plan=digital_plan,
+            status="active",
+        )
+        OrganizationProduct.objects.update_or_create(
+            organization=self.org,
+            product=digital_product,
+            defaults={"subscription_status": "active", "source": "test"},
+        )
+
+        self.client.force_login(owner)
+        payload = self.client.get("/api/auth/subscriptions").json()
+        product_slugs = sorted([row.get("product_slug") for row in payload.get("subscriptions", [])])
+        self.assertEqual(product_slugs, ["ai-chatbot", "digital-automation"])
+
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="wz-profile-photo-tests-"))
 class UserProfilePhotoCleanupTests(TestCase):

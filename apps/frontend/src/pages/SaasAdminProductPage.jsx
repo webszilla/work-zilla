@@ -47,6 +47,17 @@ function formatValue(value) {
   return value;
 }
 
+function formatLimitValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric < 0) {
+    return "Unlimited";
+  }
+  return value;
+}
+
 function titleCase(value) {
   if (!value) {
     return "-";
@@ -984,6 +995,7 @@ export default function SaasAdminProductPage() {
   const isStorageProduct = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const isBusinessAutopilotProduct = resolvedSlug === "business-autopilot-erp";
   const isWhatsappAutomationProduct = resolvedSlug === "whatsapp-automation";
+  const isDigitalAutomationProduct = resolvedSlug === "digital-automation";
   const stats = data.stats || {};
   const monthlySales = data.monthly_sales || {};
   const monthlyInr = monthlySales.INR ?? 0;
@@ -1397,6 +1409,36 @@ export default function SaasAdminProductPage() {
             allow_addons: true,
             wa_keyword_rules_limit: getWhatsappKeywordRuleLimit("", {}),
           })
+      : isDigitalAutomationProduct
+      ? (plan
+        ? {
+            name: plan.name || "",
+            monthly_price: plan.monthly_price ?? "",
+            yearly_price: plan.yearly_price ?? "",
+            usd_monthly_price: plan.usd_monthly_price ?? "",
+            usd_yearly_price: plan.usd_yearly_price ?? "",
+            social_accounts: features.social_accounts ?? "",
+            scheduled_posts: features.scheduled_posts ?? features.social_post_limit ?? "",
+            ai_words_limit: features.ai_words_limit ?? "",
+            wp_sites: features.wp_sites ?? features.wp_sites_limit ?? "",
+            hosting_accounts: features.hosting_accounts ?? features.whm_accounts_limit ?? "",
+            support: features.support ?? "email",
+            is_popular: Boolean(features.is_popular),
+          }
+        : {
+            name: "",
+            monthly_price: "",
+            yearly_price: "",
+            usd_monthly_price: "",
+            usd_yearly_price: "",
+            social_accounts: "",
+            scheduled_posts: "",
+            ai_words_limit: "",
+            wp_sites: "",
+            hosting_accounts: "",
+            support: "email",
+            is_popular: false,
+          })
       : plan
         ? {
             plan_template: "Custom",
@@ -1596,6 +1638,83 @@ export default function SaasAdminProductPage() {
           method: "POST",
           body: JSON.stringify(payload)
         });
+        await refreshPlans();
+        setPlanModal({ open: false, mode: "create", form: {}, error: "", fieldErrors: {}, loading: false, planId: null });
+        return;
+      }
+      if (isDigitalAutomationProduct) {
+        const trimmedName = (planModal.form.name || "").trim();
+        const requiredFields = [
+          "name",
+          "monthly_price",
+          "yearly_price",
+          "usd_monthly_price",
+          "usd_yearly_price",
+          "social_accounts",
+          "scheduled_posts",
+          "ai_words_limit",
+          "wp_sites",
+          "hosting_accounts",
+          "support",
+        ];
+        const requiredErrors = {};
+        const isEmptyValue = (value) => value === "" || value === null || value === undefined;
+        requiredFields.forEach((field) => {
+          const value = field === "name" ? trimmedName : planModal.form[field];
+          if (isEmptyValue(value)) {
+            requiredErrors[field] = ["This field is required."];
+          }
+        });
+        if (Object.keys(requiredErrors).length) {
+          setPlanModal((prev) => ({
+            ...prev,
+            loading: false,
+            fieldErrors: requiredErrors,
+            error: "Please fix the highlighted fields."
+          }));
+          return;
+        }
+
+        const parsedFeatures = {
+          social_accounts: Number(planModal.form.social_accounts || 0),
+          scheduled_posts: Number(planModal.form.scheduled_posts || 0),
+          ai_words_limit: Number(planModal.form.ai_words_limit || 0),
+          wp_sites: Number(planModal.form.wp_sites || 0),
+          hosting_accounts: Number(planModal.form.hosting_accounts || 0),
+          support: String(planModal.form.support || "email").trim().toLowerCase(),
+          is_popular: Boolean(planModal.form.is_popular),
+        };
+
+        const payload = {
+          name: trimmedName,
+          product_slug: slug,
+          duration_months: 1,
+          monthly_price: planModal.form.monthly_price,
+          yearly_price: planModal.form.yearly_price,
+          usd_monthly_price: planModal.form.usd_monthly_price,
+          usd_yearly_price: planModal.form.usd_yearly_price,
+          addon_monthly_price: 0,
+          addon_yearly_price: 0,
+          addon_usd_monthly_price: 0,
+          addon_usd_yearly_price: 0,
+          allow_addons: false,
+          allow_app_usage: false,
+          allow_hr_view: false,
+          features: parsedFeatures,
+          limits: {},
+        };
+
+        if (planModal.mode === "edit") {
+          await apiFetch(`/api/saas-admin/plans/${planModal.planId}`, {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          });
+        } else {
+          await apiFetch("/api/saas-admin/plans", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+        }
         await refreshPlans();
         setPlanModal({ open: false, mode: "create", form: {}, error: "", fieldErrors: {}, loading: false, planId: null });
         return;
@@ -2827,10 +2946,22 @@ export default function SaasAdminProductPage() {
                           <th>Storage (GB)</th>
                           <th>Status</th>
                         </>
+                      ) : isDigitalAutomationProduct ? (
+                        <th>Yearly</th>
                       ) : (
                         <th>Yearly</th>
                       )}
-                      {isStorageProduct ? null : isAiChatbotProduct ? (
+                      {isStorageProduct ? null : isDigitalAutomationProduct ? (
+                        <>
+                          <th>Social Accounts</th>
+                          <th>Scheduled Posts/mo</th>
+                          <th>AI Words</th>
+                          <th>WP Sites</th>
+                          <th>Hosting Accounts</th>
+                          <th>Support</th>
+                          <th>Popular</th>
+                        </>
+                      ) : isAiChatbotProduct ? (
                         <>
                           <th>Widgets</th>
                           <th>Agents</th>
@@ -2867,10 +2998,22 @@ export default function SaasAdminProductPage() {
                               <td>{formatValue(plan.storage_limit_gb ?? "-")}</td>
                               <td>{plan.is_active === false ? "Inactive" : "Active"}</td>
                             </>
+                          ) : isDigitalAutomationProduct ? (
+                            <td>{formatValue(plan.yearly_price)}</td>
                           ) : (
                             <td>{formatValue(plan.yearly_price)}</td>
                           )}
-                          {isStorageProduct ? null : isAiChatbotProduct ? (
+                          {isStorageProduct ? null : isDigitalAutomationProduct ? (
+                            <>
+                              <td>{formatLimitValue(plan.features?.social_accounts)}</td>
+                              <td>{formatLimitValue(plan.features?.scheduled_posts)}</td>
+                              <td>{formatLimitValue(plan.features?.ai_words_limit)}</td>
+                              <td>{formatLimitValue(plan.features?.wp_sites)}</td>
+                              <td>{formatLimitValue(plan.features?.hosting_accounts)}</td>
+                              <td>{plan.features?.support || "-"}</td>
+                              <td>{plan.features?.is_popular ? "Yes" : "No"}</td>
+                            </>
+                          ) : isAiChatbotProduct ? (
                             <>
                               <td>{plan.limits?.widgets ?? "-"}</td>
                               <td>{plan.limits?.included_agents ?? "-"}</td>
@@ -2913,7 +3056,7 @@ export default function SaasAdminProductPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={isStorageProduct ? 7 : isAiChatbotProduct ? 10 : isWhatsappAutomationProduct ? 6 : 7}>No plans found.</td>
+                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 10 : isWhatsappAutomationProduct ? 6 : 7}>No plans found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4962,7 +5105,7 @@ export default function SaasAdminProductPage() {
                     {getFieldError("name")}
                   </div>
                 </>
-              ) : !isWhatsappAutomationProduct ? (
+              ) : !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
                 <div className="modal-form-field">
                   <label className="form-label">Plan Name</label>
                   <input
@@ -5087,7 +5230,7 @@ export default function SaasAdminProductPage() {
                     {getFieldError("website_page_limit")}
                   </div>
                 </>
-              ) : !isWhatsappAutomationProduct ? (
+              ) : !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
                 <div className="modal-form-field">
                   <label className="form-label">Employee Limit</label>
                   <input
@@ -5100,6 +5243,197 @@ export default function SaasAdminProductPage() {
                   {getFieldError("employee_limit")}
                 </div>
               ) : null}
+              {isDigitalAutomationProduct ? (
+                <>
+                  <div className="modal-form-field">
+                    <label className="form-label">Plan Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={planModal.form.name || ""}
+                      onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, name: event.target.value } }))}
+                    />
+                    {getFieldError("name")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Monthly Price (INR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.monthly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, monthly_price: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("monthly_price")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Yearly Price (INR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.yearly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, yearly_price: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("yearly_price")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Monthly Price (USD)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.usd_monthly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, usd_monthly_price: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("usd_monthly_price")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Yearly Price (USD)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.usd_yearly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, usd_yearly_price: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("usd_yearly_price")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Social Accounts</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.social_accounts ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, social_accounts: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("social_accounts")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Scheduled Posts / Month</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.scheduled_posts ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, scheduled_posts: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("scheduled_posts")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">AI Words Limit</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.ai_words_limit ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, ai_words_limit: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("ai_words_limit")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">WordPress Sites Limit</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.wp_sites ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, wp_sites: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("wp_sites")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Hosting Accounts Limit</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.hosting_accounts ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, hosting_accounts: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("hosting_accounts")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Support Level</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={planModal.form.support ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, support: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("support")}
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Most Popular</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.is_popular ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, is_popular: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>
+                </>
+              ) : null}
+              {!isDigitalAutomationProduct ? (
+              <>
               <div className="modal-form-field">
                 <label className="form-label">Monthly Price (INR)</label>
                 <input
@@ -5188,7 +5522,9 @@ export default function SaasAdminProductPage() {
                 />
                 {getFieldError("addon_usd_yearly_price")}
               </div>
-              {!isAiChatbotProduct && !isWhatsappAutomationProduct ? (
+              </>
+              ) : null}
+              {!isAiChatbotProduct && !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
                 <>
                   <div className="modal-form-field">
                     <label className="form-label">Retention Days</label>
@@ -5214,6 +5550,7 @@ export default function SaasAdminProductPage() {
                 </div>
                 </>
               ) : null}
+              {!isDigitalAutomationProduct ? (
               <div className="modal-form-field">
                 <label className="form-label">Allow Add-ons</label>
                 <select
@@ -5231,6 +5568,7 @@ export default function SaasAdminProductPage() {
                 </select>
                 {getFieldError("allow_addons")}
               </div>
+              ) : null}
               {isWhatsappAutomationProduct ? (
                 <div className="modal-form-field">
                   <label className="form-label">Keyword Reply Rules Limit</label>
@@ -5250,7 +5588,7 @@ export default function SaasAdminProductPage() {
                   {getFieldError("wa_keyword_rules_limit")}
                 </div>
               ) : null}
-              {!isAiChatbotProduct && !isWhatsappAutomationProduct ? (
+              {!isAiChatbotProduct && !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
                 <>
                   <div className="modal-form-field">
                     <label className="form-label">Allow App Usage</label>

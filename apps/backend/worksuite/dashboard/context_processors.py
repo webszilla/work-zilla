@@ -98,6 +98,15 @@ def site_nav_context(request):
             "href": f"/products/{public_slug}/",
         })
 
+    # Keep Digital Automation immediately after WhatsApp Automation in public navigation.
+    wa_idx = next((idx for idx, item in enumerate(product_links) if item.get("slug") == "whatsapp-automation"), -1)
+    da_idx = next((idx for idx, item in enumerate(product_links) if item.get("slug") == "digital-automation"), -1)
+    if wa_idx != -1 and da_idx != -1 and da_idx != wa_idx + 1:
+        da_item = product_links.pop(da_idx)
+        if da_idx < wa_idx:
+            wa_idx -= 1
+        product_links.insert(wa_idx + 1, da_item)
+
     if not request.user.is_authenticated:
         return {"site_nav": {"is_authenticated": False, "product_links": product_links}}
     profile = UserProfile.objects.filter(user=request.user).first()

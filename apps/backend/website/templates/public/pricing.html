@@ -639,6 +639,43 @@
       ];
     }
 
+    function buildDigitalAutomationPricingFeatures(plan) {
+      const features = plan.features || {};
+      const toLimitLabel = (value) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric < 0) return "Unlimited";
+        if (value === null || value === undefined || value === "") return "-";
+        return String(value);
+      };
+      const numericLimitEnabled = (value) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return false;
+        return numeric > 0 || numeric < 0;
+      };
+      const hasSocial = numericLimitEnabled(features.social_accounts);
+      const hasScheduled = numericLimitEnabled(features.scheduled_posts);
+      const hasAi = numericLimitEnabled(features.ai_words_limit);
+      const hasWp = numericLimitEnabled(features.wp_sites);
+      const hasHosting = numericLimitEnabled(features.hosting_accounts);
+      const hasWhmBilling = Boolean(features.whm_billing_access) || hasHosting;
+      const supportKey = String(features.support || "").toLowerCase();
+      const hasPrioritySupport =
+        supportKey.includes("priority") || supportKey.includes("dedicated");
+      return [
+        { text: "Social Media Automation", ok: hasSocial || hasScheduled },
+        { text: `Social Accounts: ${toLimitLabel(features.social_accounts)}`, ok: hasSocial },
+        { text: `Scheduled Posts / Month: ${toLimitLabel(features.scheduled_posts)}`, ok: hasScheduled },
+        { text: "AI Content Writer", ok: hasAi },
+        { text: `AI Content Words: ${toLimitLabel(features.ai_words_limit)}`, ok: hasAi },
+        { text: "WordPress Auto Post", ok: hasWp },
+        { text: `WordPress Sites: ${toLimitLabel(features.wp_sites)}`, ok: hasWp },
+        { text: "Priority Support", ok: hasPrioritySupport },
+        { text: "White-label", ok: Boolean(features.white_label) },
+        { text: "WHM Billing & Subscription", ok: hasWhmBilling },
+        { text: `Hosting Accounts (WHM): ${toLimitLabel(features.hosting_accounts)}`, ok: hasHosting },
+      ];
+    }
+
     function findHighestPricedPlanId(plans) {
       const rows = Array.isArray(plans) ? plans : [];
       let bestId = null;
@@ -757,6 +794,20 @@
       return "Plan built for print-ready card imposition workflows.";
     }
 
+    function digitalAutomationPlanDescription(planName) {
+      const key = String(planName || "").toLowerCase();
+      if (key.includes("free")) {
+        return "7-day free trial with full Digital Automation access. Upgrade to a paid plan after trial.";
+      }
+      if (key.includes("starter")) {
+        return "For small teams to automate social posting, AI content, and WordPress workflows.";
+      }
+      if (key.includes("pro")) {
+        return "For serious teams scaling automation across channels with higher monthly limits.";
+      }
+      return "Agency-grade automation with WHM billing and subscription management.";
+    }
+
     function renderPlans(data) {
       const container = document.getElementById("pricing-plans");
       container.innerHTML = "";
@@ -861,8 +912,11 @@
         const isStorage = isStorageProduct;
         const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
         const isWhatsAppAutomation = normalizedSlug === "whatsapp-automation";
+        const isDigitalAutomation = normalizedSlug === "digital-automation";
         const isImposition = normalizedSlug === "imposition-software";
         const isFreePlan = String(plan.name || "").toLowerCase() === "free";
+        const isGenericFreeTrial = Boolean((plan.features || {}).is_trial)
+          || String(plan.name || "").toLowerCase().includes("free trial");
         const isTrialPlan = isImposition && (
           String(plan.name || "").toLowerCase().includes("trial") ||
           Boolean((plan.features || {}).is_trial)
@@ -880,17 +934,21 @@
         const waFeatureFlags = isWhatsAppAutomation
           ? buildWhatsAppAutomationPricingFeatures(plan, { prioritySupportEnabled })
           : [];
+        const daFeatureFlags = isDigitalAutomation
+          ? buildDigitalAutomationPricingFeatures(plan)
+          : [];
         const activePlanId = activePlans[data.product.slug]?.plan_id || null;
         const isCurrentPlan = activePlanId === plan.id;
         const activePlan = data.plans.find((item) => item.id === activePlanId) || null;
         const activePlanIsFree = activePlan
           ? String(activePlan.name || "").toLowerCase() === "free"
           : false;
-        const trialLocked = isLoggedIn && !freeEligible && (isFreePlan || isTrialPlan || storageTrialOnly);
+        const trialLikePlan = isFreePlan || isGenericFreeTrial || isTrialPlan || storageTrialOnly;
+        const trialLocked = isLoggedIn && !freeEligible && trialLikePlan;
         const actionLabel = !isLoggedIn
           ? (isStorage || isImposition
             ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
-            : isFreePlan
+            : trialLikePlan
               ? "Take a Free Trial"
               : "Process to Pay")
           : trialNotConfigured
@@ -899,17 +957,18 @@
           ? "Trial Unavailable"
         : isCurrentPlan
           ? "Current Plan"
-        : isStorage || isImposition
+          : isStorage || isImposition
           ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
-          : isFreePlan
+          : trialLikePlan
           ? "Take a Free Trial"
           : "Process to Pay";
         const card = document.createElement("div");
         card.className = "plan-card card";
         card.setAttribute("data-plan-card", "1");
         card.setAttribute("data-plan-id", plan.id);
-        const trialSuffix = (storageTrialOnly || isTrialPlan || (!isStorage && (plan.name && plan.name.toLowerCase() === "free")))
-          ? `${isMonitor ? 15 : data.trial_days} days free trial`
+        const trialDays = Number((plan.features || {}).trial_days || data.trial_days || (isMonitor ? 15 : 7));
+        const trialSuffix = trialLikePlan
+          ? `${trialDays} days free trial`
           : null;
         card.innerHTML = `
           <h2 class="plan-title">${escapeHtml(isImposition && isTrialPlan ? "Free" : formatProductPlanTitle(plan.name, normalizedSlug))}</h2>
@@ -923,6 +982,8 @@
                   ? escapeHtml(erpPlanDescription(plan.name))
                   : normalizedSlug === "whatsapp-automation"
                     ? escapeHtml(whatsappAutomationPlanDescription(plan.name))
+                    : normalizedSlug === "digital-automation"
+                      ? escapeHtml(digitalAutomationPlanDescription(plan.name))
                     : normalizedSlug === "imposition-software"
                       ? escapeHtml(impositionPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
@@ -955,9 +1016,9 @@
                     : `<span class="feature-flag ${item.ok ? "ok" : "no"}"></span>${escapeHtml(item.text)}`}
                 </li>`).join("")}
             </ul>
-          ` : (isBusinessAutopilot || isWhatsAppAutomation) ? `
+          ` : (isBusinessAutopilot || isWhatsAppAutomation || isDigitalAutomation) ? `
             <ul class="plan-features">
-              ${(isBusinessAutopilot ? erpFeatureFlags : waFeatureFlags).map((item) => `
+              ${(isBusinessAutopilot ? erpFeatureFlags : (isWhatsAppAutomation ? waFeatureFlags : daFeatureFlags)).map((item) => `
                 <li>
                   ${item.ok === undefined
                     ? escapeHtml(item.text)
@@ -1003,7 +1064,7 @@
             window.location.href = "/auth/login/?next=/pricing/";
             return;
           }
-          if ((isStorage && storageTrialOnly) || isTrialPlan || (!isStorage && isFreePlan)) {
+          if (trialLikePlan) {
             if (!freeEligible) {
               return;
             }
@@ -1055,6 +1116,7 @@
     function syncPricingCopy(productSlug) {
       const isStorage = productSlug === "storage";
       const isWhatsAppAutomation = productSlug === "whatsapp-automation";
+      const isDigitalAutomation = productSlug === "digital-automation";
       const heroTitle = document.getElementById("pricing-hero-title");
       const heroSubtitle = document.getElementById("pricing-hero-subtitle");
       const headerTitle = document.getElementById("pricing-header-title");
@@ -1108,6 +1170,16 @@
         setTextContentById("pricing-header-title", "WhatsApp Automation Plans", headerTitle?.dataset.default);
         setTextContentById("pricing-header-subtitle", "Dynamic pricing from admin plans with Digital Card add-on user pricing.", headerSubtitle?.dataset.default);
         setButtonById("pricing-hero-primary", "View Plans", "/pricing/?product=whatsapp-automation");
+        setButtonById("pricing-hero-secondary", "Talk to Sales", "/contact/");
+        if (addonSection) addonSection.style.display = "none";
+        if (trialNote) trialNote.style.display = "none";
+        if (footerCta) footerCta.style.display = "none";
+      } else if (isDigitalAutomation) {
+        setTextContentById("pricing-hero-title", "Digital Automation Pricing", heroTitle?.dataset.default);
+        setTextContentById("pricing-hero-subtitle", "Social automation, AI content, WordPress auto-posting, and Agency WHM billing in one platform.", heroSubtitle?.dataset.default);
+        setTextContentById("pricing-header-title", "Digital Automation Plans", headerTitle?.dataset.default);
+        setTextContentById("pricing-header-subtitle", "Choose Starter, Pro, or Agency based on your automation scale.", headerSubtitle?.dataset.default);
+        setButtonById("pricing-hero-primary", "View Plans", "/pricing/?product=digital-automation");
         setButtonById("pricing-hero-secondary", "Talk to Sales", "/contact/");
         if (addonSection) addonSection.style.display = "none";
         if (trialNote) trialNote.style.display = "none";

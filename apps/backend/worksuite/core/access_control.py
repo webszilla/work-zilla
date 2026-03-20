@@ -24,6 +24,7 @@ APP_PRODUCT_PREFIXES = {
     "/app/imposition": "imposition-software",
     "/app/business-autopilot": "business-autopilot-erp",
     "/app/whatsapp-automation": "whatsapp-automation",
+    "/app/digital-automation": "digital-automation",
 }
 
 API_PRODUCT_PREFIXES = {
@@ -35,6 +36,7 @@ API_PRODUCT_PREFIXES = {
     "/api/org/agents": "ai-chatbot",
     "/api/org/ai-chatbot/": "ai-chatbot",
     "/api/org/ai-chatbox/": "ai-chatbot",
+    "/api/digital-automation/": "digital-automation",
 }
 
 EXEMPT_PREFIXES = (

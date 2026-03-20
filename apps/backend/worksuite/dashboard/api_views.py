@@ -4489,9 +4489,16 @@ def billing_summary(request):
         request_type__in=("new", "renew")
     ).order_by("-updated_at").first()
     if not currency_source:
-        currency_source = pending_transfers.filter(
-            request_type__in=("new", "renew")
-        ).order_by("-created_at").first()
+        pending_candidates = [
+            row
+            for row in pending_transfers
+            if getattr(row, "request_type", "") in ("new", "renew")
+        ]
+        pending_candidates.sort(
+            key=lambda row: getattr(row, "created_at", None) or timezone.now(),
+            reverse=True,
+        )
+        currency_source = pending_candidates[0] if pending_candidates else None
     if currency_source and currency_source.currency:
         show_currency = currency_source.currency
 

@@ -77,6 +77,9 @@ import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPa
 import WebsiteCatalogueDashboardPage from "./pages/WebsiteCatalogueDashboardPage.jsx";
 import DigitalBusinessCardDashboardPage from "./pages/DigitalBusinessCardDashboardPage.jsx";
 import DigitalCardVisitorAnalyticsPage from "./pages/DigitalCardVisitorAnalyticsPage.jsx";
+import DigitalAutomationOverviewPage from "./pages/DigitalAutomationOverviewPage.jsx";
+import DigitalAutomationModulePage from "./pages/DigitalAutomationModulePage.jsx";
+import DigitalAutomationSubscriptionPage from "./pages/DigitalAutomationSubscriptionPage.jsx";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
@@ -290,6 +293,7 @@ const reactPages = [
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "imposition-software", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
+  { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "digital-automation" },
   { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
   { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "business-autopilot-erp" },
   { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "whatsapp-automation" },
@@ -314,7 +318,11 @@ const reactPages = [
   { label: "Website & Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
   { label: "Visitor Analytics", path: "/dashboard/digital-card/analytics", icon: "bi-graph-up-arrow", productOnly: "whatsapp-automation" },
-  { label: "Media Library", path: "/media-library", icon: "bi-images", adminOnly: true },
+  { label: "Social Media Automation", path: "/dashboard/social-media-automation", icon: "bi-share", productOnly: "digital-automation" },
+  { label: "AI Content Writer", path: "/dashboard/ai-content-writer", icon: "bi-magic", productOnly: "digital-automation" },
+  { label: "WordPress Auto Post", path: "/dashboard/wordpress-auto-post", icon: "bi-wordpress", productOnly: "digital-automation" },
+  { label: "Subscription", path: "/dashboard/subscription", icon: "bi-hdd-network", productOnly: "digital-automation" },
+  { label: "Media Library", path: "/media-library", icon: "bi-images", adminOnly: true, productOnly: "whatsapp-automation" },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
   { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
   { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
@@ -414,6 +422,8 @@ function AppShell({ state, productPrefix, productSlug }) {
     ? "Business Autopilot"
     : productSlug === "imposition-software"
     ? "Print Marks"
+    : productSlug === "digital-automation"
+    ? "Digital Automation"
     : productSlug === "saas-admin"
     ? "SaaS Admin"
     : "Work Zilla";
@@ -759,6 +769,9 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (productSlug === "imposition-software" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
       return false;
     }
+    if (productSlug === "digital-automation" && item.path === "/" && item.label === "Dashboard" && !item.productOnly) {
+      return false;
+    }
     if (item.productOnly && item.productOnly !== productSlug) {
       return false;
     }
@@ -815,7 +828,8 @@ function AppShell({ state, productPrefix, productSlug }) {
   });
 
   const orderedNavItems = useMemo(() => {
-    if (!isBusinessAutopilot && !isWhatsappAutomationProduct) {
+    const isDigitalAutomationProduct = productSlug === "digital-automation";
+    if (!isBusinessAutopilot && !isWhatsappAutomationProduct && !isDigitalAutomationProduct) {
       return allowedNavItems;
     }
     const uniqueNavItems = (() => {
@@ -841,6 +855,17 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/plans", 10],
           ["/profile", 11],
         ])
+      : isDigitalAutomationProduct
+      ? new Map([
+          ["/", 0],
+          ["/dashboard/social-media-automation", 1],
+          ["/dashboard/ai-content-writer", 2],
+          ["/dashboard/wordpress-auto-post", 3],
+          ["/dashboard/subscription", 4],
+          ["/billing", 5],
+          ["/plans", 6],
+          ["/profile", 7],
+        ])
       : new Map([
           ["/", 0],
           ["/notifications-inbox", 1],
@@ -857,7 +882,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/profile", 12]
         ]);
     return [...uniqueNavItems].sort((a, b) => {
-      if (isWhatsappAutomationProduct) {
+      if (isWhatsappAutomationProduct || isDigitalAutomationProduct) {
         const topPaths = new Set(["/", "/notifications-inbox"]);
         if (a.kind === "section" && b.kind !== "section") return topPaths.has(b.path) ? 1 : -1;
         if (b.kind === "section" && a.kind !== "section") return topPaths.has(a.path) ? -1 : 1;
@@ -873,7 +898,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       }
       return a.label.localeCompare(b.label);
     });
-  }, [allowedNavItems, isBusinessAutopilot, isWhatsappAutomationProduct]);
+  }, [allowedNavItems, isBusinessAutopilot, isWhatsappAutomationProduct, productSlug]);
 
   const dealerNavItems = dealerPages.filter((item) => {
     const stateValue = state.dealerOnboarding || "active";
@@ -1285,6 +1310,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                 )
                 : productSlug === "whatsapp-automation"
                 ? <WhatsappAutomationOverviewPage subscriptions={state.subscriptions} />
+                : productSlug === "digital-automation"
+                ? <DigitalAutomationOverviewPage subscriptions={state.subscriptions} />
                 : <DashboardPage productSlug={productSlug} subscriptions={state.subscriptions} />
             }
           />
@@ -1551,6 +1578,46 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/dashboard/digital-card/analytics"
             element={productSlug === "whatsapp-automation" ? <DigitalCardVisitorAnalyticsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/dashboard/social-media-automation"
+            element={
+              productSlug === "digital-automation"
+                ? <DigitalAutomationModulePage moduleKey="social" />
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/dashboard/ai-content-writer"
+            element={
+              productSlug === "digital-automation"
+                ? <DigitalAutomationModulePage moduleKey="ai" />
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/dashboard/wordpress-auto-post"
+            element={
+              productSlug === "digital-automation"
+                ? <DigitalAutomationModulePage moduleKey="wordpress" />
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/dashboard/hosting-billing"
+            element={
+              productSlug === "digital-automation"
+                ? <Navigate to={withBase("/dashboard/subscription")} replace />
+                : <Navigate to={withBase("/")} replace />
+            }
+          />
+          <Route
+            path="/dashboard/subscription"
+            element={
+              productSlug === "digital-automation"
+                ? <DigitalAutomationSubscriptionPage subscriptions={state.subscriptions} />
+                : <Navigate to={withBase("/")} replace />
+            }
           />
           <Route
             path="/notifications-inbox"
@@ -2075,6 +2142,7 @@ export default function App() {
     { prefix: "/business-autopilot-erp", slug: "business-autopilot-erp", label: "Business Autopilot", redirectPrefix: "/business-autopilot" },
     { prefix: "/business-autopilot", slug: "business-autopilot-erp", label: "Business Autopilot" },
     { prefix: "/whatsapp-automation", slug: "whatsapp-automation", label: "Whatsapp Automation" },
+    { prefix: "/digital-automation", slug: "digital-automation", label: "Digital Automation" },
     { prefix: "/ai-chat-widget", slug: "ai-chat-widget", label: "AI Chat Widget" },
     { prefix: "/digital-card", slug: "digital-card", label: "Digital Card" }
   ];
@@ -2198,26 +2266,27 @@ export default function App() {
     const monitorLabel =
       branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
     const location = useLocation();
-  const isSaasAdminPath = location.pathname.startsWith("/saas-admin");
-  const isSaasAdminUser = Boolean(
-    state.user?.is_superuser ||
-    state.user?.is_staff ||
-    state.profile?.role === "superadmin" ||
-    state.profile?.role === "super_admin"
-  );
-  const archivedBillingPath = isSaasAdminUser ? "/saas-admin/billing" : "/billing";
+    const isDealer = state.profile?.role === "dealer";
+    const isSaasAdminPath = location.pathname.startsWith("/saas-admin");
+    const isSaasAdminUser = Boolean(
+      state.user?.is_superuser ||
+      state.user?.is_staff ||
+      state.profile?.role === "superadmin" ||
+      state.profile?.role === "super_admin"
+    );
+    const archivedBillingPath = isSaasAdminUser ? "/saas-admin/billing" : "/billing";
 
-  if (isSaasAdminPath) {
-    if (isSaasAdminUser) {
-      return <AppShell state={state} productPrefix="" productSlug="saas-admin" />;
+    if (isSaasAdminPath) {
+      if (isSaasAdminUser) {
+        return <AppShell state={state} productPrefix="" productSlug="saas-admin" />;
+      }
+      return <Navigate to="/" replace />;
     }
-    return <Navigate to="/" replace />;
-  }
-  if (state.archived) {
-    if (location.pathname !== archivedBillingPath) {
-      return <Navigate to={archivedBillingPath} replace />;
+    if (state.archived) {
+      if (location.pathname !== archivedBillingPath) {
+        return <Navigate to={archivedBillingPath} replace />;
+      }
     }
-  }
 
     if (location.pathname === "/" || location.pathname === "") {
       return <Navigate to="/work-suite/" replace />;

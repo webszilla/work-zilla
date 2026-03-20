@@ -332,6 +332,47 @@ function getWhatsappAutomationPlanFeatures(plan) {
   ];
 }
 
+function formatDigitalAutomationLimit(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric < 0) {
+    return "Unlimited";
+  }
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return String(value);
+}
+
+function getDigitalAutomationPlanFeatures(plan) {
+  const features = plan?.features || {};
+  const numericLimitEnabled = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return false;
+    return numeric > 0 || numeric < 0;
+  };
+  const hasSocial = numericLimitEnabled(features.social_accounts);
+  const hasScheduled = numericLimitEnabled(features.scheduled_posts);
+  const hasAi = numericLimitEnabled(features.ai_words_limit);
+  const hasWp = numericLimitEnabled(features.wp_sites);
+  const hasHosting = numericLimitEnabled(features.hosting_accounts);
+  const hasWhmBilling = Boolean(features.whm_billing_access) || hasHosting;
+  const supportKey = String(features.support || "").toLowerCase();
+  const hasPrioritySupport = supportKey.includes("priority") || supportKey.includes("dedicated");
+  return [
+    { text: "Social Media Automation", ok: hasSocial || hasScheduled },
+    { text: `Social Accounts: ${formatDigitalAutomationLimit(features.social_accounts)}`, ok: hasSocial },
+    { text: `Scheduled Posts / Month: ${formatDigitalAutomationLimit(features.scheduled_posts)}`, ok: hasScheduled },
+    { text: "AI Content Writer", ok: hasAi },
+    { text: `AI Content Words: ${formatDigitalAutomationLimit(features.ai_words_limit)}`, ok: hasAi },
+    { text: "WordPress Auto Post", ok: hasWp },
+    { text: `WordPress Sites: ${formatDigitalAutomationLimit(features.wp_sites)}`, ok: hasWp },
+    { text: "Priority Support", ok: hasPrioritySupport },
+    { text: "White-label", ok: Boolean(features.white_label) },
+    { text: "WHM Billing & Subscription", ok: hasWhmBilling },
+    { text: `Hosting Accounts (WHM): ${formatDigitalAutomationLimit(features.hosting_accounts)}`, ok: hasHosting },
+  ];
+}
+
 function getBusinessAutopilotPlanDisplayName(planName) {
   const raw = String(planName || "").trim();
   if (!raw) return "-";
@@ -404,11 +445,14 @@ export default function PlansPage() {
       ? "business-autopilot-erp"
       : rawPath.includes("/whatsapp-automation")
       ? "whatsapp-automation"
+      : rawPath.includes("/digital-automation")
+      ? "digital-automation"
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
   const isWhatsappAutomation = resolvedSlug === "whatsapp-automation";
+  const isDigitalAutomation = resolvedSlug === "digital-automation";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -1185,6 +1229,28 @@ export default function PlansPage() {
                         )}
                       </div>
                     </>
+                  ) : isDigitalAutomation ? (
+                    <>
+                      <div className="plan-feature-list">
+                        {getDigitalAutomationPlanFeatures(plan).map((feature) => {
+                          const isOk = Boolean(feature?.ok);
+                          return (
+                            <div className="plan-feature" key={`${plan.id}-da-${feature?.text || "feature"}`}>
+                              <i
+                                className={`bi ${isOk ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                                aria-hidden="true"
+                              />
+                              <span>{feature?.text || "-"}</span>
+                            </div>
+                          );
+                        })}
+                        {plan.features?.is_trial ? (
+                          <div className="plan-metric">
+                            {Number(plan.features?.trial_days || 7)}-day free trial with full feature access
+                          </div>
+                        ) : null}
+                      </div>
+                    </>
                   ) : (
                     <>
                       <div className="plan-feature-list">
@@ -1227,7 +1293,7 @@ export default function PlansPage() {
                           {cycle === "yearly" ? "Yearly" : "Monthly"}
                         </div>
                       </div>
-                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot && !isDigitalAutomation ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">
@@ -1282,7 +1348,7 @@ export default function PlansPage() {
                           </>
                         )}
                       </div>
-                      {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
+                      {!isAiChatbot && !isStorage && !isBusinessAutopilot && !isDigitalAutomation ? (
                         <div className="mt-2">
                           <label className="form-label">Screenshot Storage History</label>
                           <div className="retention-text">

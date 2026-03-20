@@ -37,6 +37,7 @@ export default function ProductAccessSection({
     "online-storage": "/app/storage",
     "business-autopilot-erp": "/app/business-autopilot",
     "whatsapp-automation": "/app/whatsapp-automation",
+    "digital-automation": "/app/digital-automation",
     "ai-chat-widget": "/app/ai-chat-widget",
     "digital-card": "/app/digital-card"
   };
@@ -77,6 +78,12 @@ export default function ProductAccessSection({
       icon: "bi-whatsapp",
       description: "WhatsApp business automation tools with inbox, campaign, and digital card modules.",
       features: ["Inbox", "Automation", "Digital Card", "Catalogue"]
+    },
+    "digital-automation": {
+      name: "Digital Automation",
+      icon: "bi-gear-wide-connected",
+      description: "Automation hub for social posting, AI writing, WordPress publishing, and hosting workflows.",
+      features: ["Social Automation", "AI Writer", "WordPress", "Hosting Billing"]
     },
     "digital-card": {
       name: "Digital Card",
@@ -125,6 +132,7 @@ export default function ProductAccessSection({
         "storage",
         "business-autopilot-erp",
         "whatsapp-automation",
+        "digital-automation",
       ];
       const topLevelFallbackKeys = new Set(fallbackOrder);
       const fallbackKeys = new Set(fallbackOrder);

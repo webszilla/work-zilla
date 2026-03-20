@@ -170,6 +170,16 @@ def public_products(request):
             for row in saas_order_rows
         ]
         normalized_saas_rows = [slug for slug in normalized_saas_rows if slug and slug != "ai-chat-widget"]
+
+        # Keep Digital Automation immediately after WhatsApp Automation on pricing product tabs.
+        wa_idx = next((idx for idx, slug in enumerate(normalized_saas_rows) if slug == "whatsapp-automation"), -1)
+        da_idx = next((idx for idx, slug in enumerate(normalized_saas_rows) if slug == "digital-automation"), -1)
+        if wa_idx != -1 and da_idx != -1 and da_idx != wa_idx + 1:
+            da_slug = normalized_saas_rows.pop(da_idx)
+            if da_idx < wa_idx:
+                wa_idx -= 1
+            normalized_saas_rows.insert(wa_idx + 1, da_slug)
+
         public_order_map = {
             slug: index
             for index, slug in enumerate(normalized_saas_rows, start=1)

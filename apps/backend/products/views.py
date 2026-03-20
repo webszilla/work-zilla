@@ -88,7 +88,7 @@ def product_marketing_view(request, slug):
     context = build_enquiry_context(request)
     context["product"] = product
     seo_title = getattr(product, "seo_title", "") or product.name
-    seo_description = getattr(product, "seo_description", "") or product.short_description
+    seo_description = getattr(product, "seo_description", "") or product.description or product.short_description
     og_title = getattr(product, "og_title", "") or seo_title
     og_description = getattr(product, "og_description", "") or seo_description
     og_image_field = getattr(product, "og_image", None)

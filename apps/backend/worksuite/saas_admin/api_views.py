@@ -2564,6 +2564,7 @@ def _plan_payload(plan):
         "addon_yearly_price": plan.addon_yearly_price,
         "addon_usd_monthly_price": plan.addon_usd_monthly_price,
         "addon_usd_yearly_price": plan.addon_usd_yearly_price,
+        "duration_months": plan.duration_months,
         "employee_limit": plan.employee_limit,
         "retention_days": plan.retention_days,
         "screenshot_min_minutes": plan.screenshot_min_minutes,
@@ -2646,6 +2647,8 @@ def _update_plan_from_payload(plan, data):
         set_float("addon_agent_yearly_price", data.get("addon_agent_yearly_price"))
     if "employee_limit" in data:
         set_int("employee_limit", data.get("employee_limit"))
+    if "duration_months" in data:
+        set_int("duration_months", data.get("duration_months"))
     if "retention_days" in data:
         set_int("retention_days", data.get("retention_days"))
     if "screenshot_min_minutes" in data:

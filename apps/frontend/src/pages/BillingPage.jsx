@@ -231,6 +231,8 @@ export default function BillingPage() {
       ? "business-autopilot-erp"
       : rawPath.includes("/whatsapp-automation")
       ? "whatsapp-automation"
+      : rawPath.includes("/digital-automation")
+      ? "digital-automation"
       : "worksuite");
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";

@@ -938,6 +938,20 @@ def _normalize_subscription_alert_days(value):
     return normalized
 
 
+def _is_valid_alert_email(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if "@" not in text:
+        return False
+    local, domain = text.rsplit("@", 1)
+    if not local or not domain:
+        return False
+    if "." not in domain:
+        return False
+    return True
+
+
 def _normalize_subscription_alert_assignees(value):
     if value is None:
         return []
@@ -975,6 +989,19 @@ def _normalize_subscription_alert_assignees(value):
                     "label": raw_value
                 })
                 seen.add(recipient_key)
+            elif raw_type == "email":
+                email_value = raw_value.lower()
+                if not _is_valid_alert_email(email_value):
+                    return None
+                recipient_key = f"email:{email_value}"
+                if recipient_key in seen:
+                    continue
+                normalized.append({
+                    "type": "email",
+                    "value": email_value,
+                    "label": raw_label or email_value,
+                })
+                seen.add(recipient_key)
             else:
                 return None
         elif isinstance(row, str):
@@ -1004,6 +1031,19 @@ def _normalize_subscription_alert_assignees(value):
                     continue;
                 normalized.append({
                     "type": "department",
+                    "value": raw_text,
+                    "label": raw_text
+                })
+                seen.add(recipient_key)
+            elif raw_value.lower().startswith("email:"):
+                raw_text = raw_value.split(":", 1)[1].strip().lower()
+                if not _is_valid_alert_email(raw_text):
+                    return None
+                recipient_key = f"email:{raw_text}"
+                if recipient_key in seen:
+                    continue
+                normalized.append({
+                    "type": "email",
                     "value": raw_text,
                     "label": raw_text
                 })
