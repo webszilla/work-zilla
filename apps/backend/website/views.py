@@ -306,13 +306,17 @@ def _build_latest_static_download_url(request, *candidates, fallback_path=None):
 
 
 def _redirect_to_latest_static_download(request, *candidates, fallback_path=None):
-    return redirect(
+    response = redirect(
         _build_latest_static_download_url(
             request,
             *candidates,
             fallback_path=fallback_path,
         )
     )
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
 
 
 def download_managed_file(request, filename):

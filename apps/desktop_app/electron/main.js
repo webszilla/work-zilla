@@ -128,6 +128,55 @@ function resolveWindowsUninstallerPath() {
   return "";
 }
 
+function readWindowsUninstallRegistryCommand(valueName) {
+  const keys = [
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent",
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent_is1",
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.workzilla.agent",
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent",
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent_is1",
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.workzilla.agent",
+    "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent",
+    "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Work Zilla Agent_is1",
+    "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\com.workzilla.agent"
+  ];
+  for (const key of keys) {
+    try {
+      const result = spawnSync("reg", ["query", key, "/v", valueName], {
+        windowsHide: true,
+        encoding: "utf8"
+      });
+      if (result.status !== 0) {
+        continue;
+      }
+      const lines = String(result.stdout || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const row = lines.find((line) => line.toLowerCase().startsWith(valueName.toLowerCase()));
+      if (!row) {
+        continue;
+      }
+      const parts = row.split(/\s{2,}/).filter(Boolean);
+      const value = String(parts[parts.length - 1] || "").trim();
+      if (value) {
+        return value;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return "";
+}
+
+function resolveWindowsUninstallCommand() {
+  const quiet = readWindowsUninstallRegistryCommand("QuietUninstallString");
+  if (quiet) {
+    return quiet;
+  }
+  return readWindowsUninstallRegistryCommand("UninstallString");
+}
+
 function normalizeBaseDownloadOrigin() {
   const settings = loadSettings();
   const fallback = "https://getworkzilla.com";
@@ -1507,12 +1556,29 @@ ipcMain.handle("app:uninstall", async () => {
   try {
     if (process.platform === "win32") {
       const uninstallerPath = resolveWindowsUninstallerPath();
-      if (!uninstallerPath) {
+      if (uninstallerPath) {
+        const child = spawn(uninstallerPath, [], {
+          detached: true,
+          stdio: "ignore"
+        });
+        child.unref();
+        isQuitting = true;
+        setTimeout(() => {
+          app.quit();
+        }, 200);
+        return { ok: true };
+      }
+      const uninstallCommand = resolveWindowsUninstallCommand();
+      if (!uninstallCommand) {
         return { ok: false, error: "uninstaller_not_found" };
       }
-      const child = spawn(uninstallerPath, [], {
+      const command = uninstallCommand.includes("/S")
+        ? uninstallCommand
+        : `${uninstallCommand} /S`;
+      const child = spawn("cmd", ["/c", command], {
         detached: true,
-        stdio: "ignore"
+        stdio: "ignore",
+        windowsHide: true
       });
       child.unref();
       isQuitting = true;
