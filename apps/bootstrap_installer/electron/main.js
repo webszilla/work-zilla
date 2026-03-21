@@ -40,6 +40,7 @@ const PRODUCT_CONFIG_ALIASES = {
   imposition: ["imposition", "imposition-software"],
 };
 const SHARED_LAUNCH_PREF_PATH = path.join(os.homedir(), ".workzilla-product-launch.json");
+const SHARED_INSTALLED_PRODUCTS_PATH = path.join(os.homedir(), ".workzilla-installed-products.json");
 
 function getPlatformKey() {
   if (process.platform === "win32") return "windows";
@@ -572,27 +573,7 @@ function validateProductConfig(config, productKey, platformKey) {
   if (!normalized.length) {
     throw new Error(`No package URL for ${platformKey} in ${productKey}`);
   }
-  if (productKey !== "imposition") {
-    return normalized;
-  }
-
-  const fallbacks = [];
-  for (const item of normalized) {
-    try {
-      const parsed = new URL(item);
-      const fallbackPath = platformKey === "mac" ? "/downloads/mac-agent/" : "/downloads/windows-agent/";
-      fallbacks.push(`${parsed.protocol}//${parsed.host}${fallbackPath}`);
-    } catch (_err) {
-      // no-op
-    }
-  }
-  const deduped = [];
-  for (const item of [...normalized, ...fallbacks]) {
-    if (!deduped.includes(item)) {
-      deduped.push(item);
-    }
-  }
-  return deduped;
+  return normalized;
 }
 
 async function downloadFromUrls({ urls, destination, progressCb }) {
@@ -618,7 +599,9 @@ async function detectInstalledProducts() {
     return initial;
   }
   const installedVersion = await getInstalledBaseAgentVersion();
-  const state = readInstalledState();
+  const localState = readInstalledState();
+  const sharedState = readSharedInstalledState();
+  const state = { ...sharedState, ...localState };
   const hasAnyProductInstalled = PRODUCT_KEYS.some((key) => state[key] === true);
   if (!hasAnyProductInstalled) {
     return initial;
@@ -682,6 +665,42 @@ function readInstalledState() {
   }
 }
 
+function normalizeSharedInstalledState(raw) {
+  const normalized = {
+    lastInstalledProduct: PRODUCT_KEYS.includes(raw?.lastInstalledProduct)
+      ? raw.lastInstalledProduct
+      : "",
+  };
+  for (const key of PRODUCT_KEYS) {
+    normalized[key] = Boolean(raw?.[key]);
+  }
+  return normalized;
+}
+
+function readSharedInstalledState() {
+  try {
+    if (!fs.existsSync(SHARED_INSTALLED_PRODUCTS_PATH)) {
+      return normalizeSharedInstalledState({});
+    }
+    const raw = JSON.parse(fs.readFileSync(SHARED_INSTALLED_PRODUCTS_PATH, "utf8"));
+    return normalizeSharedInstalledState(raw);
+  } catch (_err) {
+    return normalizeSharedInstalledState({});
+  }
+}
+
+function writeSharedInstalledState(nextState) {
+  try {
+    fs.writeFileSync(
+      SHARED_INSTALLED_PRODUCTS_PATH,
+      `${JSON.stringify(normalizeSharedInstalledState(nextState), null, 2)}\n`,
+      "utf8",
+    );
+  } catch (_err) {
+    // no-op
+  }
+}
+
 function writeInstalledState(nextState) {
   const statePath = getInstalledStatePath();
   try {
@@ -700,6 +719,10 @@ function markProductInstalled(productKey) {
   state[productKey] = true;
   state.lastInstalledProduct = productKey;
   writeInstalledState(state);
+  const shared = readSharedInstalledState();
+  shared[productKey] = true;
+  shared.lastInstalledProduct = productKey;
+  writeSharedInstalledState(shared);
 }
 
 function markProductUninstalled(productKey) {
@@ -709,6 +732,12 @@ function markProductUninstalled(productKey) {
     state.lastInstalledProduct = "";
   }
   writeInstalledState(state);
+  const shared = readSharedInstalledState();
+  shared[productKey] = false;
+  if (shared.lastInstalledProduct === productKey) {
+    shared.lastInstalledProduct = "";
+  }
+  writeSharedInstalledState(shared);
   return state;
 }
 
@@ -1016,7 +1045,7 @@ ipcMain.handle("bootstrap:uninstall-product", async (_event, productKey) => {
   if (!SUPPORTED_PRODUCTS[productKey]) {
     throw new Error("Unknown product selected.");
   }
-  const state = readInstalledState();
+  const state = { ...readSharedInstalledState(), ...readInstalledState() };
   if (!state[productKey]) {
     return {
       ok: true,

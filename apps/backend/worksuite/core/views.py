@@ -21,6 +21,7 @@ import time
 from urllib.parse import urlparse
 from dashboard.views import get_active_org
 from core.subscription_utils import (
+    get_effective_end_date,
     has_active_subscription_for_org,
     is_subscription_active,
     maybe_expire_subscription,
@@ -1519,6 +1520,88 @@ def employee_report(request, device_id):
     return Response(ser.data)
 
 
+def _build_work_suite_plan_status(org):
+    now = timezone.now()
+    product_filter = Q(plan__product__slug__in=["monitor", "worksuite"]) | Q(plan__product__isnull=True)
+    sub = (
+        Subscription.objects
+        .filter(organization=org)
+        .filter(product_filter)
+        .select_related("plan", "plan__product")
+        .order_by("-start_date")
+        .first()
+    )
+    history = None
+    if not sub:
+        history = (
+            SubscriptionHistory.objects
+            .filter(organization=org, plan__isnull=False)
+            .filter(product_filter)
+            .select_related("plan", "plan__product")
+            .order_by("-start_date")
+            .first()
+        )
+
+    if sub:
+        normalize_subscription_end_date(sub, now=now)
+        if not is_subscription_active(sub, now=now):
+            maybe_expire_subscription(sub, now=now)
+            sub.refresh_from_db(fields=["status", "end_date", "trial_end"])
+        effective_end = get_effective_end_date(sub, now=now) or sub.end_date
+        is_expired = (sub.status or "").lower() == "expired"
+        if not is_expired and effective_end:
+            is_expired = effective_end < now
+        cycle = "monthly" if (sub.billing_cycle or "").lower() != "yearly" else "yearly"
+        expired_date = (
+            timezone.localtime(effective_end).strftime("%d %b %Y")
+            if effective_end else "the previous billing date"
+        )
+        message = (
+            f"Your {cycle} Work Suite plan expired on {expired_date}. "
+            "Renew the product to continue service."
+            if is_expired else ""
+        )
+        return {
+            "status": sub.status or "",
+            "plan_name": sub.plan.name if sub.plan else "",
+            "billing_cycle": cycle,
+            "expires_at": effective_end.isoformat() if effective_end else "",
+            "expired": bool(is_expired),
+            "message": message,
+        }
+
+    if history:
+        end_date = history.end_date
+        is_expired = bool(end_date and end_date < now) or (history.status or "").lower() == "expired"
+        cycle = "monthly" if (history.billing_cycle or "").lower() != "yearly" else "yearly"
+        expired_date = (
+            timezone.localtime(end_date).strftime("%d %b %Y")
+            if end_date else "the previous billing date"
+        )
+        message = (
+            f"Your {cycle} Work Suite plan expired on {expired_date}. "
+            "Renew the product to continue service."
+            if is_expired else ""
+        )
+        return {
+            "status": history.status or "",
+            "plan_name": history.plan.name if history.plan else "",
+            "billing_cycle": cycle,
+            "expires_at": end_date.isoformat() if end_date else "",
+            "expired": bool(is_expired),
+            "message": message,
+        }
+
+    return {
+        "status": "",
+        "plan_name": "",
+        "billing_cycle": "",
+        "expires_at": "",
+        "expired": False,
+        "message": "",
+    }
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -1544,7 +1627,8 @@ def org_settings(request):
             request=request,
         )
         return rate_limited
-    org, error = _get_org_from_company_key(request)
+    plan_status_only = str(request.query_params.get("plan_status_only") or "").strip() == "1"
+    org, error = _get_org_from_company_key(request, allow_inactive=plan_status_only)
     if error:
         log_event(
             "agent_org_settings",
@@ -1571,10 +1655,12 @@ def org_settings(request):
         request=request,
     )
     theme = ThemeSettings.get_active()
+    work_suite_plan = _build_work_suite_plan_status(org)
     return Response({
         "screenshot_interval_seconds": interval_seconds,
         "theme_primary": theme.primary_color or "",
         "theme_secondary": theme.secondary_color or "",
+        "work_suite_plan": work_suite_plan,
     })
 
 

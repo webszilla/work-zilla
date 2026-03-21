@@ -73,13 +73,19 @@ body {
 
 .hero-brand {
   display: flex;
-  align-items: center;
+  align-items: center !important;
   gap: 14px;
 }
 
 .hero-brand-title {
   display: flex;
-  align-items: center;
+  align-items: center !important;
+  min-height: 40px;
+}
+
+.hero-brand-title h1 {
+  display: flex;
+  align-items: center !important;
   min-height: 40px;
 }
 
@@ -537,6 +543,12 @@ body {
   background: linear-gradient(135deg, #334155, #1f2937);
   color: #f8fafc;
   border-color: rgba(51, 65, 85, 0.45);
+}
+
+:root[data-theme="light"] #themeDarkBtn {
+  background: linear-gradient(135deg, #334155, #1f2937) !important;
+  color: #f8fafc !important;
+  border-color: rgba(51, 65, 85, 0.45) !important;
 }
 
 :root[data-theme="light"] .hero-btn.hero-btn-danger {

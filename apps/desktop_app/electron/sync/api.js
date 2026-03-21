@@ -84,7 +84,7 @@ export async function getSyncSettings() {
   return response.json();
 }
 
-export async function getMonitorSettings({ companyKey, deviceId, employeeId } = {}) {
+export async function getMonitorSettings({ companyKey, deviceId, employeeId, planStatusOnly } = {}) {
   const params = new URLSearchParams();
   if (companyKey) {
     params.set("company_key", companyKey);
@@ -94,6 +94,9 @@ export async function getMonitorSettings({ companyKey, deviceId, employeeId } = 
   }
   if (employeeId) {
     params.set("employee", String(employeeId));
+  }
+  if (planStatusOnly) {
+    params.set("plan_status_only", "1");
   }
   const query = params.toString();
   const url = buildUrl(`/api/org/settings${query ? `?${query}` : ""}`);

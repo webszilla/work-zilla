@@ -4,9 +4,14 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   const isAuthed = Boolean(auth?.authenticated);
   const isOnline = connection?.online !== false;
   const enabledProducts = new Set(auth?.enabled_products || []);
-  const canUseMonitor = enabledProducts.has("monitor") || enabledProducts.has("worksuite");
-  const canUseStorage = enabledProducts.has("storage");
-  const canUseImposition = enabledProducts.has("imposition-software") || enabledProducts.has("imposition");
+  const [localInstalledProducts, setLocalInstalledProducts] = useState(
+    () => new Set(auth?.local_installed_products || [])
+  );
+  const canUseMonitor =
+    enabledProducts.has("monitor") || enabledProducts.has("worksuite") || localInstalledProducts.has("monitor");
+  const canUseStorage = enabledProducts.has("storage") || localInstalledProducts.has("storage");
+  const canUseImposition =
+    enabledProducts.has("imposition-software") || enabledProducts.has("imposition") || localInstalledProducts.has("imposition");
   const [agentVersion, setAgentVersion] = useState("");
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallMessage, setUninstallMessage] = useState("");
@@ -20,6 +25,35 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
     currentVersion: "",
     error: false
   });
+  const [workSuiteExpiryAlert, setWorkSuiteExpiryAlert] = useState("");
+
+  useEffect(() => {
+    setLocalInstalledProducts(new Set(auth?.local_installed_products || []));
+  }, [auth?.local_installed_products]);
+
+  useEffect(() => {
+    let active = true;
+    async function refreshLocalInstalled() {
+      if (!window.storageApi.getLocalInstalledProducts) {
+        return;
+      }
+      try {
+        const response = await window.storageApi.getLocalInstalledProducts();
+        if (!active || !response?.ok) {
+          return;
+        }
+        setLocalInstalledProducts(new Set(response.products || []));
+      } catch {
+        // ignore local state refresh errors
+      }
+    }
+    refreshLocalInstalled();
+    const timer = setInterval(refreshLocalInstalled, 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -83,6 +117,49 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
       return;
     }
     refreshUpdateStatus();
+  }, [isOnline]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadPlanStatus() {
+      try {
+        const settings = await window.storageApi.getSettings?.();
+        const companyKey = String(settings?.companyKey || settings?.orgId || "").trim();
+        if (!companyKey || !window.storageApi.getMonitorPlanStatus) {
+          if (active) {
+            setWorkSuiteExpiryAlert("");
+          }
+          return;
+        }
+        const status = await window.storageApi.getMonitorPlanStatus({ companyKey });
+        const plan = status?.plan || null;
+        if (!active) {
+          return;
+        }
+        if (status?.ok && plan?.expired) {
+          setWorkSuiteExpiryAlert(
+            String(
+              plan?.message ||
+                "Your Work Suite plan has expired. Renew the product to continue service."
+            )
+          );
+          return;
+        }
+        setWorkSuiteExpiryAlert("");
+      } catch {
+        if (active) {
+          setWorkSuiteExpiryAlert("");
+        }
+      }
+    }
+    if (isOnline) {
+      loadPlanStatus();
+    } else {
+      setWorkSuiteExpiryAlert("");
+    }
+    return () => {
+      active = false;
+    };
   }, [isOnline]);
 
   async function handleUninstall() {
@@ -218,11 +295,12 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
             >
               <div className="tile-title">Work Suite</div>
               <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
+              {workSuiteExpiryAlert ? <div className="tile-note tile-note-alert">{workSuiteExpiryAlert}</div> : null}
               {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
             </button>
           ) : null}
 
-          {isAuthed && canUseStorage ? (
+          {canUseStorage ? (
             <button
               type="button"
               className="launch-tile"

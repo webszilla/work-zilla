@@ -3,7 +3,7 @@
 
 {% block content %}
 
-<div class="container mt-5" style="max-width:700px">
+<div class="container mt-5 auth-page-shell" style="max-width:700px">
 
   <h1 class="section-title text-center">Create Your Work Zilla Account</h1>
 
@@ -33,7 +33,7 @@
         {% endif %}
       {% endif %}
 
-      <form method="post" action="/auth/signup/" data-account-form>
+      <form method="post" action="/auth/signup/" data-account-form data-auth-loading-form>
           {% csrf_token %}
 
           <div class="mb-3">
@@ -111,7 +111,7 @@
 
           <input type="hidden" name="plan" value="{{ request.GET.plan }}">
 
-          <button class="btn btn-primary w-100">
+          <button class="btn btn-primary w-100 auth-submit-btn" data-auth-submit-btn>
               Create Account
           </button>
 
@@ -123,6 +123,10 @@
       </form>
   </div>
 
+</div>
+
+<div class="auth-loading-overlay" id="authLoadingOverlay" aria-hidden="true">
+  <div class="auth-loading-spinner" aria-label="Loading"></div>
 </div>
 
 {% if request.user.is_authenticated %}
@@ -148,5 +152,18 @@
 
 {% block extra_js %}
   <script src="{% static 'public/js/account_forms.js' %}" defer></script>
+  <script>
+    (function () {
+      var form = document.querySelector("[data-auth-loading-form]");
+      var overlay = document.getElementById("authLoadingOverlay");
+      var submitBtn = document.querySelector("[data-auth-submit-btn]");
+      if (!form || !overlay) return;
+      form.addEventListener("submit", function () {
+        overlay.classList.add("show");
+        overlay.setAttribute("aria-hidden", "false");
+        if (submitBtn) submitBtn.disabled = true;
+      });
+    })();
+  </script>
 {% endblock %}
 

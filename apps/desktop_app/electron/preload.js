@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   downloadBulk: (payload) => ipcRenderer.invoke("storage:download-bulk", payload),
   saveFileBytes: (payload) => ipcRenderer.invoke("file:save-bytes", payload),
   getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
+  getLocalInstalledProducts: () => ipcRenderer.invoke("app:local-installed-products"),
   uninstallApp: () => ipcRenderer.invoke("app:uninstall"),
   checkForAppUpdate: () => ipcRenderer.invoke("app:update-check"),
   installAppUpdate: () => ipcRenderer.invoke("app:update-install"),
@@ -57,6 +58,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   startMonitor: () => ipcRenderer.invoke("monitor:start"),
   stopMonitor: () => ipcRenderer.invoke("monitor:stop"),
   getMonitorStatus: () => ipcRenderer.invoke("monitor:status"),
+  getMonitorPlanStatus: (payload) => ipcRenderer.invoke("monitor:plan-status", payload),
   onConnectionStatusUpdated: (handler) => {
     const listener = (_event, status) => handler(status);
     ipcRenderer.on("connection:status", listener);

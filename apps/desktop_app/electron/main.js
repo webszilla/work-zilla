@@ -60,6 +60,8 @@ const connectivityState = {
   checked_at: null
 };
 const SHARED_LAUNCH_PREF_PATH = path.join(os.homedir(), ".workzilla-product-launch.json");
+const SHARED_INSTALLED_PRODUCTS_PATH = path.join(os.homedir(), ".workzilla-installed-products.json");
+const PRODUCT_KEYS = ["monitor", "storage", "imposition"];
 
 process.on("uncaughtException", (error) => {
   const code = error?.code || error?.cause?.code || "";
@@ -94,6 +96,18 @@ function getSharedLaunchPreference() {
     return { preferredProduct };
   } catch {
     return { preferredProduct: "" };
+  }
+}
+
+function getSharedInstalledProducts() {
+  try {
+    if (!fs.existsSync(SHARED_INSTALLED_PRODUCTS_PATH)) {
+      return [];
+    }
+    const raw = JSON.parse(fs.readFileSync(SHARED_INSTALLED_PRODUCTS_PATH, "utf8"));
+    return PRODUCT_KEYS.filter((key) => Boolean(raw?.[key]));
+  } catch {
+    return [];
   }
 }
 
@@ -812,7 +826,7 @@ ipcMain.handle("auth:login", async (_event, payload) => {
   const status = await checkAuth();
   persistAuthProfile(status);
   refreshTray();
-  return { loading: false, ...status };
+  return { loading: false, ...status, local_installed_products: getSharedInstalledProducts() };
 });
 
 ipcMain.handle("auth:logout", async () => {
@@ -825,7 +839,7 @@ ipcMain.handle("auth:status", async () => {
   const status = await checkAuth();
   persistAuthProfile(status);
   refreshTray();
-  return { loading: false, ...status };
+  return { loading: false, ...status, local_installed_products: getSharedInstalledProducts() };
 });
 
 ipcMain.handle("settings:get", () => loadSettings());
@@ -1428,6 +1442,39 @@ ipcMain.handle("monitor:status", () => ({
   ok: true,
   status: monitorProcess || monitorCaptureTimer ? "running" : "stopped"
 }));
+
+ipcMain.handle("app:local-installed-products", () => ({
+  ok: true,
+  products: getSharedInstalledProducts()
+}));
+
+ipcMain.handle("monitor:plan-status", async (_event, payload = {}) => {
+  const settings = loadSettings();
+  const companyKey = String(payload?.companyKey || resolveCompanyKey(settings) || "").trim();
+  if (!companyKey) {
+    return { ok: false, error: "company_key_missing", plan: null };
+  }
+  try {
+    const result = await getMonitorSettings({
+      companyKey,
+      deviceId: settings.deviceId || "",
+      employeeId: settings.employeeId || null,
+      planStatusOnly: true
+    });
+    return {
+      ok: true,
+      companyKey,
+      plan: result?.work_suite_plan || null
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      companyKey,
+      error: String(error?.code || error?.message || "plan_status_unavailable"),
+      plan: null
+    };
+  }
+});
 
 ipcMain.handle("app:relaunch", () => {
   app.relaunch();

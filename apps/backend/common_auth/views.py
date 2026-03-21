@@ -1,8 +1,13 @@
 from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.contrib import messages
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
 
 from .forms import SignupForm
 from .models import Organization, User
@@ -107,6 +112,104 @@ def signup_view(request):
     )
     login(request, user)
     return redirect("/pricing/")
+
+
+@require_http_methods(["GET", "POST"])
+def forgot_password_view(request):
+    if request.method == "GET":
+        return render(request, "sites/forgot_password.html")
+
+    email = (request.POST.get("email") or "").strip()
+    if not email:
+        return render(
+            request,
+            "sites/forgot_password.html",
+            {"error": "Email is required."},
+        )
+
+    user = User.objects.filter(email__iexact=email).first()
+    # Keep response generic for unknown emails as well.
+    if user:
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        reset_path = f"/auth/reset-password/{uid}/{token}/"
+        reset_url = request.build_absolute_uri(reset_path)
+        send_templated_email(
+            user.email,
+            "Reset your Work Zilla password",
+            "emails/password_reset_link.txt",
+            {
+                "name": user.first_name or user.username,
+                "reset_url": reset_url,
+                "support_email": "support@getworkzilla.com",
+            },
+        )
+
+    return render(
+        request,
+        "sites/forgot_password.html",
+        {
+            "success": "If this email is registered, a password reset link has been sent.",
+            "submitted_email": email,
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def reset_password_view(request, uidb64, token):
+    user = None
+    token_valid = False
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.filter(pk=uid).first()
+        token_valid = bool(user and default_token_generator.check_token(user, token))
+    except Exception:
+        token_valid = False
+        user = None
+
+    if request.method == "GET":
+        return render(
+            request,
+            "sites/reset_password.html",
+            {"token_valid": token_valid},
+        )
+
+    if not token_valid or not user:
+        return render(
+            request,
+            "sites/reset_password.html",
+            {"token_valid": False, "error": "This password reset link is invalid or expired."},
+        )
+
+    password1 = request.POST.get("password1") or ""
+    password2 = request.POST.get("password2") or ""
+
+    if not password1 or not password2:
+        return render(
+            request,
+            "sites/reset_password.html",
+            {"token_valid": True, "error": "Both password fields are required."},
+        )
+    if password1 != password2:
+        return render(
+            request,
+            "sites/reset_password.html",
+            {"token_valid": True, "error": "Passwords do not match."},
+        )
+
+    try:
+        validate_password(password1, user=user)
+    except ValidationError as exc:
+        return render(
+            request,
+            "sites/reset_password.html",
+            {"token_valid": True, "error": " ".join([str(m) for m in exc.messages])},
+        )
+
+    user.set_password(password1)
+    user.save(update_fields=["password"])
+    messages.success(request, "Password reset successful. Please login with your new password.")
+    return redirect("/auth/login/")
 
 
 @require_http_methods(["GET", "POST"])

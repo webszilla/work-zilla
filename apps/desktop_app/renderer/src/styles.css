@@ -703,6 +703,11 @@ input::placeholder {
   color: var(--danger);
 }
 
+.tile-note-alert {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
 .list {
   list-style: none;
   padding: 0;

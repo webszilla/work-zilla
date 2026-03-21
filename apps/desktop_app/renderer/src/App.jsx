@@ -29,7 +29,13 @@ const storageScreens = [
   { id: "settings", label: "Settings" }
 ];
 
-const defaultAuth = { loading: true, authenticated: false, user: null, enabled_products: [] };
+const defaultAuth = {
+  loading: true,
+  authenticated: false,
+  user: null,
+  enabled_products: [],
+  local_installed_products: []
+};
 const defaultConnection = { online: true, reconnecting: false, internet: true, api: true, message: "" };
 
 export default function App() {
@@ -50,10 +56,18 @@ export default function App() {
     () => new Set(auth?.enabled_products || []).has("storage"),
     [auth?.enabled_products]
   );
+  const hasLocalStorageInstall = useMemo(
+    () => new Set(auth?.local_installed_products || []).has("storage"),
+    [auth?.local_installed_products]
+  );
   const hasImpositionAccess = useMemo(() => {
     const enabled = new Set(auth?.enabled_products || []);
     return enabled.has("imposition-software") || enabled.has("imposition");
   }, [auth?.enabled_products]);
+  const hasLocalImpositionInstall = useMemo(
+    () => new Set(auth?.local_installed_products || []).has("imposition"),
+    [auth?.local_installed_products]
+  );
 
   const visibleScreens = useMemo(
     () => storageScreens.filter((item) => !item.adminOnly || isAdmin),
@@ -237,12 +251,13 @@ export default function App() {
             setAuth(next);
             if (pendingModule) {
               const enabled = new Set(next?.enabled_products || []);
+              const localInstalled = new Set(next?.local_installed_products || []);
               const nextHasStorage = new Set(next?.enabled_products || []).has("storage");
               const nextHasMonitor = enabled.has("monitor") || enabled.has("worksuite");
               const nextHasImposition = enabled.has("imposition-software") || enabled.has("imposition");
-              if (pendingModule === "storage" && !nextHasStorage) {
+              if (pendingModule === "storage" && !nextHasStorage && !localInstalled.has("storage")) {
                 setActiveModule("launcher");
-              } else if (pendingModule === "imposition" && !nextHasImposition) {
+              } else if (pendingModule === "imposition" && !nextHasImposition && !localInstalled.has("imposition")) {
                 setActiveModule("launcher");
               } else if (pendingModule === "monitor" && enabled.size > 0 && !nextHasMonitor) {
                 setActiveModule("launcher");
@@ -270,7 +285,8 @@ export default function App() {
           connection={connection}
           onLogout={async () => {
             await window.storageApi.logout();
-            setAuth({ ...defaultAuth, loading: false });
+            const next = await window.storageApi.getAuthStatus();
+            setAuth({ loading: false, ...next });
           }}
           onSelect={(product) => {
             if (product === "login") {
@@ -287,9 +303,21 @@ export default function App() {
               return;
             }
             if (product === "storage" && auth.authenticated && !hasStorageAccess) {
-              return;
+              if (!hasLocalStorageInstall) {
+                return;
+              }
             }
             if (product === "imposition" && auth.authenticated && !hasImpositionAccess) {
+              if (!hasLocalImpositionInstall) {
+                return;
+              }
+            }
+            if (product === "storage" && auth.authenticated && !hasStorageAccess && hasLocalStorageInstall) {
+              setActiveModule(product);
+              return;
+            }
+            if (product === "imposition" && auth.authenticated && !hasImpositionAccess && hasLocalImpositionInstall) {
+              setActiveModule(product);
               return;
             }
             setActiveModule(product);
@@ -359,7 +387,8 @@ export default function App() {
           onBack={() => setActiveModule("launcher")}
           onLogout={async () => {
             await window.storageApi.logout();
-            setAuth({ ...defaultAuth, loading: false });
+            const next = await window.storageApi.getAuthStatus();
+            setAuth({ loading: false, ...next });
             setActiveModule("launcher");
           }}
         />

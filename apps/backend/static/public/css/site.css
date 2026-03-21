@@ -862,6 +862,57 @@ img {
   pointer-events: none;
 }
 
+.auth-submit-btn {
+  outline: none !important;
+}
+
+.auth-submit-btn:hover,
+.auth-submit-btn:focus,
+.auth-submit-btn:focus-visible,
+.auth-submit-btn:active {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.auth-submit-btn--auto {
+  width: auto !important;
+  min-width: 140px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.auth-loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.36);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 12000;
+}
+
+.auth-loading-overlay.show {
+  display: flex;
+}
+
+.auth-loading-spinner {
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 4px solid rgba(255, 255, 255, 0.45);
+  border-top-color: var(--color-primary);
+  animation: auth-spin 0.75s linear infinite;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .hero {
   background: var(--color-surface);
   border-radius: 0;

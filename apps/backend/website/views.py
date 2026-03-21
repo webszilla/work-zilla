@@ -408,10 +408,6 @@ def download_windows_storage_product_agent(request):
         "Work Zilla Storage Setup *.exe",
         "Work Zilla Storage Agent Setup *.exe",
         "Work Zilla Storage Setup.exe",
-        "Work Zilla Agent Setup *x64*.exe",
-        "Work Zilla Agent Setup *.exe",
-        "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
     )
 
 
@@ -529,12 +525,6 @@ def download_mac_storage_product_agent(request):
             "Work Zilla Storage-*.dmg",
             "Work Zilla Storage-*.pkg",
             "Work Zilla Storage-*-mac.zip",
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
         )
     return _redirect_to_latest_static_download(
         request,
@@ -544,12 +534,6 @@ def download_mac_storage_product_agent(request):
         "Work Zilla Storage-*-arm64.dmg",
         "Work Zilla Storage-*-arm64.pkg",
         "Work Zilla Storage-*-arm64-mac.zip",
-        "Work Zilla Agent-*.dmg",
-        "Work Zilla Agent-*.pkg",
-        "Work Zilla Agent-*-mac.zip",
-        "Work Zilla Agent-*-arm64.dmg",
-        "Work Zilla Agent-*-arm64.pkg",
-        "Work Zilla Agent-*-arm64-mac.zip",
     )
 
 
@@ -557,17 +541,11 @@ def download_windows_imposition_product_agent(request):
     redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/windows-imposition-product-agent/")
     if redirect_response:
         return redirect_response
-    _prune_download_variants("Work Zilla Imposition Setup *.exe", "Work Zilla Installer-win-*.exe", "Work Zilla Agent Setup *.exe")
+    _prune_download_variants("Work Zilla Imposition Setup *.exe")
     return _redirect_to_latest_static_download(
         request,
         "Work Zilla Imposition Setup *x64*.exe",
         "Work Zilla Imposition Setup *.exe",
-        "Work Zilla Agent Setup *x64*.exe",
-        "Work Zilla Agent Setup *.exe",
-        "WorkZillaAgentSetup.exe",
-        "Work Zilla Installer-win-x64-*.exe",
-        "Work Zilla Installer-win-*.exe",
-        "WorkZillaInstallerSetup.exe",
     )
 
 
@@ -576,28 +554,14 @@ def download_mac_imposition_product_agent(request):
     if redirect_response:
         return redirect_response
     _prune_download_variants(
-        "Work Zilla Agent-*-arm64.dmg",
-        "Work Zilla Agent-*-arm64.pkg",
-        "Work Zilla Agent-*-arm64-mac.zip",
-        "Work Zilla Agent-[0-9]*.dmg",
-        "Work Zilla Agent-[0-9]*.pkg",
-        "Work Zilla Agent-[0-9]*-mac.zip",
         "Work Zilla Imposition-*.dmg",
         "Work Zilla Imposition-*.pkg",
         "Work Zilla Imposition-*-mac.zip",
-        "Work Zilla Installer-mac-arm64-*.dmg",
-        "Work Zilla Installer-mac-x64-*.dmg",
     )
     prefer_arm = _prefer_arm64_mac(request)
     if prefer_arm:
         return _redirect_to_latest_static_download(
             request,
-            "Work Zilla Agent-*-arm64.dmg",
-            "Work Zilla Agent-*-arm64.pkg",
-            "Work Zilla Agent-*-arm64-mac.zip",
-            "Work Zilla Agent-*.dmg",
-            "Work Zilla Agent-*.pkg",
-            "Work Zilla Agent-*-mac.zip",
             "Work Zilla Imposition-*-arm64.dmg",
             "Work Zilla Imposition-*-arm64.pkg",
             "Work Zilla Imposition-*-arm64-mac.zip",
@@ -607,12 +571,6 @@ def download_mac_imposition_product_agent(request):
         )
     return _redirect_to_latest_static_download(
         request,
-        "Work Zilla Agent-*.dmg",
-        "Work Zilla Agent-*.pkg",
-        "Work Zilla Agent-*-mac.zip",
-        "Work Zilla Agent-*-arm64.dmg",
-        "Work Zilla Agent-*-arm64.pkg",
-        "Work Zilla Agent-*-arm64-mac.zip",
         "Work Zilla Imposition-*.dmg",
         "Work Zilla Imposition-*.pkg",
         "Work Zilla Imposition-*-mac.zip",
@@ -627,18 +585,12 @@ def bootstrap_products_config(request):
         request,
         "Work Zilla Agent Setup *x64*.exe",
         "Work Zilla Agent Setup *.exe",
-        "Work Zilla Installer-win-x64-*.exe",
-        "Work Zilla Installer-win-*.exe",
-        "WorkZillaInstallerSetup.exe",
-        "WorkZillaAgentSetup.exe",
         fallback_path="/downloads/windows-monitor-product-agent/",
     )
     monitor_mac_url = _build_latest_static_download_url(
         request,
-        "Work Zilla Agent-*-arm64.dmg" if _prefer_arm64_mac(request) else "Work Zilla Agent-[0-9]*.dmg",
+        "Work Zilla Agent-*-arm64.dmg" if _prefer_arm64_mac(request) else "Work Zilla Agent-*.dmg",
         "Work Zilla Agent-*.dmg",
-        "Work Zilla Installer-mac-arm64-*.dmg" if _prefer_arm64_mac(request) else "Work Zilla Installer-mac-x64-*.dmg",
-        "Work Zilla Installer-mac-*.dmg",
         fallback_path="/downloads/mac-monitor-product-agent/",
     )
     storage_windows_url = _build_latest_static_download_url(
@@ -663,8 +615,6 @@ def bootstrap_products_config(request):
     )
     imposition_mac_url = _build_latest_static_download_url(
         request,
-        "Work Zilla Agent-*-arm64.dmg" if _prefer_arm64_mac(request) else "Work Zilla Agent-[0-9]*.dmg",
-        "Work Zilla Agent-*.dmg",
         "Work Zilla Imposition-*-arm64.dmg" if _prefer_arm64_mac(request) else "Work Zilla Imposition-*.dmg",
         "Work Zilla Imposition-*.dmg",
         fallback_path="/downloads/mac-imposition-product-agent/",
