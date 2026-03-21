@@ -312,29 +312,9 @@ def monitor_stop_event(request):
 def get_screenshot_interval_seconds(org):
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     minutes = settings_obj.screenshot_interval_minutes or 5
-    monitor_plan_filter = (
-        Q(plan__product__slug="monitor")
-        | Q(plan__product__slug="worksuite")
-        | Q(plan__product__isnull=True)
-    )
-    sub = (
-        Subscription.objects
-        .filter(organization=org, status__in=("active", "trialing"))
-        .filter(monitor_plan_filter)
-        .order_by("-start_date")
-        .first()
-    )
-    if sub:
-        normalize_subscription_end_date(sub)
-        if not is_subscription_active(sub):
-            maybe_expire_subscription(sub)
-            sub = None
-    min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
-    if min_interval and minutes < min_interval:
-        minutes = min_interval
-        settings_obj.screenshot_interval_minutes = minutes
-        settings_obj.save()
-    return minutes * 60
+    if minutes <= 0:
+        minutes = 5
+    return int(minutes * 60)
 
 
 def _expand_url_targets(value):
@@ -672,26 +652,60 @@ def _keyword_match(text, keywords):
     return any(keyword and keyword in target for keyword in keywords)
 
 
-def _should_blur_keywords(url, window_title, keywords):
-    return _keyword_match(url, keywords) or _keyword_match(window_title, keywords)
+def _is_browser_context_for_blur(app_name, window_title):
+    app_target = (app_name or "").strip()
+    title_target = (window_title or "").strip().lower()
+    return _is_browser_app(app_target) or any(
+        token in title_target for token in ("chrome", "edge", "firefox", "safari", "brave", "browser")
+    )
 
 
-def _should_blur_auto(settings_obj, url, window_title):
+def _should_blur_keywords(url, window_title, keywords, app_name=""):
+    page = (url or "").strip()
+    title = (window_title or "").strip()
+    if _keyword_match(page, keywords):
+        return True
+    # Browser screenshots should prioritize current tab URL signal.
+    # If URL is unavailable, use stricter title matching to avoid false positives
+    # from non-active tabs/background browser state.
+    if _is_browser_context_for_blur(app_name, title):
+        if not page:
+            strict_keywords = [
+                key for key in keywords
+                if key in {
+                    "netbank",
+                    "netbanking",
+                    "internet banking",
+                    "otp",
+                    "one time password",
+                    "verification code",
+                    "card number",
+                    "cvv",
+                    "payment gateway",
+                    "upi",
+                }
+            ]
+            return _keyword_match(title, strict_keywords)
+        return _keyword_match(title, keywords)
+    return _keyword_match(title, keywords)
+
+
+def _should_blur_auto(settings_obj, url, window_title, app_name=""):
     if not settings_obj:
         return False
     title = window_title or ""
     page = url or ""
     if settings_obj.auto_blur_password_fields:
-        if _should_blur_keywords(page, title, PASSWORD_FIELD_KEYWORDS):
+        if _should_blur_keywords(page, title, PASSWORD_FIELD_KEYWORDS, app_name=app_name):
             return True
     if settings_obj.auto_blur_otp_fields:
-        if _should_blur_keywords(page, title, OTP_FIELD_KEYWORDS):
+        if _should_blur_keywords(page, title, OTP_FIELD_KEYWORDS, app_name=app_name):
             return True
     if settings_obj.auto_blur_card_fields:
-        if _should_blur_keywords(page, title, CARD_FIELD_KEYWORDS):
+        if _should_blur_keywords(page, title, CARD_FIELD_KEYWORDS, app_name=app_name):
             return True
     if settings_obj.auto_blur_email_inbox:
-        if _should_blur_keywords(page, title, EMAIL_INBOX_KEYWORDS):
+        if _should_blur_keywords(page, title, EMAIL_INBOX_KEYWORDS, app_name=app_name):
             return True
     return False
 
@@ -1274,9 +1288,9 @@ def upload_screenshot(request):
             window_title,
         )
         if not should_blur and keyword_rules:
-            should_blur = _should_blur_keywords(url, window_title, keyword_rules)
+            should_blur = _should_blur_keywords(url, window_title, keyword_rules, app_name=app_name)
         if not should_blur:
-            should_blur = _should_blur_auto(settings_obj, url, window_title)
+            should_blur = _should_blur_auto(settings_obj, url, window_title, app_name=app_name)
         if should_blur:
             blurred_image = _blur_upload_image(image)
             if blurred_image:

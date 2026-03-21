@@ -6,6 +6,7 @@ const sizeTextEl = document.getElementById("sizeText");
 const installerVersionTextEl = document.getElementById("installerVersionText");
 const themeLightBtn = document.getElementById("themeLightBtn");
 const themeDarkBtn = document.getElementById("themeDarkBtn");
+const uninstallInstallerBtn = document.getElementById("uninstallInstallerBtn");
 const SHARED_UI_VERSION = "20260228-1";
 const SHARED_UI_URL = `https://getworkzilla.com/static/public/css/shared-ui.css?v=${SHARED_UI_VERSION}`;
 
@@ -13,6 +14,7 @@ let installing = false;
 let activeProduct = "";
 let productState = [];
 let theme = "dark";
+let installerUninstallSupported = false;
 
 function loadRemoteSharedUiCss() {
   if (document.head.querySelector("link[data-shared-ui-remote='1']")) {
@@ -73,6 +75,47 @@ function setProgress(downloaded, total) {
   setSizeText(downloaded, total);
 }
 
+function extractSemver(value) {
+  const text = String(value || "");
+  const match = text.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match ? match[1] : "";
+}
+
+function compareSemver(a, b) {
+  const parse = (version) => {
+    const core = String(version || "").split("-", 1)[0] || "";
+    const [major = "0", minor = "0", patch = "0"] = core.split(".");
+    return [
+      Number.parseInt(major, 10) || 0,
+      Number.parseInt(minor, 10) || 0,
+      Number.parseInt(patch, 10) || 0,
+    ];
+  };
+  const left = parse(a);
+  const right = parse(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] !== right[i]) {
+      return left[i] - right[i];
+    }
+  }
+  return 0;
+}
+
+function canUpdateProduct(product) {
+  if (!product?.installed || !product?.available) {
+    return false;
+  }
+  const latest = extractSemver(product.latestVersion);
+  const installed = extractSemver(product.installedVersion);
+  if (!latest) {
+    return false;
+  }
+  if (!installed) {
+    return true;
+  }
+  return compareSemver(latest, installed) > 0;
+}
+
 function createCard(product, onInstall) {
   const card = document.createElement("article");
   card.className = "card";
@@ -118,6 +161,13 @@ function createCard(product, onInstall) {
   uninstallButton.disabled = !product.installed || installing;
   uninstallButton.addEventListener("click", () => handleUninstall(product.key));
 
+  const updateButton = document.createElement("button");
+  updateButton.className = "btn-update";
+  updateButton.textContent = "Update";
+  updateButton.dataset.productKey = product.key;
+  updateButton.disabled = !canUpdateProduct(product) || installing;
+  updateButton.addEventListener("click", () => handleUpdate(product.key));
+
   const footnote = document.createElement("div");
   footnote.className = "card-footnote";
   footnote.textContent = product.installed
@@ -136,7 +186,7 @@ function createCard(product, onInstall) {
 
   const actions = document.createElement("div");
   actions.className = "card-actions";
-  actions.append(button, uninstallButton);
+  actions.append(button, uninstallButton, updateButton);
 
   header.append(title, chip);
   card.append(header, subtitle, versions, footnote, actions);
@@ -155,14 +205,24 @@ function setButtonsDisabled(disabled) {
   Array.from(cardsEl.querySelectorAll("button")).forEach((button) => {
     const isUnavailableInstall = button.classList.contains("btn-install") && button.dataset.unavailable === "1";
     const isUninstallButton = button.classList.contains("btn-uninstall");
+    const isUpdateButton = button.classList.contains("btn-update");
     if (isUninstallButton) {
       const key = button.dataset.productKey;
       const product = productState.find((item) => item.key === key);
       button.disabled = disabled || !product?.installed;
       return;
     }
+    if (isUpdateButton) {
+      const key = button.dataset.productKey;
+      const product = productState.find((item) => item.key === key);
+      button.disabled = disabled || !canUpdateProduct(product);
+      return;
+    }
     button.disabled = disabled || isUnavailableInstall;
   });
+  if (uninstallInstallerBtn) {
+    uninstallInstallerBtn.disabled = disabled || !installerUninstallSupported;
+  }
 }
 
 async function boot() {
@@ -170,6 +230,7 @@ async function boot() {
   loadRemoteSharedUiCss();
   themeLightBtn?.addEventListener("click", () => applyTheme("light"));
   themeDarkBtn?.addEventListener("click", () => applyTheme("dark"));
+  uninstallInstallerBtn?.addEventListener("click", handleInstallerUninstall);
 
   const unsubscribe = window.bootstrapApi.onDownloadProgress((payload) => {
     if (!payload || payload.productKey !== activeProduct) return;
@@ -179,6 +240,10 @@ async function boot() {
   try {
     const data = await window.bootstrapApi.getProducts();
     platformPillEl.textContent = data.platform;
+    installerUninstallSupported = data.platform === "windows";
+    if (uninstallInstallerBtn) {
+      uninstallInstallerBtn.disabled = !installerUninstallSupported;
+    }
     if (installerVersionTextEl) {
       installerVersionTextEl.textContent = `Installer version: ${data.installerVersion || "-"}`;
     }
@@ -256,6 +321,67 @@ async function handleUninstall(productKey) {
   }
 }
 
+async function handleUpdate(productKey) {
+  if (installing) return;
+  const selected = productState.find((item) => item.key === productKey);
+  if (!selected?.installed) {
+    setStatus("Install this module first, then update.");
+    return;
+  }
+  if (!canUpdateProduct(selected)) {
+    setStatus("Already running the latest version.");
+    return;
+  }
+  if (!window.confirm(`Update ${selected.label} to the latest version?`)) {
+    return;
+  }
+  installing = true;
+  activeProduct = productKey;
+  setButtonsDisabled(true);
+  setProgress(0, 1);
+  setStatus("Downloading update package...");
+  try {
+    const result = await window.bootstrapApi.updateProduct(productKey);
+    setProgress(1, 1);
+    const versionText = result?.latestVersion ? ` Updated to ${result.latestVersion}.` : "";
+    setStatus((result?.message || "Update started successfully.") + versionText);
+    await refreshInstalledState();
+    setTimeout(() => {
+      setStatus("Ready.");
+      setProgress(0, 0);
+    }, 1800);
+  } catch (error) {
+    setStatus(error?.message || "Update failed.");
+    setProgress(0, 1);
+  } finally {
+    installing = false;
+    activeProduct = "";
+    setButtonsDisabled(false);
+  }
+}
+
+async function handleInstallerUninstall() {
+  if (installing) return;
+  if (!installerUninstallSupported) {
+    setStatus("Installer uninstall is supported only on Windows.");
+    return;
+  }
+  const confirmed = window.confirm("Uninstall Work Zilla Installer from this computer?");
+  if (!confirmed) {
+    return;
+  }
+  installing = true;
+  setButtonsDisabled(true);
+  setStatus("Opening installer uninstaller...");
+  try {
+    await window.bootstrapApi.uninstallInstaller();
+  } catch (error) {
+    setStatus(error?.message || "Unable to uninstall installer.");
+    installing = false;
+    setButtonsDisabled(false);
+  }
+}
+
 async function refreshInstalledState() {
   if (!window.bootstrapApi?.getInstalledProducts || productState.length === 0) return;
   try {
@@ -264,6 +390,11 @@ async function refreshInstalledState() {
       ...item,
       installed: Boolean(installed?.[item.key]?.installed),
       installedVersion: installed?.[item.key]?.version || "",
+      updateAvailable: canUpdateProduct({
+        ...item,
+        installed: Boolean(installed?.[item.key]?.installed),
+        installedVersion: installed?.[item.key]?.version || "",
+      }),
     }));
     renderProducts(next, handleInstall);
   } catch {

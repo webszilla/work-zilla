@@ -32,24 +32,6 @@ const storageScreens = [
 const defaultAuth = { loading: true, authenticated: false, user: null, enabled_products: [] };
 const defaultConnection = { online: true, reconnecting: false, internet: true, api: true, message: "" };
 
-function normalizeLaunchProduct(value) {
-  const rawValue = typeof value === "object" && value !== null ? value.preferredProduct : value;
-  if (!rawValue) {
-    return null;
-  }
-  const normalized = String(rawValue).trim().toLowerCase();
-  if (["monitor", "worksuite", "work-suite", "work_suite"].includes(normalized)) {
-    return "monitor";
-  }
-  if (["imposition", "imposition-software", "imposition_software"].includes(normalized)) {
-    return "imposition";
-  }
-  if (["storage", "online-storage", "online_storage"].includes(normalized)) {
-    return "storage";
-  }
-  return null;
-}
-
 export default function App() {
   const [auth, setAuth] = useState(defaultAuth);
   const [activeModule, setActiveModule] = useState("launcher");
@@ -86,9 +68,6 @@ export default function App() {
       const network = window.storageApi.getConnectionStatus
         ? await window.storageApi.getConnectionStatus()
         : defaultConnection;
-      const preferredProduct = window.storageApi.getLaunchPreference
-        ? normalizeLaunchProduct(await window.storageApi.getLaunchPreference())
-        : null;
       const os = window.storageApi.getPlatform ? window.storageApi.getPlatform() : "unknown";
       let versionResp = null;
       try {
@@ -106,11 +85,7 @@ export default function App() {
       setPlatform(os);
       setAppVersion(String(versionResp?.version || ""));
       setConnection(network || defaultConnection);
-      if (preferredProduct === "monitor" || preferredProduct === "imposition") {
-        setActiveModule(preferredProduct);
-      } else if (preferredProduct === "storage" && state?.authenticated) {
-        setActiveModule("storage");
-      }
+      setActiveModule("launcher");
     }
     load();
     return () => {
@@ -303,7 +278,7 @@ export default function App() {
               setActiveModule("login");
               return;
             }
-            if (!connection.online && (product === "storage" || product === "monitor" || product === "imposition")) {
+            if (!connection.internet && (product === "storage" || product === "monitor" || product === "imposition")) {
               return;
             }
             if (product === "storage" && !auth.authenticated) {
@@ -366,7 +341,7 @@ export default function App() {
   return (
     <>
       <WindowControls />
-      {!connection.online ? (
+      {!connection.internet ? (
         <div className="connection-banner">
           {connection.reconnecting ? "Reconnecting..." : "Offline"}
           <span className="connection-banner-subtitle">

@@ -64,6 +64,10 @@ export async function getStorageStatus() {
 
 export async function pingApi() {
   try {
+    const settings = loadSettings();
+    if (!settings.serverUrl) {
+      return true;
+    }
     const response = await getFetch()(buildUrl("/api/auth/me"), { method: "GET" });
     // 2xx, 401, 403 all confirm API is reachable.
     return response.status < 500;

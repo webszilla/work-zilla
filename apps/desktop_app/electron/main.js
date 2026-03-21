@@ -5,6 +5,8 @@ import fs from "fs";
 import dns from "dns/promises";
 import { randomUUID } from "crypto";
 import { spawn, spawnSync } from "child_process";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { fileURLToPath } from "url";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
@@ -68,11 +70,14 @@ process.on("uncaughtException", (error) => {
 });
 
 function getConnectionStatusSnapshot() {
+  const message = !connectivityState.internet
+    ? "WorkZilla requires internet connection. Please connect to internet to continue."
+    : !connectivityState.api
+      ? "Internet connected. Reconnecting to WorkZilla server..."
+      : "Online";
   return {
     ...connectivityState,
-    message: connectivityState.online
-      ? "Online"
-      : "WorkZilla requires internet connection. Please connect to internet to continue."
+    message
   };
 }
 
@@ -90,6 +95,150 @@ function getSharedLaunchPreference() {
   } catch {
     return { preferredProduct: "" };
   }
+}
+
+function resolveWindowsUninstallerPath() {
+  const installDir = path.dirname(process.execPath);
+  const candidates = [
+    `Uninstall ${app.getName()}.exe`,
+    "Uninstall Work Zilla Agent.exe",
+    "Uninstall.exe",
+    "uninstall.exe"
+  ];
+  for (const name of candidates) {
+    const fullPath = path.join(installDir, name);
+    if (fs.existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+  return "";
+}
+
+function normalizeBaseDownloadOrigin() {
+  const settings = loadSettings();
+  const fallback = "https://getworkzilla.com";
+  const raw = String(settings.serverUrl || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    const withScheme = raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`;
+    return new URL(withScheme).origin;
+  } catch {
+    return fallback;
+  }
+}
+
+function getPlatformUpdatePaths() {
+  if (process.platform === "win32") {
+    return [
+      "/downloads/windows-product-agent/",
+      "/downloads/windows-monitor-product-agent/",
+      "/downloads/windows-agent/"
+    ];
+  }
+  if (process.platform === "darwin") {
+    return [
+      "/downloads/mac-product-agent/",
+      "/downloads/mac-monitor-product-agent/",
+      "/downloads/mac-agent/"
+    ];
+  }
+  return [];
+}
+
+function extractSemver(value) {
+  const text = String(value || "");
+  const match = text.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match ? match[1] : "";
+}
+
+function compareSemver(a, b) {
+  const parse = (version) => {
+    const [core, pre = ""] = String(version || "").split("-", 2);
+    const [major = "0", minor = "0", patch = "0"] = core.split(".");
+    return {
+      major: Number.parseInt(major, 10) || 0,
+      minor: Number.parseInt(minor, 10) || 0,
+      patch: Number.parseInt(patch, 10) || 0,
+      pre
+    };
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+  if (left.patch !== right.patch) {
+    return left.patch - right.patch;
+  }
+  if (left.pre === right.pre) {
+    return 0;
+  }
+  if (!left.pre) {
+    return 1;
+  }
+  if (!right.pre) {
+    return -1;
+  }
+  return left.pre.localeCompare(right.pre);
+}
+
+async function resolveUpdateInfo() {
+  const origin = normalizeBaseDownloadOrigin();
+  const candidates = getPlatformUpdatePaths();
+  const currentVersion = app.getVersion();
+  for (const pathSuffix of candidates) {
+    const sourceUrl = new URL(pathSuffix, origin).toString();
+    try {
+      const response = await fetch(sourceUrl, {
+        method: "GET",
+        redirect: "follow"
+      });
+      const finalUrl = String(response.url || sourceUrl);
+      try {
+        await response.body?.cancel?.();
+      } catch {
+        // ignore
+      }
+      if (!response.ok) {
+        continue;
+      }
+      const latestVersion = extractSemver(finalUrl);
+      const updateAvailable = latestVersion
+        ? compareSemver(latestVersion, currentVersion) > 0
+        : false;
+      return {
+        ok: true,
+        currentVersion,
+        latestVersion: latestVersion || "",
+        updateAvailable,
+        downloadUrl: finalUrl
+      };
+    } catch {
+      // try next candidate
+    }
+  }
+  return {
+    ok: false,
+    currentVersion,
+    latestVersion: "",
+    updateAvailable: false,
+    downloadUrl: "",
+    error: "update_info_unavailable"
+  };
+}
+
+async function downloadFileToPath(url, filePath) {
+  const response = await fetch(url, { method: "GET", redirect: "follow" });
+  if (!response.ok || !response.body) {
+    throw new Error("download_failed");
+  }
+  const nodeStream = Readable.fromWeb(response.body);
+  await pipeline(nodeStream, fs.createWriteStream(filePath));
 }
 
 function broadcastConnectionStatus() {
@@ -179,22 +328,22 @@ async function resumeServicesAfterReconnect() {
 }
 
 async function runConnectivityCheck() {
-  const prevOnline = connectivityState.online;
+  const prevInternet = connectivityState.internet;
   const internet = await checkInternetConnectivity();
   const api = internet ? await pingApi() : false;
   connectivityState.internet = internet;
   connectivityState.api = api;
-  connectivityState.online = Boolean(internet && api);
-  connectivityState.reconnecting = !connectivityState.online;
+  connectivityState.online = Boolean(internet);
+  connectivityState.reconnecting = !internet || !api;
   connectivityState.checked_at = new Date().toISOString();
-  if (!connectivityState.online) {
-    if (prevOnline) {
+  if (!internet) {
+    if (prevInternet) {
       pauseServicesForReconnect();
     }
-    if (!prevOnline || !connectivityState.api) {
+    if (!prevInternet) {
       showOfflineAlert();
     }
-  } else if (!prevOnline) {
+  } else if (!prevInternet) {
     offlineAlertShown = false;
     await resumeServicesAfterReconnect();
   }
@@ -1257,6 +1406,11 @@ ipcMain.handle("monitor:stop", async (_event, payload) => {
   configureAutoLaunch(false);
   try {
     const settings = loadSettings();
+    saveSettings({
+      ...settings,
+      monitorRunning: false,
+      monitorStartedAt: ""
+    });
     await recordMonitorStop({
       companyKey: resolveCompanyKey(settings),
       deviceId: settings.deviceId || "",
@@ -1299,6 +1453,97 @@ ipcMain.handle("app:open-external", (_event, payload) => {
     return { ok: true };
   } catch {
     return { ok: false, error: "open_failed" };
+  }
+});
+
+ipcMain.handle("app:uninstall", async () => {
+  try {
+    if (process.platform === "win32") {
+      const uninstallerPath = resolveWindowsUninstallerPath();
+      if (!uninstallerPath) {
+        return { ok: false, error: "uninstaller_not_found" };
+      }
+      const child = spawn(uninstallerPath, [], {
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      isQuitting = true;
+      setTimeout(() => {
+        app.quit();
+      }, 200);
+      return { ok: true };
+    }
+
+    if (process.platform === "darwin") {
+      const candidates = [
+        path.join(process.resourcesPath, "uninstall.sh"),
+        path.join(app.getAppPath(), "electron", "uninstall.sh")
+      ];
+      const scriptPath = candidates.find((item) => fs.existsSync(item));
+      if (!scriptPath) {
+        return { ok: false, error: "uninstaller_not_found" };
+      }
+      const child = spawn("sh", [scriptPath], {
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      isQuitting = true;
+      setTimeout(() => {
+        app.quit();
+      }, 200);
+      return { ok: true };
+    }
+
+    return { ok: false, error: "unsupported_os" };
+  } catch (error) {
+    return { ok: false, error: error?.message || "uninstall_failed" };
+  }
+});
+
+ipcMain.handle("app:update-check", async () => {
+  return resolveUpdateInfo();
+});
+
+ipcMain.handle("app:update-install", async () => {
+  try {
+    const info = await resolveUpdateInfo();
+    if (!info?.ok) {
+      return { ok: false, error: info?.error || "update_info_unavailable" };
+    }
+    if (!info.updateAvailable) {
+      return {
+        ok: false,
+        error: "no_update",
+        currentVersion: info.currentVersion,
+        latestVersion: info.latestVersion || info.currentVersion
+      };
+    }
+    if (!info.downloadUrl) {
+      return { ok: false, error: "download_url_missing" };
+    }
+
+    if (process.platform === "win32") {
+      const versionTag = info.latestVersion || String(Date.now());
+      const targetPath = path.join(os.tmpdir(), `work-zilla-agent-update-${versionTag}.exe`);
+      await downloadFileToPath(info.downloadUrl, targetPath);
+      const child = spawn(targetPath, [], {
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      isQuitting = true;
+      setTimeout(() => {
+        app.quit();
+      }, 200);
+      return { ok: true, mode: "installer", latestVersion: info.latestVersion };
+    }
+
+    await shell.openExternal(info.downloadUrl);
+    return { ok: true, mode: "external", latestVersion: info.latestVersion };
+  } catch (error) {
+    return { ok: false, error: error?.message || "update_failed" };
   }
 });
 
@@ -1418,7 +1663,7 @@ async function ensureMonitorConfig(auth) {
 }
 
 async function startMonitorWithAuth() {
-  if (!connectivityState.online) {
+  if (!connectivityState.internet) {
     return { ok: false, error: "offline" };
   }
   const auth = await checkAuth();
@@ -1494,9 +1739,12 @@ async function startMonitorWithAuth() {
   if (status === "running") {
     try {
       const next = loadSettings();
-      if (next.screenPermissionRelaunchRequired) {
-        saveSettings({ ...next, screenPermissionRelaunchRequired: false });
-      }
+      saveSettings({
+        ...next,
+        monitorRunning: true,
+        monitorStartedAt: next.monitorStartedAt || new Date().toISOString(),
+        screenPermissionRelaunchRequired: false
+      });
     } catch {
       // ignore
     }

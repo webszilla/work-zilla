@@ -2061,9 +2061,6 @@ def employees_list(request):
     sub = _reconcile_addon_count(sub, org)
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     allowed_intervals = list(DEFAULT_ALLOWED_INTERVALS)
-    min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
-    if min_interval:
-        allowed_intervals = [i for i in allowed_intervals if i >= min_interval]
 
     employee_limit = sub.plan.employee_limit if sub and sub.plan else 0
     addon_count = sub.addon_count if sub else 0
@@ -2368,9 +2365,6 @@ def employees_update_interval(request):
     sub = _get_active_subscription(org)
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     allowed_intervals = list(DEFAULT_ALLOWED_INTERVALS)
-    min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
-    if min_interval:
-        allowed_intervals = [i for i in allowed_intervals if i >= min_interval]
 
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -3861,9 +3855,6 @@ def company_summary(request):
     show_privacy_settings = not dashboard_views.is_super_admin_user(request.user)
 
     allowed_intervals = list(DEFAULT_ALLOWED_INTERVALS)
-    min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
-    if min_interval:
-        allowed_intervals = [i for i in allowed_intervals if i >= min_interval]
 
     support_active = dashboard_views.has_active_support_access(privacy_settings)
     support_until = privacy_settings.support_access_enabled_until
@@ -3975,9 +3966,6 @@ def company_update_interval(request):
     sub = Subscription.objects.filter(organization=org).first()
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     allowed_intervals = list(DEFAULT_ALLOWED_INTERVALS)
-    min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
-    if min_interval:
-        allowed_intervals = [i for i in allowed_intervals if i >= min_interval]
 
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -5635,9 +5623,8 @@ def plans_subscribe(request, plan_id):
         )
         if plan:
             settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
-            min_interval = plan.screenshot_min_minutes or 5
-            if settings_obj.screenshot_interval_minutes < min_interval:
-                settings_obj.screenshot_interval_minutes = min_interval
+            if not settings_obj.screenshot_interval_minutes:
+                settings_obj.screenshot_interval_minutes = 5
                 settings_obj.save()
         send_templated_email(
             request.user.email,

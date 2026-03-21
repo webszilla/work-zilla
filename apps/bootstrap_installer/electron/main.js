@@ -236,6 +236,38 @@ function extractVersionFromText(value) {
   return match ? match[1] : "";
 }
 
+function compareSemver(a, b) {
+  const parse = (version) => {
+    const core = String(version || "").split("-", 1)[0] || "";
+    const [major = "0", minor = "0", patch = "0"] = core.split(".");
+    return [
+      Number.parseInt(major, 10) || 0,
+      Number.parseInt(minor, 10) || 0,
+      Number.parseInt(patch, 10) || 0,
+    ];
+  };
+  const left = parse(a);
+  const right = parse(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] !== right[i]) {
+      return left[i] - right[i];
+    }
+  }
+  return 0;
+}
+
+function isUpdateAvailable(installedVersion, latestVersion) {
+  const installed = extractVersionFromText(installedVersion);
+  const latest = extractVersionFromText(latestVersion);
+  if (!latest) {
+    return false;
+  }
+  if (!installed) {
+    return true;
+  }
+  return compareSemver(latest, installed) > 0;
+}
+
 function detectLatestVersionFromUrls(urls = []) {
   for (const item of urls) {
     try {
@@ -841,6 +873,21 @@ async function uninstallBaseAgent() {
   throw new Error("Uninstall is not supported on this platform.");
 }
 
+function resolveBootstrapUninstallerPath() {
+  const installDir = path.dirname(process.execPath);
+  const candidates = [
+    path.join(installDir, "Uninstall Work Zilla Installer.exe"),
+    path.join(installDir, `Uninstall ${app.getName()}.exe`),
+    path.join(installDir, "Uninstall.exe"),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
 ipcMain.handle("bootstrap:get-products", async () => {
   const platform = getPlatformKey();
   if (platform === "unsupported") {
@@ -860,6 +907,7 @@ ipcMain.handle("bootstrap:get-products", async () => {
       .filter(Boolean);
     const hasPackage = urls.length > 0;
     const installedInfo = installed[key] || { installed: false, version: "" };
+    const latestVersion = detectLatestVersionFromUrls(urls) || "latest";
     return {
       key,
       label: meta.label,
@@ -867,7 +915,8 @@ ipcMain.handle("bootstrap:get-products", async () => {
       available: hasPackage,
       installed: Boolean(installedInfo.installed),
       installedVersion: installedInfo.version || "",
-      latestVersion: detectLatestVersionFromUrls(urls) || "latest",
+      latestVersion,
+      updateAvailable: Boolean(installedInfo.installed) && hasPackage && isUpdateAvailable(installedInfo.version || "", latestVersion),
     };
   });
 
@@ -881,7 +930,7 @@ ipcMain.handle("bootstrap:get-products", async () => {
 
 ipcMain.handle("bootstrap:get-installed-products", async () => detectInstalledProducts());
 
-ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
+async function installProductFlow(event, productKey) {
   const platform = getPlatformKey();
   if (platform === "unsupported") {
     throw new Error("Platform not supported.");
@@ -959,7 +1008,9 @@ ipcMain.handle("bootstrap:install-product", async (event, productKey) => {
       checkEndpoint: "/api/imposition/device/check",
     },
   };
-});
+}
+
+ipcMain.handle("bootstrap:install-product", async (event, productKey) => installProductFlow(event, productKey));
 
 ipcMain.handle("bootstrap:uninstall-product", async (_event, productKey) => {
   if (!SUPPORTED_PRODUCTS[productKey]) {
@@ -1005,6 +1056,45 @@ ipcMain.handle("bootstrap:uninstall-product", async (_event, productKey) => {
   } catch (error) {
     throw new Error(error?.message || "Uninstall failed.");
   }
+});
+
+ipcMain.handle("bootstrap:update-product", async (event, productKey) => {
+  if (!SUPPORTED_PRODUCTS[productKey]) {
+    throw new Error("Unknown product selected.");
+  }
+  const installed = await detectInstalledProducts();
+  const installedInfo = installed[productKey] || { installed: false, version: "" };
+  if (!installedInfo.installed) {
+    throw new Error("This module is not installed on this device.");
+  }
+  const platform = getPlatformKey();
+  if (platform === "unsupported") {
+    throw new Error("Platform not supported.");
+  }
+  const { config } = await fetchConfigWithFallback();
+  const downloadUrls = validateProductConfig(config, productKey, platform);
+  const latestVersion = detectLatestVersionFromUrls(downloadUrls) || "latest";
+  if (!isUpdateAvailable(installedInfo.version || "", latestVersion)) {
+    throw new Error("Already running the latest version.");
+  }
+  return installProductFlow(event, productKey);
+});
+
+ipcMain.handle("bootstrap:uninstall-installer", async () => {
+  if (process.platform !== "win32") {
+    throw new Error("Installer uninstall is supported only on Windows.");
+  }
+  const uninstallerPath = resolveBootstrapUninstallerPath();
+  if (!uninstallerPath) {
+    throw new Error("Work Zilla Installer uninstaller not found.");
+  }
+  const child = spawn(uninstallerPath, [], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  app.quit();
+  return { ok: true };
 });
 
 if (!gotSingleInstanceLock) {
