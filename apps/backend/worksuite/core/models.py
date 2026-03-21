@@ -1276,6 +1276,7 @@ class InvoiceSellerProfile(models.Model):
 class OrganizationSettings(models.Model):
     organization = models.OneToOneField(Organization, on_delete=models.CASCADE)
     screenshot_interval_minutes = models.PositiveSmallIntegerField(default=5)
+    session_timeout_minutes = models.PositiveSmallIntegerField(default=30)
     screenshot_ignore_patterns = models.TextField(blank=True, default="")
     privacy_keyword_rules = models.TextField(blank=True, default="")
     auto_blur_password_fields = models.BooleanField(default=True)
@@ -1296,6 +1297,40 @@ class OrganizationSettings(models.Model):
 
     def __str__(self):
         return f"{self.organization.name} settings"
+
+
+class UserLoginActivity(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="login_activities")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="login_activities",
+    )
+    username = models.CharField(max_length=150, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    role = models.CharField(max_length=30, blank=True, default="")
+    session_key = models.CharField(max_length=64, blank=True, default="")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    login_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "login_at"]),
+            models.Index(fields=["user", "login_at"]),
+        ]
+
+    @classmethod
+    def purge_older_than_days(cls, days=30):
+        safe_days = max(int(days or 30), 1)
+        cutoff = timezone.now() - timedelta(days=safe_days)
+        return cls.objects.filter(login_at__lt=cutoff).delete()
+
+    def __str__(self):
+        who = self.username or self.email or f"user:{self.user_id or '-'}"
+        return f"{who} - {timezone.localtime(self.login_at).strftime('%Y-%m-%d %H:%M:%S')}"
 
 
 class CompanyPrivacySettings(models.Model):

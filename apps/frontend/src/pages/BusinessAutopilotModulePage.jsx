@@ -1680,6 +1680,77 @@ function normalizeCrmLeadRecord(row = {}) {
   };
 }
 
+function normalizeDedupToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizePhoneForDedup(countryCode, phone) {
+  const code = String(countryCode || "").trim();
+  const number = String(phone || "").replace(/\D+/g, "");
+  return `${code}|${number}`;
+}
+
+function buildCrmImportDedupKey(sectionKey, row = {}) {
+  const key = String(sectionKey || "").trim();
+  if (key === "leads") {
+    return [
+      normalizeDedupToken(row.name),
+      normalizeDedupToken(row.company),
+      normalizePhoneForDedup(row.phoneCountryCode, row.phone),
+    ].join("|");
+  }
+  if (key === "contacts") {
+    return [
+      normalizeDedupToken(row.name),
+      normalizeDedupToken(row.company),
+      normalizeDedupToken(row.email),
+      normalizePhoneForDedup(row.phoneCountryCode, row.phone),
+    ].join("|");
+  }
+  if (key === "teams") {
+    return normalizeDedupToken(row.name);
+  }
+  if (key === "deals") {
+    return [
+      normalizeDedupToken(row.dealName),
+      normalizeDedupToken(row.company),
+      normalizeDedupToken(row.amount),
+    ].join("|");
+  }
+  if (key === "followUps") {
+    return [
+      normalizeDedupToken(row.subject),
+      normalizeDedupToken(row.relatedTo),
+      normalizeDedupToken(row.dueDate),
+    ].join("|");
+  }
+  if (key === "meetings") {
+    return [
+      normalizeDedupToken(row.title),
+      normalizeDedupToken(row.relatedTo),
+      normalizeDedupToken(row.meetingDate),
+      normalizeDedupToken(row.meetingTime),
+    ].join("|");
+  }
+  if (key === "activities") {
+    return [
+      normalizeDedupToken(row.activityType),
+      normalizeDedupToken(row.relatedTo),
+      normalizeDedupToken(row.date),
+      normalizeDedupToken(row.owner),
+    ].join("|");
+  }
+  return "";
+}
+
+function buildCustomerImportDedupKey(row = {}) {
+  const company = normalizeDedupToken(row.companyName || row.name);
+  const gstin = normalizeDedupToken(row.gstin);
+  const primaryPhone = normalizePhoneForDedup(row.phoneCountryCode || "+91", row.phone);
+  const primaryEmail = normalizeDedupToken(row.email);
+  return [company, gstin, primaryPhone, primaryEmail].join("|");
+}
+
 function normalizeCrmTeamRecord(row = {}) {
   const members = Array.isArray(row.members)
     ? row.members.map((item) => String(item || "").trim()).filter(Boolean)
@@ -2328,6 +2399,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     event.preventDefault();
     if (!canManagePayroll) return;
     if (!String(salaryStructureForm.name || "").trim()) {
+      setSaveError("Salary structure name is required.");
       return;
     }
     const payload = {
@@ -2358,6 +2430,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     event.preventDefault();
     if (!canEditSalaryHistory) return;
     if (!String(salaryHistoryForm.employeeName || "").trim() || !String(salaryHistoryForm.salaryStructureId || "").trim()) {
+      setSaveError("Employee name and salary structure are required.");
       return;
     }
     if (!String(salaryHistoryForm.sourceUserId || "").trim()) {
@@ -2468,6 +2541,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     if (!canManagePayroll) return;
     const payrollMonth = String(payrollRunForm.month || "").trim();
     if (!/^\d{4}-\d{2}$/.test(payrollMonth)) {
+      setSaveError("Payroll month is required.");
       return;
     }
     const nextEntries = [...(workspace.payrollEntries || [])];
@@ -3472,6 +3546,57 @@ function normalizeImportHeader(value) {
     .trim();
 }
 
+function collectImportHeaderMap(rows) {
+  const headerMap = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    Object.keys(row || {}).forEach((header) => {
+      const rawHeader = String(header || "").trim();
+      const normalizedHeader = normalizeImportHeader(rawHeader);
+      if (!rawHeader || !normalizedHeader || headerMap.has(normalizedHeader)) {
+        return;
+      }
+      headerMap.set(normalizedHeader, rawHeader);
+    });
+  });
+  return headerMap;
+}
+
+function validateImportHeaders(rows, expectedHeaders = []) {
+  const expectedMap = new Map();
+  (Array.isArray(expectedHeaders) ? expectedHeaders : []).forEach((header) => {
+    const rawHeader = String(header || "").trim();
+    const normalizedHeader = normalizeImportHeader(rawHeader);
+    if (!rawHeader || !normalizedHeader || expectedMap.has(normalizedHeader)) {
+      return;
+    }
+    expectedMap.set(normalizedHeader, rawHeader);
+  });
+  const actualMap = collectImportHeaderMap(rows);
+  const missing = Array.from(expectedMap.entries())
+    .filter(([normalizedHeader]) => !actualMap.has(normalizedHeader))
+    .map(([, rawHeader]) => rawHeader);
+  const unexpected = Array.from(actualMap.entries())
+    .filter(([normalizedHeader]) => !expectedMap.has(normalizedHeader))
+    .map(([, rawHeader]) => rawHeader);
+  return {
+    isValid: missing.length === 0 && unexpected.length === 0,
+    missing,
+    unexpected,
+  };
+}
+
+function buildHeaderValidationMessage(sectionLabel, missingHeaders = [], unexpectedHeaders = []) {
+  const chunks = [`Excel columns do not match ${sectionLabel} template.`];
+  if (missingHeaders.length) {
+    chunks.push(`Missing: ${missingHeaders.join(", ")}`);
+  }
+  if (unexpectedHeaders.length) {
+    chunks.push(`Extra: ${unexpectedHeaders.join(", ")}`);
+  }
+  chunks.push("Use the Export template headers and import again.");
+  return chunks.join(" ");
+}
+
 function parseCsvRows(text) {
   const source = String(text || "").replace(/^\uFEFF/, "");
   const rows = [];
@@ -3605,6 +3730,16 @@ function SearchablePaginatedTableCard({
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const importInputRef = useRef(null);
+  const [importSummary, setImportSummary] = useState({
+    open: false,
+    title: "",
+    message: "",
+    isError: false,
+    totalRows: 0,
+    newRows: 0,
+    replacedRows: 0,
+    skippedRows: 0,
+  });
 
   const filteredRows = useMemo(() => {
     const term = String(searchTerm || "").trim().toLowerCase();
@@ -3742,6 +3877,27 @@ function SearchablePaginatedTableCard({
     importInputRef.current?.click();
   }
 
+  function openImportSummaryPopup(summary = {}) {
+    const totalRows = Number(summary.totalRows || 0);
+    const newRows = Number(summary.newRows || 0);
+    const replacedRows = Number(summary.replacedRows || 0);
+    const skippedRows = Number(summary.skippedRows || 0);
+    const isError = Boolean(summary.isError);
+    const defaultMessage = isError
+      ? "Unable to process import file."
+      : `Import completed for ${title}.`;
+    setImportSummary({
+      open: true,
+      title: String(summary.title || `${title} Import Summary`).trim(),
+      message: String(summary.message || defaultMessage).trim(),
+      isError,
+      totalRows,
+      newRows,
+      replacedRows,
+      skippedRows,
+    });
+  }
+
   async function onImportFileChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -3762,12 +3918,48 @@ function SearchablePaginatedTableCard({
         parsedRows = parseCsvRows(content);
       }
       if (!parsedRows.length) {
-        window.alert("Imported file is empty or invalid.");
+        openImportSummaryPopup({
+          title: `${title} Import`,
+          message: "Imported file is empty or invalid.",
+          isError: true,
+          totalRows: 0,
+          newRows: 0,
+          replacedRows: 0,
+          skippedRows: 0,
+        });
         return;
       }
-      onImportRows(parsedRows);
+      const result = await Promise.resolve(onImportRows(parsedRows));
+      if (result && typeof result === "object") {
+        openImportSummaryPopup({
+          title: `${title} Import Summary`,
+          message: result.message || "",
+          isError: Boolean(result.isError),
+          totalRows: Number(result.totalRows ?? parsedRows.length),
+          newRows: Number(result.newRows || 0),
+          replacedRows: Number(result.replacedRows || 0),
+          skippedRows: Number(result.skippedRows || 0),
+        });
+      } else {
+        openImportSummaryPopup({
+          title: `${title} Import Summary`,
+          message: `Imported ${parsedRows.length} row(s).`,
+          totalRows: parsedRows.length,
+          newRows: parsedRows.length,
+          replacedRows: 0,
+          skippedRows: 0,
+        });
+      }
     } catch (_error) {
-      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+      openImportSummaryPopup({
+        title: `${title} Import`,
+        message: "Unable to import this file. Use the exported template structure in CSV or Excel format.",
+        isError: true,
+        totalRows: 0,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: 0,
+      });
     }
   }
 
@@ -3898,6 +4090,61 @@ function SearchablePaginatedTableCard({
           maxPageLinks={5}
         />
       </div>
+      {importSummary.open ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setImportSummary((prev) => ({ ...prev, open: false }))}>
+          <div className="modal-panel wz-import-summary-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="wz-import-summary-modal__header">
+              <div className="wz-import-summary-modal__title-wrap">
+                <span className={`wz-import-summary-modal__icon ${importSummary.isError ? "is-error" : "is-success"}`} aria-hidden="true">
+                  <i className={`bi ${importSummary.isError ? "bi-exclamation-triangle-fill" : "bi-check-circle-fill"}`} />
+                </span>
+                <div>
+                  <h5>{importSummary.title || "Import Summary"}</h5>
+                  <div className={`wz-import-summary-modal__message ${importSummary.isError ? "text-danger" : "text-secondary"}`}>
+                    {importSummary.message}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                onClick={() => setImportSummary((prev) => ({ ...prev, open: false }))}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="wz-import-summary-modal__stats">
+              <div className="wz-import-summary-modal__stat">
+                <div className="wz-import-summary-modal__stat-label">Total Rows</div>
+                <div className="wz-import-summary-modal__stat-value">{importSummary.totalRows}</div>
+              </div>
+              <div className="wz-import-summary-modal__stat">
+                <div className="wz-import-summary-modal__stat-label text-success">New Added</div>
+                <div className="wz-import-summary-modal__stat-value text-success">{importSummary.newRows}</div>
+              </div>
+              <div className="wz-import-summary-modal__stat">
+                <div className="wz-import-summary-modal__stat-label text-info">Replaced</div>
+                <div className="wz-import-summary-modal__stat-value text-info">{importSummary.replacedRows}</div>
+              </div>
+              <div className="wz-import-summary-modal__stat">
+                <div className="wz-import-summary-modal__stat-label text-warning">Skipped</div>
+                <div className="wz-import-summary-modal__stat-value text-warning">{importSummary.skippedRows}</div>
+              </div>
+            </div>
+
+            <div className="d-flex justify-content-end mt-3">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setImportSummary((prev) => ({ ...prev, open: false }))}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -4562,6 +4809,22 @@ function CrmOnePageModule() {
 
   function importRows(sectionKey, importedRows) {
     const config = CRM_SECTION_CONFIG[sectionKey];
+    const expectedHeaders = (config.columns || []).map((column) => column.label);
+    const headerValidation = validateImportHeaders(importedRows, expectedHeaders);
+    if (!headerValidation.isValid) {
+      return {
+        isError: true,
+        totalRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        message: buildHeaderValidationMessage(
+          `${config.label} table`,
+          headerValidation.missing,
+          headerValidation.unexpected
+        ),
+      };
+    }
     const columnByHeader = new Map();
     config.columns.forEach((column) => {
       columnByHeader.set(normalizeImportHeader(column.label), column);
@@ -4676,14 +4939,87 @@ function CrmOnePageModule() {
       );
 
     if (!nextRows.length) {
-      window.alert("No valid rows found in the imported file.");
-      return;
+      return {
+        isError: true,
+        totalRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        message: "No valid rows found in the imported file.",
+      };
+    }
+
+    const existingRows = Array.isArray(moduleData[sectionKey]) ? moduleData[sectionKey] : [];
+    const updatedExistingRows = [...existingRows];
+    const existingKeyToIndex = new Map();
+    updatedExistingRows.forEach((row, index) => {
+      const key = buildCrmImportDedupKey(sectionKey, row);
+      if (key && !existingKeyToIndex.has(key)) {
+        existingKeyToIndex.set(key, index);
+      }
+    });
+    const newImportedRows = [];
+    const newKeyToIndex = new Map();
+    let replacedRows = 0;
+    let newRows = 0;
+
+    nextRows.forEach((row) => {
+      const dedupKey = buildCrmImportDedupKey(sectionKey, row);
+      if (!dedupKey) {
+        newImportedRows.push(row);
+        newRows += 1;
+        return;
+      }
+      if (existingKeyToIndex.has(dedupKey)) {
+        const rowIndex = existingKeyToIndex.get(dedupKey);
+        const previous = updatedExistingRows[rowIndex] || {};
+        updatedExistingRows[rowIndex] = {
+          ...previous,
+          ...row,
+          id: previous.id || row.id,
+        };
+        replacedRows += 1;
+        return;
+      }
+      if (newKeyToIndex.has(dedupKey)) {
+        const rowIndex = newKeyToIndex.get(dedupKey);
+        const previous = newImportedRows[rowIndex] || {};
+        newImportedRows[rowIndex] = {
+          ...previous,
+          ...row,
+          id: previous.id || row.id,
+        };
+        replacedRows += 1;
+        return;
+      }
+      newKeyToIndex.set(dedupKey, newImportedRows.length);
+      newImportedRows.push(row);
+      newRows += 1;
+    });
+
+    const skippedRows = Math.max(0, nextRows.length - (newRows + replacedRows));
+    if (!newRows && !replacedRows) {
+      return {
+        isError: true,
+        totalRows: nextRows.length,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: nextRows.length,
+        message: "No records were imported.",
+      };
     }
 
     setModuleData((prev) => ({
       ...prev,
-      [sectionKey]: [...nextRows, ...(prev[sectionKey] || [])],
+      [sectionKey]: [...newImportedRows, ...updatedExistingRows],
     }));
+    return {
+      totalRows: nextRows.length,
+      newRows,
+      replacedRows,
+      skippedRows,
+      message: `${newRows} new row(s) added, ${replacedRows} existing row(s) replaced.`,
+    };
   }
 
   const meetingCalendar = useMemo(() => {
@@ -5332,7 +5668,7 @@ function CrmOnePageModule() {
                                       : field.key === "owner"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "status"
-                                      ? "col-12 col-md-6 col-xl-2"
+                                      ? "col-12 col-md-6 col-xl-1"
                                       : "col-12 col-md-6 col-xl-4"
                                   )
                                 : sectionKey === "meetings"
@@ -6013,7 +6349,7 @@ function CrmOnePageModule() {
                             })()}
                           </div>
                           )}
-                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) && sectionKey !== "followUps" ? (
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
                             <div
                               className={
                                 sectionKey === "leads"
@@ -6065,29 +6401,6 @@ function CrmOnePageModule() {
                         </Fragment>
                       ))}
                     </div>
-                    {sectionKey === "followUps" ? (
-                      <div className="row">
-                        <div className="col-12 col-sm-2">
-                          <button
-                            type="submit"
-                            className="btn btn-success btn-sm w-100"
-                          >
-                            {editingId ? "Update" : "Create"}
-                          </button>
-                        </div>
-                        {editingId ? (
-                          <div className="col-12 col-sm-2">
-                            <button
-                              type="button"
-                              className="btn btn-outline-light btn-sm w-100"
-                              onClick={() => resetSectionForm(sectionKey)}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
                     {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                       <div className="d-flex gap-2">
                         <button type="submit" className="btn btn-success btn-sm">
@@ -6629,6 +6942,7 @@ function ProjectManagementModule() {
     event.preventDefault();
     const companyName = String(projectClientForm.companyName || projectClientForm.name || "").trim();
     if (!companyName) {
+      window.alert("Company name is required.");
       return;
     }
     const clientName = String(projectClientForm.clientName || "").trim();
@@ -6792,8 +7106,9 @@ function ProjectManagementModule() {
       }
       return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const hasEmptyField = visibleFields.some((field) => !String(formValues[field.key] || "").trim());
-    if (hasEmptyField) {
+    const missingFields = visibleFields.filter((field) => !String(formValues[field.key] || "").trim());
+    if (missingFields.length) {
+      window.alert(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
     if (activeTab === "customers") {
@@ -8795,8 +9110,9 @@ function HrManagementModule() {
       }
       return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const hasEmptyField = visibleFields.some((field) => !field.optional && !String(formValues[field.key] || "").trim());
-    if (hasEmptyField) {
+    const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
+    if (missingFields.length) {
+      window.alert(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
     const payload = {};
@@ -8981,6 +9297,7 @@ function HrManagementModule() {
     const employee = String(attendanceTaskModal.employee || "").trim();
     const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
     if (!employee) {
+      window.alert("Employee name is required.");
       return;
     }
     const patch = {
@@ -9727,10 +10044,12 @@ function CategoryCrudModule({
 
   function onSubmit(event) {
     event.preventDefault();
-    const hasEmptyField = config.fields.some((field) => !String(formValues[field.key] || "").trim());
-    if (hasEmptyField) {
+    const missingFields = config.fields.filter((field) => !String(formValues[field.key] || "").trim());
+    if (missingFields.length) {
+      setCategoryNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
+    setCategoryNotice("");
     const payload = {};
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
@@ -9811,8 +10130,9 @@ function CategoryCrudModule({
       return;
     }
     const values = categoryForms[tabKey] || {};
-    const hasEmptyField = cfg.fields.some((field) => !String(values[field.key] || "").trim());
-    if (hasEmptyField) {
+    const missingFields = cfg.fields.filter((field) => !String(values[field.key] || "").trim());
+    if (missingFields.length) {
+      setCategoryNotice(`${cfg.label}: Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
     const payload = {};
@@ -10992,6 +11312,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const name = String(subscriptionCategoryForm.name || "").trim();
     if (!name) {
+      window.alert("Category name is required.");
       return;
     }
     const payload = {
@@ -11030,6 +11351,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     const name = String(subscriptionSubCategoryForm.name || "").trim();
     const categoryId = String(subscriptionSubCategoryForm.categoryId || "").trim();
     if (!name || !categoryId) {
+      window.alert("Category and sub-category name are required.");
       return;
     }
     const payload = {
@@ -11128,16 +11450,20 @@ function AccountsErpModule({ initialTab = "overview" }) {
       whatsappAlertAssignTo: normalizedSubscriptionWhatsappAlertAssignees
     };
     if (!payload.categoryId || !payload.subCategoryId || !payload.subscriptionTitle || !payload.customerId || !payload.startDate) {
+      window.alert("Please fill mandatory fields: Category, Sub Category, Subscription Title, Client and Start Date.");
       return;
     }
     if (normalizedPlanDuration && normalizedPlanDuration !== "custom" && !/^(30|90|180|365|730|1095)$/.test(planDurationDays)) {
+      window.alert("Select a valid plan duration.");
       return;
     }
     if (normalizedPlanDuration === "custom" && (!/^\d+$/.test(planDurationDays) || Number(planDurationDays) < 1)) {
+      window.alert("Enter valid custom plan duration in days.");
       return;
     }
     payload.nextBillingDate = getNextBillingDateFromStart(payload.startDate);
     if (!payload.nextBillingDate) {
+      window.alert("Invalid start date.");
       return;
     }
     try {
@@ -11377,6 +11703,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveGstTemplate(event) {
     event.preventDefault();
     if (!gstForm.name.trim()) {
+      window.alert("GST template name is required.");
       return;
     }
     const payload = {
@@ -11432,6 +11759,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveBillingTemplate(event) {
     event.preventDefault();
     if (!templateForm.name.trim()) {
+      window.alert("Billing template name is required.");
       return;
     }
     const payload = {
@@ -11507,6 +11835,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const companyName = String(customerForm.companyName || customerForm.name || "").trim();
     if (!companyName) {
+      window.alert("Customer company name is required.");
       return;
     }
     const clientName = String(customerForm.clientName || "").trim();
@@ -11575,6 +11904,29 @@ function AccountsErpModule({ initialTab = "overview" }) {
   }
 
   function importCustomers(importedRows) {
+    const expectedHeaders = [
+      "Company Name",
+      "Client Name",
+      "GSTIN",
+      "Contact Number",
+      "Email ID",
+      "Location",
+    ];
+    const headerValidation = validateImportHeaders(importedRows, expectedHeaders);
+    if (!headerValidation.isValid) {
+      return {
+        isError: true,
+        totalRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        message: buildHeaderValidationMessage(
+          "Customers table",
+          headerValidation.missing,
+          headerValidation.unexpected
+        ),
+      };
+    }
     const nextRows = importedRows
       .map((row, rowIndex) => {
         const getValue = (...keys) => {
@@ -11660,14 +12012,87 @@ function AccountsErpModule({ initialTab = "overview" }) {
       .filter(Boolean);
 
     if (!nextRows.length) {
-      window.alert("Imported file is empty or invalid.");
-      return;
+      return {
+        isError: true,
+        totalRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: Array.isArray(importedRows) ? importedRows.length : 0,
+        message: "Imported file is empty or invalid.",
+      };
+    }
+
+    const existingRows = Array.isArray(moduleData.customers) ? moduleData.customers : [];
+    const updatedExistingRows = [...existingRows];
+    const existingKeyToIndex = new Map();
+    updatedExistingRows.forEach((row, index) => {
+      const key = buildCustomerImportDedupKey(row);
+      if (key && !existingKeyToIndex.has(key)) {
+        existingKeyToIndex.set(key, index);
+      }
+    });
+    const newImportedRows = [];
+    const newKeyToIndex = new Map();
+    let replacedRows = 0;
+    let newRows = 0;
+
+    nextRows.forEach((row) => {
+      const dedupKey = buildCustomerImportDedupKey(row);
+      if (!dedupKey) {
+        newImportedRows.push(row);
+        newRows += 1;
+        return;
+      }
+      if (existingKeyToIndex.has(dedupKey)) {
+        const rowIndex = existingKeyToIndex.get(dedupKey);
+        const previous = updatedExistingRows[rowIndex] || {};
+        updatedExistingRows[rowIndex] = {
+          ...previous,
+          ...row,
+          id: previous.id || row.id,
+        };
+        replacedRows += 1;
+        return;
+      }
+      if (newKeyToIndex.has(dedupKey)) {
+        const rowIndex = newKeyToIndex.get(dedupKey);
+        const previous = newImportedRows[rowIndex] || {};
+        newImportedRows[rowIndex] = {
+          ...previous,
+          ...row,
+          id: previous.id || row.id,
+        };
+        replacedRows += 1;
+        return;
+      }
+      newKeyToIndex.set(dedupKey, newImportedRows.length);
+      newImportedRows.push(row);
+      newRows += 1;
+    });
+
+    const skippedRows = Math.max(0, nextRows.length - (newRows + replacedRows));
+    if (!newRows && !replacedRows) {
+      return {
+        isError: true,
+        totalRows: nextRows.length,
+        newRows: 0,
+        replacedRows: 0,
+        skippedRows: nextRows.length,
+        message: "No customer records were imported.",
+      };
     }
 
     setModuleData((prev) => ({
       ...prev,
-      customers: [...nextRows, ...(prev.customers || [])],
+      customers: [...newImportedRows, ...updatedExistingRows],
     }));
+    return {
+      totalRows: nextRows.length,
+      newRows,
+      replacedRows,
+      skippedRows,
+      message: `${newRows} new customer row(s) added, ${replacedRows} existing row(s) replaced.`,
+    };
   }
 
   function editCustomer(row) {
@@ -11703,6 +12128,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveItemMaster(event) {
     event.preventDefault();
     if (!String(itemMasterForm.name || "").trim()) {
+      window.alert("Item name is required.");
       return;
     }
     const payload = {
@@ -11934,6 +12360,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const form = kind === "estimate" ? estimateForm : invoiceForm;
     if (!String(form.customerName || "").trim()) {
+      window.alert("Client / Company name is required.");
       return;
     }
     const payload = {

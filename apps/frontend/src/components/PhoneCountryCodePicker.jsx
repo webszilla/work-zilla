@@ -9,6 +9,25 @@ function entryKey(entry) {
   return `${String(entry?.code || "").trim()}__${String(entry?.label || "").trim()}`;
 }
 
+function CountryFlag({ entry, className = "" }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const flagUrl = String(entry?.flagImageUrl || "").trim();
+  const emojiFlag = String(entry?.flag || "🌐");
+  if (flagUrl && !imageFailed) {
+    return (
+      <img
+        src={flagUrl}
+        alt=""
+        className={`wz-country-picker__flag-image ${className}`.trim()}
+        loading="lazy"
+        decoding="async"
+        onError={() => setImageFailed(true)}
+      />
+    );
+  }
+  return <span className={className}>{emojiFlag}</span>;
+}
+
 export default function PhoneCountryCodePicker({
   value = "+91",
   onChange,
@@ -56,6 +75,7 @@ export default function PhoneCountryCodePicker({
           label,
           code,
           flag: String(entry?.flag || fallback?.flag || "🌐"),
+          flagImageUrl: String(entry?.flagImageUrl || fallback?.flagImageUrl || "").trim(),
           key,
           search: normalize(`${label} ${code}`),
         };
@@ -159,7 +179,7 @@ export default function PhoneCountryCodePicker({
         title={`${selectedEntry.label} ${selectedEntry.code}`.trim()}
       >
         <span className="wz-country-picker__flag" aria-hidden="true">
-          {selectedEntry.flag || "🌐"}
+          <CountryFlag entry={selectedEntry} className="wz-country-picker__flag-fallback" />
         </span>
         <i className="bi bi-caret-down-fill wz-country-picker__caret" aria-hidden="true" />
       </button>
@@ -194,7 +214,7 @@ export default function PhoneCountryCodePicker({
                   onClick={() => selectEntry(entry)}
                 >
                   <span className="wz-country-picker__option-flag" aria-hidden="true">
-                    {entry.flag}
+                    <CountryFlag entry={entry} className="wz-country-picker__flag-fallback" />
                   </span>
                   <span className="wz-country-picker__option-label">{entry.label}</span>
                   <span className="wz-country-picker__option-code">{entry.code}</span>

@@ -79,6 +79,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'dashboard.middleware.OrganizationSessionTimeoutMiddleware',
     'dashboard.middleware.GlobalPayloadValidationMiddleware',
     'dashboard.middleware.OrganizationTimezoneMiddleware',
     'dashboard.middleware.LoginSessionGuardMiddleware',

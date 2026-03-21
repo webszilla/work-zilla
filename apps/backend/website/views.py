@@ -1691,6 +1691,7 @@ def checkout_confirm(request):
 @login_required(login_url="/auth/login/")
 def billing_renew_start(request):
     product_slug = _normalize_product_slug(request.GET.get("product"))
+    requested_plan_id = request.GET.get("plan") or request.GET.get("plan_id")
     org = _resolve_org_for_user(request.user)
     profile = UserProfile.objects.filter(user=request.user).first()
     if not _has_account_billing_access(request.user, org, profile):
@@ -1707,7 +1708,50 @@ def billing_renew_start(request):
         if pending_exists:
             messages.info(request, "Renewal already submitted. Awaiting admin approval.")
             return redirect("/my-account/")
-    latest = _latest_subscription_for_product(org, product_slug)
+    latest = None
+    if requested_plan_id:
+        try:
+            requested_plan_id_int = int(requested_plan_id)
+        except (TypeError, ValueError):
+            requested_plan_id_int = None
+        if requested_plan_id_int:
+            requested_plan = (
+                Plan.objects
+                .filter(id=requested_plan_id_int)
+                .select_related("product")
+                .first()
+            )
+            if requested_plan:
+                plan_product_slug = _normalize_product_slug(
+                    requested_plan.product.slug if requested_plan.product else product_slug
+                )
+                if plan_product_slug:
+                    product_slug = plan_product_slug
+                latest = (
+                    Subscription.objects
+                    .filter(organization=org, plan_id=requested_plan.id)
+                    .select_related("plan", "plan__product")
+                    .order_by("-start_date", "-id")
+                    .first()
+                )
+                if not latest:
+                    history = (
+                        SubscriptionHistory.objects
+                        .filter(organization=org, plan_id=requested_plan.id)
+                        .select_related("plan", "plan__product")
+                        .order_by("-start_date", "-id")
+                        .first()
+                    )
+                    if history:
+                        latest = SimpleNamespace(
+                            plan=history.plan,
+                            plan_id=history.plan_id,
+                            billing_cycle=history.billing_cycle or "monthly",
+                            addon_count=0,
+                            addon_next_cycle_count=0,
+                        )
+    if not latest:
+        latest = _latest_subscription_for_product(org, product_slug)
     if not latest or not latest.plan:
         messages.error(request, "No previous subscription found to renew.")
         return redirect("/pricing/")

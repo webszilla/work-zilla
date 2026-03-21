@@ -7,8 +7,10 @@ from django.views.decorators.http import require_http_methods
 from .forms import SignupForm
 from .models import Organization, User
 from core.models import UserProfile
+from core.access_control import get_user_organization
 from core.email_utils import send_templated_email
 from core.notification_emails import send_email_verification, is_verification_token_valid, mark_email_verified
+from core.session_security import apply_request_session_timeout, log_user_login_activity
 from .signals import user_registration_success
 
 
@@ -41,6 +43,10 @@ def login_view(request):
         )
 
     login(request, user)
+    profile = UserProfile.objects.filter(user=user).select_related("organization").first()
+    org_for_security = get_user_organization(user, profile)
+    apply_request_session_timeout(request, org=org_for_security)
+    log_user_login_activity(request, user, org=org_for_security, profile=profile)
     return redirect(next_url)
 
 

@@ -308,10 +308,47 @@ function flagFromIso2(iso2) {
   return String.fromCodePoint(first, second);
 }
 
+function flagImageUrlFromIso2(iso2) {
+  const normalized = String(iso2 || "").trim().toLowerCase();
+  if (!/^[a-z]{2}$/.test(normalized)) {
+    return "";
+  }
+  // FlagCDN serves lightweight PNG flags and is broadly supported across browsers.
+  return `https://flagcdn.com/24x18/${normalized}.png`;
+}
+
 const NORMALIZED_MANUAL_ISO_BY_LABEL = Object.entries(MANUAL_ISO_BY_LABEL).reduce((acc, [label, iso2]) => {
   acc[normalizeCountryLabel(label)] = String(iso2 || "").trim().toUpperCase();
   return acc;
 }, {});
+
+const DEPRECATED_OR_RESERVED_ISO2 = new Set([
+  "AN",
+  "BU",
+  "CS",
+  "CT",
+  "DD",
+  "DY",
+  "FQ",
+  "FX",
+  "HV",
+  "JT",
+  "MI",
+  "NH",
+  "NQ",
+  "PU",
+  "PZ",
+  "RH",
+  "SK",
+  "SU",
+  "TP",
+  "UK",
+  "VD",
+  "WK",
+  "YD",
+  "YU",
+  "ZR",
+]);
 
 function buildIntlRegionMap() {
   const map = {};
@@ -330,9 +367,12 @@ function buildIntlRegionMap() {
         } catch {
           name = "";
         }
+        if (DEPRECATED_OR_RESERVED_ISO2.has(iso2)) {
+          continue;
+        }
         if (!name || String(name).trim().toUpperCase() === iso2) continue;
         const key = normalizeCountryLabel(name);
-        if (key && !map[key]) map[key] = iso2;
+        if (key) map[key] = iso2;
       }
     }
   } catch {
@@ -353,10 +393,12 @@ function resolveIso2FromLabel(label) {
 export const PHONE_COUNTRIES = RAW_PHONE_COUNTRIES.map((entry) => {
   const iso2 = resolveIso2FromLabel(entry.label);
   const flag = flagFromIso2(iso2);
+  const flagImageUrl = flagImageUrlFromIso2(iso2);
   return {
     ...entry,
     iso2,
     flag,
+    flagImageUrl,
   };
 });
 

@@ -10,7 +10,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from core.device_policy import resolve_org_for_user, get_device_limit_for_org, should_refresh_device_last_seen
-from core.models import Device
+from core.models import Device, UserProfile
+from core.session_security import apply_request_session_timeout, log_user_login_activity
 
 
 @api_view(["GET"])
@@ -88,6 +89,10 @@ def api_login(request):
         device_registered = True
 
     login(request, user)
+    profile = UserProfile.objects.filter(user=user).select_related("organization").first()
+    org_for_security = org if device_id else None
+    apply_request_session_timeout(request, org=org_for_security, minutes=None)
+    log_user_login_activity(request, user, org=org_for_security, profile=profile)
     return Response({"ok": True, "device_registered": device_registered, "device_replaced": device_replaced})
 
 

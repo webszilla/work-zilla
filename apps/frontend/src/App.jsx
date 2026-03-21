@@ -108,6 +108,7 @@ const emptyState = {
   dealerOnboarding: null,
   onboarding: { enabled: false, state: "active" },
   readOnly: false,
+  sessionTimeoutMinutes: 30,
   subscriptions: []
 };
 
@@ -1908,6 +1909,7 @@ export default function App() {
       freePlanExpiry: data.free_plan_expiry || "",
       onboarding: data.onboarding || { enabled: false, state: "active" },
       readOnly: Boolean(data.read_only),
+      sessionTimeoutMinutes: Number.parseInt(data.session_timeout_minutes, 10) || 30,
       subscriptions: []
     });
   }, []);
@@ -2134,6 +2136,38 @@ export default function App() {
     };
   }, [loadProfile]);
 
+  useEffect(() => {
+    if (!state.authenticated) {
+      return undefined;
+    }
+    const timeoutMinutes = Math.max(1, Number.parseInt(state.sessionTimeoutMinutes, 10) || 30);
+    const timeoutMs = timeoutMinutes * 60 * 1000;
+    let timerId = null;
+    const resetTimer = () => {
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      timerId = window.setTimeout(async () => {
+        try {
+          await apiFetch("/api/auth/logout", { method: "POST", body: "{}" });
+        } catch {
+          // Ignore logout request errors and continue redirect.
+        }
+        const nextPath = `/app${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.replace(`/auth/login/?next=${encodeURIComponent(nextPath)}`);
+      }, timeoutMs);
+    };
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer, true));
+    resetTimer();
+    return () => {
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer, true));
+    };
+  }, [state.authenticated, state.sessionTimeoutMinutes]);
+
   const productRoutes = [
     { prefix: "/work-suite", slug: "worksuite", label: "Work Suite" },
     { prefix: "/ai-chatbot", slug: "ai-chatbot", label: "AI Chatbot" },
@@ -2202,7 +2236,7 @@ export default function App() {
     return status;
   }
 
-  function AccessDenied({ label, status, productSlug, planIsFree }) {
+  function AccessDenied({ label, status, productSlug, planIsFree, billingCycle, expiryDate }) {
     const { branding } = useBranding();
     const monitorLabel =
       branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
@@ -2212,6 +2246,9 @@ export default function App() {
     const isExpired = status === "expired";
     const isTrialEnded = status === "trial_ended";
     const needsPaidPlan = Boolean(planIsFree && (isExpired || isTrialEnded));
+    const normalizedBillingCycle = String(billingCycle || "").trim().toLowerCase();
+    const billingCycleLabel = normalizedBillingCycle === "yearly" ? "yearly" : "monthly";
+    const expiryDateText = expiryDate ? formatDeviceDate(expiryDate, "") : "";
     const title = isPending
       ? "Awaiting Admin Approval"
       : isRejected
@@ -2228,7 +2265,11 @@ export default function App() {
       : isTrialEnded
       ? "Trial ended. Please upgrade your plan."
       : isExpired
-      ? "Your subscription has expired. Please renew to continue."
+      ? (
+          expiryDateText
+            ? `Your ${billingCycleLabel} plan expired on ${expiryDateText}. To continue this service, please renew the product plan.`
+            : `Your ${billingCycleLabel} plan has expired. To continue this service, please renew the product plan.`
+        )
       : "You need an active plan to open this dashboard.";
     const actionLabel = isPending
       ? "View My Account"
@@ -2331,6 +2372,8 @@ export default function App() {
             status={status}
             productSlug={productSlug}
             planIsFree={entry?.plan_is_free}
+            billingCycle={entry?.billing_cycle}
+            expiryDate={entry?.ends_at}
           />
         );
       }

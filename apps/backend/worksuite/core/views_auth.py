@@ -15,6 +15,7 @@ from core.device_policy import get_device_limit_for_org
 from core.email_utils import send_templated_email
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
 from core.notification_emails import send_email_verification
+from core.session_security import apply_request_session_timeout, get_org_session_timeout_minutes, log_user_login_activity
 from core.timezone_utils import normalize_timezone, resolve_default_timezone, is_valid_timezone
 from core.subscription_utils import (
     get_effective_end_date,
@@ -197,6 +198,9 @@ def company_login(request):
             login(request, user)
             request.session.pop("pending_transfer_data", None)
             profile = UserProfile.objects.filter(user=user).first()
+            org_for_security = get_user_organization(user, profile)
+            apply_request_session_timeout(request, org=org_for_security)
+            log_user_login_activity(request, user, org=org_for_security, profile=profile)
             if user.is_superuser or (profile and profile.role in ("superadmin", "super_admin")):
                 return redirect("/app/saas-admin/")
             if profile and profile.role == "dealer":
@@ -273,6 +277,8 @@ def hr_login(request):
         login(request, user)
         request.session["active_org_id"] = org.id
         request.session.pop("pending_transfer_data", None)
+        apply_request_session_timeout(request, org=org)
+        log_user_login_activity(request, user, org=org, profile=profile)
         return redirect("/app/")
 
     return render(request, "sites/hr_login.html")
@@ -515,6 +521,7 @@ def auth_me(request):
         sidebar_menu_style = (org_settings.sidebar_menu_style or "default").strip().lower() or "default"
     if sidebar_menu_style not in {"default", "compact"}:
         sidebar_menu_style = "default"
+    session_timeout_minutes = get_org_session_timeout_minutes(org)
     retention_status = None
     grace_until = None
     archive_until = None
@@ -560,6 +567,7 @@ def auth_me(request):
             "theme_primary": theme_primary,
             "theme_secondary": theme_secondary,
             "sidebar_menu_style": sidebar_menu_style,
+            "session_timeout_minutes": session_timeout_minutes,
             "read_only": read_only,
             "retention_status": retention_status,
             "grace_until": grace_until.isoformat() if grace_until else "",
@@ -682,6 +690,7 @@ def auth_subscriptions(request):
             "product_slug": slug,
             "product_name": product.name if product else "Work Suite",
             "status": status,
+            "billing_cycle": row.billing_cycle or "monthly",
             "access_role": access_role,
             "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
             "plan_id": row.plan_id,
@@ -726,6 +735,7 @@ def auth_subscriptions(request):
             "product_slug": slug,
             "product_name": product.name if product else "Work Suite",
             "status": status,
+            "billing_cycle": transfer.billing_cycle or "monthly",
             "access_role": access_role,
             "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
             "plan_id": plan.id if plan else None,
@@ -760,6 +770,7 @@ def auth_subscriptions(request):
                 "product_slug": "storage",
                 "product_name": storage_sub.product.name if storage_sub.product else "Online Storage",
                 "status": status,
+                "billing_cycle": getattr(storage_sub, "billing_cycle", "") or "monthly",
                 "access_role": access_role,
                 "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
                 "plan_id": plan.id if plan else None,
@@ -794,6 +805,7 @@ def auth_subscriptions(request):
                 "product_slug": "imposition-software",
                 "product_name": "Print Marks",
                 "status": imposition_sub.status or "active",
+                "billing_cycle": getattr(imposition_sub, "billing_cycle", "") or "monthly",
                 "access_role": access_role,
                 "permission": decision.permission or ("full" if decision.role == "ORG_ADMIN" else ""),
                 "plan_id": imposition_sub.plan_id,

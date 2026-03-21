@@ -8,6 +8,8 @@ import re
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden, JsonResponse
 from core.models import Organization, Subscription, DeletedAccount, UserProfile, OrganizationSettings
+from core.access_control import get_user_organization
+from core.session_security import apply_request_session_timeout
 from core.timezone_utils import normalize_timezone
 from core.subscription_utils import get_effective_end_date, is_free_plan, is_subscription_active, maybe_expire_subscription
 
@@ -139,6 +141,19 @@ class LoginSessionGuardMiddleware:
                 if request.path.startswith(path):
                     logout(request)
                     break
+        return self.get_response(request)
+
+
+class OrganizationSessionTimeoutMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.user.is_authenticated:
+            profile = UserProfile.objects.filter(user=request.user).select_related("organization").first()
+            org = get_user_organization(request.user, profile)
+            if org:
+                apply_request_session_timeout(request, org=org)
         return self.get_response(request)
 
 

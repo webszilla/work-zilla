@@ -90,6 +90,20 @@ function buildEmptyCompanyProfile() {
   };
 }
 
+function normalizeTimeoutMinutes(value, fallback = 30) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed < 1) {
+    return 1;
+  }
+  if (parsed > 1440) {
+    return 1440;
+  }
+  return parsed;
+}
+
 function normalizeHexColor(value, fallback = "") {
   const color = String(value || "").trim();
   return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? color.toLowerCase() : fallback;
@@ -271,7 +285,7 @@ export default function ProfilePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const requestedTab = String(params.get("tab") || "").trim();
-    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "openAiApi", "tickets"]);
+    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "openAiApi", "security", "tickets"]);
     return allowedTabs.has(requestedTab) ? requestedTab : "profile";
   })();
   const [state, setState] = useState(emptyState);
@@ -307,6 +321,11 @@ export default function ProfilePage() {
     error: "",
     success: "",
   });
+  const [securityTimeoutMinutes, setSecurityTimeoutMinutes] = useState(30);
+  const [securitySaving, setSecuritySaving] = useState(false);
+  const [securityRetentionDays, setSecurityRetentionDays] = useState(30);
+  const [securityActivityLoading, setSecurityActivityLoading] = useState(false);
+  const [securityActivityRows, setSecurityActivityRows] = useState([]);
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState("");
   const [backupItems, setBackupItems] = useState([]);
@@ -405,6 +424,9 @@ export default function ProfilePage() {
         setThemePrimary(normalizeHexColor(data.theme_primary, defaults.primary));
         setThemeSecondary(normalizeHexColor(data.theme_secondary, defaults.secondary));
         setSidebarMenuStyle(data.sidebar_menu_style === "compact" ? "compact" : "default");
+        const securitySettings = data.security || {};
+        setSecurityTimeoutMinutes(normalizeTimeoutMinutes(securitySettings.session_timeout_minutes, 30));
+        setSecurityRetentionDays(normalizeTimeoutMinutes(securitySettings.login_activity_retention_days, 30));
       } catch (error) {
         if (error?.data?.redirect) {
           window.location.href = error.data.redirect;
@@ -648,6 +670,11 @@ export default function ProfilePage() {
         );
       }
       setNotice("UI theme settings updated successfully.");
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 120);
+      }
     } catch (error) {
       setState((prev) => ({
         ...prev,
@@ -936,9 +963,37 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSecuritySettingsSubmit(event) {
+    event.preventDefault();
+    setNotice("");
+    setState((prev) => ({ ...prev, error: "" }));
+    const timeout = normalizeTimeoutMinutes(securityTimeoutMinutes, 30);
+    setSecuritySaving(true);
+    try {
+      const response = await apiFetch("/api/dashboard/profile/security", {
+        method: "POST",
+        body: JSON.stringify({
+          session_timeout_minutes: timeout,
+        }),
+      });
+      const savedTimeout = normalizeTimeoutMinutes(response?.session_timeout_minutes, timeout);
+      setSecurityTimeoutMinutes(savedTimeout);
+      setSecurityRetentionDays(normalizeTimeoutMinutes(response?.login_activity_retention_days, 30));
+      setNotice(`Security settings updated. Auto logout timeout is ${savedTimeout} minutes.`);
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to update security settings.",
+      }));
+    } finally {
+      setSecuritySaving(false);
+    }
+  }
+
   const data = state.data || {};
   const user = data.user || {};
   const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
+  const isOrgAdminProfile = normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin";
   const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
   const isBusinessAutopilotOrgAdmin = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "company_admin";
   const recentActions = data.recent_actions || [];
@@ -980,6 +1035,41 @@ export default function ProfilePage() {
     }
     return rows.filter((row) => String(row?.department || "").trim().toLowerCase() !== "client");
   }, [whatsappEventRules, whatsappRulesTab]);
+
+  useEffect(() => {
+    if (profileTopTab !== "security" || !isOrgAdminProfile || !data.org?.id) {
+      return undefined;
+    }
+    let active = true;
+    async function loadLoginActivity() {
+      setSecurityActivityLoading(true);
+      try {
+        const response = await apiFetch("/api/dashboard/profile/login-activity");
+        if (!active) {
+          return;
+        }
+        setSecurityRetentionDays(normalizeTimeoutMinutes(response?.retention_days, 30));
+        setSecurityActivityRows(Array.isArray(response?.rows) ? response.rows : []);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setSecurityActivityRows([]);
+        setState((prev) => ({
+          ...prev,
+          error: error?.message || "Unable to load login activity.",
+        }));
+      } finally {
+        if (active) {
+          setSecurityActivityLoading(false);
+        }
+      }
+    }
+    loadLoginActivity();
+    return () => {
+      active = false;
+    };
+  }, [data.org?.id, isOrgAdminProfile, profileTopTab]);
 
   useEffect(() => {
     if (!isBusinessAutopilotOrgUser) {
@@ -1197,6 +1287,15 @@ export default function ProfilePage() {
               onClick={() => setProfileTopTab("openAiApi")}
             >
               Open AI API
+            </button>
+          ) : null}
+          {isOrgAdminProfile && data.org?.id ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${profileTopTab === "security" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setProfileTopTab("security")}
+            >
+              Security
             </button>
           ) : null}
           <button
@@ -2160,6 +2259,87 @@ export default function ProfilePage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "security" && isOrgAdminProfile ? (
+      <div className="mt-3">
+        <h5>Security</h5>
+        <p className="text-secondary mb-3">
+          Configure automatic sign-out timeout and review login activity for the last {securityRetentionDays} days.
+        </p>
+        <div className="row g-3">
+          <div className="col-12 col-lg-4">
+            <div className="h-100">
+              <form className="d-flex flex-column h-100" onSubmit={handleSecuritySettingsSubmit}>
+                <label className="form-label small mb-1">Session Timeout (Minutes)</label>
+                <div className="row g-2 align-items-start">
+                  <div className="col-9">
+                    <input
+                      type="number"
+                      className="form-control"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={securityTimeoutMinutes}
+                      onChange={(event) => setSecurityTimeoutMinutes(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="col-3 text-end">
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={securitySaving}>
+                      {securitySaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+                <div className="form-text">Example: 5, 10, 30. Users are signed out after this inactive time.</div>
+              </form>
+            </div>
+          </div>
+          <div className="col-12 col-lg-8">
+            <div className="h-100">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <h6 className="mb-0">Login Activity</h6>
+                <span className="small text-secondary">Auto-clears after {securityRetentionDays} days</span>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-dark table-striped table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Role</th>
+                      <th>Login Time</th>
+                      <th>IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {securityActivityLoading ? (
+                      <tr>
+                        <td colSpan="4">Loading login activity...</td>
+                      </tr>
+                    ) : securityActivityRows.length ? (
+                      securityActivityRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>
+                            <div className="fw-semibold">{row.name || row.username || "-"}</div>
+                            <div className="small text-secondary">{row.email || row.username || "-"}</div>
+                          </td>
+                          <td>{row.role_label || "-"}</td>
+                          <td>{row.login_at || "-"}</td>
+                          <td>{row.ip_address || "-"}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="4">No login activity in the last {securityRetentionDays} days.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       ) : null}

@@ -810,6 +810,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const name = newEmployeeRole.trim();
     if (!name) {
+      setNotice("Employee role name is required.");
       return;
     }
     setSavingEmployeeRole(true);
@@ -839,6 +840,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const name = newDepartment.trim();
     if (!name) {
+      setNotice("Department name is required.");
       return;
     }
     setSavingDepartment(true);
@@ -1150,6 +1152,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const companyName = String(clientForm.companyName || "").trim();
     if (!companyName) {
+      setNotice("Client company name is required.");
       return;
     }
     const clientName = String(clientForm.clientName || "").trim();
@@ -1452,6 +1455,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const companyName = String(vendorForm.companyName || "").trim();
     if (!companyName) {
+      setNotice("Vendor company name is required.");
       return;
     }
     const vendorName = String(vendorForm.clientName || "").trim();

@@ -54,6 +54,7 @@ from core.models import (
     Device,
     UserProfile,
     ThemeSettings,
+    UserLoginActivity,
     OrgSupportTicket,
     OrgSupportTicketMessage,
     OrgSupportTicketAttachment,
@@ -66,6 +67,14 @@ from core.subscription_utils import is_subscription_active
 from core.timezone_utils import normalize_timezone, is_valid_timezone, resolve_default_timezone
 from core.notification_emails import notify_password_changed, notify_account_limit_reached, send_email_verification
 from core.notifications import create_org_admin_inbox_notification
+from core.session_security import (
+    DEFAULT_SESSION_TIMEOUT_MINUTES,
+    LOGIN_ACTIVITY_RETENTION_DAYS,
+    MAX_SESSION_TIMEOUT_MINUTES,
+    MIN_SESSION_TIMEOUT_MINUTES,
+    apply_request_session_timeout,
+    clamp_session_timeout_minutes,
+)
 from core.access_control import iter_accessible_product_slugs
 from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
@@ -5912,6 +5921,34 @@ def plans_rollback(request):
     })
 
 
+def _is_org_admin_profile(profile):
+    role = str(getattr(profile, "role", "") or "").strip().lower()
+    return role in {"company_admin", "org_admin"}
+
+
+def _serialize_login_activity_row(row):
+    role_value = str(row.role or "").strip()
+    role_label = role_value.replace("_", " ").title() if role_value else "-"
+    display_name = (
+        f"{getattr(row.user, 'first_name', '')} {getattr(row.user, 'last_name', '')}".strip()
+        if row.user else ""
+    )
+    if not display_name:
+        display_name = row.username or row.email or "-"
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "name": display_name,
+        "username": row.username or "",
+        "email": row.email or "",
+        "role": role_value,
+        "role_label": role_label,
+        "login_at": _format_datetime(row.login_at),
+        "ip_address": row.ip_address or "",
+        "user_agent": row.user_agent or "",
+    }
+
+
 @login_required
 @require_http_methods(["GET"])
 def profile_summary(request):
@@ -6153,6 +6190,16 @@ def profile_summary(request):
             "secondary": org_theme_secondary,
         },
         "sidebar_menu_style": sidebar_menu_style,
+        "security": {
+            "session_timeout_minutes": clamp_session_timeout_minutes(
+                getattr(org_settings, "session_timeout_minutes", DEFAULT_SESSION_TIMEOUT_MINUTES),
+                default=DEFAULT_SESSION_TIMEOUT_MINUTES,
+            ),
+            "min_timeout_minutes": MIN_SESSION_TIMEOUT_MINUTES,
+            "max_timeout_minutes": MAX_SESSION_TIMEOUT_MINUTES,
+            "login_activity_retention_days": LOGIN_ACTIVITY_RETENTION_DAYS,
+            "can_manage": _is_org_admin_profile(profile),
+        },
         "phone_country": phone_country,
         "phone_number": phone_number,
         "recent_actions": [
@@ -6167,6 +6214,78 @@ def profile_summary(request):
             "page_size": paginator.per_page,
             "total_items": paginator.count,
         },
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def profile_security(request):
+    org, error = _get_org_or_error(request)
+    if error:
+        return error
+    profile = dashboard_views.get_profile(request.user)
+    if not _is_org_admin_profile(profile):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    if request.method == "GET":
+        timeout = clamp_session_timeout_minutes(
+            getattr(settings_obj, "session_timeout_minutes", DEFAULT_SESSION_TIMEOUT_MINUTES),
+            default=DEFAULT_SESSION_TIMEOUT_MINUTES,
+        )
+        return JsonResponse({
+            "session_timeout_minutes": timeout,
+            "min_timeout_minutes": MIN_SESSION_TIMEOUT_MINUTES,
+            "max_timeout_minutes": MAX_SESSION_TIMEOUT_MINUTES,
+            "login_activity_retention_days": LOGIN_ACTIVITY_RETENTION_DAYS,
+        })
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    timeout = clamp_session_timeout_minutes(
+        payload.get("session_timeout_minutes"),
+        default=DEFAULT_SESSION_TIMEOUT_MINUTES,
+    )
+    settings_obj.session_timeout_minutes = timeout
+    settings_obj.save(update_fields=["session_timeout_minutes"])
+    apply_request_session_timeout(request, org=org, minutes=timeout)
+    dashboard_views.log_admin_activity(
+        request.user,
+        "Update Session Timeout",
+        f"Set organization session timeout to {timeout} minutes.",
+        request=request,
+    )
+    return JsonResponse({
+        "updated": True,
+        "session_timeout_minutes": timeout,
+        "min_timeout_minutes": MIN_SESSION_TIMEOUT_MINUTES,
+        "max_timeout_minutes": MAX_SESSION_TIMEOUT_MINUTES,
+        "login_activity_retention_days": LOGIN_ACTIVITY_RETENTION_DAYS,
+    })
+
+
+@login_required
+@require_http_methods(["GET"])
+def profile_login_activity(request):
+    org, error = _get_org_or_error(request)
+    if error:
+        return error
+    profile = dashboard_views.get_profile(request.user)
+    if not _is_org_admin_profile(profile):
+        return HttpResponseForbidden("Access denied.")
+
+    UserLoginActivity.purge_older_than_days(LOGIN_ACTIVITY_RETENTION_DAYS)
+    rows = (
+        UserLoginActivity.objects
+        .filter(organization=org)
+        .select_related("user")
+        .order_by("-login_at")[:500]
+    )
+    return JsonResponse({
+        "retention_days": LOGIN_ACTIVITY_RETENTION_DAYS,
+        "rows": [_serialize_login_activity_row(row) for row in rows],
     })
 
 

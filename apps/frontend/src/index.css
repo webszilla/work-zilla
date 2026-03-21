@@ -119,6 +119,14 @@ a{
 .btn-success:focus-visible{
   box-shadow: 0 0 0 0.2rem rgba(var(--color-primary-rgb, 79, 70, 229), 0.25) !important;
 }
+
+/* Keep primary form action buttons aligned to the right across products. */
+.app-shell form button[type="submit"].btn-primary:not(.w-100):not(.flex-fill),
+.app-shell form button[type="submit"].btn-success:not(.w-100):not(.flex-fill),
+.app-shell form button[type="submit"].btn-warning:not(.w-100):not(.flex-fill){
+  display: block;
+  margin-left: auto;
+}
 .app-btn-secondary{
   background: transparent;
   border:1px solid var(--color-border, #1f2937);
@@ -906,6 +914,21 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
 .wz-country-picker__flag,
 .wz-country-picker__caret{
   color: inherit;
+}
+.wz-country-picker__flag-image{
+  width: 24px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 2px;
+  display: inline-block;
+  vertical-align: middle;
+}
+.wz-country-picker__flag-fallback{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
 }
 .wz-country-picker__menu{
   position: absolute;
