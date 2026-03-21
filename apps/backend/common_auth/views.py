@@ -1,13 +1,19 @@
+import random
+import hashlib
+from datetime import timedelta
+
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.cache import cache
 from django.db import transaction
 from django.contrib import messages
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
+from django.utils import timezone
 
 from .forms import SignupForm
 from .models import Organization, User
@@ -19,21 +25,112 @@ from core.session_security import apply_request_session_timeout, log_user_login_
 from .signals import user_registration_success
 
 
+LOGIN_MAX_FAILED_ATTEMPTS = 4
+LOGIN_LOCK_SECONDS = 15 * 60
+
+
+def _login_attempt_cache_key(identifier: str, ip_address: str) -> str:
+    source = f"{(identifier or '').strip().lower()}|{(ip_address or '').strip()}"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return f"auth:login-lock:{digest}"
+
+
+def _is_login_locked(identifier: str, ip_address: str):
+    key = _login_attempt_cache_key(identifier, ip_address)
+    state = cache.get(key) or {}
+    locked_until = state.get("locked_until")
+    if not locked_until:
+        return False, 0
+    now = timezone.now()
+    if locked_until <= now:
+        cache.delete(key)
+        return False, 0
+    remaining_seconds = int((locked_until - now).total_seconds())
+    return True, max(1, remaining_seconds)
+
+
+def _register_login_failure(identifier: str, ip_address: str):
+    key = _login_attempt_cache_key(identifier, ip_address)
+    state = cache.get(key) or {}
+    count = int(state.get("count") or 0) + 1
+    if count >= LOGIN_MAX_FAILED_ATTEMPTS:
+        locked_until = timezone.now() + timedelta(seconds=LOGIN_LOCK_SECONDS)
+        cache.set(
+            key,
+            {"count": LOGIN_MAX_FAILED_ATTEMPTS, "locked_until": locked_until},
+            timeout=LOGIN_LOCK_SECONDS,
+        )
+        return True
+    cache.set(key, {"count": count}, timeout=LOGIN_LOCK_SECONDS)
+    return False
+
+
+def _clear_login_lock(identifier: str, ip_address: str):
+    cache.delete(_login_attempt_cache_key(identifier, ip_address))
+
+
+def _build_signup_captcha(request):
+    left = random.randint(1, 9)
+    right = random.randint(1, 9)
+    answer = left + right
+    request.session["signup_captcha_answer"] = str(answer)
+    request.session["signup_captcha_question"] = f"{left} + {right}"
+    request.session.modified = True
+    return request.session["signup_captcha_question"]
+
+
+def _build_login_captcha(request):
+    left = random.randint(1, 9)
+    right = random.randint(1, 9)
+    answer = left + right
+    request.session["login_captcha_answer"] = str(answer)
+    request.session["login_captcha_question"] = f"{left} + {right}"
+    request.session.modified = True
+    return request.session["login_captcha_question"]
+
+
 @require_http_methods(["GET", "POST"])
 def login_view(request):
     next_url = request.GET.get("next") or request.POST.get("next") or "/my-account/"
     if request.method == "GET":
         if request.user.is_authenticated:
             return redirect(next_url)
-        return render(request, "sites/login.html", {"next": next_url})
+        captcha_question = _build_login_captcha(request)
+        return render(request, "sites/login.html", {"next": next_url, "captcha_question": captcha_question})
 
     username_or_email = request.POST.get("email") or request.POST.get("username")
     password = request.POST.get("password")
-    if not username_or_email or not password:
+    captcha_answer = str(request.POST.get("captcha_answer") or "").strip()
+    expected_captcha = str(request.session.get("login_captcha_answer") or "").strip()
+    client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get("REMOTE_ADDR", "")
+
+    if not expected_captcha or captcha_answer != expected_captcha:
+        captcha_question = _build_login_captcha(request)
         return render(
             request,
             "sites/login.html",
-            {"next": next_url, "error": "Email and password are required"},
+            {"next": next_url, "error": "Captcha answer is incorrect. Please try again.", "captcha_question": captcha_question},
+        )
+
+    if not username_or_email or not password:
+        captcha_question = _build_login_captcha(request)
+        return render(
+            request,
+            "sites/login.html",
+            {"next": next_url, "error": "Email and password are required", "captcha_question": captcha_question},
+        )
+    is_locked, remaining_seconds = _is_login_locked(username_or_email, client_ip)
+    if is_locked:
+        remaining_minutes = max(1, (remaining_seconds + 59) // 60)
+        captcha_question = _build_login_captcha(request)
+        return render(
+            request,
+            "sites/login.html",
+            {
+                "next": next_url,
+                "error": f"Too many failed attempts. Please try again after {remaining_minutes} minutes.",
+                "captcha_question": captcha_question,
+            },
         )
     user = authenticate(request, username=username_or_email, password=password)
     if user is None:
@@ -41,13 +138,22 @@ def login_view(request):
         if user_obj:
             user = authenticate(request, username=user_obj.username, password=password)
     if user is None:
+        just_locked = _register_login_failure(username_or_email, client_ip)
+        if just_locked:
+            error_message = "Too many failed attempts. Please try again after 15 minutes."
+        else:
+            error_message = "Username or password is incorrect. Please check and try again."
+        captcha_question = _build_login_captcha(request)
         return render(
             request,
             "sites/login.html",
-            {"next": next_url, "error": "Username or password is incorrect. Please check and try again."},
+            {"next": next_url, "error": error_message, "captcha_question": captcha_question},
         )
 
+    _clear_login_lock(username_or_email, client_ip)
     login(request, user)
+    request.session.pop("login_captcha_answer", None)
+    request.session.pop("login_captcha_question", None)
     profile = UserProfile.objects.filter(user=user).select_related("organization").first()
     org_for_security = get_user_organization(user, profile)
     apply_request_session_timeout(request, org=org_for_security)
@@ -64,11 +170,20 @@ def logout_view(request):
 @require_http_methods(["GET", "POST"])
 def signup_view(request):
     if request.method == "GET":
-        return render(request, "sites/signup.html")
+        captcha_question = _build_signup_captcha(request)
+        return render(request, "sites/signup.html", {"captcha_question": captcha_question})
 
     form = SignupForm(request.POST)
-    if not form.is_valid():
-        return render(request, "sites/signup.html", {"form": form})
+    expected_answer = str(request.session.get("signup_captcha_answer") or "").strip()
+    entered_answer = str(request.POST.get("captcha_answer") or "").strip()
+    captcha_valid = bool(expected_answer and entered_answer and entered_answer == expected_answer)
+
+    if not captcha_valid:
+        form.add_error(None, "Captcha answer is incorrect. Please try again.")
+
+    if not form.is_valid() or not captcha_valid:
+        captcha_question = _build_signup_captcha(request)
+        return render(request, "sites/signup.html", {"form": form, "captcha_question": captcha_question})
 
     username = form.cleaned_data["username"]
     first_name = form.cleaned_data["first_name"]
@@ -111,6 +226,8 @@ def signup_view(request):
         )
     )
     login(request, user)
+    request.session.pop("signup_captcha_answer", None)
+    request.session.pop("signup_captcha_question", None)
     return redirect("/pricing/")
 
 

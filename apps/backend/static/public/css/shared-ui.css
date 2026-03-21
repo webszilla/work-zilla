@@ -58,6 +58,26 @@ body {
   box-shadow: 0 14px 28px color-mix(in srgb, var(--shared-ui-primary) 24%, transparent) !important;
 }
 
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:focus-visible,
+.btn-success:hover,
+.btn-success:focus,
+.btn-success:focus-visible,
+.theme-toggle-btn.active:hover,
+.theme-toggle-btn.active:focus,
+.theme-toggle-btn.active:focus-visible,
+.theme-btn.active:hover,
+.theme-btn.active:focus,
+.theme-btn.active:focus-visible,
+.card button.btn-install:hover,
+.card button.btn-install:focus,
+.card button.btn-install:focus-visible {
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--shared-ui-primary) 24%, transparent) !important;
+}
+
 .btn-outline-light,
 .btn-secondary,
 .theme-toggle-btn:not(.active),

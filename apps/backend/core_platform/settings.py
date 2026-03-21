@@ -86,6 +86,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "apps.backend.core_platform.middleware.RequestSecurityShieldMiddleware",
     "apps.backend.core_platform.middleware.LegacyMonitorRedirectMiddleware",
     "django.middleware.common.CommonMiddleware",
     "apps.backend.modules.whatsapp_automation.middleware.CustomDigitalCardDomainMiddleware",

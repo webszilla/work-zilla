@@ -1,7 +1,11 @@
 import json
+import re
+from datetime import timedelta
 
 from django.http import HttpResponsePermanentRedirect
 from django.shortcuts import redirect
+from django.core.cache import cache
+from django.utils import timezone
 
 from apps.backend.brand.models import ProductRouteMapping
 from core.access_control import build_login_redirect, check_product_access, get_request_product_slug, is_exempt_product_path
@@ -39,6 +43,93 @@ class LegacyMonitorRedirectMiddleware:
             return HttpResponsePermanentRedirect(f"/worksuite{suffix}{suffix_query}")
 
         return self.get_response(request)
+
+
+class RequestSecurityShieldMiddleware:
+    BLOCK_SECONDS = 15 * 60
+    NOT_FOUND_WINDOW_SECONDS = 5 * 60
+    MAX_NOT_FOUND_ATTEMPTS = 20
+    SUSPICIOUS_WINDOW_SECONDS = 10 * 60
+    MAX_SUSPICIOUS_ATTEMPTS = 4
+    SUSPICIOUS_RE = re.compile(
+        r"(\.\./|%2e%2e|<script|/wp-admin|/wp-login|/xmlrpc\.php|/phpmyadmin|/\.env|/cgi-bin|/vendor/phpunit|/boaform)",
+        re.IGNORECASE,
+    )
+    EXEMPT_PREFIXES = ("/static/", "/media/", "/favicon.ico", "/robots.txt", "/sitemap.xml")
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def _get_ip(self, request):
+        return request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get("REMOTE_ADDR", "")
+
+    def _block_key(self, ip):
+        return f"security:block:{ip}"
+
+    def _nf_key(self, ip):
+        return f"security:404:{ip}"
+
+    def _suspicious_key(self, ip):
+        return f"security:suspicious:{ip}"
+
+    def _blocked_response(self, request, minutes):
+        payload = {"detail": f"Security protection enabled. Try again after {minutes} minutes."}
+        if request.path.startswith("/api/"):
+            return JsonResponse(payload, status=429)
+        return JsonResponse(payload, status=429)
+
+    def _is_exempt(self, path):
+        return any(path.startswith(prefix) for prefix in self.EXEMPT_PREFIXES)
+
+    def _set_block(self, ip, reason):
+        until = timezone.now() + timedelta(seconds=self.BLOCK_SECONDS)
+        cache.set(self._block_key(ip), {"until": until, "reason": reason}, timeout=self.BLOCK_SECONDS)
+
+    def _increment_and_check(self, key, window_seconds, max_attempts):
+        count = int(cache.get(key) or 0) + 1
+        cache.set(key, count, timeout=window_seconds)
+        return count >= max_attempts
+
+    def __call__(self, request):
+        path = request.path or ""
+        if self._is_exempt(path):
+            return self.get_response(request)
+
+        ip = self._get_ip(request)
+        block_state = cache.get(self._block_key(ip)) or {}
+        until = block_state.get("until")
+        if until and until > timezone.now():
+            remaining_seconds = int((until - timezone.now()).total_seconds())
+            remaining_minutes = max(1, (remaining_seconds + 59) // 60)
+            return self._blocked_response(request, remaining_minutes)
+        if until and until <= timezone.now():
+            cache.delete(self._block_key(ip))
+
+        response = self.get_response(request)
+
+        raw_target = f"{request.path}?{request.META.get('QUERY_STRING', '')}"
+        is_suspicious = bool(self.SUSPICIOUS_RE.search(raw_target))
+        if is_suspicious:
+            reached = self._increment_and_check(
+                self._suspicious_key(ip),
+                self.SUSPICIOUS_WINDOW_SECONDS,
+                self.MAX_SUSPICIOUS_ATTEMPTS,
+            )
+            if reached:
+                self._set_block(ip, "suspicious_activity")
+                return self._blocked_response(request, 15)
+
+        if response.status_code == 404:
+            reached = self._increment_and_check(
+                self._nf_key(ip),
+                self.NOT_FOUND_WINDOW_SECONDS,
+                self.MAX_NOT_FOUND_ATTEMPTS,
+            )
+            if reached:
+                self._set_block(ip, "too_many_not_found")
+                return self._blocked_response(request, 15)
+
+        return response
 
 
 class ApiV2ErrorNormalizeMiddleware:

@@ -39,14 +39,14 @@
           <div class="row g-2 mb-3">
             <div class="col-12 col-md-6">
               <label class="form-label">Company Name</label>
-              <input type="text" name="company_name" class="form-control" required>
+              <input type="text" name="company_name" class="form-control" maxlength="120" required>
               {% if form and form.company_name.errors %}
                 <div class="text-danger small">{{ form.company_name.errors|striptags }}</div>
               {% endif %}
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label">Username</label>
-              <input type="text" name="username" class="form-control" required>
+              <input type="text" name="username" class="form-control" minlength="4" maxlength="30" required>
               {% if form and form.username.errors %}
                 <div class="text-danger small">{{ form.username.errors|striptags }}</div>
               {% endif %}
@@ -54,16 +54,16 @@
           </div>
 
           <div class="mb-3">
-              <label class="form-label">Your Name</label>
+              <label class="form-label">Your Name <span class="text-danger">*</span></label>
               <div class="row g-2">
                 <div class="col-md-6">
-                  <input type="text" name="first_name" class="form-control" placeholder="First name" required>
+                  <input type="text" name="first_name" class="form-control" placeholder="First name" maxlength="60" required>
                   {% if form and form.first_name.errors %}
                     <div class="text-danger small">{{ form.first_name.errors|striptags }}</div>
                   {% endif %}
                 </div>
                 <div class="col-md-6">
-                  <input type="text" name="last_name" class="form-control" placeholder="Last name" required>
+                  <input type="text" name="last_name" class="form-control" placeholder="Last name" maxlength="60" required>
                   {% if form and form.last_name.errors %}
                     <div class="text-danger small">{{ form.last_name.errors|striptags }}</div>
                   {% endif %}
@@ -73,14 +73,14 @@
 
           <div class="mb-3">
               <label class="form-label">Email</label>
-              <input type="email" name="email" class="form-control" required>
+              <input type="email" name="email" class="form-control" maxlength="120" required>
               {% if form and form.email.errors %}
                 <div class="text-danger small">{{ form.email.errors|striptags }}</div>
               {% endif %}
           </div>
 
           <div class="mb-3">
-              <label class="form-label">Mobile Number</label>
+              <label class="form-label">Mobile Number <span class="text-danger">*</span></label>
               <input type="hidden" name="phone_number" data-phone-hidden value="">
               <div class="phone-input-group">
                 <select name="phone_country" class="form-select" data-phone-country data-phone-picker="native" required>
@@ -97,30 +97,44 @@
           <div class="row g-2 mb-3">
             <div class="col-12 col-md-6">
               <label class="form-label">Password</label>
-              <input type="password" name="password1" class="form-control" required>
+              <input type="password" name="password1" class="form-control" data-password-strength-input minlength="8" maxlength="128" required>
+              <div class="password-strength mt-2" data-password-strength>
+                <div class="password-strength__bar">
+                  <span class="password-strength__fill" data-password-strength-fill></span>
+                </div>
+                <small class="password-strength__text text-secondary" data-password-strength-text>Password strength: Too weak</small>
+              </div>
               {% if form and form.password1.errors %}
                 <div class="text-danger small">{{ form.password1.errors|striptags }}</div>
               {% endif %}
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label">Confirm Password</label>
-              <input type="password" name="password2" class="form-control" required>
+              <input type="password" name="password2" class="form-control" minlength="8" maxlength="128" required>
               {% if form and form.password2.errors %}
                 <div class="text-danger small">{{ form.password2.errors|striptags }}</div>
               {% endif %}
             </div>
           </div>
 
+          <div class="mb-3">
+            <label class="form-label">Captcha <span class="text-danger">*</span></label>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="captcha-question">{{ captcha_question|default:"1 + 1" }} = ?</span>
+              <input type="text" name="captcha_answer" class="form-control captcha-input" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="Enter answer" required>
+            </div>
+          </div>
+
           <input type="hidden" name="plan" value="{{ request.GET.plan }}">
 
           <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
-            <button class="btn btn-primary auth-submit-btn auth-submit-btn--auto" data-auth-submit-btn>
-                Create Account
-            </button>
-            <p class="mb-0 text-secondary text-end">
+            <p class="mb-0 text-secondary text-start">
                 Already have an account?
                 <a href="/auth/login/?next=/app/">Login</a>
             </p>
+            <button class="btn btn-primary auth-submit-btn auth-submit-btn--auto" data-auth-submit-btn>
+                Create Account
+            </button>
           </div>
 
       </form>
@@ -166,6 +180,68 @@
         overlay.setAttribute("aria-hidden", "false");
         if (submitBtn) submitBtn.disabled = true;
       });
+    })();
+
+    (function () {
+      var passwordInput = document.querySelector("[data-password-strength-input]");
+      var fill = document.querySelector("[data-password-strength-fill]");
+      var text = document.querySelector("[data-password-strength-text]");
+      var form = document.querySelector("[data-auth-loading-form]");
+      if (!passwordInput || !fill || !text) return;
+
+      function evaluateStrength(value) {
+        var score = 0;
+        if (value.length >= 8) score += 1;
+        if (/[A-Z]/.test(value)) score += 1;
+        if (/[a-z]/.test(value)) score += 1;
+        if (/[0-9]/.test(value)) score += 1;
+        if (/[^A-Za-z0-9]/.test(value)) score += 1;
+        return score;
+      }
+
+      function updateStrength() {
+        var value = String(passwordInput.value || "");
+        var score = evaluateStrength(value);
+        var width = Math.max(8, (score / 5) * 100);
+        var label = "Too weak";
+        var color = "#ef4444";
+        if (score >= 2) {
+          label = "Weak";
+          color = "#f97316";
+        }
+        if (score >= 3) {
+          label = "Medium";
+          color = "#eab308";
+        }
+        if (score >= 4) {
+          label = "Strong";
+          color = "#22c55e";
+        }
+        if (score >= 5) {
+          label = "Very strong";
+          color = "#16a34a";
+        }
+        fill.style.width = width + "%";
+        fill.style.backgroundColor = color;
+        text.textContent = "Password strength: " + label;
+        if (score < 4) {
+          passwordInput.setCustomValidity("Use a strong password to continue.");
+        } else {
+          passwordInput.setCustomValidity("");
+        }
+      }
+
+      passwordInput.addEventListener("input", updateStrength);
+      if (form) {
+        form.addEventListener("submit", function (event) {
+          updateStrength();
+          if (!form.checkValidity()) {
+            event.preventDefault();
+            form.reportValidity();
+          }
+        });
+      }
+      updateStrength();
     })();
   </script>
 {% endblock %}

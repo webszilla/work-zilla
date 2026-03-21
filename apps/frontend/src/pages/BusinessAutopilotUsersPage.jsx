@@ -827,7 +827,14 @@ export default function BusinessAutopilotUsersPage() {
       setNewEmployeeRole("");
       setNotice("Employee role created.");
     } catch (error) {
-      setNotice(error?.message || "Unable to create employee role.");
+      const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
+      if (detail === "employee_role_exists") {
+        setNotice("This employee role already exists.");
+      } else if (detail === "name_required") {
+        setNotice("Employee role name is required.");
+      } else {
+        setNotice(error?.message || "Unable to create employee role.");
+      }
     } finally {
       setSavingEmployeeRole(false);
     }

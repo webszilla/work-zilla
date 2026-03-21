@@ -639,7 +639,7 @@ img {
 
 .phone-input-group {
   display: grid !important;
-  grid-template-columns: 138px minmax(0, 1fr);
+  grid-template-columns: 96px minmax(0, 1fr);
   gap: 0;
   width: 100%;
   align-items: center;
@@ -654,7 +654,7 @@ img {
 .phone-input-group input:first-child,
 .phone-input-group select:first-child {
   max-width: 100%;
-  min-width: 138px;
+  min-width: 96px;
 }
 
 .phone-input-group input:last-child,
@@ -668,7 +668,7 @@ img {
 
 .phone-country-picker {
   position: relative;
-  width: 138px;
+  width: 96px;
   margin-right: -1px;
 }
 
@@ -837,9 +837,9 @@ img {
 }
 
 .alert-danger {
-  background: rgba(var(--color-accent-rgb), 0.12);
-  border: 1px solid rgba(var(--color-accent-rgb), 0.3);
-  color: #10223a;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
 }
 
 .alert {
@@ -905,6 +905,45 @@ img {
   border-top-color: var(--color-primary);
   animation: auth-spin 0.75s linear infinite;
   background: rgba(255, 255, 255, 0.85);
+}
+
+.password-strength__bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.password-strength__fill {
+  display: block;
+  height: 100%;
+  width: 8%;
+  background: #ef4444;
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.password-strength__text {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+
+.captcha-question {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px dashed rgba(15, 23, 42, 0.25);
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.captcha-input {
+  max-width: 180px;
 }
 
 @keyframes auth-spin {

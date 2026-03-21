@@ -7,8 +7,10 @@ import "./dashboard.css";
 import "./styles/admin-shell.css";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import { loadRemoteSharedUiCss } from "./lib/sharedUi.js";
+import { bindGlobalEmailRealtimeValidation } from "./lib/emailRealtimeValidation.js";
 
 loadRemoteSharedUiCss();
+bindGlobalEmailRealtimeValidation();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

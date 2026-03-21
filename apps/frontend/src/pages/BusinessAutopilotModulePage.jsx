@@ -5360,7 +5360,7 @@ function CrmOnePageModule() {
         return (
 		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
 		            <div className={sectionKey === "teams" ? "col-12 col-xl-3" : ""}>
-            <div className="card p-3">
+            <div className={`card p-3 ${editingId ? "crm-form-editing-highlight" : ""}`}>
               <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={(event) => onSubmit(sectionKey, event)}>
                 {sectionFormErrors[sectionKey] ? (
@@ -5998,16 +5998,15 @@ function CrmOnePageModule() {
                                     <div className="d-flex flex-wrap gap-2">
                                       {selectedFollowUpOwner ? (
                                         <span
-                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                                         >
                                           <button
                                             type="button"
-                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                             aria-label={`Remove ${selectedFollowUpOwner}`}
-                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                             onClick={() => toggleFollowUpOwner(selectedFollowUpOwner)}
                                           >
-                                            -
+                                            &times;
                                           </button>
                                           <span>{selectedFollowUpOwner}</span>
                                         </span>
@@ -6140,16 +6139,15 @@ function CrmOnePageModule() {
                                       {selectedMeetingEmployees.length ? selectedMeetingEmployees.map((employeeName) => (
                                         <span
                                           key={`meeting-selected-employee-${employeeName}`}
-                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                                         >
                                           <button
                                             type="button"
-                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                             aria-label={`Remove ${employeeName}`}
-                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                             onClick={() => toggleMeetingEmployee(employeeName)}
                                           >
-                                            -
+                                            &times;
                                           </button>
                                           <span>{employeeName}</span>
                                         </span>
@@ -6213,16 +6211,15 @@ function CrmOnePageModule() {
                                       {selectedMeetingReminderChannels.length ? selectedMeetingReminderChannels.map((option) => (
                                         <span
                                           key={`meeting-selected-reminder-channel-${option}`}
-                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                                         >
                                           <button
                                             type="button"
-                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                             aria-label={`Remove ${option}`}
-                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                             onClick={() => toggleMeetingReminderChannel(option)}
                                           >
-                                            -
+                                            &times;
                                           </button>
                                           <span>{option}</span>
                                         </span>
@@ -6353,11 +6350,11 @@ function CrmOnePageModule() {
                             <div
                               className={
                                 sectionKey === "leads"
-                                  ? "col-12 col-md-6 col-xl-3 d-flex align-items-end"
+                                  ? "col-12 col-md-6 col-xl-2 ms-xl-auto d-flex align-items-end justify-content-end"
                                   : sectionKey === "deals"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : sectionKey === "followUps"
-                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-start crm-submit-align-with-input"
                                   : sectionKey === "activities"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : sectionKey === "meetings"
@@ -6365,7 +6362,7 @@ function CrmOnePageModule() {
                                   : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
                               }
                             >
-                              <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center" : "d-flex gap-2 flex-wrap w-100"}>
+                              <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center justify-content-end w-100" : "d-flex gap-2 flex-wrap w-100"}>
                                 <button
                                   type="submit"
                                   className={`btn btn-success btn-sm ${

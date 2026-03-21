@@ -635,6 +635,30 @@ html[data-theme="light"] .media-library .media-library-folders .list-group-item.
   border-color:#273456;
   color:#e2e8f0;
 }
+
+/* Global form sizing: keep form inputs and actions visually aligned. */
+.app-shell form :is(
+  .form-control,
+  .form-select,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+){
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.app-shell form :is(
+  button,
+  input[type="submit"],
+  input[type="button"],
+  input[type="reset"],
+  .btn,
+  a.btn
+){
+  min-height: 36px;
+  border-radius: 8px !important;
+}
 .form-control::placeholder{
   color:#94a3b8;
 }
@@ -1006,14 +1030,99 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   border-radius:10px;
 }
 .single-row-form-submit-btn{
-  width:100%;
+  width:auto !important;
   padding-top:7px !important;
   padding-bottom:7px !important;
   line-height:1.2;
-  min-height:38px;
+  min-height:36px;
+  border-radius:8px !important;
   display:flex !important;
   align-items:center;
   justify-content:center;
+}
+.crm-submit-align-with-input{
+  padding-top: 26px;
+}
+.wz-selected-chip{
+  padding: 0.24rem 0.5rem !important;
+  min-height: 28px;
+  border-radius: 8px !important;
+  font-weight: 600;
+}
+.wz-selected-chip-remove{
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px;
+  border-radius: 999px !important;
+  line-height: 1 !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  padding: 0 !important;
+}
+.wz-selected-chip-remove:hover,
+.wz-selected-chip-remove:focus{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.12) !important;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.45) !important;
+}
+
+/* Global form action sizing: keep all React form buttons content-width. */
+.app-shell form :is(
+  button.btn,
+  a.btn,
+  input[type="submit"],
+  input[type="button"],
+  input[type="reset"]
+){
+  width: auto !important;
+  max-width: 100%;
+}
+
+.app-shell form .btn.flex-fill,
+.app-shell form a.btn.flex-fill{
+  flex: 0 0 auto !important;
+}
+
+.app-shell form .d-grid > :is(
+  button.btn,
+  a.btn,
+  input[type="submit"],
+  input[type="button"],
+  input[type="reset"]
+){
+  width: auto !important;
+  justify-self: start;
+}
+
+.crm-form-editing-highlight{
+  border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.52) !important;
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb, 79, 70, 229), 0.14);
+  animation: crm-edit-border-blink 2.8s ease-in-out infinite;
+}
+
+@keyframes crm-edit-border-blink{
+  0%{
+    border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.28);
+    box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb, 79, 70, 229), 0.0);
+  }
+  50%{
+    border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.9);
+    box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb, 79, 70, 229), 0.22);
+  }
+  100%{
+    border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.28);
+    box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb, 79, 70, 229), 0.0);
+  }
+}
+
+html[data-theme="light"] .crm-form-editing-highlight{
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb, 29, 78, 216), 0.16);
+}
+
+@media (prefers-reduced-motion: reduce){
+  .crm-form-editing-highlight{
+    animation: none;
+  }
 }
 .wz-pagination-inline .btn.disabled,
 .wz-pagination-inline .btn:disabled{
@@ -1318,9 +1427,9 @@ html[data-theme="light"] .btn-outline-light{
 .app-shell .btn-outline-success,
 .app-shell .btn-success,
 .app-shell .btn-primary{
-  min-height: 32px;
+  min-height: 36px;
   padding: 0.42rem 0.88rem;
-  border-radius: 10px;
+  border-radius: 8px;
   border-width: 1px;
   font-size: 0.88rem;
   font-weight: 600;
@@ -1393,9 +1502,9 @@ html[data-theme="light"] .app-shell .btn-outline-success:focus{
 }
 .app-shell .btn-outline-info,
 .app-shell .btn-outline-danger{
-  min-height: 32px;
+  min-height: 36px;
   padding: 0.35rem 0.8rem;
-  border-radius: 10px;
+  border-radius: 8px;
   border-width: 1px;
   font-size: 0.85rem;
   font-weight: 600;

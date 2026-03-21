@@ -355,6 +355,7 @@ function setupPhoneFields(form) {
   const hiddenInput = form.querySelector("[data-phone-hidden]");
   const initialHidden = hiddenInput?.value || "";
   const initialParts = splitPhoneValue(initialHidden);
+  const hasInitialPhoneValue = Boolean(String(initialHidden || "").trim());
   const preferNativePicker = String(countryInput?.dataset?.phonePicker || "").toLowerCase() === "native";
 
   if (!preferNativePicker) {
@@ -363,8 +364,15 @@ function setupPhoneFields(form) {
     decoratePhoneCountryOptions(countryInput);
   }
 
-  if (countryInput && !countryInput.value) {
-    countryInput.value = initialParts.code || "+91";
+  if (countryInput) {
+    const hasExplicitSelection = Boolean(countryInput.querySelector("option[selected]"));
+    if (hasInitialPhoneValue) {
+      countryInput.value = initialParts.code || "+91";
+    } else if (!hasExplicitSelection) {
+      countryInput.value = "+91";
+    } else if (!countryInput.value) {
+      countryInput.value = "+91";
+    }
   }
   if (numberInput && !numberInput.value) {
     numberInput.value = initialParts.number || "";
@@ -446,9 +454,142 @@ function attachRequiredValidation() {
   });
 }
 
+function ensureLiveErrorNode(field) {
+  const scope =
+    field.closest(".mb-3, .mb-2, .form-group, .form-field, .col, .row, div") || field.parentElement;
+  if (!scope) return null;
+  let node = scope.querySelector(".live-field-error[data-for='" + (field.name || field.id || "field") + "']");
+  if (!node) {
+    node = document.createElement("div");
+    node.className = "live-field-error text-danger small mt-1";
+    node.dataset.for = field.name || field.id || "field";
+    node.style.display = "none";
+    scope.appendChild(node);
+  }
+  return node;
+}
+
+function attachLiveEmailValidation() {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const fields = document.querySelectorAll("input[type='email'], input[name*='email' i], input[id*='email' i]");
+  fields.forEach((field) => {
+    if (!(field instanceof HTMLInputElement)) return;
+    const errorNode = ensureLiveErrorNode(field);
+    const validate = () => {
+      const value = String(field.value || "").trim();
+      if (!value) {
+        field.setCustomValidity("");
+        if (errorNode) {
+          errorNode.textContent = "";
+          errorNode.style.display = "none";
+        }
+        field.classList.remove("is-invalid");
+        return;
+      }
+      if (!emailRegex.test(value)) {
+        field.setCustomValidity("Please enter a valid email address.");
+        if (errorNode) {
+          errorNode.textContent = "Please enter a valid email address.";
+          errorNode.style.display = "block";
+        }
+        field.classList.add("is-invalid");
+        return;
+      }
+      field.setCustomValidity("");
+      if (errorNode) {
+        errorNode.textContent = "";
+        errorNode.style.display = "none";
+      }
+      field.classList.remove("is-invalid");
+    };
+    field.addEventListener("input", validate);
+    field.addEventListener("blur", validate);
+    validate();
+  });
+}
+
+function fieldIdentity(field) {
+  return [
+    field.getAttribute("name"),
+    field.id,
+    field.getAttribute("placeholder"),
+    field.getAttribute("aria-label"),
+    field.className,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function resolveGlobalMaxLength(field) {
+  const identity = fieldIdentity(field);
+  const type = String(field.getAttribute("type") || "").toLowerCase();
+
+  if (field instanceof HTMLTextAreaElement) {
+    if (identity.includes("description") || identity.includes("message") || identity.includes("details")) return 1000;
+    return 500;
+  }
+  if (type === "password") return 128;
+  if (identity.includes("captcha")) return 2;
+  if (type === "email" || identity.includes("email")) return 120;
+  if (identity.includes("username")) return 30;
+  if (identity.includes("company")) return 120;
+  if (identity.includes("first_name") || identity.includes("last_name") || identity.includes("name")) return 60;
+  if (identity.includes("phone") || identity.includes("mobile") || identity.includes("whatsapp")) return 15;
+  if (identity.includes("address")) return 250;
+  if (identity.includes("city") || identity.includes("state") || identity.includes("country")) return 80;
+  if (identity.includes("subject") || identity.includes("title")) return 120;
+  if (identity.includes("website") || identity.includes("url") || type === "url") return 255;
+  return 120;
+}
+
+function sanitizeFieldValue(field, value) {
+  const identity = fieldIdentity(field);
+  let next = String(value || "");
+  if (identity.includes("phone") || identity.includes("mobile") || identity.includes("whatsapp") || identity.includes("captcha")) {
+    next = next.replace(/\D+/g, "");
+  }
+  return next;
+}
+
+function attachGlobalCharacterLimits() {
+  const fields = document.querySelectorAll("input, textarea");
+  fields.forEach((field) => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+    if (field.dataset.noGlobalLimit === "1") return;
+    const type = String(field.getAttribute("type") || "").toLowerCase();
+    if (["hidden", "checkbox", "radio", "file", "submit", "button", "reset"].includes(type)) return;
+
+    const maxLen = resolveGlobalMaxLength(field);
+    if (field.maxLength <= 0 || field.maxLength > maxLen) {
+      field.maxLength = maxLen;
+    }
+    const effectiveMaxLen = field.maxLength > 0 ? field.maxLength : maxLen;
+
+    const identity = fieldIdentity(field);
+    if (identity.includes("username") && !field.minLength) {
+      field.minLength = 4;
+    }
+
+    const applyLimit = () => {
+      const cleaned = sanitizeFieldValue(field, field.value);
+      const limited = cleaned.slice(0, effectiveMaxLen);
+      if (field.value !== limited) {
+        field.value = limited;
+      }
+    };
+
+    field.addEventListener("input", applyLimit);
+    field.addEventListener("blur", applyLimit);
+    applyLimit();
+  });
+}
+
 function initAccountForms() {
   markRequiredLabels();
   attachRequiredValidation();
+  attachLiveEmailValidation();
+  attachGlobalCharacterLimits();
   document.querySelectorAll("[data-account-form]").forEach((form) => {
     setupCountryState(form);
     setupPhoneFields(form);

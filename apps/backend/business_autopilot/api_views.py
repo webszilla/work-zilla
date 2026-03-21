@@ -1504,11 +1504,34 @@ def org_employee_roles(request):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
-        OrganizationEmployeeRole.objects.get_or_create(
-            organization=org,
-            name=name,
-            defaults={"is_active": True},
+        existing_role = (
+            OrganizationEmployeeRole.objects
+            .filter(organization=org, name__iexact=name)
+            .order_by("-is_active", "id")
+            .first()
         )
+        if existing_role:
+            update_fields = []
+            if not existing_role.is_active:
+                existing_role.is_active = True
+                update_fields.append("is_active")
+            if existing_role.name != name:
+                existing_role.name = name
+                update_fields.append("name")
+            if update_fields:
+                try:
+                    existing_role.save(update_fields=[*update_fields, "updated_at"])
+                except IntegrityError:
+                    return JsonResponse({"detail": "employee_role_exists"}, status=400)
+        else:
+            try:
+                OrganizationEmployeeRole.objects.create(
+                    organization=org,
+                    name=name,
+                    is_active=True,
+                )
+            except IntegrityError:
+                return JsonResponse({"detail": "employee_role_exists"}, status=400)
 
     return JsonResponse(
         {
@@ -1552,7 +1575,7 @@ def org_employee_role_detail(request, role_id: int):
             return JsonResponse({"detail": "name_required"}, status=400)
         duplicate = (
             OrganizationEmployeeRole.objects
-            .filter(organization=org, name=name, is_active=True)
+            .filter(organization=org, name__iexact=name, is_active=True)
             .exclude(id=role.id)
             .exists()
         )
@@ -1560,7 +1583,10 @@ def org_employee_role_detail(request, role_id: int):
             return JsonResponse({"detail": "employee_role_exists"}, status=400)
         role.name = name
         role.is_active = True
-        role.save(update_fields=["name", "is_active", "updated_at"])
+        try:
+            role.save(update_fields=["name", "is_active", "updated_at"])
+        except IntegrityError:
+            return JsonResponse({"detail": "employee_role_exists"}, status=400)
     else:
         if role.is_active:
             role.is_active = False
@@ -1597,11 +1623,34 @@ def org_departments(request):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
-        OrganizationDepartment.objects.get_or_create(
-            organization=org,
-            name=name,
-            defaults={"is_active": True},
+        existing_department = (
+            OrganizationDepartment.objects
+            .filter(organization=org, name__iexact=name)
+            .order_by("-is_active", "id")
+            .first()
         )
+        if existing_department:
+            update_fields = []
+            if not existing_department.is_active:
+                existing_department.is_active = True
+                update_fields.append("is_active")
+            if existing_department.name != name:
+                existing_department.name = name
+                update_fields.append("name")
+            if update_fields:
+                try:
+                    existing_department.save(update_fields=[*update_fields, "updated_at"])
+                except IntegrityError:
+                    return JsonResponse({"detail": "department_exists"}, status=400)
+        else:
+            try:
+                OrganizationDepartment.objects.create(
+                    organization=org,
+                    name=name,
+                    is_active=True,
+                )
+            except IntegrityError:
+                return JsonResponse({"detail": "department_exists"}, status=400)
 
     return JsonResponse(
         {
@@ -1644,7 +1693,7 @@ def org_department_detail(request, department_id: int):
             return JsonResponse({"detail": "name_required"}, status=400)
         duplicate = (
             OrganizationDepartment.objects
-            .filter(organization=org, name=name, is_active=True)
+            .filter(organization=org, name__iexact=name, is_active=True)
             .exclude(id=department.id)
             .exists()
         )
@@ -1652,7 +1701,10 @@ def org_department_detail(request, department_id: int):
             return JsonResponse({"detail": "department_exists"}, status=400)
         department.name = name
         department.is_active = True
-        department.save(update_fields=["name", "is_active", "updated_at"])
+        try:
+            department.save(update_fields=["name", "is_active", "updated_at"])
+        except IntegrityError:
+            return JsonResponse({"detail": "department_exists"}, status=400)
     else:
         if department.is_active:
             department.is_active = False
