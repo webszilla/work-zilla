@@ -610,6 +610,11 @@ img {
   grid-column: 1 / -1;
 }
 
+.field-required-marker {
+  color: #dc2626;
+  font-weight: 700;
+}
+
 .form-field input,
 .form-field textarea,
 .form-field select {

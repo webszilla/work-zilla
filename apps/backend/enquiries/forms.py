@@ -38,7 +38,8 @@ class EnquiryForm(forms.ModelForm):
             .order_by("sort_order", "name")
         )
         self.fields["product"].label_from_instance = lambda obj: "Work Suite" if getattr(obj, "slug", "") == "monitor" else obj.name
-        self.fields["product"].required = False
+        self.fields["product"].required = True
+        self.fields["product"].empty_label = "Select product"
         self.fields["details"].required = False
 
     def clean_mobile_number(self):

@@ -6,11 +6,11 @@
   <div class="form-grid">
     <div class="form-field">
       <label>Contact Name *</label>
-      <input type="text" name="contact_name" value="{{ billing_profile.contact_name|default:'' }}">
+      <input type="text" name="contact_name" value="{{ billing_profile.contact_name|default:'' }}" required>
     </div>
     <div class="form-field">
       <label>Company Name *</label>
-      <input type="text" name="company_name" value="{{ billing_profile.company_name|default:'' }}">
+      <input type="text" name="company_name" value="{{ billing_profile.company_name|default:'' }}" required>
     </div>
     <div class="form-field">
       <label>Email *</label>
@@ -27,7 +27,7 @@
     </div>
     <div class="form-field">
       <label>Address Line 1 *</label>
-      <input type="text" name="address_line1" value="{{ billing_profile.address_line1|default:'' }}">
+      <input type="text" name="address_line1" value="{{ billing_profile.address_line1|default:'' }}" required>
     </div>
     <div class="form-field">
       <label>Address Line 2</label>
@@ -35,7 +35,7 @@
     </div>
     <div class="form-field">
       <label>City *</label>
-      <input type="text" name="city" value="{{ billing_profile.city|default:'' }}">
+      <input type="text" name="city" value="{{ billing_profile.city|default:'' }}" required>
     </div>
     <div class="form-field">
       <label>Country *</label>
@@ -47,7 +47,7 @@
     </div>
     <div class="form-field">
       <label>Postal Code *</label>
-      <input type="text" name="postal_code" value="{{ billing_profile.postal_code|default:'' }}">
+      <input type="text" name="postal_code" value="{{ billing_profile.postal_code|default:'' }}" required>
     </div>
     <div class="form-field">
       <label>GSTIN</label>

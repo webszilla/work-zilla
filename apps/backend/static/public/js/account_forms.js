@@ -385,7 +385,70 @@ function setupPhoneFields(form) {
   syncHidden();
 }
 
+function findFieldLabel(form, field) {
+  if (!field || !form) return null;
+  const fieldId = String(field.id || "").trim();
+  if (fieldId) {
+    const byFor = form.querySelector(`label[for="${fieldId}"]`);
+    if (byFor) return byFor;
+  }
+  const scope = field.closest(".form-field, .mb-3, .mb-2, .ticket-form-row, .col, .row, .form-group, div");
+  if (!scope) return null;
+  return scope.querySelector("label");
+}
+
+function markRequiredLabels() {
+  const forms = document.querySelectorAll("form");
+  forms.forEach((form) => {
+    const fields = form.querySelectorAll("input, select, textarea");
+    fields.forEach((field) => {
+      if (!(field instanceof HTMLElement) || !field.willValidate || !field.required || field.disabled) {
+        return;
+      }
+      const fieldType = String(field.getAttribute("type") || "").toLowerCase();
+      if (fieldType === "hidden" || fieldType === "button" || fieldType === "submit" || fieldType === "reset") {
+        return;
+      }
+      const label = findFieldLabel(form, field);
+      if (!label) return;
+      if (label.querySelector(".field-required-marker")) return;
+      if (label.textContent && label.textContent.includes("*")) return;
+      const marker = document.createElement("span");
+      marker.className = "field-required-marker";
+      marker.textContent = " *";
+      marker.setAttribute("aria-hidden", "true");
+      label.appendChild(marker);
+    });
+  });
+}
+
+function attachRequiredValidation() {
+  const forms = document.querySelectorAll("form");
+  forms.forEach((form) => {
+    if (form.dataset.requiredValidationBound === "1") {
+      return;
+    }
+    form.dataset.requiredValidationBound = "1";
+    form.addEventListener("submit", (event) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      if (form.checkValidity()) {
+        return;
+      }
+      event.preventDefault();
+      const firstInvalid = form.querySelector(":invalid");
+      if (firstInvalid instanceof HTMLElement) {
+        firstInvalid.focus();
+      }
+      form.reportValidity();
+    });
+  });
+}
+
 function initAccountForms() {
+  markRequiredLabels();
+  attachRequiredValidation();
   document.querySelectorAll("[data-account-form]").forEach((form) => {
     setupCountryState(form);
     setupPhoneFields(form);

@@ -3920,6 +3920,12 @@ function CrmOnePageModule() {
       Object.entries(CRM_SECTION_CONFIG).map(([key, config]) => [key, buildEmptyValues(config.fields)])
     )
   );
+  const [sectionFormErrors, setSectionFormErrors] = useState(() =>
+    Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, ""]))
+  );
+  const [sectionFieldErrors, setSectionFieldErrors] = useState(() =>
+    Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, {}]))
+  );
   const [editingIds, setEditingIds] = useState(() =>
     Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, ""]))
   );
@@ -4141,6 +4147,14 @@ function CrmOnePageModule() {
   );
 
   function setField(sectionKey, fieldKey, value) {
+    setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
+    setSectionFieldErrors((prev) => ({
+      ...prev,
+      [sectionKey]: {
+        ...(prev[sectionKey] || {}),
+        [fieldKey]: false,
+      },
+    }));
     setForms((prev) => ({
       ...prev,
       [sectionKey]: {
@@ -4161,6 +4175,8 @@ function CrmOnePageModule() {
 
   function resetSectionForm(sectionKey) {
     setEditingIds((prev) => ({ ...prev, [sectionKey]: "" }));
+    setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
+    setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
     setForms((prev) => ({
       ...prev,
       [sectionKey]: buildEmptyValues(CRM_SECTION_CONFIG[sectionKey].fields),
@@ -4272,6 +4288,22 @@ function CrmOnePageModule() {
     });
   }
 
+  function isCrmFieldRequired(sectionKey, field, values) {
+    if (!field) {
+      return false;
+    }
+    if (sectionKey === "meetings" && field.key === "reminderDays") {
+      return false;
+    }
+    if (sectionKey === "leads" && field.key === "assignedUser") {
+      return String(values?.assignType || "User").trim().toLowerCase() === "user";
+    }
+    if (sectionKey === "leads" && field.key === "assignedTeam") {
+      return String(values?.assignType || "User").trim().toLowerCase() === "team";
+    }
+    return true;
+  }
+
   function onDelete(sectionKey, rowId) {
     setModuleData((prev) => ({
       ...prev,
@@ -4306,18 +4338,8 @@ function CrmOnePageModule() {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
-    const hasEmptyField = config.fields.some((field) => {
-      if (sectionKey === "leads" && field.key === "assignedUser") {
-        return String(values.assignType || "User").trim().toLowerCase() === "user"
-          ? !String(values.assignedUser || "").trim()
-          : false;
-      }
-      if (sectionKey === "leads" && field.key === "assignedTeam") {
-        return String(values.assignType || "User").trim().toLowerCase() === "team"
-          ? !String(values.assignedTeam || "").trim()
-          : false;
-      }
-      if (sectionKey === "meetings" && field.key === "reminderDays") {
+    const missingFields = config.fields.filter((field) => {
+      if (!isCrmFieldRequired(sectionKey, field, values)) {
         return false;
       }
       if (field.type === "multiselect") {
@@ -4325,9 +4347,20 @@ function CrmOnePageModule() {
       }
       return !String(values[field.key] || "").trim();
     });
-    if (hasEmptyField) {
+    if (missingFields.length) {
+      const missingFieldMap = {};
+      missingFields.forEach((field) => {
+        missingFieldMap[field.key] = true;
+      });
+      setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: missingFieldMap }));
+      setSectionFormErrors((prev) => ({
+        ...prev,
+        [sectionKey]: `Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`,
+      }));
       return;
     }
+    setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
+    setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
     const editingId = editingIds[sectionKey];
     let payload = {};
     config.fields.forEach((field) => {
@@ -4994,6 +5027,11 @@ function CrmOnePageModule() {
             <div className="card p-3">
               <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={(event) => onSubmit(sectionKey, event)}>
+                {sectionFormErrors[sectionKey] ? (
+                  <div className="alert alert-danger py-2 mb-0">
+                    {sectionFormErrors[sectionKey]}
+                  </div>
+                ) : null}
                 {sectionKey === "teams" ? (
                   <div className="d-flex flex-column gap-3">
                     <div>
@@ -5315,7 +5353,10 @@ function CrmOnePageModule() {
                             }
                             key={`${sectionKey}-${field.key}`}
                           >
-                            <label className="form-label small text-secondary mb-1">{field.label}</label>
+                            <label className={`form-label small mb-1 ${sectionFieldErrors[sectionKey]?.[field.key] ? "text-danger" : "text-secondary"}`}>
+                              {field.label}
+                              {isCrmFieldRequired(sectionKey, field, formValues) ? " *" : ""}
+                            </label>
                             {(() => {
                               if (hasPhoneCountryCodeField && field.key === "phone") {
                                 return (
