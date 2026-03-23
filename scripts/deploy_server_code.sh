@@ -10,7 +10,35 @@ echo "Deploying code to ${SERVER_HOST}:${SERVER_PROJECT_PATH}"
 
 cd "$(dirname "$0")/.."
 
-ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' SERVER_RETENTION_DAYS='$SERVER_RETENTION_DAYS' bash -s" <<'EOF'
+DEPLOY_MODE="git"
+if ! ssh "$SERVER_HOST" "[ -d '$SERVER_PROJECT_PATH/.git' ]" >/dev/null 2>&1; then
+  DEPLOY_MODE="rsync"
+fi
+
+if [ "$DEPLOY_MODE" = "rsync" ]; then
+  echo "Remote .git missing. Using rsync fallback deploy."
+  rsync -az \
+    --exclude '.git/' \
+    --exclude 'venv/' \
+    --exclude '.venv/' \
+    --exclude 'env/' \
+    --exclude '*.sqlite3' \
+    --exclude '*.sqlite3-journal' \
+    --exclude '*.sqlite3-wal' \
+    --exclude '*.sqlite3-shm' \
+    --exclude '*.sql' \
+    --exclude '*.dump' \
+    --exclude '*.bak' \
+    --exclude 'logs/' \
+    --exclude 'apps/backend/backups/postgres_migration/' \
+    --exclude 'node_modules/' \
+    --exclude 'dist/' \
+    --exclude '.build/' \
+    --exclude 'build/' \
+    ./ "${SERVER_HOST}:${SERVER_PROJECT_PATH}/"
+fi
+
+ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' SERVER_RETENTION_DAYS='$SERVER_RETENTION_DAYS' SERVER_DEPLOY_MODE='$DEPLOY_MODE' bash -s" <<'EOF'
 set -euo pipefail
 
 min_free_mb="${SERVER_MIN_FREE_MB:-1024}"
@@ -105,8 +133,12 @@ run_preflight_cleanup
 
 cd "$SERVER_PROJECT_PATH"
 
-git config --global --add safe.directory "$SERVER_PROJECT_PATH" >/dev/null 2>&1 || true
-git pull origin main
+if [ "${SERVER_DEPLOY_MODE:-git}" = "git" ]; then
+  git config --global --add safe.directory "$SERVER_PROJECT_PATH" >/dev/null 2>&1 || true
+  git pull origin main
+else
+  echo "Deploy mode: rsync (skipping git pull)"
+fi
 
 . venv/bin/activate
 venv/bin/python apps/backend/manage.py migrate
@@ -128,7 +160,11 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   sleep 1
 done
 
-echo "Live SHA: $(git rev-parse --short HEAD)"
+if [ -d .git ]; then
+  echo "Live SHA: $(git rev-parse --short HEAD)"
+else
+  echo "Live SHA: rsync-no-git"
+fi
 echo "Gunicorn:"
 pgrep -af "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000"
 EOF
