@@ -175,7 +175,9 @@ function decoratePhoneCountryOptions(select) {
     const label = rawText.replace(new RegExp(`${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "").trim();
     const iso2 = resolveIso2FromLabel(label);
     const flag = flagFromIso2(iso2);
-    option.textContent = `${flag} ${label} ${code}`.trim();
+    option.dataset.countryLabel = label;
+    option.dataset.countryCode = code;
+    option.textContent = flag;
   });
   select.dataset.phoneFlagsReady = "1";
 }
@@ -224,10 +226,13 @@ function buildPhoneCountryPicker(select) {
     const normalizedQuery = String(query || "").trim().toLowerCase();
     list.innerHTML = "";
     Array.from(select.options || []).forEach((option) => {
-      const text = String(option.textContent || "").trim();
+      const flag = String(option.textContent || "").trim();
       const value = String(option.value || "").trim();
-      if (!text || !value) return;
-      if (normalizedQuery && !text.toLowerCase().includes(normalizedQuery) && !value.toLowerCase().includes(normalizedQuery)) {
+      const countryLabel = String(option.dataset.countryLabel || "").trim();
+      const countryCode = String(option.dataset.countryCode || value).trim();
+      const searchText = `${countryLabel} ${countryCode}`.toLowerCase();
+      if (!flag || !value) return;
+      if (normalizedQuery && !searchText.includes(normalizedQuery)) {
         return;
       }
       const item = document.createElement("button");
@@ -236,7 +241,7 @@ function buildPhoneCountryPicker(select) {
       if (option.selected) {
         item.classList.add("is-selected");
       }
-      item.innerHTML = `<span class="phone-country-option-label">${text}</span>`;
+      item.innerHTML = `<span class="phone-country-option-label">${flag} ${countryLabel} ${countryCode}</span>`;
       item.addEventListener("click", () => {
         select.value = value;
         select.dispatchEvent(new Event("change", { bubbles: true }));

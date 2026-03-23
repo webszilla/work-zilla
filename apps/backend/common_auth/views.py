@@ -98,7 +98,7 @@ def login_view(request):
         captcha_question = _build_login_captcha(request)
         return render(request, "sites/login.html", {"next": next_url, "captcha_question": captcha_question})
 
-    username_or_email = request.POST.get("email") or request.POST.get("username")
+    username_or_email = request.POST.get("username") or request.POST.get("email")
     password = request.POST.get("password")
     captcha_answer = str(request.POST.get("captcha_answer") or "").strip()
     expected_captcha = str(request.session.get("login_captcha_answer") or "").strip()
@@ -117,7 +117,7 @@ def login_view(request):
         return render(
             request,
             "sites/login.html",
-            {"next": next_url, "error": "Email and password are required", "captcha_question": captcha_question},
+            {"next": next_url, "error": "Username/Email and password are required", "captcha_question": captcha_question},
         )
     is_locked, remaining_seconds = _is_login_locked(username_or_email, client_ip)
     if is_locked:
@@ -134,7 +134,10 @@ def login_view(request):
         )
     user = authenticate(request, username=username_or_email, password=password)
     if user is None:
-        user_obj = User.objects.filter(email__iexact=username_or_email).first()
+        user_obj = (
+            User.objects.filter(email__iexact=username_or_email).first()
+            or User.objects.filter(username__iexact=username_or_email).first()
+        )
         if user_obj:
             user = authenticate(request, username=user_obj.username, password=password)
     if user is None:
