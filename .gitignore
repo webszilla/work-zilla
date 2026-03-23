@@ -20,6 +20,8 @@ venv/
 media/
 staticfiles/
 static_root/
+logs/
+apps/backend/backups/postgres_migration/
 
 # =====================================
 #  React / Node / Frontend

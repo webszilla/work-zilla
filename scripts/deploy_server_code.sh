@@ -4,15 +4,17 @@ set -euo pipefail
 SERVER_HOST="${SERVER_HOST:-root@89.167.16.104}"
 SERVER_PROJECT_PATH="${SERVER_PROJECT_PATH:-/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com}"
 SERVER_MIN_FREE_MB="${SERVER_MIN_FREE_MB:-1024}"
+SERVER_RETENTION_DAYS="${SERVER_RETENTION_DAYS:-3}"
 
 echo "Deploying code to ${SERVER_HOST}:${SERVER_PROJECT_PATH}"
 
 cd "$(dirname "$0")/.."
 
-ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' bash -s" <<'EOF'
+ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' SERVER_RETENTION_DAYS='$SERVER_RETENTION_DAYS' bash -s" <<'EOF'
 set -euo pipefail
 
 min_free_mb="${SERVER_MIN_FREE_MB:-1024}"
+retention_days="${SERVER_RETENTION_DAYS:-3}"
 
 check_free_mb() {
   df -Pm / | awk 'NR==2 {print $4}'
@@ -73,6 +75,17 @@ run_preflight_cleanup() {
     truncate_file_if_exists "/var/lib/docker/containers/${clickhouse_id}/${clickhouse_id}-json.log"
   fi
 
+  # Keep deployment lean: remove temporary and backup artifacts older than retention window.
+  find /tmp -maxdepth 1 -type f \( -name 'workzilla-*' -o -name '*workzilla*dump*' -o -name '*.tmp' \) -mtime "+${retention_days}" -delete 2>/dev/null || true
+  find "${SERVER_PROJECT_PATH}/apps/backend/backups" -mindepth 1 -maxdepth 3 -mtime "+${retention_days}" -exec rm -rf {} + 2>/dev/null || true
+  find "${SERVER_PROJECT_PATH}" -type f \( -name '*.sql' -o -name '*.dump' -o -name '*.bak' -o -name '*.tmp' \) -mtime "+${retention_days}" -delete 2>/dev/null || true
+
+  # Safe docker cleanup (does not stop running containers).
+  docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
+  docker builder prune -af --filter "until=168h" >/dev/null 2>&1 || true
+  docker container prune -f --filter "until=168h" >/dev/null 2>&1 || true
+  docker volume prune -f >/dev/null 2>&1 || true
+
   journalctl --vacuum-size=200M >/dev/null 2>&1 || true
   apt-get clean >/dev/null 2>&1 || true
   rm -f "${SERVER_PROJECT_PATH}/.git/index.lock" >/dev/null 2>&1 || true
@@ -106,7 +119,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   fi
   sleep 1
 done
-nohup env DJANGO_DEBUG=0 venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >/tmp/workzilla-gunicorn.out 2>&1 </dev/null &
+mkdir -p "${SERVER_PROJECT_PATH}/logs"
+nohup env DJANGO_DEBUG=0 venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >"${SERVER_PROJECT_PATH}/logs/gunicorn.out" 2>&1 </dev/null &
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if ss -ltnp | grep -q ':8000 '; then
     break
