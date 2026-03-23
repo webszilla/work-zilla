@@ -42,9 +42,11 @@ HARD RULES
    - Never overwrite server database files from local during deploy.
    - Never upload/sync `*.sqlite3`, `*.sqlite3-journal`, `*.sqlite3-wal`, `*.sqlite3-shm`.
    - Never run `--delete` deploy without DB excludes.
+   - For normal SaaS code deploys, do NOT create/replace server DB backup files unless explicitly requested for a DB task.
 12) Keep production data separate from code deploy:
    - Treat `apps/backend/db.sqlite3` as live data, not deployment artifact.
    - Code deploy must not change DB contents unless explicit migration/data task is requested.
+   - Local SQLite backup on laptop is the default backup source for routine deploy flows.
 
 CURRENT DATABASE MODE (IMPORTANT)
 - Current active DB in project: `SQLite` (`apps/backend/db.sqlite3`)
