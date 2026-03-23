@@ -3,6 +3,95 @@
 from django.db import migrations, models
 
 
+def convert_alert_days_to_json_postgres(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'business_autopilot_subscription'
+              AND column_name IN ('email_alert_days', 'whatsapp_alert_days');
+            """
+        )
+        types = {name: dtype for name, dtype in cursor.fetchall()}
+
+        # Drop CHECK constraints that compare old integer fields (e.g. ">= 0")
+        # so type change to jsonb can proceed safely.
+        cursor.execute(
+            """
+            SELECT conname
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            WHERE t.relname = 'business_autopilot_subscription'
+              AND c.contype = 'c'
+              AND (
+                pg_get_constraintdef(c.oid) ILIKE '%email_alert_days%'
+                OR pg_get_constraintdef(c.oid) ILIKE '%whatsapp_alert_days%'
+              );
+            """
+        )
+        for (conname,) in cursor.fetchall():
+            cursor.execute(
+                f'ALTER TABLE business_autopilot_subscription DROP CONSTRAINT IF EXISTS "{conname}";'
+            )
+
+        if types.get("email_alert_days") not in {"json", "jsonb"}:
+            cursor.execute(
+                """
+                ALTER TABLE business_autopilot_subscription
+                ALTER COLUMN email_alert_days TYPE jsonb
+                USING CASE
+                    WHEN email_alert_days IS NULL THEN NULL
+                    ELSE to_jsonb(ARRAY[email_alert_days])
+                END;
+                """
+            )
+
+        if types.get("whatsapp_alert_days") not in {"json", "jsonb"}:
+            cursor.execute(
+                """
+                ALTER TABLE business_autopilot_subscription
+                ALTER COLUMN whatsapp_alert_days TYPE jsonb
+                USING CASE
+                    WHEN whatsapp_alert_days IS NULL THEN NULL
+                    ELSE to_jsonb(ARRAY[whatsapp_alert_days])
+                END;
+                """
+            )
+
+
+def convert_alert_days_to_int_postgres(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            ALTER TABLE business_autopilot_subscription
+            ALTER COLUMN email_alert_days TYPE integer
+            USING CASE
+                WHEN email_alert_days IS NULL THEN NULL
+                WHEN jsonb_typeof(email_alert_days) = 'array' AND jsonb_array_length(email_alert_days) > 0
+                    THEN (email_alert_days->>0)::integer
+                ELSE NULL
+            END;
+            """
+        )
+        cursor.execute(
+            """
+            ALTER TABLE business_autopilot_subscription
+            ALTER COLUMN whatsapp_alert_days TYPE integer
+            USING CASE
+                WHEN whatsapp_alert_days IS NULL THEN NULL
+                WHEN jsonb_typeof(whatsapp_alert_days) = 'array' AND jsonb_array_length(whatsapp_alert_days) > 0
+                    THEN (whatsapp_alert_days->>0)::integer
+                ELSE NULL
+            END;
+            """
+        )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,14 +99,24 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterField(
-            model_name="subscription",
-            name="email_alert_days",
-            field=models.JSONField(blank=True, default=list, null=True),
-        ),
-        migrations.AlterField(
-            model_name="subscription",
-            name="whatsapp_alert_days",
-            field=models.JSONField(blank=True, default=list, null=True),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    convert_alert_days_to_json_postgres,
+                    convert_alert_days_to_int_postgres,
+                ),
+            ],
+            state_operations=[
+                migrations.AlterField(
+                    model_name="subscription",
+                    name="email_alert_days",
+                    field=models.JSONField(blank=True, default=list, null=True),
+                ),
+                migrations.AlterField(
+                    model_name="subscription",
+                    name="whatsapp_alert_days",
+                    field=models.JSONField(blank=True, default=list, null=True),
+                ),
+            ],
         ),
     ]

@@ -33,6 +33,36 @@ DROP_INSERT_TRIGGER = "DROP TRIGGER IF EXISTS auth_user_sync_insert;"
 DROP_DELETE_TRIGGER = "DROP TRIGGER IF EXISTS auth_user_sync_delete;"
 
 
+def forward_sqlite_only(apps, schema_editor):
+    if schema_editor.connection.vendor != "sqlite":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.executescript(
+            ";".join(
+                [
+                    CREATE_AUTH_USER_TABLE,
+                    SYNC_EXISTING_USERS,
+                    CREATE_INSERT_TRIGGER,
+                    CREATE_DELETE_TRIGGER,
+                ]
+            )
+        )
+
+
+def reverse_sqlite_only(apps, schema_editor):
+    if schema_editor.connection.vendor != "sqlite":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.executescript(
+            ";".join(
+                [
+                    DROP_INSERT_TRIGGER,
+                    DROP_DELETE_TRIGGER,
+                ]
+            )
+        )
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("core", "0041_screenshot_employee_name"),
@@ -40,20 +70,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql=";".join(
-                [
-                    CREATE_AUTH_USER_TABLE,
-                    SYNC_EXISTING_USERS,
-                    CREATE_INSERT_TRIGGER,
-                    CREATE_DELETE_TRIGGER,
-                ]
-            ),
-            reverse_sql=";".join(
-                [
-                    DROP_INSERT_TRIGGER,
-                    DROP_DELETE_TRIGGER,
-                ]
-            ),
-        ),
+        migrations.RunPython(forward_sqlite_only, reverse_sqlite_only),
     ]

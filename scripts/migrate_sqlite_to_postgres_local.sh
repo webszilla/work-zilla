@@ -131,8 +131,8 @@ print("saved", len(rows), "models")
 
 echo "[7/8] Writing migration summary"
 python - <<'PY'
-import json, pathlib
-backup_dir = pathlib.Path("'"$BACKUP_DIR"'")
+import json, os, pathlib
+backup_dir = pathlib.Path(os.environ["BACKUP_DIR"])
 pre = json.loads((backup_dir / "sqlite_counts_before.json").read_text())
 post = json.loads((backup_dir / "postgres_counts_after.json").read_text())
 

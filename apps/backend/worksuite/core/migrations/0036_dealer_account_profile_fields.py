@@ -1,4 +1,4 @@
-from django.db import migrations, models
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -7,50 +7,7 @@ class Migration(migrations.Migration):
         ("core", "0035_pendingtransfer_org_nullable"),
     ]
 
-    operations = [
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="address_line1",
-            field=models.CharField(blank=True, max_length=200),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="address_line2",
-            field=models.CharField(blank=True, max_length=200),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="city",
-            field=models.CharField(blank=True, max_length=120),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="state",
-            field=models.CharField(blank=True, max_length=120),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="postal_code",
-            field=models.CharField(blank=True, max_length=20),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="bank_name",
-            field=models.CharField(blank=True, max_length=120),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="bank_account_number",
-            field=models.CharField(blank=True, max_length=80),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="bank_ifsc",
-            field=models.CharField(blank=True, max_length=20),
-        ),
-        migrations.AddField(
-            model_name="dealeraccount",
-            name="upi_id",
-            field=models.CharField(blank=True, max_length=80),
-        ),
-    ]
+    # NOTE:
+    # DealerAccount profile/bank fields are already created in 0034_dealer_referrals.
+    # Keeping this migration as a no-op prevents duplicate-column failures on clean PostgreSQL setups.
+    operations = []

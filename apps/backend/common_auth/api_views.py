@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from core.device_policy import resolve_org_for_user, get_device_limit_for_org, should_refresh_device_last_seen
 from core.models import Device, UserProfile
-from common_auth.models import User
+from .models import User
 from core.session_security import apply_request_session_timeout, log_user_login_activity
 
 

@@ -26,6 +26,9 @@ def _build_default_welcome(company_profile, card_slug, catalogue_slug):
 
 @receiver(post_save, sender=CompanyProfile, dispatch_uid="wa.company_profile.autocreate_assets")
 def ensure_company_profile_assets(sender, instance, created, **kwargs):
+    if kwargs.get("raw"):
+        return
+
     company_name = _company_display_name(instance)
     base_slug = company_name
 
