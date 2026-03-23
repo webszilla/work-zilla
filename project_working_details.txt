@@ -46,6 +46,22 @@ HARD RULES
    - Treat `apps/backend/db.sqlite3` as live data, not deployment artifact.
    - Code deploy must not change DB contents unless explicit migration/data task is requested.
 
+CURRENT DATABASE MODE (IMPORTANT)
+- Current active DB in project: `SQLite` (`apps/backend/db.sqlite3`)
+- Target DB for SaaS scale: `PostgreSQL` (migration in progress)
+- Django DB switch is now env-based in `apps/backend/core_platform/settings.py`:
+  - `DB_ENGINE=sqlite` (default)
+  - `DB_ENGINE=postgresql` + `DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT`
+- Local migration helper script:
+  - `./scripts/migrate_sqlite_to_postgres_local.sh`
+- Migration runbook:
+  - `docs/sqlite_to_postgres_migration.md`
+- Backup/report path used by migration helper:
+  - `apps/backend/backups/postgres_migration/<timestamp>/`
+- Data safety during migration:
+  - Keep SQLite backup always.
+  - Remove temporary JSON dump by default (no unwanted dump retention).
+
 CURRENT CLEAN STRUCTURE EXPECTATION
 - No external installer staging folders outside repo.
 - Do not commit installer binaries into `apps/backend/static/downloads`.
@@ -63,6 +79,21 @@ B) Django migrations
 - cd apps/backend
 - python3 manage.py makemigrations
 - python3 manage.py migrate
+
+B.1) SQLite -> PostgreSQL local migration (when requested)
+- Ensure local PostgreSQL + `psql` available first.
+- Set env:
+  - `export DB_ENGINE=postgresql`
+  - `export DB_NAME=workzilla`
+  - `export DB_USER=workzilla`
+  - `export DB_PASSWORD=<password>`
+  - `export DB_HOST=127.0.0.1`
+  - `export DB_PORT=5432`
+- Run:
+  - `./scripts/migrate_sqlite_to_postgres_local.sh`
+- Verify:
+  - check `migration_summary.json` under backup folder
+  - mismatch count must be reviewed before production cutover
 
 C) Frontend build helpers
 - ./build_and_copy_frontend.sh
@@ -198,6 +229,8 @@ FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
   - rsync -azn --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
 - Then actual sync:
   - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
+- PostgreSQL mode note:
+  - If production is switched to PostgreSQL, still keep sqlite exclude rules to avoid accidental test DB upload.
 - Immediately after fallback sync, always run:
   - source venv/bin/activate
   - venv/bin/python apps/backend/manage.py collectstatic --noinput

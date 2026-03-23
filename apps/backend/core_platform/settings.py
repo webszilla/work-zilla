@@ -32,6 +32,25 @@ def _csv_env(name, default=""):
 def _bool_env(name, default="0"):
     return os.environ.get(name, default) == "1"
 
+
+def _load_env_file(path):
+    """Minimal .env loader so local DB/env switches work without extra deps."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# Load local env file before reading runtime settings.
+_load_env_file(BASE_DIR / ".env")
+
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "local").strip().lower()
 
 
@@ -133,12 +152,29 @@ TEMPLATES = [
 WSGI_APPLICATION = "apps.backend.core_platform.wsgi.application"
 
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite").strip().lower()
+if DB_ENGINE in {"postgres", "postgresql"}:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "workzilla"),
+            "USER": os.environ.get("DB_USER", "workzilla"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+            "OPTIONS": {
+                "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
+            },
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 AUTH_PASSWORD_VALIDATORS = [

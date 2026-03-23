@@ -104,5 +104,10 @@ def product_marketing_view(request, slug):
     return render(request, templates, context)
 
 
+def products_index_redirect(request):
+    # Keep /products/ valid and route users to the primary products landing page.
+    return redirect("/products/worksuite/", permanent=False)
+
+
 # Backwards compatibility with any direct imports.
 product_page = product_marketing_view
