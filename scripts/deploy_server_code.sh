@@ -105,7 +105,7 @@ run_preflight_cleanup() {
 
   # Keep deployment lean: remove temporary and backup artifacts older than retention window.
   find /tmp -maxdepth 1 -type f \( -name 'workzilla-*' -o -name '*workzilla*dump*' -o -name '*.tmp' \) -mtime "+${retention_days}" -delete 2>/dev/null || true
-  find "${SERVER_PROJECT_PATH}/apps/backend/backups" -mindepth 1 -maxdepth 3 -mtime "+${retention_days}" -exec rm -rf {} + 2>/dev/null || true
+  find "${SERVER_PROJECT_PATH}/apps/backend/backups/postgres_migration" -mindepth 1 -maxdepth 3 -mtime "+${retention_days}" -exec rm -rf {} + 2>/dev/null || true
   find "${SERVER_PROJECT_PATH}" -type f \( -name '*.sql' -o -name '*.dump' -o -name '*.bak' -o -name '*.tmp' \) -mtime "+${retention_days}" -delete 2>/dev/null || true
 
   # Safe docker cleanup (does not stop running containers).
