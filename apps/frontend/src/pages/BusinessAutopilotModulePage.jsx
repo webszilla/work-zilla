@@ -9322,6 +9322,15 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             value={formValues[field.key] || ""}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
+        ) : field.type === "date" ? (
+          <input
+            type="date"
+            className="form-control"
+            placeholder={field.placeholder}
+            value={formValues[field.key] || ""}
+            max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
+            onChange={(event) => onChangeField(field.key, event.target.value)}
+          />
         ) : (
           <input
             type={field.type || "text"}
@@ -9462,6 +9471,14 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       payload.workedHours = computeWorkedDuration(payload.inTime, payload.outTime);
       payload.completedTasks = String(payload.completedTasks || "").trim();
       payload.taskNotes = String(payload.taskNotes || "").trim();
+    }
+    if (activeTab === "employees") {
+      const dob = String(payload.dateOfBirth || "").trim();
+      if (dob && dob > todayIso) {
+        setHrFieldErrors((prev) => ({ ...prev, dateOfBirth: true }));
+        setHrFormNotice("Date of Birth cannot be a future date.");
+        return;
+      }
     }
     const nextRowId = editingId || `${activeTab}_${Date.now()}`;
     setModuleData((prev) => {
