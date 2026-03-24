@@ -830,8 +830,8 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-assistant__dismiss {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--wz-border-soft);
   border-radius: 999px;
   background: var(--wz-surface-3);
@@ -840,6 +840,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   align-items: center;
   justify-content: center;
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.18);
+  font-size: 0.72rem;
 }
 
 .ba-assistant__panel {
