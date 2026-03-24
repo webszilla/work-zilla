@@ -83,7 +83,7 @@
               <label class="form-label">Mobile Number <span class="text-danger">*</span></label>
               <input type="hidden" name="phone_number" data-phone-hidden value="">
               <div class="phone-input-group">
-                <select name="phone_country" class="form-select" data-phone-country data-phone-picker="native" required>
+                <select name="phone_country" class="form-control" data-phone-country required>
                   <option value="+91" selected>India +91</option>
                   {% include "partials/phone_country_options.html" %}
                 </select>
@@ -168,7 +168,6 @@
 {% block shell_class %}no-sidebar{% endblock %}
 
 {% block extra_js %}
-  <script src="{% static 'public/js/account_forms.js' %}" defer></script>
   <script>
     (function () {
       var form = document.querySelector("[data-auth-loading-form]");

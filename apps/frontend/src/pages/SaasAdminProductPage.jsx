@@ -993,7 +993,7 @@ export default function SaasAdminProductPage() {
   const resolvedSlug = product?.slug || slug;
   const isAiChatbotProduct = resolvedSlug === "ai-chatbot";
   const isStorageProduct = resolvedSlug === "storage" || resolvedSlug === "online-storage";
-  const isBusinessAutopilotProduct = resolvedSlug === "business-autopilot-erp";
+  const isBusinessAutopilotProduct = resolvedSlug === "business-autopilot-erp" || resolvedSlug === "business-autopilot";
   const isWhatsappAutomationProduct = resolvedSlug === "whatsapp-automation";
   const isDigitalAutomationProduct = resolvedSlug === "digital-automation";
   const stats = data.stats || {};
@@ -1439,9 +1439,9 @@ export default function SaasAdminProductPage() {
             support: "email",
             is_popular: false,
           })
-      : plan
+      : isBusinessAutopilotProduct
+      ? (plan
         ? {
-            plan_template: "Custom",
             name: plan.name || "",
             monthly_price: plan.monthly_price ?? "",
             yearly_price: plan.yearly_price ?? "",
@@ -1454,8 +1454,6 @@ export default function SaasAdminProductPage() {
             employee_limit: plan.employee_limit ?? 0,
             retention_days: plan.retention_days ?? 30,
             screenshot_min_minutes: plan.screenshot_min_minutes ?? 5,
-            ai_library_limit_mb: plan.ai_library_limit_mb ?? "",
-            website_page_limit: plan.website_page_limit ?? "",
             allow_addons: Boolean(plan.allow_addons),
             allow_app_usage: Boolean(plan.allow_app_usage),
             allow_hr_view: Boolean(plan.allow_hr_view),
@@ -1463,24 +1461,8 @@ export default function SaasAdminProductPage() {
             erp_enabled_modules: Array.isArray(features.erp_enabled_modules)
               ? features.erp_enabled_modules.filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
               : getDefaultErpModulesForPlanName(plan.name || ""),
-            widgets: limits.widgets ?? "",
-            included_agents: limits.included_agents ?? "",
-            conversations_per_month: limits.conversations_per_month ?? "",
-            chat_history_days: limits.chat_history_days ?? "",
-            max_messages_per_conversation: limits.max_messages_per_conversation ?? "",
-            max_chars_per_message: limits.max_chars_per_message ?? "",
-            remove_branding: Boolean(features.remove_branding),
-            analytics_basic: Boolean(features.analytics_basic),
-            csv_export: Boolean(features.csv_export),
-            agent_inbox: Boolean(features.agent_inbox),
-            ai_enabled: Boolean(features.ai_enabled ?? true),
-            ai_replies_per_month: limits.ai_replies_per_month ?? "",
-            ai_max_messages_per_conversation: limits.ai_max_messages_per_conversation ?? "",
-            ai_max_chars_per_message: limits.ai_max_chars_per_message ?? "",
-            wa_keyword_rules_limit: getWhatsappKeywordRuleLimit(plan.name || "", features),
           }
         : {
-            plan_template: "Custom",
             name: "",
             monthly_price: "",
             yearly_price: "",
@@ -1493,29 +1475,37 @@ export default function SaasAdminProductPage() {
             employee_limit: 0,
             retention_days: 30,
             screenshot_min_minutes: 5,
-            ai_library_limit_mb: "",
-            website_page_limit: "",
             allow_addons: true,
             allow_app_usage: false,
             allow_hr_view: false,
             role_based_access: true,
             erp_enabled_modules: getDefaultErpModulesForPlanName(""),
-            widgets: "",
-            included_agents: "",
-            conversations_per_month: "",
-            chat_history_days: "",
-            max_messages_per_conversation: "",
-            max_chars_per_message: "",
-            remove_branding: false,
-            analytics_basic: false,
-            csv_export: false,
-            agent_inbox: true,
-            ai_enabled: true,
-            ai_replies_per_month: "",
-            ai_max_messages_per_conversation: "",
-            ai_max_chars_per_message: "",
-            wa_keyword_rules_limit: getWhatsappKeywordRuleLimit("", {}),
-          };
+          })
+      : (plan
+        ? {
+            name: plan.name || "",
+            monthly_price: plan.monthly_price ?? "",
+            yearly_price: plan.yearly_price ?? "",
+            usd_monthly_price: plan.usd_monthly_price ?? "",
+            usd_yearly_price: plan.usd_yearly_price ?? "",
+            addon_monthly_price: plan.addon_monthly_price ?? "",
+            addon_yearly_price: plan.addon_yearly_price ?? "",
+            addon_usd_monthly_price: plan.addon_usd_monthly_price ?? "",
+            addon_usd_yearly_price: plan.addon_usd_yearly_price ?? "",
+            allow_addons: Boolean(plan.allow_addons),
+          }
+        : {
+            name: "",
+            monthly_price: "",
+            yearly_price: "",
+            usd_monthly_price: "",
+            usd_yearly_price: "",
+            addon_monthly_price: "",
+            addon_yearly_price: "",
+            addon_usd_monthly_price: "",
+            addon_usd_yearly_price: "",
+            allow_addons: true,
+          });
     setPlanModal({ open: true, mode, form, error: "", fieldErrors: {}, loading: false, planId: plan?.id || null });
   }
 
@@ -1752,11 +1742,23 @@ export default function SaasAdminProductPage() {
             "addon_usd_yearly_price",
             "wa_keyword_rules_limit"
           ]
-        : [
+        : isBusinessAutopilotProduct
+        ? [
             "name",
             "employee_limit",
             "retention_days",
             "screenshot_min_minutes",
+            "monthly_price",
+            "yearly_price",
+            "usd_monthly_price",
+            "usd_yearly_price",
+            "addon_monthly_price",
+            "addon_yearly_price",
+            "addon_usd_monthly_price",
+            "addon_usd_yearly_price"
+          ]
+        : [
+            "name",
             "monthly_price",
             "yearly_price",
             "usd_monthly_price",
@@ -1830,14 +1832,14 @@ export default function SaasAdminProductPage() {
         addon_yearly_price: planModal.form.addon_yearly_price,
         addon_usd_monthly_price: planModal.form.addon_usd_monthly_price,
         addon_usd_yearly_price: planModal.form.addon_usd_yearly_price,
-        employee_limit: planModal.form.employee_limit,
-        retention_days: planModal.form.retention_days,
-        screenshot_min_minutes: planModal.form.screenshot_min_minutes,
-        ai_library_limit_mb: planModal.form.ai_library_limit_mb,
-        website_page_limit: planModal.form.website_page_limit,
         allow_addons: Boolean(planModal.form.allow_addons),
-        allow_app_usage: Boolean(planModal.form.allow_app_usage),
-        allow_hr_view: Boolean(planModal.form.allow_hr_view),
+        ...(isBusinessAutopilotProduct ? {
+          employee_limit: planModal.form.employee_limit,
+          retention_days: planModal.form.retention_days,
+          screenshot_min_minutes: planModal.form.screenshot_min_minutes,
+          allow_app_usage: Boolean(planModal.form.allow_app_usage),
+          allow_hr_view: Boolean(planModal.form.allow_hr_view),
+        } : {}),
         limits,
         features
       };
@@ -2975,12 +2977,14 @@ export default function SaasAdminProductPage() {
                           <th>Keyword Lists</th>
                           <th>Add-ons</th>
                         </>
-                      ) : (
+                      ) : isBusinessAutopilotProduct ? (
                         <>
                           <th>Employees</th>
                           <th>Add-ons</th>
                           <th>App Usage</th>
                         </>
+                      ) : (
+                        <th>Add-ons</th>
                       )}
                       <th>Action</th>
                     </tr>
@@ -3027,12 +3031,14 @@ export default function SaasAdminProductPage() {
                               <td>{plan.features?.wa_keyword_rules_limit ?? "-"}</td>
                               <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
                             </>
-                          ) : (
+                          ) : isBusinessAutopilotProduct ? (
                             <>
                               <td>{plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}</td>
                               <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
                               <td>{plan.allow_app_usage ? "Enabled" : "Disabled"}</td>
                             </>
+                          ) : (
+                            <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
                           )}
                           <td>
                             <button
@@ -3056,7 +3062,7 @@ export default function SaasAdminProductPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 10 : isWhatsappAutomationProduct ? 6 : 7}>No plans found.</td>
+                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 10 : isWhatsappAutomationProduct ? 6 : isBusinessAutopilotProduct ? 7 : 5}>No plans found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4899,7 +4905,7 @@ export default function SaasAdminProductPage() {
       {planModal.open ? (
         <div className="modal-overlay" onClick={() => setPlanModal({ open: false, mode: "create", form: {}, error: "", fieldErrors: {}, loading: false, planId: null })}>
           <div
-            className={`modal-panel ${isAiChatbotProduct ? "ai-chatbot-plan-modal" : ""}`}
+            className={`modal-panel saas-plan-modal ${isAiChatbotProduct ? "ai-chatbot-plan-modal" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
             <h5>{planModal.mode === "edit" ? "Edit Plan" : "Create Plan"}</h5>
@@ -5230,7 +5236,7 @@ export default function SaasAdminProductPage() {
                     {getFieldError("website_page_limit")}
                   </div>
                 </>
-              ) : !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
+              ) : isBusinessAutopilotProduct ? (
                 <div className="modal-form-field">
                   <label className="form-label">Employee Limit</label>
                   <input
@@ -5524,7 +5530,7 @@ export default function SaasAdminProductPage() {
               </div>
               </>
               ) : null}
-              {!isAiChatbotProduct && !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
+              {isBusinessAutopilotProduct ? (
                 <>
                   <div className="modal-form-field">
                     <label className="form-label">Retention Days</label>
@@ -5588,7 +5594,7 @@ export default function SaasAdminProductPage() {
                   {getFieldError("wa_keyword_rules_limit")}
                 </div>
               ) : null}
-              {!isAiChatbotProduct && !isWhatsappAutomationProduct && !isDigitalAutomationProduct ? (
+              {isBusinessAutopilotProduct ? (
                 <>
                   <div className="modal-form-field">
                     <label className="form-label">Allow App Usage</label>

@@ -1044,25 +1044,32 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   padding-top: 26px;
 }
 .wz-selected-chip{
-  padding: 0.24rem 0.5rem !important;
-  min-height: 28px;
-  border-radius: 8px !important;
+  padding: 0.15rem 0.45rem !important;
+  min-height: 24px;
+  border-radius: 999px !important;
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
   font-weight: 600;
 }
 .wz-selected-chip-remove{
-  width: 14px !important;
-  height: 14px !important;
-  min-width: 14px;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
   border-radius: 999px !important;
   line-height: 1 !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 700;
-  padding: 0 !important;
+  padding: 0.1rem 0.35rem !important;
+  background: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #475569 !important;
 }
 .wz-selected-chip-remove:hover,
 .wz-selected-chip-remove:focus{
-  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.12) !important;
-  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.45) !important;
+  background: #cbd5e1 !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
 }
 
 /* Global form action sizing: keep all React form buttons content-width. */

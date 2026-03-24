@@ -361,13 +361,7 @@ function setupPhoneFields(form) {
   const initialHidden = hiddenInput?.value || "";
   const initialParts = splitPhoneValue(initialHidden);
   const hasInitialPhoneValue = Boolean(String(initialHidden || "").trim());
-  const preferNativePicker = String(countryInput?.dataset?.phonePicker || "").toLowerCase() === "native";
-
-  if (!preferNativePicker) {
-    buildPhoneCountryPicker(countryInput);
-  } else {
-    decoratePhoneCountryOptions(countryInput);
-  }
+  buildPhoneCountryPicker(countryInput);
 
   if (countryInput) {
     const hasExplicitSelection = Boolean(countryInput.querySelector("option[selected]"));

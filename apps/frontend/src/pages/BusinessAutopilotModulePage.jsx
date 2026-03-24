@@ -24,6 +24,8 @@ function normalizeCountryName(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function getAccountsTaxUiConfig(countryValue) {
   const country = String(countryValue || "India").trim() || "India";
   const normalized = normalizeCountryName(country);
@@ -1157,27 +1159,52 @@ function getCrmMeetingReminderMinuteLabel(value) {
   return CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => option.value === normalizedValue)?.label || normalizedValue;
 }
 
-function getCrmMeetingReminderDayOptions(dateValue) {
+function parseCrmMeetingDateValue(dateValue) {
   const normalizedDate = String(dateValue || "").trim();
   if (!normalizedDate) {
-    return [];
+    return null;
   }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    const [year, month, day] = normalizedDate.split("-").map((part) => Number(part));
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+      return parsed;
+    }
+    return null;
+  }
+  const slashOrDashMatch = normalizedDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (slashOrDashMatch) {
+    const day = Number(slashOrDashMatch[1]);
+    const month = Number(slashOrDashMatch[2]);
+    const year = Number(slashOrDashMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+      return parsed;
+    }
+    return null;
+  }
+  const fallback = new Date(normalizedDate);
+  if (Number.isNaN(fallback.getTime())) {
+    return null;
+  }
+  return fallback;
+}
+
+function getCrmMeetingReminderDayOptions(dateValue) {
+  const target = parseCrmMeetingDateValue(dateValue);
+  if (!target) return [];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const target = new Date(`${normalizedDate}T00:00:00`);
-  if (Number.isNaN(target.getTime())) {
-    return [];
-  }
   target.setHours(0, 0, 0, 0);
   const diffDays = Math.floor((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
-  if (diffDays < 1) {
+  if (diffDays < 0) {
     return [];
   }
-  return Array.from({ length: diffDays }, (_, index) => {
-    const dayCount = index + 1;
+  return Array.from({ length: diffDays + 1 }, (_, index) => {
+    const dayCount = index;
     return {
       value: String(dayCount),
-      label: `${dayCount} Day${dayCount > 1 ? "s" : ""}`,
+      label: dayCount === 0 ? "Same day" : `${dayCount} Day${dayCount > 1 ? "s" : ""}`,
     };
   });
 }
@@ -1192,7 +1219,11 @@ function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminder
   const parts = [];
   const dayCount = String(reminderDays || "").trim();
   if (dayCount) {
-    parts.push(`${dayCount} Day${dayCount === "1" ? "" : "s"} before`);
+    if (dayCount === "0") {
+      parts.push("Same day");
+    } else {
+      parts.push(`${dayCount} Day${dayCount === "1" ? "" : "s"} before`);
+    }
   }
   const minuteLabel = getCrmMeetingReminderMinuteLabel(reminderMinutes);
   if (minuteLabel) {
@@ -3356,7 +3387,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
           </div>
         ))}
       </div>
-	            <div className="card p-3" ref={sectionKey === activeSection ? sectionFormRef : null}>
+	            <div className="card p-3">
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <div>
             <h6 className="mb-1">Run Payroll</h6>
@@ -4394,12 +4425,19 @@ function CrmOnePageModule() {
   );
 
   function setField(sectionKey, fieldKey, value) {
-    setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
+    const normalizedFieldKey = String(fieldKey || "").toLowerCase();
+    const isEmailInput = normalizedFieldKey.includes("email");
+    const trimmedValue = String(value || "").trim();
+    const hasInvalidEmail = isEmailInput && trimmedValue && !EMAIL_ADDRESS_RE.test(trimmedValue);
+    setSectionFormErrors((prev) => ({
+      ...prev,
+      [sectionKey]: hasInvalidEmail ? "Please enter a valid email address." : "",
+    }));
     setSectionFieldErrors((prev) => ({
       ...prev,
       [sectionKey]: {
         ...(prev[sectionKey] || {}),
-        [fieldKey]: false,
+        [fieldKey]: hasInvalidEmail,
       },
     }));
     setForms((prev) => ({
@@ -4454,6 +4492,8 @@ function CrmOnePageModule() {
 
   function onEdit(sectionKey, row) {
     setEditingIds((prev) => ({ ...prev, [sectionKey]: row.id }));
+    setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
+    setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
     const normalizedRow = sectionKey === "leads"
       ? normalizeCrmLeadRecord(row)
       : sectionKey === "teams"
@@ -4585,6 +4625,20 @@ function CrmOnePageModule() {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
+    const invalidEmailFields = config.fields.filter((field) => {
+      if (!isCrmFieldRequired(sectionKey, field, values)) {
+        return false;
+      }
+      const hasEmailFieldKey = String(field?.key || "").toLowerCase().includes("email");
+      if (!hasEmailFieldKey) {
+        return false;
+      }
+      const fieldValue = String(values[field.key] || "").trim();
+      if (!fieldValue) {
+        return false;
+      }
+      return !EMAIL_ADDRESS_RE.test(fieldValue);
+    });
     const missingFields = config.fields.filter((field) => {
       if (!isCrmFieldRequired(sectionKey, field, values)) {
         return false;
@@ -4594,15 +4648,25 @@ function CrmOnePageModule() {
       }
       return !String(values[field.key] || "").trim();
     });
-    if (missingFields.length) {
+    if (missingFields.length || invalidEmailFields.length) {
       const missingFieldMap = {};
       missingFields.forEach((field) => {
         missingFieldMap[field.key] = true;
       });
+      invalidEmailFields.forEach((field) => {
+        missingFieldMap[field.key] = true;
+      });
+      const formErrors = [];
+      if (missingFields.length) {
+        formErrors.push(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
+      }
+      if (invalidEmailFields.length) {
+        formErrors.push(`Please enter valid email in: ${invalidEmailFields.map((field) => field.label).join(", ")}`);
+      }
       setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: missingFieldMap }));
       setSectionFormErrors((prev) => ({
         ...prev,
-        [sectionKey]: `Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`,
+        [sectionKey]: formErrors.join(". "),
       }));
       return;
     }
@@ -5460,16 +5524,15 @@ function CrmOnePageModule() {
                           {selectedTeamDepartments.map((option) => (
                             <span
                               key={`selected-team-department-${option}`}
-                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                             >
                               <button
                                 type="button"
-                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                 aria-label={`Remove department ${option}`}
-                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                 onClick={() => toggleCrmTeamCategory("department", option)}
                               >
-                                -
+                                &times;
                               </button>
                               <span>Dept: {option}</span>
                             </span>
@@ -5477,16 +5540,15 @@ function CrmOnePageModule() {
                           {selectedTeamEmployeeRoles.map((option) => (
                             <span
                               key={`selected-team-role-${option}`}
-                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                             >
                               <button
                                 type="button"
-                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                 aria-label={`Remove employee role ${option}`}
-                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                 onClick={() => toggleCrmTeamCategory("employeeRole", option)}
                               >
-                                -
+                                &times;
                               </button>
                               <span>Role: {option}</span>
                             </span>
@@ -5561,16 +5623,15 @@ function CrmOnePageModule() {
                           return (
                             <span
                               key={`crm-team-selected-${member.name}`}
-                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                             >
                               <button
                                 type="button"
-                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                 aria-label={`Remove ${member.name}`}
-                                style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                 onClick={() => toggleCrmTeamMember(member.name)}
                               >
-                                -
+                                &times;
                               </button>
                               <span className="fw-semibold">{member.name}</span>
                             </span>
@@ -5637,8 +5698,10 @@ function CrmOnePageModule() {
                                   )
                                 : sectionKey === "contacts"
                                 ? (
-                                    field.key === "name" || field.key === "company" || field.key === "email"
+                                    field.key === "name" || field.key === "company"
                                       ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "email"
+                                      ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "phone"
                                       ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "tag"
@@ -5675,12 +5738,12 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "title" || field.key === "companyOrClientName"
                                       ? "col-12 col-md-6 col-xl-3"
-                                      : field.key === "relatedTo"
+                                    : field.key === "relatedTo"
                                       ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "meetingDate" || field.key === "meetingTime"
+                                    : field.key === "meetingDate" || field.key === "meetingTime"
                                       ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "owner"
-                                      ? "col-12 col-md-6 col-xl-3"
+                                    : field.key === "owner"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "meetingMode" || field.key === "reminderChannel" || field.key === "reminderDays" || field.key === "reminderMinutes" || field.key === "status"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : "col-12 col-md-6 col-xl-4"
@@ -5747,7 +5810,6 @@ function CrmOnePageModule() {
                                                       ...prev,
                                                       leads: {
                                                         ...prev.leads,
-                                                        name: String(contact.name || "").trim(),
                                                         company: String(contact.company || "").trim(),
                                                         phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
                                                         phone: String(contact.phone || "").trim(),
@@ -5776,7 +5838,6 @@ function CrmOnePageModule() {
                                                       ...prev,
                                                       leads: {
                                                         ...prev.leads,
-                                                        name: String(customer.clientName || customer.name || "").trim(),
                                                         company: String(customer.companyName || customer.name || "").trim(),
                                                         phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
                                                         phone: String(customer.phone || "").trim(),
@@ -5861,16 +5922,15 @@ function CrmOnePageModule() {
                                       {selectedLeadAssignedUsers.length ? selectedLeadAssignedUsers.map((userName) => (
                                         <span
                                           key={`lead-selected-user-${userName}`}
-                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                                         >
                                           <button
                                             type="button"
-                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                                             aria-label={`Remove ${userName}`}
-                                            style={{ width: "18px", height: "18px", lineHeight: 1 }}
                                             onClick={() => toggleLeadAssignedUser(userName)}
                                           >
-                                            -
+                                            &times;
                                           </button>
                                           <span>{userName}</span>
                                         </span>
@@ -6336,7 +6396,16 @@ function CrmOnePageModule() {
                               }
                               return (
                                 <input
-                                  type="text"
+                                  type={
+                                    field.type === "email" || String(field.key || "").toLowerCase().includes("email")
+                                      ? "email"
+                                      : "text"
+                                  }
+                                  inputMode={
+                                    field.type === "email" || String(field.key || "").toLowerCase().includes("email")
+                                      ? "email"
+                                      : undefined
+                                  }
                                   className="form-control"
                                   placeholder={field.placeholder}
                                   value={formValues[field.key] || ""}
@@ -6346,7 +6415,7 @@ function CrmOnePageModule() {
                             })()}
                           </div>
                           )}
-                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "meetings" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
                             <div
                               className={
                                 sectionKey === "leads"
@@ -6356,8 +6425,6 @@ function CrmOnePageModule() {
                                   : sectionKey === "followUps"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-start crm-submit-align-with-input"
                                   : sectionKey === "activities"
-                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
-                                  : sectionKey === "meetings"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
                               }
@@ -6381,23 +6448,33 @@ function CrmOnePageModule() {
                               </div>
                             </div>
                           ) : null}
-                          {sectionKey === "contacts" && field.key === "tag" ? (
-                            <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
-                              <div className="d-flex gap-2 flex-wrap w-100">
-                                <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
-                                  {editingId ? "Update" : "Create"}
-                                </button>
-                                {editingId ? (
-                                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
-                                    Cancel
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
                         </Fragment>
                       ))}
                     </div>
+                    {sectionKey === "contacts" ? (
+                      <div className="d-flex justify-content-end gap-2 mt-2">
+                        <button type="submit" className="btn btn-success btn-sm">
+                          {editingId ? "Update" : "Create"}
+                        </button>
+                        {editingId ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {sectionKey === "meetings" ? (
+                      <div className="d-flex justify-content-end gap-2 mt-2">
+                        <button type="submit" className="btn btn-success btn-sm">
+                          {editingId ? "Update" : "Create"}
+                        </button>
+                        {editingId ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={() => resetSectionForm(sectionKey)}>
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                       <div className="d-flex gap-2">
                         <button type="submit" className="btn btn-success btn-sm">
@@ -6770,6 +6847,7 @@ function ProjectManagementModule() {
   const [activeTab, setActiveTab] = useState("projects");
   const [moduleData, setModuleData] = useState(() => readProjectWorkspaceData());
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
+  const [projectFormNotice, setProjectFormNotice] = useState("");
   const [editingId, setEditingId] = useState("");
   const [showProjectClientSuggestions, setShowProjectClientSuggestions] = useState(false);
   const [projectClientForm, setProjectClientForm] = useState({
@@ -6830,6 +6908,7 @@ function ProjectManagementModule() {
 
   useEffect(() => {
     setEditingId("");
+    setProjectFormNotice("");
     setFormValues(buildEmptyValues(PROJECT_TAB_CONFIG[activeTab].fields));
   }, [activeTab]);
 
@@ -6912,6 +6991,7 @@ function ProjectManagementModule() {
 
   function resetProjectClientForm() {
     setEditingProjectClientId("");
+    setProjectFormNotice("");
     setProjectClientForm({
       id: "",
       companyName: "",
@@ -6939,7 +7019,7 @@ function ProjectManagementModule() {
     event.preventDefault();
     const companyName = String(projectClientForm.companyName || projectClientForm.name || "").trim();
     if (!companyName) {
-      window.alert("Company name is required.");
+      setProjectFormNotice("Company name is required.");
       return;
     }
     const clientName = String(projectClientForm.clientName || "").trim();
@@ -7005,6 +7085,7 @@ function ProjectManagementModule() {
       }
       return [payload, ...prev];
     });
+    setProjectFormNotice("");
     resetProjectClientForm();
   }
 
@@ -7058,6 +7139,7 @@ function ProjectManagementModule() {
 
   function onCancelEdit() {
     setEditingId("");
+    setProjectFormNotice("");
     setFormValues(buildEmptyValues(config.fields));
     setShowProjectClientSuggestions(false);
   }
@@ -7105,7 +7187,7 @@ function ProjectManagementModule() {
     });
     const missingFields = visibleFields.filter((field) => !String(formValues[field.key] || "").trim());
     if (missingFields.length) {
-      window.alert(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
+      setProjectFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
     if (activeTab === "customers") {
@@ -7123,6 +7205,7 @@ function ProjectManagementModule() {
         }
         return [payload, ...prev];
       });
+      setProjectFormNotice("");
       onCancelEdit();
       return;
     }
@@ -7156,6 +7239,7 @@ function ProjectManagementModule() {
           : {}),
       };
     });
+    setProjectFormNotice("");
     onCancelEdit();
   }
 
@@ -7202,6 +7286,9 @@ function ProjectManagementModule() {
           <div className="card p-3" style={{ paddingTop: "20px" }}>
             <h6 className="mb-3">{editingProjectClientId ? "Edit Client" : "Create Client"}</h6>
             <form className="d-flex flex-column gap-3" onSubmit={saveProjectClient}>
+              {projectFormNotice ? (
+                <div className="alert alert-danger py-2 mb-0">{projectFormNotice}</div>
+              ) : null}
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
@@ -7427,6 +7514,9 @@ function ProjectManagementModule() {
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+          {projectFormNotice ? (
+            <div className="alert alert-danger py-2 mb-0">{projectFormNotice}</div>
+          ) : null}
           <div className="row g-3">
             {config.fields.map((field) => (
               (() => {
@@ -8289,6 +8379,7 @@ function ProjectDetailPage() {
 function HrManagementModule() {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
+  const [hrFormNotice, setHrFormNotice] = useState("");
   const [formValues, setFormValues] = useState({
     ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
     temporarySameAsPermanent: false,
@@ -8407,6 +8498,7 @@ function HrManagementModule() {
 
   useEffect(() => {
     setEditingId("");
+    setHrFormNotice("");
     const next = buildEmptyValues(HR_TAB_CONFIG[activeTab].fields);
     if (activeTab === "employees") {
       next.temporarySameAsPermanent = false;
@@ -9074,6 +9166,7 @@ function HrManagementModule() {
 
   function onCancelEdit() {
     setEditingId("");
+    setHrFormNotice("");
     const next = buildEmptyValues(config.fields);
     if (activeTab === "employees") {
       next.temporarySameAsPermanent = false;
@@ -9109,7 +9202,7 @@ function HrManagementModule() {
     });
     const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
     if (missingFields.length) {
-      window.alert(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
+      setHrFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
     const payload = {};
@@ -9148,6 +9241,7 @@ function HrManagementModule() {
         [activeTab]: [{ id: nextRowId, ...payload }, ...existing]
       };
     });
+    setHrFormNotice("");
     if (activeTab === "employees" && payload.sourceUserId) {
       const matchedDirectoryUser = findDirectoryItemBySourceUser(hrUserDirectory, payload.sourceUserId, payload.name);
       const membershipId = String(matchedDirectoryUser?.membership_id || "").trim();
@@ -9294,7 +9388,7 @@ function HrManagementModule() {
     const employee = String(attendanceTaskModal.employee || "").trim();
     const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
     if (!employee) {
-      window.alert("Employee name is required.");
+      setHrFormNotice("Employee name is required.");
       return;
     }
     const patch = {
@@ -9307,6 +9401,7 @@ function HrManagementModule() {
       patch.status = "Present";
     }
     upsertAttendanceRecord({ employee, date, patch });
+    setHrFormNotice("");
     closeAttendanceTaskModal();
   }
 
@@ -9405,6 +9500,9 @@ function HrManagementModule() {
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+          {hrFormNotice ? (
+            <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
+          ) : null}
           {activeTab === "employees" ? (
             <>
               <div className="row g-3">
@@ -10784,6 +10882,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   const [subscriptionWhatsappAlertSearchOpen, setSubscriptionWhatsappAlertSearchOpen] = useState(false);
   const [subscriptionAssignSearch, setSubscriptionAssignSearch] = useState("");
   const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
+  const [accountsFormNotice, setAccountsFormNotice] = useState("");
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
   const isValidAccountsTab = new Set([
@@ -10805,6 +10904,10 @@ function AccountsErpModule({ initialTab = "overview" }) {
       setActiveTab(nextTab);
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    setAccountsFormNotice("");
+  }, [activeTab]);
 
   useEffect(() => {
     let active = true;
@@ -11252,16 +11355,19 @@ function AccountsErpModule({ initialTab = "overview" }) {
 
   function resetSubscriptionCategoryForm() {
     setEditingSubscriptionCategoryId("");
+    setAccountsFormNotice("");
     setSubscriptionCategoryForm(createEmptySubscriptionCategory());
   }
 
   function resetSubscriptionSubCategoryForm() {
     setEditingSubscriptionSubCategoryId("");
+    setAccountsFormNotice("");
     setSubscriptionSubCategoryForm(createEmptySubscriptionSubCategory());
   }
 
   function resetSubscriptionForm() {
     setEditingSubscriptionId("");
+    setAccountsFormNotice("");
     setSubscriptionForm(createEmptySubscriptionForm({ currency: defaultCurrency }));
   }
 
@@ -11309,7 +11415,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const name = String(subscriptionCategoryForm.name || "").trim();
     if (!name) {
-      window.alert("Category name is required.");
+      setAccountsFormNotice("Category name is required.");
       return;
     }
     const payload = {
@@ -11336,10 +11442,11 @@ function AccountsErpModule({ initialTab = "overview" }) {
           setSubscriptionCategories((prev) => [{ ...saved }, ...prev]);
         }
       }
+      setAccountsFormNotice("");
       resetSubscriptionCategoryForm();
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to save subscription category.");
+      setAccountsFormNotice(error?.message || "Unable to save subscription category.");
     }
   }
 
@@ -11348,7 +11455,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     const name = String(subscriptionSubCategoryForm.name || "").trim();
     const categoryId = String(subscriptionSubCategoryForm.categoryId || "").trim();
     if (!name || !categoryId) {
-      window.alert("Category and sub-category name are required.");
+      setAccountsFormNotice("Category and sub-category name are required.");
       return;
     }
     const payload = {
@@ -11376,10 +11483,11 @@ function AccountsErpModule({ initialTab = "overview" }) {
           setSubscriptionSubCategories((prev) => [{ ...saved }, ...prev]);
         }
       }
+      setAccountsFormNotice("");
       resetSubscriptionSubCategoryForm();
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to save subscription sub category.");
+      setAccountsFormNotice(error?.message || "Unable to save subscription sub category.");
     }
   }
 
@@ -11398,9 +11506,10 @@ function AccountsErpModule({ initialTab = "overview" }) {
       if (String(subscriptionSubCategoryForm.categoryId || "") === String(id || "")) {
         resetSubscriptionSubCategoryForm();
       }
+      setAccountsFormNotice("");
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to delete subscription category.");
+      setAccountsFormNotice(error?.message || "Unable to delete subscription category.");
     }
   }
 
@@ -11417,9 +11526,10 @@ function AccountsErpModule({ initialTab = "overview" }) {
       if (editingSubscriptionSubCategoryId === id) {
         resetSubscriptionSubCategoryForm();
       }
+      setAccountsFormNotice("");
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to delete subscription sub category.");
+      setAccountsFormNotice(error?.message || "Unable to delete subscription sub category.");
     }
   }
 
@@ -11447,20 +11557,20 @@ function AccountsErpModule({ initialTab = "overview" }) {
       whatsappAlertAssignTo: normalizedSubscriptionWhatsappAlertAssignees
     };
     if (!payload.categoryId || !payload.subCategoryId || !payload.subscriptionTitle || !payload.customerId || !payload.startDate) {
-      window.alert("Please fill mandatory fields: Category, Sub Category, Subscription Title, Client and Start Date.");
+      setAccountsFormNotice("Please fill mandatory fields: Category, Sub Category, Subscription Title, Client and Start Date.");
       return;
     }
     if (normalizedPlanDuration && normalizedPlanDuration !== "custom" && !/^(30|90|180|365|730|1095)$/.test(planDurationDays)) {
-      window.alert("Select a valid plan duration.");
+      setAccountsFormNotice("Select a valid plan duration.");
       return;
     }
     if (normalizedPlanDuration === "custom" && (!/^\d+$/.test(planDurationDays) || Number(planDurationDays) < 1)) {
-      window.alert("Enter valid custom plan duration in days.");
+      setAccountsFormNotice("Enter valid custom plan duration in days.");
       return;
     }
     payload.nextBillingDate = getNextBillingDateFromStart(payload.startDate);
     if (!payload.nextBillingDate) {
-      window.alert("Invalid start date.");
+      setAccountsFormNotice("Invalid start date.");
       return;
     }
     try {
@@ -11483,10 +11593,11 @@ function AccountsErpModule({ initialTab = "overview" }) {
           setSubscriptionList((prev) => [saved, ...prev]);
         }
       }
+      setAccountsFormNotice("");
       resetSubscriptionForm();
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to save subscription.");
+      setAccountsFormNotice(error?.message || "Unable to save subscription.");
     }
   }
 
@@ -11550,9 +11661,10 @@ function AccountsErpModule({ initialTab = "overview" }) {
       if (editingSubscriptionId === String(id || "")) {
         resetSubscriptionForm();
       }
+      setAccountsFormNotice("");
       await refreshSubscriptionData();
     } catch (error) {
-      window.alert(error?.message || "Unable to delete subscription.");
+      setAccountsFormNotice(error?.message || "Unable to delete subscription.");
     }
   }
 
@@ -11642,6 +11754,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
 
   function resetGstForm() {
     setEditingGstId("");
+    setAccountsFormNotice("");
     setGstForm({
       id: "",
       name: "",
@@ -11657,6 +11770,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
 
   function resetTemplateForm() {
     setEditingTemplateId("");
+    setAccountsFormNotice("");
     setTemplateForm({
       id: "",
       name: "",
@@ -11700,7 +11814,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveGstTemplate(event) {
     event.preventDefault();
     if (!gstForm.name.trim()) {
-      window.alert("GST template name is required.");
+      setAccountsFormNotice("GST template name is required.");
       return;
     }
     const payload = {
@@ -11718,6 +11832,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
         gstTemplates: [{ ...payload, id: `gst_${Date.now()}` }, ...rows]
       };
     });
+    setAccountsFormNotice("");
     resetGstForm();
   }
 
@@ -11756,7 +11871,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveBillingTemplate(event) {
     event.preventDefault();
     if (!templateForm.name.trim()) {
-      window.alert("Billing template name is required.");
+      setAccountsFormNotice("Billing template name is required.");
       return;
     }
     const payload = {
@@ -11775,6 +11890,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
         billingTemplates: [{ ...payload, id: `bt_${Date.now()}` }, ...rows]
       };
     });
+    setAccountsFormNotice("");
     resetTemplateForm();
   }
 
@@ -11805,6 +11921,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
 
   function resetCustomerForm() {
     setEditingCustomerId("");
+    setAccountsFormNotice("");
     setCustomerForm({
       id: "",
       companyName: "",
@@ -11832,7 +11949,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const companyName = String(customerForm.companyName || customerForm.name || "").trim();
     if (!companyName) {
-      window.alert("Customer company name is required.");
+      setAccountsFormNotice("Customer company name is required.");
       return;
     }
     const clientName = String(customerForm.clientName || "").trim();
@@ -11897,6 +12014,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
       }
       return { ...prev, customers: [{ ...payload, id: `cust_${Date.now()}` }, ...rows] };
     });
+    setAccountsFormNotice("");
     resetCustomerForm();
   }
 
@@ -12110,6 +12228,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
 
   function resetItemMasterForm() {
     setEditingItemMasterId("");
+    setAccountsFormNotice("");
     setItemMasterForm({
       id: "",
       name: "",
@@ -12125,7 +12244,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
   function saveItemMaster(event) {
     event.preventDefault();
     if (!String(itemMasterForm.name || "").trim()) {
-      window.alert("Item name is required.");
+      setAccountsFormNotice("Item name is required.");
       return;
     }
     const payload = {
@@ -12145,6 +12264,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
       }
       return { ...prev, itemMasters: [{ ...payload, id: `itm_${Date.now()}` }, ...rows] };
     });
+    setAccountsFormNotice("");
     resetItemMasterForm();
   }
 
@@ -12357,7 +12477,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
     event.preventDefault();
     const form = kind === "estimate" ? estimateForm : invoiceForm;
     if (!String(form.customerName || "").trim()) {
-      window.alert("Client / Company name is required.");
+      setAccountsFormNotice("Client / Company name is required.");
       return;
     }
     const payload = {
@@ -12408,6 +12528,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
       }
       return { ...prev, [listKey]: [{ ...payload, id: `${kind}_${Date.now()}` }, ...rows] };
     });
+    setAccountsFormNotice("");
     if (kind === "estimate") {
       setEditingEstimateId("");
       setEstimateForm(createEmptyBillingDocument("estimate"));
@@ -12874,6 +12995,10 @@ function AccountsErpModule({ initialTab = "overview" }) {
           ))}
         </div>
       </div>
+
+      {accountsFormNotice ? (
+        <div className="alert alert-danger py-2 mb-0">{accountsFormNotice}</div>
+      ) : null}
 
       {activeTab === "overview" ? (
         <div className="row g-3">
@@ -14104,13 +14229,12 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     {normalizedSubscriptionEmailAlertDays.map((value) => (
                       <span
                         key={`selected-email-alert-${value}`}
-                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                       >
                         <button
                           type="button"
-                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                           aria-label={`Remove email alert ${value}`}
-                          style={{ width: "18px", height: "18px", lineHeight: 1 }}
                           onClick={() => {
                             updateSubscriptionFormField(
                               "emailAlertDays",
@@ -14119,7 +14243,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                             setSubscriptionEmailAlertSearch("");
                           }}
                         >
-                          <i className="bi bi-x-lg" aria-hidden="true" />
+                          &times;
                         </button>
                         <span>{getSubscriptionAlertOptionLabel(value)}</span>
                       </span>
@@ -14182,13 +14306,12 @@ function AccountsErpModule({ initialTab = "overview" }) {
                     {normalizedSubscriptionWhatsappAlertDays.map((value) => (
                       <span
                         key={`selected-whatsapp-alert-${value}`}
-                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                        className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                       >
                         <button
                           type="button"
-                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                           aria-label={`Remove whatsapp alert ${value}`}
-                          style={{ width: "18px", height: "18px", lineHeight: 1 }}
                           onClick={() => {
                             updateSubscriptionFormField(
                               "whatsappAlertDays",
@@ -14197,7 +14320,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
                             setSubscriptionWhatsappAlertSearch("");
                           }}
                         >
-                          <i className="bi bi-x-lg" aria-hidden="true" />
+                          &times;
                         </button>
                         <span>{getSubscriptionAlertOptionLabel(value)}</span>
                       </span>
@@ -14291,16 +14414,15 @@ function AccountsErpModule({ initialTab = "overview" }) {
                   {normalizedSubscriptionEmailAlertAssignees.length ? normalizedSubscriptionEmailAlertAssignees.map((assignee) => (
                     <span
                       key={`selected-subscription-alert-assignee-${assignee.type}-${assignee.value}`}
-                      className="badge text-bg-light border d-inline-flex align-items-center gap-2 px-2 py-2"
+                      className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
                     >
                       <button
                         type="button"
-                        className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center"
+                        className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                         aria-label={`Remove ${getSubscriptionAlertAssigneeLabel(assignee)}`}
-                        style={{ width: "18px", height: "18px", lineHeight: 1 }}
                         onClick={() => toggleSubscriptionAssignee(assignee)}
                       >
-                        <i className="bi bi-x-lg" aria-hidden="true" />
+                        &times;
                       </button>
                       <span>{getSubscriptionAlertAssigneeLabel(assignee)}</span>
                     </span>

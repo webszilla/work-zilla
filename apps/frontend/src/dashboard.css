@@ -4965,6 +4965,10 @@ html[data-theme="light"] .table-pagination .shot-btn{
   color:#e5e7eb;
   box-shadow:0 20px 40px rgba(15, 23, 42, 0.35);
 }
+.modal-panel.saas-plan-modal{
+  max-height:min(750px, calc(100vh - 32px));
+  overflow-y:auto;
+}
 .work-activity-history-modal{
   width:min(1080px, 96vw);
 }
@@ -5122,8 +5126,6 @@ html[data-theme="light"] .receipt-modal__close-btn:focus{
 }
 .modal-panel.ai-chatbot-plan-modal{
   width:min(1100px, 96vw);
-  max-height:90vh;
-  overflow:auto;
 }
 .modal-form-field{
   display:flex;
