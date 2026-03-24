@@ -27,17 +27,31 @@ const ERP_MODULE_OPTIONS = [
   { slug: "hrm", label: "HR Management" },
   { slug: "projects", label: "Project Management" },
   { slug: "accounts", label: "Accounts / ERP" },
+  { slug: "subscriptions", label: "Subscriptions" },
   { slug: "ticketing", label: "Ticketing System" },
-  { slug: "stocks", label: "Stocks Management" },
+  { slug: "stocks", label: "Inventory" },
 ];
 
 function getDefaultErpModulesForPlanName(planName) {
   const key = String(planName || "").trim().toLowerCase();
-  if (key.includes("free")) return ["crm", "hrm", "projects", "accounts"];
-  if (key.includes("starter")) return ["crm", "hrm", "projects", "accounts"];
+  if (key.includes("free")) return ["crm", "hrm", "projects", "accounts", "subscriptions"];
+  if (key.includes("starter")) return ["crm", "hrm", "projects", "accounts", "subscriptions"];
   if (key.includes("growth")) return ERP_MODULE_OPTIONS.map((item) => item.slug);
   if (key.includes("pro")) return ERP_MODULE_OPTIONS.map((item) => item.slug);
   return ERP_MODULE_OPTIONS.map((item) => item.slug);
+}
+
+function normalizeErpModuleSelection(values = []) {
+  const normalized = Array.isArray(values)
+    ? values
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
+    : [];
+  const deduped = Array.from(new Set(normalized));
+  if (deduped.includes("accounts") && !deduped.includes("subscriptions")) {
+    deduped.push("subscriptions");
+  }
+  return deduped;
 }
 
 function formatValue(value) {
@@ -1459,7 +1473,7 @@ export default function SaasAdminProductPage() {
             allow_hr_view: Boolean(plan.allow_hr_view),
             role_based_access: Boolean(features.role_based_access ?? true),
             erp_enabled_modules: Array.isArray(features.erp_enabled_modules)
-              ? features.erp_enabled_modules.filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
+              ? normalizeErpModuleSelection(features.erp_enabled_modules)
               : getDefaultErpModulesForPlanName(plan.name || ""),
           }
         : {
@@ -1817,9 +1831,7 @@ export default function SaasAdminProductPage() {
       }
       if (isBusinessAutopilotProduct) {
         features.role_based_access = Boolean(planModal.form.role_based_access ?? true);
-        features.erp_enabled_modules = Array.isArray(planModal.form.erp_enabled_modules)
-          ? planModal.form.erp_enabled_modules.filter((item) => ERP_MODULE_OPTIONS.some((opt) => opt.slug === item))
-          : [];
+        features.erp_enabled_modules = normalizeErpModuleSelection(planModal.form.erp_enabled_modules);
       }
       const payload = {
         name: trimmedName,

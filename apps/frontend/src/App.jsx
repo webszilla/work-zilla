@@ -83,6 +83,7 @@ import DigitalAutomationSubscriptionPage from "./pages/DigitalAutomationSubscrip
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import BusinessAutopilotAssistantWidget from "./components/BusinessAutopilotAssistantWidget.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
 import { formatDeviceDate, setOrgTimezone } from "./lib/datetime.js";
 import { getBrowserTimezone } from "./lib/timezones.js";
@@ -117,6 +118,7 @@ const THEME_LAST_KEY = "wz_brand_theme";
 const THEME_PREV_KEY = "wz_brand_theme_prev";
 const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
 const BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
+const BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 
 function readBusinessAutopilotRoleAccessMap() {
   if (typeof window === "undefined") {
@@ -131,6 +133,19 @@ function readBusinessAutopilotRoleAccessMap() {
   }
 }
 
+function readBusinessAutopilotUserDirectory() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function getBusinessAutopilotSectionKey(pathname) {
   const candidate = String(pathname || "").trim();
   if (!candidate || candidate === "/") return "dashboard";
@@ -138,6 +153,7 @@ function getBusinessAutopilotSectionKey(pathname) {
   if (candidate === "/crm" || candidate.startsWith("/crm/")) return "crm";
   if (candidate === "/hrm" || candidate.startsWith("/hrm/")) return "hr";
   if (candidate === "/projects" || candidate.startsWith("/projects/")) return "projects";
+  if (candidate === "/subscriptions" || candidate.startsWith("/subscriptions/") || candidate === "/accounts/subscriptions" || candidate.startsWith("/accounts/subscriptions/")) return "subscriptions";
   if (candidate === "/accounts" || candidate.startsWith("/accounts/")) return "accounts";
   if (candidate === "/ticketing" || candidate.startsWith("/ticketing/")) return "ticketing";
   if (candidate === "/stocks" || candidate.startsWith("/stocks/")) return "stocks";
@@ -150,18 +166,29 @@ function getBusinessAutopilotSectionKey(pathname) {
 
 function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employeeRole) {
   const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
-  const normalizedProfileRole = String(profileRole || "").trim().toLowerCase();
-  const normalizedEmployeeRole = String(employeeRole || "").trim();
-  const keys = [];
+  const normalizeRoleToken = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+  const normalizedProfileRole = normalizeRoleToken(profileRole);
+  const normalizedEmployeeRole = normalizeRoleToken(employeeRole);
+
+  const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
   if (normalizedEmployeeRole) {
-    keys.push(`employee_role:${normalizedEmployeeRole}`);
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "employee_role" && normalizeRoleToken(rawRole) === normalizedEmployeeRole) {
+        return value;
+      }
+    }
   }
   if (normalizedProfileRole) {
-    keys.push(`system:${normalizedProfileRole}`);
-  }
-  for (const key of keys) {
-    if (safeMap[key] && typeof safeMap[key] === "object") {
-      return safeMap[key];
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "system" && normalizeRoleToken(rawRole) === normalizedProfileRole) {
+        return value;
+      }
     }
   }
   return null;
@@ -174,7 +201,11 @@ function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
   if (!sectionKey) {
     return false;
   }
-  const value = String(accessRecord?.sections?.[sectionKey] || "No Access").trim();
+  const sections = accessRecord?.sections || {};
+  const rawValue = sectionKey === "subscriptions"
+    ? (sections.subscriptions || sections.accounts || "No Access")
+    : (sections[sectionKey] || "No Access");
+  const value = String(rawValue).trim();
   return value && value !== "No Access";
 }
 
@@ -328,6 +359,7 @@ const reactPages = [
   { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
   { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
   { label: "Accounts", path: "/accounts", icon: "bi-calculator", productOnly: "business-autopilot-erp", moduleKey: "accounts" },
+  { label: "Subscriptions", path: "/subscriptions", icon: "bi-arrow-repeat", productOnly: "business-autopilot-erp", moduleKey: "subscriptions" },
   { label: "Ticketing", path: "/ticketing", icon: "bi-life-preserver", productOnly: "business-autopilot-erp", moduleKey: "ticketing" },
   { label: "Inventory", path: "/stocks", icon: "bi-box-seam", productOnly: "business-autopilot-erp", moduleKey: "stocks" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
@@ -677,19 +709,35 @@ function AppShell({ state, productPrefix, productSlug }) {
     async function loadBusinessAutopilotAccess() {
       setAutopilotAccessResolved(false);
       try {
-        const roleAccessMap = readBusinessAutopilotRoleAccessMap();
-        const usersData = await apiFetch("/api/business-autopilot/users");
+        let roleAccessMap = readBusinessAutopilotRoleAccessMap();
+        try {
+          const roleAccessData = await apiFetch("/api/business-autopilot/role-access");
+          if (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object") {
+            roleAccessMap = roleAccessData.role_access_map;
+            window.localStorage.setItem(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(roleAccessMap));
+          }
+        } catch {
+          // Fallback to cached local role access map.
+        }
+        const cachedDirectory = readBusinessAutopilotUserDirectory();
+        let usersDirectory = cachedDirectory;
+        try {
+          const usersData = await apiFetch("/api/business-autopilot/users");
+          usersDirectory = Array.isArray(usersData?.users) ? usersData.users : cachedDirectory;
+        } catch {
+          usersDirectory = cachedDirectory;
+        }
         if (!active) {
           return;
         }
         const currentEmail = String(state.user?.email || state.user?.username || "").trim().toLowerCase();
-        const matchedUser = (Array.isArray(usersData?.users) ? usersData.users : []).find(
+        const matchedUser = (Array.isArray(usersDirectory) ? usersDirectory : []).find(
           (row) => String(row?.email || "").trim().toLowerCase() === currentEmail
         );
         const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
           roleAccessMap,
           state.profile?.role,
-          matchedUser?.employee_role || ""
+          matchedUser?.employee_role || state.user?.employee_role || ""
         );
         setAutopilotAccessRecord(nextAccessRecord);
       } catch {
@@ -709,12 +757,16 @@ function AppShell({ state, productPrefix, productSlug }) {
     };
     window.addEventListener("storage", refreshAccess);
     window.addEventListener("focus", refreshAccess);
+    window.addEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
+    window.addEventListener("wz:business-autopilot-user-directory-changed", refreshAccess);
     return () => {
       active = false;
       window.removeEventListener("storage", refreshAccess);
       window.removeEventListener("focus", refreshAccess);
+      window.removeEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
+      window.removeEventListener("wz:business-autopilot-user-directory-changed", refreshAccess);
     };
-  }, [isAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username]);
+  }, [isAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username, state.user?.employee_role]);
 
   const autopilotCurrentSectionKey = useMemo(
     () => getBusinessAutopilotSectionKey(normalizedPathname),
@@ -875,13 +927,14 @@ function AppShell({ state, productPrefix, productSlug }) {
           ["/hrm", 3],
           ["/projects", 4],
           ["/accounts", 5],
-          ["/ticketing", 6],
-          ["/stocks", 7],
-          ["/users", 8],
-          ["/media-library", 9],
-          ["/billing", 10],
-          ["/plans", 11],
-          ["/profile", 12]
+          ["/subscriptions", 6],
+          ["/ticketing", 7],
+          ["/stocks", 8],
+          ["/users", 9],
+          ["/media-library", 10],
+          ["/billing", 11],
+          ["/plans", 12],
+          ["/profile", 13]
         ]);
     return [...uniqueNavItems].sort((a, b) => {
       if (isWhatsappAutomationProduct || isDigitalAutomationProduct) {
@@ -1379,16 +1432,20 @@ function AppShell({ state, productPrefix, productSlug }) {
           />
           <Route
             path="/accounts/subscriptions"
+            element={<Navigate to={withBase("/subscriptions")} replace />}
+          />
+          <Route
+            path="/subscriptions"
             element={renderRouteElement(
               <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                <BusinessAutopilotModulePage moduleKey="accounts" title="Accounts" initialTab="subscriptions" />
+                <BusinessAutopilotModulePage moduleKey="subscriptions" title="Subscriptions" />
               </Suspense>,
               {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
-                  autopilotModules.some((module) => module.slug === "accounts") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", isAdmin),
+                  autopilotModules.some((module) => module.slug === "subscriptions") &&
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "subscriptions", isAdmin),
               }
             )}
           />
@@ -1826,6 +1883,13 @@ function AppShell({ state, productPrefix, productSlug }) {
               <Route path="*" element={<Navigate to={withBase("/")} replace />} />
             </Routes>
           </div>
+          {isBusinessAutopilot && !isDealer && !isSaasAdminRoute && autopilotAccessResolved ? (
+            <BusinessAutopilotAssistantWidget
+              enabled={hasBusinessAutopilotSectionAccess(autopilotAccessRecord, autopilotCurrentSectionKey || "dashboard", isAdmin)}
+              isAdmin={isAdmin}
+              subscriptions={state.subscriptions}
+            />
+          ) : null}
         </main>
       </div>
 
@@ -2201,7 +2265,7 @@ export default function App() {
       { slug: "worksuite", prefixes: ["/activity", "/work-activity", "/app-usage", "/app-urls", "/gaming-ott", "/employees", "/screenshots", "/company", "/privacy"] },
       { slug: "storage", prefixes: ["/files", "/user"] },
       { slug: "ai-chatbot", prefixes: ["/inbox", "/widgets", "/leads", "/agents", "/history", "/chat-settings"] },
-      { slug: "business-autopilot-erp", prefixes: ["/crm", "/hrm", "/projects", "/accounts", "/ticketing", "/stocks"] },
+      { slug: "business-autopilot-erp", prefixes: ["/crm", "/hrm", "/projects", "/accounts", "/subscriptions", "/ticketing", "/stocks"] },
       { slug: "whatsapp-automation", prefixes: ["/dashboard/company-profile", "/dashboard/whatsapp-automation", "/dashboard/catalogue", "/dashboard/digital-card", "/media-library"] },
     ];
 

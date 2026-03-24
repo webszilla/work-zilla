@@ -144,13 +144,17 @@ function getErpPlanFeatures(plan) {
         .map((item) => String(item || "").trim().toLowerCase())
         .filter(Boolean)
     : [];
+  if (configuredModules.includes("accounts") && !configuredModules.includes("subscriptions")) {
+    configuredModules.push("subscriptions");
+  }
   const moduleLabelMap = {
     crm: "CRM Module",
     hrm: "HR Management",
     projects: "Projects",
     accounts: "Accounts / ERP",
+    subscriptions: "Subscriptions",
     ticketing: "Ticketing",
-    stocks: "Stocks",
+    stocks: "Inventory",
   };
   const configuredModuleLabels = configuredModules.map((slug) => moduleLabelMap[slug]).filter(Boolean);
   const roleBasedAccessEnabled = plan?.features?.role_based_access !== false;
@@ -199,8 +203,9 @@ function getErpPlanFeatures(plan) {
     "HR Management",
     "Projects",
     "Accounts / ERP",
+    "Subscriptions",
     "Ticketing",
-    "Stocks",
+    "Inventory",
   ];
   if (roleBasedAccessEnabled) fallback.push("Role Based Access");
   return Array.from(new Set(fallback));

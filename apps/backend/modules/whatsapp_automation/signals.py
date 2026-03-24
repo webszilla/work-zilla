@@ -26,6 +26,8 @@ def _build_default_welcome(company_profile, card_slug, catalogue_slug):
 
 @receiver(post_save, sender=CompanyProfile, dispatch_uid="wa.company_profile.autocreate_assets")
 def ensure_company_profile_assets(sender, instance, created, **kwargs):
+    # During fixture loads (`loaddata`), related rows can arrive out of order.
+    # Skip auto-creation side effects for raw saves.
     if kwargs.get("raw"):
         return
 

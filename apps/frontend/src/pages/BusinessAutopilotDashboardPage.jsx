@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import ProductAccessSection from "../components/ProductAccessSection.jsx";
-import BusinessAutopilotAssistantWidget from "../components/BusinessAutopilotAssistantWidget.jsx";
 
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
@@ -651,14 +650,6 @@ export default function BusinessAutopilotDashboardPage({
         products={products}
         subscriptions={subscriptions}
         currentProductKey="business-autopilot-erp"
-      />
-      <BusinessAutopilotAssistantWidget
-        enabled
-        isAdmin={isOrgAdmin}
-        quickStats={quickStats}
-        crmMeetings={crmMeetings}
-        accountsWorkspace={accountsWorkspace}
-        subscriptions={subscriptions}
       />
     </div>
   );

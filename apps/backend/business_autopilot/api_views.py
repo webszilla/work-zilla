@@ -42,6 +42,7 @@ MODULE_PATHS = {
     "hrm": "/hrm",
     "projects": "/projects",
     "accounts": "/accounts",
+    "subscriptions": "/subscriptions",
     "ticketing": "/ticketing",
     "stocks": "/stocks",
 }
@@ -51,8 +52,9 @@ DEFAULT_ERP_MODULES = [
     {"name": "HR Management", "slug": "hrm", "sort_order": 2},
     {"name": "Project Management", "slug": "projects", "sort_order": 3},
     {"name": "Accounts / ERP", "slug": "accounts", "sort_order": 4},
-    {"name": "Ticketing System", "slug": "ticketing", "sort_order": 5},
-    {"name": "Inventory", "slug": "stocks", "sort_order": 6},
+    {"name": "Subscriptions", "slug": "subscriptions", "sort_order": 5},
+    {"name": "Ticketing System", "slug": "ticketing", "sort_order": 6},
+    {"name": "Inventory", "slug": "stocks", "sort_order": 7},
 ]
 
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
@@ -62,6 +64,22 @@ BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
 SUBSCRIPTION_STATUS_OPTIONS = ("Active", "Expired", "Cancelled")
+ROLE_ACCESS_SECTION_KEYS = {
+    "dashboard",
+    "inbox",
+    "crm",
+    "hr",
+    "projects",
+    "accounts",
+    "subscriptions",
+    "ticketing",
+    "stocks",
+    "users",
+    "billing",
+    "plans",
+    "profile",
+}
+ROLE_ACCESS_LEVELS = {"No Access", "View", "Create/Edit", "Full Access"}
 
 
 
@@ -193,6 +211,29 @@ def _mask_secret(value: str):
     return f"{secret[:4]}{'*' * max(0, len(secret) - 8)}{secret[-4:]}"
 
 
+def _normalize_role_access_map(payload):
+    raw_map = payload if isinstance(payload, dict) else {}
+    normalized = {}
+    for raw_key, raw_record in raw_map.items():
+        key = str(raw_key or "").strip()
+        if not key or len(key) > 200:
+            continue
+        record = raw_record if isinstance(raw_record, dict) else {}
+        sections = record.get("sections") if isinstance(record.get("sections"), dict) else {}
+        normalized_sections = {}
+        for section_key in ROLE_ACCESS_SECTION_KEYS:
+            raw_level = str(sections.get(section_key) or "No Access").strip()
+            normalized_sections[section_key] = raw_level if raw_level in ROLE_ACCESS_LEVELS else "No Access"
+        normalized[key] = {
+            "sections": normalized_sections,
+            "can_export": bool(record.get("can_export")),
+            "can_delete": bool(record.get("can_delete")),
+            "attendance_self_service": bool(record.get("attendance_self_service")),
+            "remarks": str(record.get("remarks") or "").strip()[:500],
+        }
+    return normalized
+
+
 def _serialize_openai_settings(settings_obj: OrganizationSettings):
     return {
         "enabled": bool(settings_obj.business_autopilot_openai_enabled),
@@ -313,13 +354,13 @@ def _ensure_org_modules(org):
 def _default_plan_module_slugs(plan_name):
     key = str(plan_name or "").strip().lower()
     if "free" in key:
-        return ["crm", "hrm", "projects", "accounts"]
+        return ["crm", "hrm", "projects", "accounts", "subscriptions"]
     if "starter" in key:
-        return ["crm", "hrm", "projects", "accounts"]
+        return ["crm", "hrm", "projects", "accounts", "subscriptions"]
     if "growth" in key:
-        return ["crm", "hrm", "projects", "accounts", "ticketing", "stocks"]
+        return ["crm", "hrm", "projects", "accounts", "subscriptions", "ticketing", "stocks"]
     if "pro" in key:
-        return ["crm", "hrm", "projects", "accounts", "ticketing", "stocks"]
+        return ["crm", "hrm", "projects", "accounts", "subscriptions", "ticketing", "stocks"]
     return list(ERP_MODULE_SLUG_SET)
 
 
@@ -398,6 +439,9 @@ def _get_plan_erp_module_slugs(plan, subscription=None):
             for item in configured
             if str(item or "").strip().lower() in ERP_MODULE_SLUG_SET
         }
+        # Backward compatibility: subscriptions previously lived under Accounts.
+        if "accounts" in normalized:
+            normalized.add("subscriptions")
         if normalized:
             return normalized
     return set(_default_plan_module_slugs(plan.name))
@@ -1479,6 +1523,48 @@ def org_user_detail(request, membership_id: int):
             "employee_roles": _serialize_employee_roles(org),
             "departments": _serialize_departments(org),
             "can_manage_users": can_manage_users,
+        }
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def org_role_access(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False, "role_access_map": {}}, status=401)
+
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "role_access_map": {}})
+
+    can_manage_users = _can_manage_users(request.user)
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+
+    if request.method == "POST":
+        if not can_manage_users:
+            return JsonResponse({"detail": "forbidden"}, status=403)
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        role_access_map = payload.get("role_access_map", payload)
+        normalized_role_access_map = _normalize_role_access_map(role_access_map)
+        settings_obj.business_autopilot_role_access_map = normalized_role_access_map
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+    else:
+        normalized_role_access_map = _normalize_role_access_map(
+            settings_obj.business_autopilot_role_access_map or {}
+        )
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "organization": {
+                "id": org.id,
+                "name": org.name,
+                "company_key": org.company_key,
+            },
+            "can_manage_users": can_manage_users,
+            "role_access_map": normalized_role_access_map,
         }
     )
 

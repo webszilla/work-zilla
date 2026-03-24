@@ -179,16 +179,19 @@ function getErpPlanFeatures(plan) {
   const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
 
   const defaultsByTier = {
-    free: { crm: true, hrm: true, projects: true, accounts: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-    starter: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-    growth: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
-    pro: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
+    free: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+    starter: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+    growth: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
+    pro: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
   };
   const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
 
   const configuredModules = Array.isArray(features.erp_enabled_modules)
     ? features.erp_enabled_modules.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
     : null;
+  if (Array.isArray(configuredModules) && configuredModules.includes("accounts") && !configuredModules.includes("subscriptions")) {
+    configuredModules.push("subscriptions");
+  }
   const hasModule = (slug, fallback) => (configuredModules ? configuredModules.includes(slug) : fallback);
   const boolFrom = (keys, fallback) => {
     for (const key of keys) {
@@ -204,18 +207,14 @@ function getErpPlanFeatures(plan) {
     { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
     { text: "Project Management", ok: hasModule("projects", defaults.projects) },
     { text: "Accounts / ERP", ok: hasModule("accounts", defaults.accounts) },
+    { text: "Subscriptions Module", ok: hasModule("subscriptions", defaults.subscriptions) },
     { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
     { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
     { text: "Invoice & Billing", ok: boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
-    { text: "Expense Tracking", ok: boolFrom(["expense_tracking"], defaults.expense) },
     { text: "GST Ready (India)", ok: boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
-    { text: "Reports", ok: boolFrom(["reports", "basic_reports", "advanced_reports"], defaults.reports) },
     { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
-    { text: "Purchase Orders", ok: boolFrom(["purchase_orders"], defaults.purchase) },
     { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
-    { text: "API Access", ok: boolFrom(["api_access"], defaults.api) },
-    { text: "Custom Dashboards", ok: boolFrom(["custom_dashboards"], defaults.dashboards) },
-    { text: "Audit Logs", ok: boolFrom(["audit_logs"], defaults.audit) },
+    { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
     { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
   ];
   if (trialPro) {

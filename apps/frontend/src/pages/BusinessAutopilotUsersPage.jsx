@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
+import { HrManagementModule } from "./BusinessAutopilotModulePage.jsx";
 
 const defaultForm = {
   first_name: "",
@@ -32,6 +33,7 @@ const defaultEditForm = {
 };
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
+const USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
@@ -51,8 +53,9 @@ const ROLE_ACCESS_SECTIONS = [
   { key: "hr", label: "HR" },
   { key: "projects", label: "Projects" },
   { key: "accounts", label: "Accounts / ERP" },
+  { key: "subscriptions", label: "Subscriptions" },
   { key: "ticketing", label: "Ticketing" },
-  { key: "stocks", label: "Stocks" },
+  { key: "stocks", label: "Inventory" },
   { key: "users", label: "Users" },
   { key: "billing", label: "Billing" },
   { key: "plans", label: "Plans" },
@@ -377,6 +380,21 @@ function readSharedHrEmployees() {
   }
 }
 
+function writeBusinessAutopilotUserDirectory(users) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const rows = Array.isArray(users) ? users : [];
+  const normalized = rows
+    .map((row) => ({
+      email: String(row?.email || "").trim(),
+      employee_role: String(row?.employee_role || "").trim(),
+    }))
+    .filter((row) => row.email);
+  window.localStorage.setItem(USER_DIRECTORY_STORAGE_KEY, JSON.stringify(normalized));
+  window.dispatchEvent(new CustomEvent("wz:business-autopilot-user-directory-changed"));
+}
+
 function writeSharedHrEmployees(rows = []) {
   try {
     const nextData = { employees: Array.isArray(rows) ? rows : [] };
@@ -534,6 +552,8 @@ export default function BusinessAutopilotUsersPage() {
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
+  const [roleAccessSaving, setRoleAccessSaving] = useState(false);
+  const [roleAccessDirty, setRoleAccessDirty] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
   const [clientPage, setClientPage] = useState(1);
   const [vendorSearch, setVendorSearch] = useState("");
@@ -558,6 +578,7 @@ export default function BusinessAutopilotUsersPage() {
       const data = await apiFetch("/api/business-autopilot/users");
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
       setCanManageUsers(Boolean(data.can_manage_users));
@@ -567,11 +588,34 @@ export default function BusinessAutopilotUsersPage() {
     } catch (error) {
       setNotice(error?.message || "Unable to load users.");
       setUsers([]);
+      writeBusinessAutopilotUserDirectory([]);
       setEmployeeRoles([]);
       setDepartments([]);
       setCanManageUsers(false);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadRoleAccess() {
+    try {
+      const data = await apiFetch("/api/business-autopilot/role-access");
+      const nextMap = (data?.role_access_map && typeof data.role_access_map === "object" && !Array.isArray(data.role_access_map))
+        ? data.role_access_map
+        : {};
+      setRoleAccessMap(nextMap);
+      setRoleAccessDirty(false);
+      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextMap));
+    } catch {
+      try {
+        const raw = window.localStorage.getItem(ROLE_ACCESS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          setRoleAccessMap(parsed);
+        }
+      } catch {
+        // Ignore invalid local role access cache.
+      }
     }
   }
 
@@ -608,6 +652,10 @@ export default function BusinessAutopilotUsersPage() {
     if (!editForm.membership_id || savingEdit) {
       return;
     }
+    if (!String(editForm.phone_number_input || "").trim()) {
+      setNotice("Phone number is required.");
+      return;
+    }
     setSavingEdit(true);
     setNotice("");
     try {
@@ -627,6 +675,7 @@ export default function BusinessAutopilotUsersPage() {
       });
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
       const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
@@ -653,6 +702,7 @@ export default function BusinessAutopilotUsersPage() {
       });
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
       const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
@@ -679,21 +729,7 @@ export default function BusinessAutopilotUsersPage() {
 
   useEffect(() => {
     loadUsers();
-  }, []);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(ROLE_ACCESS_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        setRoleAccessMap(parsed);
-      }
-    } catch (_error) {
-      // Ignore invalid local role access cache.
-    }
+    loadRoleAccess();
   }, []);
 
   useEffect(() => {
@@ -752,6 +788,10 @@ export default function BusinessAutopilotUsersPage() {
     if (!canManageUsers || saving) {
       return;
     }
+    if (!String(form.phone_number_input || "").trim()) {
+      setNotice("Phone number is required.");
+      return;
+    }
     const basePayload = {
       ...form,
       name: buildDisplayName(form.first_name, form.last_name),
@@ -789,6 +829,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
       const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
@@ -1139,7 +1180,33 @@ export default function BusinessAutopilotUsersPage() {
         [selectedRoleAccessKey]: nextRecord,
       };
     });
-    setNotice("Role access settings saved locally.");
+    setRoleAccessDirty(true);
+  }
+
+  async function handleSaveRoleAccess() {
+    if (!canManageUsers || roleAccessSaving) {
+      return;
+    }
+    setRoleAccessSaving(true);
+    setNotice("");
+    try {
+      const data = await apiFetch("/api/business-autopilot/role-access", {
+        method: "POST",
+        body: JSON.stringify({ role_access_map: roleAccessMap }),
+      });
+      const nextMap = (data?.role_access_map && typeof data.role_access_map === "object" && !Array.isArray(data.role_access_map))
+        ? data.role_access_map
+        : {};
+      setRoleAccessMap(nextMap);
+      setRoleAccessDirty(false);
+      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextMap));
+      window.dispatchEvent(new CustomEvent("wz:business-autopilot-role-access-changed"));
+      setNotice("Role access settings saved.");
+    } catch (error) {
+      setNotice(error?.message || "Unable to save role access settings.");
+    } finally {
+      setRoleAccessSaving(false);
+    }
   }
 
   function resetClientForm() {
@@ -1812,6 +1879,13 @@ export default function BusinessAutopilotUsersPage() {
           </button>
           <button
             type="button"
+            className={`btn btn-sm ${activeTopTab === "create-employee" ? "btn-success" : "btn-outline-light"}`}
+            onClick={() => setActiveTopTab("create-employee")}
+          >
+            Employee
+          </button>
+          <button
+            type="button"
             className={`btn btn-sm ${activeTopTab === "role-access" ? "btn-success" : "btn-outline-light"}`}
             onClick={() => setActiveTopTab("role-access")}
           >
@@ -1836,7 +1910,9 @@ export default function BusinessAutopilotUsersPage() {
 
       {notice ? <div className="alert alert-info py-2 mb-0">{notice}</div> : null}
 
-      {activeTopTab === "users" ? (
+      {activeTopTab === "create-employee" ? (
+        <HrManagementModule embeddedEmployeeOnly />
+      ) : activeTopTab === "users" ? (
         <>
           {canManageUsers ? (
             <>
@@ -2137,6 +2213,7 @@ export default function BusinessAutopilotUsersPage() {
                             }
                             setForm((prev) => ({ ...prev, phone_number_input: value }));
                           }}
+                          required
                         />
                       </div>
                     </div>
@@ -2352,6 +2429,21 @@ export default function BusinessAutopilotUsersPage() {
                   <option key={item.key} value={item.key}>{item.label}</option>
                 ))}
               </select>
+            </div>
+            <div className="d-flex flex-column align-items-end gap-1">
+              <button
+                type="button"
+                className="btn btn-sm btn-success"
+                onClick={handleSaveRoleAccess}
+                disabled={!canManageUsers || roleAccessSaving || !roleAccessDirty}
+              >
+                {roleAccessSaving ? "Saving..." : "Save Access"}
+              </button>
+              {roleAccessDirty ? (
+                <div className="small text-warning">Unsaved changes</div>
+              ) : (
+                <div className="small text-secondary">Saved</div>
+              )}
             </div>
           </div>
 

@@ -7,6 +7,7 @@ urlpatterns = [
     path("modules", api_views.org_enabled_modules, name="business_autopilot_modules"),
     path("users", api_views.org_users, name="business_autopilot_users"),
     path("users/<int:membership_id>", api_views.org_user_detail, name="business_autopilot_user_detail"),
+    path("role-access", api_views.org_role_access, name="business_autopilot_role_access"),
     path("openai/settings", api_views.org_openai_settings, name="business_autopilot_openai_settings"),
     path("openai/test", api_views.org_openai_test, name="business_autopilot_openai_test"),
     path("openai/chat", api_views.org_openai_chat, name="business_autopilot_openai_chat"),

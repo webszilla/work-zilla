@@ -368,9 +368,7 @@
             "HR + Payroll Integration",
             "CRM Integration",
             "Automation Workflows",
-            "Custom Dashboards",
             "Advanced Role Permissions",
-            "Audit Logs",
             "Priority Support"
           ];
           if (roleBasedAccessEnabled) items.push("Role Based Access");
@@ -394,9 +392,7 @@
           const items = [
             "Basic Accounting",
             "Invoice & Billing",
-            "Expense Tracking",
             "GST Ready (India)",
-            "Basic Reports",
             "1 Organization",
             "Email Support"
           ];
@@ -408,12 +404,10 @@
           const items = [
             "Everything in Starter",
             "Inventory Management",
-            "Purchase Orders",
             "Vendor Management",
             "Project Accounting",
             "Multi-branch Support",
-            "Advanced Reports",
-            "API Access"
+            "Whatsapp & Open Ai API"
           ];
           if (roleBasedAccessEnabled) items.push("Role Based Access");
           if (configuredModules.length) items.push(...configuredModules);
@@ -574,15 +568,10 @@
         { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
         { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
         { text: "Invoice & Billing", ok: boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
-        { text: "Expense Tracking", ok: boolFrom(["expense_tracking"], defaults.expense) },
         { text: "GST Ready (India)", ok: boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
-        { text: "Reports", ok: boolFrom(["reports", "basic_reports", "advanced_reports"], defaults.reports) },
         { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
-        { text: "Purchase Orders", ok: boolFrom(["purchase_orders"], defaults.purchase) },
         { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
-        { text: "API Access", ok: boolFrom(["api_access"], defaults.api) },
-        { text: "Custom Dashboards", ok: boolFrom(["custom_dashboards"], defaults.dashboards) },
-        { text: "Audit Logs", ok: boolFrom(["audit_logs"], defaults.audit) },
+        { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
         { text: "Priority Support", ok: !!prioritySupportEnabled },
       ];
       if (trialPro) rows.push({ text: "2 Add-on Users Included (Trial)" });

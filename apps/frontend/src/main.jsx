@@ -8,9 +8,11 @@ import "./styles/admin-shell.css";
 import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
 import { loadRemoteSharedUiCss } from "./lib/sharedUi.js";
 import { bindGlobalEmailRealtimeValidation } from "./lib/emailRealtimeValidation.js";
+import { bindGlobalRequiredFieldValidation } from "./lib/requiredFieldValidation.js";
 
 loadRemoteSharedUiCss();
 bindGlobalEmailRealtimeValidation();
+bindGlobalRequiredFieldValidation();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

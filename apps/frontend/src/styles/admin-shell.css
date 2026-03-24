@@ -808,6 +808,13 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   gap: 12px;
 }
 
+.ba-assistant__dock {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .ba-assistant__toggle {
   display: inline-flex;
   align-items: center;
@@ -820,6 +827,19 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   color: #fff;
   font-weight: 700;
   box-shadow: 0 18px 40px rgba(var(--color-primary-rgb, 79, 70, 229), 0.32);
+}
+
+.ba-assistant__dismiss {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--wz-border-soft);
+  border-radius: 999px;
+  background: var(--wz-surface-3);
+  color: var(--color-text, #e5e7eb);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.18);
 }
 
 .ba-assistant__panel {
@@ -1070,6 +1090,11 @@ html[data-theme="light"] .ba-assistant__close {
   color: #0f172a;
 }
 
+html[data-theme="light"] .ba-assistant__dismiss {
+  color: #0f172a;
+  background: #ffffff;
+}
+
 html[data-theme="light"] .wz-profile-photo-card__fallback,
 html[data-theme="light"] .ba-assistant__user-avatar-fallback {
   color: #0f172a;
@@ -1083,6 +1108,10 @@ html[data-theme="light"] .ba-assistant__user-avatar-fallback {
   }
 
   .ba-assistant__toggle {
+    align-self: flex-end;
+  }
+
+  .ba-assistant__dock {
     align-self: flex-end;
   }
 

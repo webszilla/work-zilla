@@ -235,6 +235,7 @@ export default function BusinessAutopilotAssistantWidget({
   const [sending, setSending] = useState(false);
   const [historyDate, setHistoryDate] = useState(getTodayIso());
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const listRef = useRef(null);
   const todayIso = getTodayIso();
   const isViewingToday = historyDate === todayIso;
@@ -393,7 +394,7 @@ export default function BusinessAutopilotAssistantWidget({
     setShowHistoryPicker(false);
   }
 
-  if (!enabled || !isAdmin || settings.loading || !settings.enabled) {
+  if (!enabled || !isAdmin || settings.loading || !settings.enabled || dismissed) {
     return null;
   }
 
@@ -553,10 +554,23 @@ export default function BusinessAutopilotAssistantWidget({
           )}
         </div>
       ) : null}
-      <button type="button" className="ba-assistant__toggle" onClick={() => setOpen((prev) => !prev)}>
-        <AiAvatar emotion={open ? "explaining" : "neutral"} size={38} />
-        <span>AI Assistant</span>
-      </button>
+      {!open ? (
+        <div className="ba-assistant__dock">
+          <button
+            type="button"
+            className="ba-assistant__dismiss"
+            onClick={() => setDismissed(true)}
+            aria-label="Dismiss AI Assistant"
+            title="Dismiss AI Assistant"
+          >
+            <i className="bi bi-x-lg" aria-hidden="true" />
+          </button>
+          <button type="button" className="ba-assistant__toggle" onClick={() => setOpen((prev) => !prev)}>
+            <AiAvatar emotion={open ? "explaining" : "neutral"} size={38} />
+            <span>AI Assistant</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

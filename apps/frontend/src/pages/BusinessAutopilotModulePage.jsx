@@ -148,6 +148,20 @@ const MODULE_CONTENT = {
       "Vendor and purchase entries"
     ]
   },
+  subscriptions: {
+    title: "Subscriptions",
+    subtitle: "Create categories, plans, and subscription billing records.",
+    stats: [
+      { label: "Categories", value: "0" },
+      { label: "Sub Categories", value: "0" },
+      { label: "Subscriptions", value: "0" }
+    ],
+    sections: [
+      "Subscription categories",
+      "Sub category management",
+      "Subscription plans and billing"
+    ]
+  },
   ticketing: {
     title: "Ticketing System",
     subtitle: "Track support tickets, priorities, SLA, and team resolution workflows.",
@@ -217,8 +231,8 @@ const CRM_SECTION_CONFIG = {
       { key: "company", label: "Company", placeholder: "Company / Business name" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
-      { key: "assignType", label: "Assign To", type: "select", options: ["User", "Team"], defaultValue: "User" },
-      { key: "assignedUser", label: "User", type: "datalist", datalistSource: "erpUsers", placeholder: "Search user name" },
+      { key: "assignType", label: "Assign To", type: "select", options: ["Users", "Team"], defaultValue: "Users" },
+      { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
       { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
       { key: "stage", label: "Stage", type: "select", options: ["New", "Qualified", "Proposal"], defaultValue: "New" },
       { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Converted"], defaultValue: "Open" }
@@ -338,7 +352,7 @@ const CRM_SECTION_CONFIG = {
       { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
       { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: ["App Alert"] },
-      { key: "reminderDays", label: "Remind Before Days", type: "select", defaultValue: "" },
+      { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
       { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: "15" },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "Scheduled" }
     ]
@@ -347,8 +361,8 @@ const CRM_SECTION_CONFIG = {
 
 const DEFAULT_CRM_DATA = {
   leads: [
-    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phoneCountryCode: "+91", phone: "9876543210", assignType: "User", assignedUser: "GP Prakash", assignedTeam: "", assignedTo: "GP Prakash", createdBy: "GP Prakash", stage: "Qualified", status: "Open" },
-    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phoneCountryCode: "+91", phone: "9123456780", assignType: "Team", assignedUser: "", assignedTeam: "Sales Team", assignedTo: "Sales Team", createdBy: "GP Prakash", stage: "Proposal", status: "Open" }
+    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", phoneCountryCode: "+91", phone: "9876543210", assignType: "Users", assignedUser: ["GP Prakash"], assignedTeam: "", assignedTo: "GP Prakash", createdBy: "GP Prakash", stage: "Qualified", status: "Open" },
+    { id: "crm_l2", name: "Priya N", company: "North India Jewels", phoneCountryCode: "+91", phone: "9123456780", assignType: "Team", assignedUser: [], assignedTeam: "Sales Team", assignedTo: "Sales Team", createdBy: "GP Prakash", stage: "Proposal", status: "Open" }
   ],
   contacts: [
     { id: "crm_c1", name: "Ravi Kumar", company: "Ultra HD Prints", email: "ravi@uhdprints.example", phoneCountryCode: "+91", phone: "9876543210", tag: "Customer" },
@@ -1159,6 +1173,52 @@ function getCrmMeetingReminderMinuteLabel(value) {
   return CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => option.value === normalizedValue)?.label || normalizedValue;
 }
 
+function parseCrmMeetingReminderDayValues(reminderDays) {
+  const rawValues = Array.isArray(reminderDays)
+    ? reminderDays
+    : typeof reminderDays === "string"
+      ? reminderDays.split(",")
+      : reminderDays === null || reminderDays === undefined
+        ? []
+        : [reminderDays];
+  const normalized = rawValues
+    .map((item) => {
+      const value = String(item || "").trim();
+      if (!value) {
+        return "";
+      }
+      if (/^same day$/i.test(value)) {
+        return "0";
+      }
+      if (/^1\s*week$/i.test(value)) {
+        return "7";
+      }
+      const dayMatch = value.match(/^(\d+)\s*day/i);
+      if (dayMatch) {
+        return dayMatch[1];
+      }
+      return /^\d+$/.test(value) ? value : "";
+    })
+    .filter(Boolean)
+    .map((item) => String(Math.max(0, Number(item))));
+  return Array.from(new Set(normalized)).sort((a, b) => Number(a) - Number(b));
+}
+
+function formatCrmMeetingReminderDayLabel(dayCountValue, withBefore = false) {
+  const dayCount = Number(dayCountValue);
+  if (!Number.isFinite(dayCount) || dayCount < 0) {
+    return "";
+  }
+  if (dayCount === 0) {
+    return "Same day";
+  }
+  if (dayCount === 7) {
+    return withBefore ? "1 Week before" : "1 Week";
+  }
+  const base = `${dayCount} Day${dayCount > 1 ? "s" : ""}`;
+  return withBefore ? `${base} before` : base;
+}
+
 function parseCrmMeetingDateValue(dateValue) {
   const normalizedDate = String(dateValue || "").trim();
   if (!normalizedDate) {
@@ -1191,22 +1251,29 @@ function parseCrmMeetingDateValue(dateValue) {
 }
 
 function getCrmMeetingReminderDayOptions(dateValue) {
+  const buildOptions = (maxDays) => {
+    const safeMaxDays = Math.max(0, Number(maxDays || 0));
+    return Array.from({ length: safeMaxDays + 1 }, (_, index) => {
+      const dayCount = index;
+      return {
+        value: String(dayCount),
+        label: formatCrmMeetingReminderDayLabel(dayCount, false),
+      };
+    });
+  };
+
   const target = parseCrmMeetingDateValue(dateValue);
-  if (!target) return [];
+  if (!target) {
+    return buildOptions(7);
+  }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   target.setHours(0, 0, 0, 0);
   const diffDays = Math.floor((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
   if (diffDays < 0) {
-    return [];
+    return buildOptions(7);
   }
-  return Array.from({ length: diffDays + 1 }, (_, index) => {
-    const dayCount = index;
-    return {
-      value: String(dayCount),
-      label: dayCount === 0 ? "Same day" : `${dayCount} Day${dayCount > 1 ? "s" : ""}`,
-    };
-  });
+  return buildOptions(Math.min(Math.max(diffDays, 0), 7));
 }
 
 function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminderMinutes) {
@@ -1217,13 +1284,9 @@ function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminder
       .map((item) => item.trim())
       .filter(Boolean);
   const parts = [];
-  const dayCount = String(reminderDays || "").trim();
-  if (dayCount) {
-    if (dayCount === "0") {
-      parts.push("Same day");
-    } else {
-      parts.push(`${dayCount} Day${dayCount === "1" ? "" : "s"} before`);
-    }
+  const dayCounts = parseCrmMeetingReminderDayValues(reminderDays);
+  if (dayCounts.length) {
+    parts.push(dayCounts.map((dayCount) => formatCrmMeetingReminderDayLabel(dayCount, true)).filter(Boolean).join(", "));
   }
   const minuteLabel = getCrmMeetingReminderMinuteLabel(reminderMinutes);
   if (minuteLabel) {
@@ -1698,15 +1761,21 @@ function normalizeCrmData(value) {
 }
 
 function normalizeCrmLeadRecord(row = {}) {
-  const assignType = String(row.assignType || (row.assignedTeam ? "Team" : "User")).trim() || "User";
-  const assignedUser = String(row.assignedUser || (assignType.toLowerCase() === "user" ? row.assignedTo || "" : "")).trim();
+  const normalizedAssignType = String(row.assignType || "").trim().toLowerCase();
+  const assignType = normalizedAssignType === "team" ? "Team" : "Users";
+  const assignedUser = Array.isArray(row.assignedUser)
+    ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.assignedUser || (assignType.toLowerCase() !== "team" ? row.assignedTo || "" : ""))
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
   const assignedTeam = String(row.assignedTeam || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")).trim();
   return {
     ...row,
     assignType,
     assignedUser,
     assignedTeam,
-    assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser)).trim(),
+    assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser.join(", "))).trim(),
     createdBy: String(row.createdBy || row.owner || "").trim(),
   };
 }
@@ -4221,6 +4290,8 @@ function CrmOnePageModule() {
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
   const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
   const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
+  const [meetingReminderDaySearch, setMeetingReminderDaySearch] = useState("");
+  const [meetingReminderDaySearchOpen, setMeetingReminderDaySearchOpen] = useState(false);
   const [meetingEmployeeSearch, setMeetingEmployeeSearch] = useState("");
   const [meetingEmployeeSearchOpen, setMeetingEmployeeSearchOpen] = useState(false);
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
@@ -4331,6 +4402,8 @@ function CrmOnePageModule() {
       setMeetingCompanySearchOpen(false);
       setMeetingReminderChannelSearch("");
       setMeetingReminderChannelSearchOpen(false);
+      setMeetingReminderDaySearch("");
+      setMeetingReminderDaySearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4338,16 +4411,18 @@ function CrmOnePageModule() {
 
   useEffect(() => {
     const reminderDayOptions = getCrmMeetingReminderDayOptions(forms.meetings?.meetingDate);
-    const selectedReminderDay = String(forms.meetings?.reminderDays || "").trim();
-    if (!selectedReminderDay) {
+    const selectedReminderDays = parseCrmMeetingReminderDayValues(forms.meetings?.reminderDays);
+    if (!selectedReminderDays.length) {
       return;
     }
-    if (!reminderDayOptions.some((option) => option.value === selectedReminderDay)) {
+    const reminderDayOptionSet = new Set(reminderDayOptions.map((option) => option.value));
+    const nextReminderDays = selectedReminderDays.filter((value) => reminderDayOptionSet.has(value));
+    if (nextReminderDays.length !== selectedReminderDays.length) {
       setForms((prev) => ({
         ...prev,
         meetings: {
           ...prev.meetings,
-          reminderDays: "",
+          reminderDays: nextReminderDays,
         },
       }));
     }
@@ -4478,6 +4553,8 @@ function CrmOnePageModule() {
       setMeetingCompanySearchOpen(false);
       setMeetingReminderChannelSearch("");
       setMeetingReminderChannelSearchOpen(false);
+      setMeetingReminderDaySearch("");
+      setMeetingReminderDaySearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4534,6 +4611,8 @@ function CrmOnePageModule() {
       setMeetingCompanySearchOpen(false);
       setMeetingReminderChannelSearch("");
       setMeetingReminderChannelSearchOpen(false);
+      setMeetingReminderDaySearch("");
+      setMeetingReminderDaySearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4583,10 +4662,10 @@ function CrmOnePageModule() {
       return false;
     }
     if (sectionKey === "leads" && field.key === "assignedUser") {
-      return String(values?.assignType || "User").trim().toLowerCase() === "user";
+      return String(values?.assignType || "Users").trim().toLowerCase() !== "team";
     }
     if (sectionKey === "leads" && field.key === "assignedTeam") {
-      return String(values?.assignType || "User").trim().toLowerCase() === "team";
+      return String(values?.assignType || "Users").trim().toLowerCase() === "team";
     }
     return true;
   }
@@ -4682,10 +4761,10 @@ function CrmOnePageModule() {
       }
     });
     if (sectionKey === "leads") {
-      const assignType = String(payload.assignType || "User").trim();
+      const assignType = String(payload.assignType || "Users").trim();
       payload.assignedTo = assignType.toLowerCase() === "team"
         ? String(payload.assignedTeam || "").trim()
-        : String(payload.assignedUser || "").trim();
+        : (Array.isArray(payload.assignedUser) ? payload.assignedUser.join(", ") : String(payload.assignedUser || "").trim());
       payload.createdBy = String(currentUserName || "Current User").trim();
       payload = normalizeCrmLeadRecord(payload);
     }
@@ -4704,9 +4783,8 @@ function CrmOnePageModule() {
           .filter(Boolean);
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
       payload.owner = meetingOwners.join(", ");
-      payload.reminderSummary = `${reminderChannels.join(", ")} • ${payload.reminderMinutes} min before`;
       payload.reminderChannel = reminderChannels;
-      payload.reminderDays = String(payload.reminderDays || "").trim();
+      payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
     }
     if (sectionKey === "followUps") {
@@ -4799,13 +4877,24 @@ function CrmOnePageModule() {
     if (!normalizedValue) {
       return;
     }
-    setForms((prev) => ({
-      ...prev,
-      leads: {
-        ...prev.leads,
-        assignedUser: String(prev.leads?.assignedUser || "").trim() === normalizedValue ? "" : normalizedValue,
-      },
-    }));
+    setForms((prev) => {
+      const currentUsers = Array.isArray(prev.leads?.assignedUser)
+        ? prev.leads.assignedUser
+        : String(prev.leads?.assignedUser || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      const nextUsers = currentUsers.includes(normalizedValue)
+        ? currentUsers.filter((item) => item !== normalizedValue)
+        : [...currentUsers, normalizedValue];
+      return {
+        ...prev,
+        leads: {
+          ...prev.leads,
+          assignedUser: nextUsers,
+        },
+      };
+    });
   }
 
   function toggleFollowUpOwner(value) {
@@ -4866,6 +4955,26 @@ function CrmOnePageModule() {
         meetings: {
           ...prev.meetings,
           reminderChannel: nextChannels,
+        },
+      };
+    });
+  }
+
+  function toggleMeetingReminderDay(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentDays = parseCrmMeetingReminderDayValues(prev.meetings?.reminderDays);
+      const nextDays = currentDays.includes(normalizedValue)
+        ? currentDays.filter((item) => item !== normalizedValue)
+        : parseCrmMeetingReminderDayValues([...currentDays, normalizedValue]);
+      return {
+        ...prev,
+        meetings: {
+          ...prev.meetings,
+          reminderDays: nextDays,
         },
       };
     });
@@ -4958,9 +5067,18 @@ function CrmOnePageModule() {
                 .map((item) => item.trim())
                 .filter(Boolean);
               const reminderMeta = reminderSegments.slice(1).join(" • ").toLowerCase();
-              const reminderDayMatch = reminderMeta.match(/(\d+)\s*day/i);
-              if (reminderDayMatch) {
-                payload.reminderDays = reminderDayMatch[1];
+              const parsedReminderDays = [];
+              if (/\bsame day\b/i.test(reminderMeta)) {
+                parsedReminderDays.push("0");
+              }
+              if (/\b1\s*week\b/i.test(reminderMeta)) {
+                parsedReminderDays.push("7");
+              }
+              for (const match of reminderMeta.matchAll(/(\d+)\s*day/gi)) {
+                parsedReminderDays.push(match[1]);
+              }
+              if (parsedReminderDays.length) {
+                payload.reminderDays = parseCrmMeetingReminderDayValues(parsedReminderDays);
               }
               const reminderMinuteOption = CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => reminderMeta.includes(option.label.toLowerCase()));
               if (reminderMinuteOption) {
@@ -4985,7 +5103,7 @@ function CrmOnePageModule() {
               .map((item) => item.trim())
               .filter(Boolean);
           payload.reminderChannel = reminderChannels.length ? reminderChannels : defaultValues.reminderChannel;
-          payload.reminderDays = String(payload.reminderDays || "").trim();
+          payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
           payload.reminderSummary = payload.reminderSummary
             || buildCrmMeetingReminderSummary(payload.reminderChannel, payload.reminderDays, payload.reminderMinutes);
         }
@@ -5316,7 +5434,11 @@ function CrmOnePageModule() {
             }).slice(0, 6)
           : [];
         const selectedLeadAssignedUsers = sectionKey === "leads"
-          ? [String(formValues.assignedUser || "").trim()].filter(Boolean)
+          ? (
+              Array.isArray(formValues.assignedUser)
+                ? formValues.assignedUser
+                : String(formValues.assignedUser || "").split(",")
+            ).map((item) => String(item || "").trim()).filter(Boolean)
           : [];
         const filteredLeadAssignedUsers = sectionKey === "leads"
           ? crmDirectoryOptions.filter((item) => {
@@ -5361,6 +5483,9 @@ function CrmOnePageModule() {
             .map((item) => String(item || "").trim())
             .filter(Boolean)
           : [];
+        const selectedMeetingReminderDays = sectionKey === "meetings"
+          ? parseCrmMeetingReminderDayValues(formValues.reminderDays)
+          : [];
         const filteredMeetingReminderChannels = sectionKey === "meetings"
           ? CRM_MEETING_REMINDER_CHANNEL_OPTIONS.filter((option) => {
               const normalizedSearch = String(meetingReminderChannelSearch || "").trim().toLowerCase();
@@ -5372,6 +5497,15 @@ function CrmOnePageModule() {
           : [];
         const meetingReminderDayOptions = sectionKey === "meetings"
           ? getCrmMeetingReminderDayOptions(formValues.meetingDate)
+          : [];
+        const filteredMeetingReminderDayOptions = sectionKey === "meetings"
+          ? meetingReminderDayOptions.filter((option) => {
+              const normalizedSearch = String(meetingReminderDaySearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return option.label.toLowerCase().includes(normalizedSearch);
+            })
           : [];
         const selectedTeamMembers = sectionKey === "teams" && Array.isArray(formValues.members)
           ? formValues.members.map((item) => String(item || "").trim()).filter(Boolean)
@@ -5663,9 +5797,9 @@ function CrmOnePageModule() {
                         <Fragment key={`${sectionKey}-${field.key}`}>
                           {hasPhoneCountryCodeField && field.key === "phoneCountryCode"
                             ? null
-                            : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "User").trim().toLowerCase() !== "user"
+                            : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "Users").trim().toLowerCase() === "team"
                             ? null
-                            : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "User").trim().toLowerCase() !== "team"
+                            : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "Users").trim().toLowerCase() !== "team"
                             ? null
                             : (
                           <div
@@ -5872,7 +6006,7 @@ function CrmOnePageModule() {
                                         type="search"
                                         className="form-control"
                                         autoComplete="off"
-                                        placeholder="Search user name"
+                                        placeholder="Search users"
                                         value={leadAssignedUserSearch}
                                         onFocus={() => setLeadAssignedUserSearchOpen(true)}
                           onClick={() => setLeadAssignedUserSearchOpen(true)}
@@ -5892,7 +6026,11 @@ function CrmOnePageModule() {
                                                 type="button"
                                                 className="crm-inline-suggestions__item"
                                                 onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => toggleLeadAssignedUser(user.name)}
+                                                onClick={() => {
+                                                  toggleLeadAssignedUser(user.name);
+                                                  setLeadAssignedUserSearch("");
+                                                  setLeadAssignedUserSearchOpen(true);
+                                                }}
                                               >
                                                 <span className="d-flex align-items-start gap-2">
                                                   <input
@@ -6292,17 +6430,79 @@ function CrmOnePageModule() {
                               }
                               if (sectionKey === "meetings" && field.key === "reminderDays") {
                                 return (
-                                  <select
-                                    className="form-select"
-                                    value={formValues[field.key] || ""}
-                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                                    disabled={!meetingReminderDayOptions.length}
-                                  >
-                                    <option value="">{meetingReminderDayOptions.length ? "Select remind before days" : "Select meeting date first"}</option>
-                                    {meetingReminderDayOptions.map((option) => (
-                                      <option key={`meeting-reminder-day-${option.value}`} value={option.value}>{option.label}</option>
-                                    ))}
-                                  </select>
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search remind before days"
+                                        value={meetingReminderDaySearch}
+                                        onFocus={() => setMeetingReminderDaySearchOpen(true)}
+                                        onClick={() => setMeetingReminderDaySearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setMeetingReminderDaySearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setMeetingReminderDaySearch(event.target.value);
+                                          setMeetingReminderDaySearchOpen(true);
+                                        }}
+                                      />
+                                      {meetingReminderDaySearchOpen ? (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Remind Before Days</div>
+                                            {filteredMeetingReminderDayOptions.length ? filteredMeetingReminderDayOptions.map((option) => (
+                                              <button
+                                                key={`meeting-reminder-day-${option.value}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleMeetingReminderDay(option.value)}
+                                              >
+                                                <span className="d-flex align-items-center gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-0"
+                                                    checked={selectedMeetingReminderDays.includes(option.value)}
+                                                    readOnly
+                                                  />
+                                                  <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No reminder day options found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedMeetingReminderDays.length ? selectedMeetingReminderDays.map((value) => {
+                                        const optionLabel = meetingReminderDayOptions.find((option) => option.value === value)?.label
+                                          || formatCrmMeetingReminderDayLabel(value, false)
+                                          || value;
+                                        return (
+                                          <span
+                                            key={`meeting-selected-reminder-day-${value}`}
+                                            className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                                          >
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                                              aria-label={`Remove ${optionLabel}`}
+                                              onClick={() => toggleMeetingReminderDay(value)}
+                                            >
+                                              &times;
+                                            </button>
+                                            <span>{optionLabel}</span>
+                                          </span>
+                                        );
+                                      }) : (
+                                        <div className="small text-secondary">No reminder day selected yet.</div>
+                                      )}
+                                    </div>
+                                  </div>
                                 );
                               }
                               if (sectionKey === "meetings" && field.key === "reminderMinutes") {
@@ -6579,11 +6779,13 @@ function CrmOnePageModule() {
 	                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
 	                  }
                   if (sectionKey === "leads" && column.key === "assignedTo") {
-                    const assignedUsers = String(row.assignedUser || row.assignedTo || "")
-                      .split(",")
-                      .map((item) => item.trim())
-                      .filter(Boolean);
-                    if (String(row.assignType || "").trim().toLowerCase() === "user" && assignedUsers.length > 1) {
+                    const assignedUsers = Array.isArray(row.assignedUser)
+                      ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+                      : String(row.assignedUser || row.assignedTo || "")
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean);
+                    if (String(row.assignType || "").trim().toLowerCase() !== "team" && assignedUsers.length > 1) {
 	                      return (
 	                        <button
 	                          type="button"
@@ -8376,10 +8578,11 @@ function ProjectDetailPage() {
   );
 }
 
-function HrManagementModule() {
+export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
   const [hrFormNotice, setHrFormNotice] = useState("");
+  const [hrFieldErrors, setHrFieldErrors] = useState({});
   const [formValues, setFormValues] = useState({
     ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
     temporarySameAsPermanent: false,
@@ -8410,6 +8613,7 @@ function HrManagementModule() {
   });
   const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
   const [attendanceMonthFilter, setAttendanceMonthFilter] = useState("");
+  const showOnlyEmployeeForm = Boolean(embeddedEmployeeOnly);
 
   useEffect(() => {
     try {
@@ -8427,6 +8631,10 @@ function HrManagementModule() {
   }, []);
 
   useEffect(() => {
+    if (showOnlyEmployeeForm) {
+      setActiveTab("employees");
+      return undefined;
+    }
     const applyHashTab = () => {
       const rawHash = String(window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
       const tabByHash = {
@@ -8447,7 +8655,7 @@ function HrManagementModule() {
     return () => {
       window.removeEventListener("hashchange", applyHashTab);
     };
-  }, []);
+  }, [showOnlyEmployeeForm]);
 
   useEffect(() => {
     window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(moduleData));
@@ -8499,6 +8707,7 @@ function HrManagementModule() {
   useEffect(() => {
     setEditingId("");
     setHrFormNotice("");
+    setHrFieldErrors({});
     const next = buildEmptyValues(HR_TAB_CONFIG[activeTab].fields);
     if (activeTab === "employees") {
       next.temporarySameAsPermanent = false;
@@ -8835,9 +9044,20 @@ function HrManagementModule() {
     if (!isVisible) {
       return null;
     }
+    const isRequiredField = !field.optional;
+    const linkedPhoneNumberKey = activeTab === "employees" && field.type === "phoneCode"
+      ? (field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber")
+      : "";
+    const hasFieldError = Boolean(
+      hrFieldErrors[field.key]
+      || (linkedPhoneNumberKey && hrFieldErrors[linkedPhoneNumberKey])
+    );
     return (
       <div className={className} key={field.key}>
-        <label className="form-label small text-secondary mb-1">{field.label}</label>
+        <label className={`form-label small mb-1 ${hasFieldError ? "text-danger" : "text-secondary"}`}>
+          {field.label}
+          {isRequiredField ? " *" : ""}
+        </label>
         {activeTab === "attendance" && field.key === "employee" ? (
           <div className="position-relative">
             <input
@@ -8967,7 +9187,7 @@ function HrManagementModule() {
             />
             <input
               type="tel"
-              className="form-control hr-phone-input"
+              className={`form-control hr-phone-input ${hasFieldError ? "is-invalid" : ""}`}
               placeholder={
                 field.key === "secondaryContactCountryCode"
                   ? employeeFieldMap.get("secondaryContactNumber")?.placeholder || "Secondary mobile number"
@@ -9116,6 +9336,14 @@ function HrManagementModule() {
   }
 
   function onChangeField(fieldKey, nextValue) {
+    setHrFieldErrors((prev) => {
+      if (!prev[fieldKey]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[fieldKey];
+      return next;
+    });
     if (activeTab === "employees" && fieldKey === "name") {
       const { nextValues, matchedEmployeeId } = buildEmployeeFormValuesFromName(nextValue, formValues);
       setEditingId(matchedEmployeeId);
@@ -9167,6 +9395,7 @@ function HrManagementModule() {
   function onCancelEdit() {
     setEditingId("");
     setHrFormNotice("");
+    setHrFieldErrors({});
     const next = buildEmptyValues(config.fields);
     if (activeTab === "employees") {
       next.temporarySameAsPermanent = false;
@@ -9202,9 +9431,15 @@ function HrManagementModule() {
     });
     const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
     if (missingFields.length) {
+      const fieldErrorMap = {};
+      missingFields.forEach((field) => {
+        fieldErrorMap[field.key] = true;
+      });
+      setHrFieldErrors(fieldErrorMap);
       setHrFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
     }
+    setHrFieldErrors({});
     const payload = {};
     config.fields.forEach((field) => {
       payload[field.key] = String(formValues[field.key]).trim();
@@ -9456,28 +9691,30 @@ function HrManagementModule() {
 
   return (
     <div className="d-flex flex-column gap-3">
-      <div>
-        <h4 className="mb-2">HR</h4>
-        <p className="text-secondary mb-3">Handle employees, attendance, leave approvals, and payroll.</p>
-        <div className="d-flex flex-wrap gap-2">
-          {Object.entries(HR_TAB_CONFIG).map(([tabKey, tabValue]) => (
-            <button
-              key={tabKey}
-              type="button"
-              className={`btn btn-sm ${activeTab === tabKey ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => {
-                setActiveTab(tabKey);
-                const nextHash = String(tabKey || "").replace(/[A-Z]/g, (match) => match.toLowerCase());
-                window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${nextHash}`);
-              }}
-            >
-              {tabValue.label}
-            </button>
-          ))}
+      {!showOnlyEmployeeForm ? (
+        <div>
+          <h4 className="mb-2">HR</h4>
+          <p className="text-secondary mb-3">Handle employees, attendance, leave approvals, and payroll.</p>
+          <div className="d-flex flex-wrap gap-2">
+            {Object.entries(HR_TAB_CONFIG).map(([tabKey, tabValue]) => (
+              <button
+                key={tabKey}
+                type="button"
+                className={`btn btn-sm ${activeTab === tabKey ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => {
+                  setActiveTab(tabKey);
+                  const nextHash = String(tabKey || "").replace(/[A-Z]/g, (match) => match.toLowerCase());
+                  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${nextHash}`);
+                }}
+              >
+                {tabValue.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      {activeTab === "employees" ? (
+      {!showOnlyEmployeeForm && activeTab === "employees" ? (
         <div className="row g-3">
           {stats.map((item) => (
             <div className="col-12 col-md-4" key={item.label}>
@@ -9498,7 +9735,11 @@ function HrManagementModule() {
       ) : (
         <>
       <div className="card p-3">
-        <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
+        <h6 className="mb-3">
+          {editingId
+            ? `Edit ${config.itemLabel}`
+            : (showOnlyEmployeeForm && activeTab === "employees" ? config.itemLabel : `Create ${config.itemLabel}`)}
+        </h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           {hrFormNotice ? (
             <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
@@ -9547,6 +9788,7 @@ function HrManagementModule() {
                   "col-12 col-md-6 col-xl-3"
                 ))}
               </div>
+              <hr className="section-divider mt-1 mb-2" />
               <div className="row g-3">
                 <div className="col-12 col-xl-6">
                   <div className="h-100">
@@ -9637,7 +9879,7 @@ function HrManagementModule() {
         </form>
       </div>
 
-      {activeTab === "attendance" ? (
+      {!showOnlyEmployeeForm && activeTab === "attendance" ? (
         <div className="card p-3">
           <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <h6 className="mb-0">My Attendance (HR)</h6>
@@ -9705,97 +9947,99 @@ function HrManagementModule() {
         </div>
       ) : null}
 
-      <SearchablePaginatedTableCard
-        title={config.label}
-        badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : currentRows).length} items`}
-        rows={activeTab === "attendance" ? attendanceFilteredRows : currentRows}
-        columns={hrTableColumns}
-        withoutOuterCard={["attendance", "leaves", "payroll"].includes(activeTab)}
-        headerBottom={activeTab === "attendance" ? (
-          <div className="d-flex flex-wrap align-items-end gap-2">
-            <div>
-              <label className="form-label small text-secondary mb-1">Year</label>
-              <select
-                className="form-select form-select-sm"
-                value={attendanceYearFilter}
-                onChange={(e) => setAttendanceYearFilter(e.target.value)}
-                style={{ minWidth: "110px" }}
-              >
-                {attendanceYearOptions.map((year) => (
-                  <option key={`attendance-year-${year}`} value={year}>{year}</option>
-                ))}
-              </select>
+      {!showOnlyEmployeeForm || activeTab === "employees" ? (
+        <SearchablePaginatedTableCard
+          title={showOnlyEmployeeForm && activeTab === "employees" ? "Employee List" : config.label}
+          badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : currentRows).length} items`}
+          rows={activeTab === "attendance" ? attendanceFilteredRows : currentRows}
+          columns={hrTableColumns}
+          withoutOuterCard={["attendance", "leaves", "payroll"].includes(activeTab)}
+          headerBottom={activeTab === "attendance" ? (
+            <div className="d-flex flex-wrap align-items-end gap-2">
+              <div>
+                <label className="form-label small text-secondary mb-1">Year</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={attendanceYearFilter}
+                  onChange={(e) => setAttendanceYearFilter(e.target.value)}
+                  style={{ minWidth: "110px" }}
+                >
+                  {attendanceYearOptions.map((year) => (
+                    <option key={`attendance-year-${year}`} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label small text-secondary mb-1">Month</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={attendanceMonthFilter}
+                  onChange={(e) => setAttendanceMonthFilter(e.target.value)}
+                  style={{ minWidth: "120px" }}
+                >
+                  {attendanceMonthOptions.map((month) => (
+                    <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="form-label small text-secondary mb-1">Month</label>
-              <select
-                className="form-select form-select-sm"
-                value={attendanceMonthFilter}
-                onChange={(e) => setAttendanceMonthFilter(e.target.value)}
-                style={{ minWidth: "120px" }}
-              >
-                {attendanceMonthOptions.map((month) => (
-                  <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        ) : null}
-        actionHeaderStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
-        actionCellStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
-        searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-        noRowsText={`No ${config.label.toLowerCase()} yet.`}
-        searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-        renderCells={(row) => config.columns.map((column) => {
-          if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
-            return formatTimeToAmPm(row[column.key]);
-          }
-          if (activeTab === "attendance" && column.key === "workedHours") {
-            return row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
-          }
-          if (activeTab === "attendance" && column.key === "status") {
-            const status = String(row.status || "").trim();
-            if (status === "Permission" && String(row.permissionHours || "").trim()) {
-              return `Permission (${String(row.permissionHours).trim()} hrs)`;
+          ) : null}
+          actionHeaderStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+          actionCellStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+          searchPlaceholder={`Search ${config.label.toLowerCase()}`}
+          noRowsText={`No ${config.label.toLowerCase()} yet.`}
+          searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+          renderCells={(row) => config.columns.map((column) => {
+            if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
+              return formatTimeToAmPm(row[column.key]);
             }
-            return row.entryMode ? `${status || "-"}${row.entryMode ? ` (${row.entryMode})` : ""}` : (status || "-");
-          }
-          return row[column.key] || "-";
-        })}
-        renderActions={(row) => (
-          <div className="d-inline-flex gap-2 flex-nowrap">
-            {activeTab === "attendance" ? (() => {
-              const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
-              return (
-                <>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-outline-primary"}`}
-                    onClick={() => openAttendanceTaskModal(row)}
-                  >
-                    Task
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-outline-primary" : "btn-outline-secondary"}`}
-                    onClick={() => openAttendanceNotesModal(row)}
-                  >
-                    Notes
-                  </button>
-                </>
-              );
-            })() : null}
-            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
-              Edit
-            </button>
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
-              Delete
-            </button>
-          </div>
-        )}
-      />
+            if (activeTab === "attendance" && column.key === "workedHours") {
+              return row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
+            }
+            if (activeTab === "attendance" && column.key === "status") {
+              const status = String(row.status || "").trim();
+              if (status === "Permission" && String(row.permissionHours || "").trim()) {
+                return `Permission (${String(row.permissionHours).trim()} hrs)`;
+              }
+              return row.entryMode ? `${status || "-"}${row.entryMode ? ` (${row.entryMode})` : ""}` : (status || "-");
+            }
+            return row[column.key] || "-";
+          })}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2 flex-nowrap">
+              {activeTab === "attendance" ? (() => {
+                const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
+                return (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-outline-primary"}`}
+                      onClick={() => openAttendanceTaskModal(row)}
+                    >
+                      Task
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-outline-primary" : "btn-outline-secondary"}`}
+                      onClick={() => openAttendanceNotesModal(row)}
+                    >
+                      Notes
+                    </button>
+                  </>
+                );
+              })() : null}
+              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                Delete
+              </button>
+            </div>
+          )}
+        />
+      ) : null}
 
-      {activeTab === "attendance" && attendanceTaskModal.open ? (
+      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceTaskModal.open ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -9856,7 +10100,7 @@ function HrManagementModule() {
         </div>
       ) : null}
 
-      {activeTab === "attendance" && attendanceNotesModal.open ? (
+      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceNotesModal.open ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -10776,8 +11020,8 @@ function StocksManagementModule() {
   );
 }
 
-function AccountsErpModule({ initialTab = "overview" }) {
-  const [activeTab, setActiveTab] = useState(initialTab || "overview");
+function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false, headingTitle = "Accounts" }) {
+  const [activeTab, setActiveTab] = useState(subscriptionsOnly ? "subscriptions" : (initialTab || "overview"));
   const [overviewDocTab, setOverviewDocTab] = useState("invoice");
   const [moduleData, setModuleData] = useState(DEFAULT_ACCOUNTS_DATA);
   const [orgBillingCountry, setOrgBillingCountry] = useState("India");
@@ -10896,14 +11140,30 @@ function AccountsErpModule({ initialTab = "overview" }) {
     "subscriptions"
   ]);
 
+  const accountTabs = subscriptionsOnly
+    ? [{ key: "subscriptions", label: "Subscriptions" }]
+    : [
+        { key: "overview", label: "Overview" },
+        { key: "invoices", label: "Invoices" },
+        { key: "estimates", label: "Estimates" },
+        { key: "gst", label: taxUi.templatesLabel },
+        { key: "templates", label: "Billing Templates" },
+        { key: "items", label: "Items" },
+        { key: "customers", label: "Clients" },
+      ];
+
   useEffect(() => {
-    const nextTab = isValidAccountsTab.has(String(initialTab || "overview").trim().toLowerCase())
-      ? String(initialTab || "overview").trim().toLowerCase()
-      : "overview";
+    const nextTab = subscriptionsOnly
+      ? "subscriptions"
+      : (
+          isValidAccountsTab.has(String(initialTab || "overview").trim().toLowerCase())
+            ? String(initialTab || "overview").trim().toLowerCase()
+            : "overview"
+        );
     if (nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
-  }, [initialTab]);
+  }, [initialTab, subscriptionsOnly]);
 
   useEffect(() => {
     setAccountsFormNotice("");
@@ -12964,9 +13224,11 @@ function AccountsErpModule({ initialTab = "overview" }) {
         <div className="card p-3 text-secondary">Loading accounts workspace...</div>
       ) : null}
       <div>
-        <h4 className="mb-2">Accounts</h4>
+        <h4 className="mb-2">{headingTitle}</h4>
         <p className="text-secondary mb-3">
-          Complete billing workflow with GST templates, billing templates, estimates, invoices, and status updates.
+          {subscriptionsOnly
+            ? "Manage subscription categories, sub categories, and customer subscriptions in one place."
+            : "Complete billing workflow with GST templates, billing templates, estimates, invoices, and status updates."}
         </p>
         {accountsSyncError ? (
           <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -12974,16 +13236,7 @@ function AccountsErpModule({ initialTab = "overview" }) {
           </div>
         ) : null}
         <div className="d-flex flex-wrap gap-2">
-          {[
-            { key: "overview", label: "Overview" },
-            { key: "invoices", label: "Invoices" },
-            { key: "estimates", label: "Estimates" },
-            { key: "gst", label: taxUi.templatesLabel },
-            { key: "templates", label: "Billing Templates" },
-            { key: "items", label: "Items" },
-            { key: "customers", label: "Clients" },
-            { key: "subscriptions", label: "Subscriptions" }
-          ].map((tab) => (
+          {accountTabs.map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -14538,7 +14791,10 @@ export default function BusinessAutopilotModulePage({ moduleKey = "crm", title, 
     return <StocksManagementModule />;
   }
   if (moduleKey === "accounts") {
-    return <AccountsErpModule initialTab={initialTab} />;
+    return <AccountsErpModule initialTab={initialTab} headingTitle={heading} />;
+  }
+  if (moduleKey === "subscriptions") {
+    return <AccountsErpModule initialTab="subscriptions" subscriptionsOnly headingTitle={heading} />;
   }
 
   return <StandardModule heading={heading} moduleData={moduleData} />;
