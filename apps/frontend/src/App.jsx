@@ -392,6 +392,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isAdmin =
     state.profile?.role === "superadmin" ||
     state.profile?.role === "company_admin" ||
+    state.profile?.role === "org_admin" ||
     isSuperuser ||
     isHrView;
   const isDealer = state.profile?.role === "dealer";

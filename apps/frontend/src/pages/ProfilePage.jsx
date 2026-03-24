@@ -995,7 +995,9 @@ export default function ProfilePage() {
   const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
   const isOrgAdminProfile = normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin";
   const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
-  const isBusinessAutopilotOrgAdmin = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "company_admin";
+  const isBusinessAutopilotOrgAdmin =
+    currentProductSlug === "business-autopilot-erp" &&
+    (normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin");
   const recentActions = data.recent_actions || [];
   const profilePhoneDisplay = `${phoneCountry || ""} ${phoneNumber || ""}`.trim();
   const profilePhotoFallback = getProfilePhotoFallbackLabel(user);
