@@ -9463,6 +9463,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       payload.completedTasks = String(payload.completedTasks || "").trim();
       payload.taskNotes = String(payload.taskNotes || "").trim();
     }
+    const nextRowId = editingId || `${activeTab}_${Date.now()}`;
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
