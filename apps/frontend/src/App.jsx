@@ -80,7 +80,7 @@ import DigitalCardVisitorAnalyticsPage from "./pages/DigitalCardVisitorAnalytics
 import DigitalAutomationOverviewPage from "./pages/DigitalAutomationOverviewPage.jsx";
 import DigitalAutomationModulePage from "./pages/DigitalAutomationModulePage.jsx";
 import DigitalAutomationSubscriptionPage from "./pages/DigitalAutomationSubscriptionPage.jsx";
-import { ConfirmProvider } from "./components/ConfirmDialog.jsx";
+import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import BusinessAutopilotAssistantWidget from "./components/BusinessAutopilotAssistantWidget.jsx";
@@ -1948,6 +1948,99 @@ function ForceHtmlLoginRedirect() {
   );
 }
 
+function GlobalDeleteConfirmBridge() {
+  const confirm = useConfirm();
+
+  useEffect(() => {
+    const DELETE_CONFIRM_FLAG = "wzDeleteConfirmed";
+    const DELETE_CONFIRM_MESSAGE = "Are you sure you want to delete this item?";
+    const DELETE_CONFIRM_TITLE = "Confirm Delete";
+
+    const getActionElement = (target) => {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+      return target.closest("button, a, [role='button'], input[type='button'], input[type='submit']");
+    };
+
+    const getActionText = (el) => {
+      const text = el instanceof HTMLInputElement ? (el.value || "") : (el.textContent || "");
+      return [
+        text,
+        el.getAttribute("aria-label") || "",
+        el.getAttribute("title") || "",
+        el.getAttribute("data-action") || "",
+        el.className || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+    };
+
+    const isDeleteIntent = (el) => {
+      if (!(el instanceof HTMLElement)) {
+        return false;
+      }
+      if (el.hasAttribute("data-no-delete-confirm")) {
+        return false;
+      }
+      if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") {
+        return false;
+      }
+      const text = getActionText(el);
+      if (!text) {
+        return false;
+      }
+      return (
+        text.includes("delete")
+        || text.includes("remove")
+        || text.includes("btn-danger")
+        || text.includes("outline-danger")
+      );
+    };
+
+    const onGlobalDeleteClickCapture = (event) => {
+      const actionEl = getActionElement(event.target);
+      if (!actionEl || !isDeleteIntent(actionEl)) {
+        return;
+      }
+      if (actionEl.dataset[DELETE_CONFIRM_FLAG] === "true") {
+        delete actionEl.dataset[DELETE_CONFIRM_FLAG];
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+
+      window.setTimeout(async () => {
+        const confirmed = await confirm({
+          title: DELETE_CONFIRM_TITLE,
+          message: DELETE_CONFIRM_MESSAGE,
+          confirmText: "Yes",
+          cancelText: "No",
+          confirmVariant: "danger",
+        });
+        if (!confirmed) {
+          return;
+        }
+        actionEl.dataset[DELETE_CONFIRM_FLAG] = "true";
+        if (typeof actionEl.click === "function") {
+          actionEl.click();
+        }
+      }, 0);
+    };
+
+    document.addEventListener("click", onGlobalDeleteClickCapture, true);
+    return () => {
+      document.removeEventListener("click", onGlobalDeleteClickCapture, true);
+    };
+  }, [confirm]);
+
+  return null;
+}
+
 export default function App() {
   const [state, setState] = useState(emptyState);
 
@@ -2448,6 +2541,7 @@ export default function App() {
   return (
     <UploadAlertProvider>
       <ConfirmProvider>
+        <GlobalDeleteConfirmBridge />
         <BrowserRouter basename="/app">
           <BrandingShell getProductRoute={getProductRoute}>
             {state.loading ? (

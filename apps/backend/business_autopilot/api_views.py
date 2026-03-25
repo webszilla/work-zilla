@@ -1,5 +1,8 @@
 import calendar
 import json
+import logging
+import secrets
+import string
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -18,6 +21,7 @@ from reportlab.pdfgen import canvas
 from apps.backend.common_auth.models import User
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription
+from core.email_utils import send_templated_email
 
 from .models import (
     Module,
@@ -63,6 +67,7 @@ ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
+PUBLIC_LOGIN_URL = "https://getworkzilla.com/auth/login/"
 SUBSCRIPTION_STATUS_OPTIONS = ("Active", "Expired", "Cancelled")
 ROLE_ACCESS_SECTION_KEYS = {
     "dashboard",
@@ -80,11 +85,24 @@ ROLE_ACCESS_SECTION_KEYS = {
     "profile",
 }
 ROLE_ACCESS_LEVELS = {"No Access", "View", "Create/Edit", "Full Access"}
+logger = logging.getLogger(__name__)
+
+TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
+TEMP_PASSWORD_LENGTH = 10
 
 
 
 def _get_business_autopilot_product():
     return Product.objects.filter(slug=BUSINESS_AUTOPILOT_PRODUCT_SLUG).first()
+
+
+def _generate_temp_login_password(length: int = TEMP_PASSWORD_LENGTH):
+    safe_length = max(8, int(length or TEMP_PASSWORD_LENGTH))
+    password = "".join(secrets.choice(TEMP_PASSWORD_ALPHABET) for _ in range(safe_length - 2))
+    # Ensure at least one digit and one uppercase character.
+    password += secrets.choice(string.digits)
+    password += secrets.choice(string.ascii_uppercase)
+    return "".join(secrets.SystemRandom().sample(password, len(password)))
 
 
 def _get_business_autopilot_permission(role: str):
@@ -467,24 +485,12 @@ def _serialize_departments(org):
 
 def _serialize_org_users(org):
     _sync_business_autopilot_membership_access(org)
-    product = _get_business_autopilot_product()
-    assigned_user_ids = set()
-    if product:
-        assigned_user_ids = set(
-            UserProductAccess.objects
-            .filter(product=product)
-            .values_list("user_id", flat=True)
-        )
     memberships = (
         OrganizationUser.objects
         .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
         .select_related("user", "user__userprofile")
         .order_by("-id")
     )
-    if assigned_user_ids:
-        memberships = memberships.filter(user_id__in=assigned_user_ids)
-    else:
-        memberships = memberships.none()
     return [
         {
             "id": member.user_id,
@@ -505,6 +511,30 @@ def _serialize_org_users(org):
         }
         for member in memberships
     ]
+
+
+def _safe_serialize_org_users(org):
+    try:
+        return _serialize_org_users(org)
+    except (DatabaseError, OperationalError, IntegrityError):
+        logger.exception("Failed to serialize Business Autopilot users for org_id=%s", getattr(org, "id", None))
+        return []
+
+
+def _safe_serialize_employee_roles(org):
+    try:
+        return _serialize_employee_roles(org)
+    except (DatabaseError, OperationalError, IntegrityError):
+        logger.exception("Failed to serialize employee roles for org_id=%s", getattr(org, "id", None))
+        return []
+
+
+def _safe_serialize_departments(org):
+    try:
+        return _serialize_departments(org)
+    except (DatabaseError, OperationalError, IntegrityError):
+        logger.exception("Failed to serialize departments for org_id=%s", getattr(org, "id", None))
+        return []
 
 
 def _decimal_to_string(value, default="0.00"):
@@ -1257,6 +1287,13 @@ def org_users(request):
 
     can_manage_users = _can_manage_users(request.user)
 
+    created_user_credentials = None
+    credential_delivery = {
+        "is_new_user": False,
+        "email_sent": False,
+        "status": "not_applicable",
+    }
+
     if request.method == "POST":
         if not can_manage_users:
             return JsonResponse({"detail": "forbidden"}, status=403)
@@ -1307,6 +1344,8 @@ def org_users(request):
             return JsonResponse({"detail": "password_too_short"}, status=400)
         existing_user = User.objects.filter(email__iexact=email).first()
 
+        newly_created_user = False
+        plain_password_for_share = ""
         with transaction.atomic():
             if existing_user:
                 existing_profile = UserProfile.objects.filter(user=existing_user).first()
@@ -1362,6 +1401,8 @@ def org_users(request):
                         "phone_number": phone_number,
                     },
                 )
+                newly_created_user = True
+                plain_password_for_share = str(password or "")
 
             OrganizationUser.objects.update_or_create(
                 organization=org,
@@ -1375,7 +1416,33 @@ def org_users(request):
             )
             _grant_business_autopilot_access(user, request.user, role)
 
-    users = _serialize_org_users(org)
+        if newly_created_user:
+            login_url = PUBLIC_LOGIN_URL
+            created_user_credentials = {
+                "name": _get_org_user_display_name(user),
+                "email": str(user.email or "").strip(),
+                "password": plain_password_for_share,
+                "login_url": login_url,
+            }
+            mail_sent = send_templated_email(
+                user.email,
+                "Your Work Zilla login credentials",
+                "emails/business_autopilot_user_credentials.txt",
+                {
+                    "name": created_user_credentials["name"] or "User",
+                    "email": created_user_credentials["email"],
+                    "password": plain_password_for_share,
+                    "login_url": login_url,
+                    "organization_name": str(org.name or "").strip(),
+                },
+            )
+            credential_delivery = {
+                "is_new_user": True,
+                "email_sent": bool(mail_sent),
+                "status": "sent" if mail_sent else "failed",
+            }
+
+    users = _safe_serialize_org_users(org)
     return JsonResponse(
         {
             "authenticated": True,
@@ -1385,9 +1452,11 @@ def org_users(request):
                 "company_key": org.company_key,
             },
             "users": users,
-            "employee_roles": _serialize_employee_roles(org),
-            "departments": _serialize_departments(org),
+            "employee_roles": _safe_serialize_employee_roles(org),
+            "departments": _safe_serialize_departments(org),
             "can_manage_users": can_manage_users,
+            "created_user_credentials": created_user_credentials,
+            "credential_delivery": credential_delivery,
         }
     )
 
@@ -1415,9 +1484,9 @@ def org_user_detail(request, membership_id: int):
         return JsonResponse(
             {
                 "authenticated": True,
-                "users": _serialize_org_users(org),
-                "employee_roles": _serialize_employee_roles(org),
-                "departments": _serialize_departments(org),
+                "users": _safe_serialize_org_users(org),
+                "employee_roles": _safe_serialize_employee_roles(org),
+                "departments": _safe_serialize_departments(org),
                 "can_manage_users": can_manage_users,
             }
         )
@@ -1519,10 +1588,66 @@ def org_user_detail(request, membership_id: int):
     return JsonResponse(
         {
             "authenticated": True,
-            "users": _serialize_org_users(org),
-            "employee_roles": _serialize_employee_roles(org),
-            "departments": _serialize_departments(org),
+            "users": _safe_serialize_org_users(org),
+            "employee_roles": _safe_serialize_employee_roles(org),
+            "departments": _safe_serialize_departments(org),
             "can_manage_users": can_manage_users,
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def org_user_resend_credentials(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": []})
+
+    can_manage_users = _can_manage_users(request.user)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+
+    user = membership.user
+    email = str(user.email or "").strip()
+    if not email:
+        return JsonResponse({"detail": "email_required"}, status=400)
+
+    temp_password = _generate_temp_login_password()
+    user.set_password(temp_password)
+    user.save(update_fields=["password"])
+
+    login_url = PUBLIC_LOGIN_URL
+    credentials = {
+        "name": _get_org_user_display_name(user),
+        "email": email,
+        "password": temp_password,
+        "login_url": login_url,
+    }
+    mail_sent = send_templated_email(
+        email,
+        "Your Work Zilla login credentials",
+        "emails/business_autopilot_user_credentials.txt",
+        {
+            "name": credentials["name"] or "User",
+            "email": credentials["email"],
+            "password": temp_password,
+            "login_url": login_url,
+            "organization_name": str(org.name or "").strip(),
+        },
+    )
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "credentials": credentials,
+            "email_sent": bool(mail_sent),
+            "status": "sent" if mail_sent else "failed",
         }
     )
 

@@ -85,7 +85,7 @@ const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "fatherName", label: "Father Name" },
   { key: "motherName", label: "Mother Name" },
   { key: "maritalStatus", label: "Marital Status" },
-  { key: "wifeName", label: "Wife Name" },
+  { key: "wifeName", label: "Spouse Name" },
   { key: "contactCountryCode", label: "Contact Country Code" },
   { key: "contactNumber", label: "Contact Number" },
   { key: "secondaryContactCountryCode", label: "Secondary Contact Country Code" },
@@ -104,12 +104,43 @@ const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "sourceUserEmail", label: "Linked User Email" },
 ];
 
+function buildCredentialShareText(credentials = {}) {
+  const lines = [
+    "Work Zilla Login Credentials",
+    `Name: ${String(credentials.name || "-").trim()}`,
+    `Email: ${String(credentials.email || "-").trim()}`,
+    `Password: ${String(credentials.password || "-").trim()}`,
+    `Login URL: ${String(credentials.login_url || "-").trim()}`,
+  ];
+  return lines.join("\n");
+}
+
 function limitedInput(fieldKey, value) {
   return clampBusinessAutopilotText(fieldKey, value, { isTextarea: false });
 }
 
 function limitedTextarea(fieldKey, value) {
   return clampBusinessAutopilotText(fieldKey, value, { isTextarea: true });
+}
+
+function evaluatePasswordStrength(value) {
+  const raw = String(value || "");
+  let score = 0;
+  if (raw.length >= 8) score += 1;
+  if (/[A-Z]/.test(raw)) score += 1;
+  if (/[a-z]/.test(raw)) score += 1;
+  if (/[0-9]/.test(raw)) score += 1;
+  if (/[^A-Za-z0-9]/.test(raw)) score += 1;
+  return score;
+}
+
+function getPasswordStrengthMeta(score) {
+  if (score >= 5) return { label: "Very strong", color: "#16a34a", width: 100 };
+  if (score >= 4) return { label: "Strong", color: "#22c55e", width: 80 };
+  if (score >= 3) return { label: "Medium", color: "#eab308", width: 60 };
+  if (score >= 2) return { label: "Weak", color: "#f97316", width: 40 };
+  if (score >= 1) return { label: "Too weak", color: "#ef4444", width: 20 };
+  return { label: "Too weak", color: "#ef4444", width: 0 };
 }
 
 function createEmptySharedPartyForm() {
@@ -558,6 +589,7 @@ export default function BusinessAutopilotUsersPage() {
   const [editForm, setEditForm] = useState(defaultEditForm);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingMembershipId, setDeletingMembershipId] = useState("");
+  const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
@@ -571,6 +603,13 @@ export default function BusinessAutopilotUsersPage() {
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
+  const [credentialModal, setCredentialModal] = useState({
+    open: false,
+    credentials: null,
+    emailSent: false,
+    emailStatus: "not_applicable",
+    copyNotice: "",
+  });
   const [clientForm, setClientForm] = useState(() => createEmptySharedPartyForm());
   const [editingClientId, setEditingClientId] = useState("");
   const [vendorForm, setVendorForm] = useState(() => createEmptySharedPartyForm());
@@ -578,6 +617,7 @@ export default function BusinessAutopilotUsersPage() {
   const clientImportInputRef = useRef(null);
   const vendorImportInputRef = useRef(null);
   const userFormRef = useRef(null);
+  const createPasswordInputRef = useRef(null);
   const pageSize = 5;
 
   async function loadUsers() {
@@ -728,6 +768,49 @@ export default function BusinessAutopilotUsersPage() {
     }
   }
 
+  async function handleResendCredentials(user) {
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || sendingCredentialMembershipId) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "Email login details again to this user? The password will be reset and changed. Do you want to continue?"
+    );
+    if (!confirmed) {
+      setNotice("Credentials resend cancelled.");
+      return;
+    }
+    setSendingCredentialMembershipId(membershipId);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/resend-credentials`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      const credentials = data?.credentials || null;
+      const emailSent = Boolean(data?.email_sent);
+      const emailStatus = String(data?.status || "not_applicable");
+      if (credentials?.email && credentials?.password) {
+        setCredentialModal({
+          open: true,
+          credentials,
+          emailSent,
+          emailStatus,
+          copyNotice: "",
+        });
+      }
+      setNotice(
+        emailSent
+          ? "Login credentials sent to user email."
+          : "Email sending failed. Credentials generated, please copy and share manually."
+      );
+    } catch (error) {
+      setNotice(error?.message || "Unable to send credentials email.");
+    } finally {
+      setSendingCredentialMembershipId("");
+    }
+  }
+
   function openViewUser(user) {
     setViewUserModal({
       open: true,
@@ -845,7 +928,24 @@ export default function BusinessAutopilotUsersPage() {
       setHrEmployees(syncedHrEmployees);
       writeSharedHrEmployees(syncedHrEmployees);
       setForm(defaultForm);
-      setNotice("User created successfully.");
+      const createdCredentials = data?.created_user_credentials || null;
+      const credentialDelivery = data?.credential_delivery || {};
+      if (createdCredentials?.email && createdCredentials?.password) {
+        setCredentialModal({
+          open: true,
+          credentials: createdCredentials,
+          emailSent: Boolean(credentialDelivery.email_sent),
+          emailStatus: String(credentialDelivery.status || "not_applicable"),
+          copyNotice: "",
+        });
+        setNotice(
+          credentialDelivery?.email_sent
+            ? "User created successfully. Login credentials email sent."
+            : "User created successfully. Email sending failed, please copy and share credentials manually."
+        );
+      } else {
+        setNotice("User created successfully.");
+      }
     } catch (error) {
       setNotice(error?.message || "Unable to create user.");
     } finally {
@@ -914,6 +1014,31 @@ export default function BusinessAutopilotUsersPage() {
       setNotice(error?.message || "Unable to create department.");
     } finally {
       setSavingDepartment(false);
+    }
+  }
+
+  async function handleCopyCredentials() {
+    if (!credentialModal.credentials) {
+      return;
+    }
+    const shareText = buildCredentialShareText(credentialModal.credentials);
+    try {
+      if (navigator?.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(shareText);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = shareText;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCredentialModal((prev) => ({ ...prev, copyNotice: "Credentials copied." }));
+    } catch {
+      setCredentialModal((prev) => ({ ...prev, copyNotice: "Unable to copy automatically. Please copy manually." }));
     }
   }
 
@@ -1107,6 +1232,29 @@ export default function BusinessAutopilotUsersPage() {
     return Array.from(unique.values());
   }, [employeeRoles]);
   const isEditingUser = Boolean(editForm.membership_id);
+  const createPasswordStrength = useMemo(() => {
+    const score = evaluatePasswordStrength(form.password);
+    return {
+      score,
+      ...getPasswordStrengthMeta(score),
+    };
+  }, [form.password]);
+
+  useEffect(() => {
+    const input = createPasswordInputRef.current;
+    if (!input) {
+      return;
+    }
+    if (isEditingUser || !String(form.password || "").trim()) {
+      input.setCustomValidity("");
+      return;
+    }
+    if (createPasswordStrength.score < 4) {
+      input.setCustomValidity("Use a strong password to continue.");
+      return;
+    }
+    input.setCustomValidity("");
+  }, [createPasswordStrength.score, form.password, isEditingUser]);
 
   useEffect(() => {
     if (roleAccessRoleOptions.some((item) => item.key === selectedRoleAccessKey)) {
@@ -1928,105 +2076,7 @@ export default function BusinessAutopilotUsersPage() {
               <div className="row g-3">
                 <div className="col-12 col-xl-6">
                   <div className="card p-3 h-100">
-                    <h6 className="mb-3">Employee Role Master</h6>
-                    <form className="row g-2" onSubmit={handleCreateEmployeeRole}>
-                      <div className="col-12 col-md-8">
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="Create Employee Role (e.g. Accountant)"
-                          value={newEmployeeRole}
-                          maxLength={getBusinessAutopilotMaxLength("employee_role")}
-                          onChange={(event) => setNewEmployeeRole(limitedInput("employee_role", event.target.value))}
-                        />
-                      </div>
-                <div className="col-12 col-md-4 d-grid">
-                  <button type="submit" className="btn btn-outline-success" disabled={savingEmployeeRole}>
-                    {savingEmployeeRole ? "Adding..." : "Add Role"}
-                  </button>
-                </div>
-              </form>
-              <hr className="my-3" />
-              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
-                <span className="badge bg-secondary">{filteredEmployeeRoles.length} items</span>
-                <div className="table-search">
-                  <i className="bi bi-search" aria-hidden="true" />
-                  <input
-                    type="search"
-                    className="form-control form-control-sm"
-                    placeholder="Search roles"
-                    value={employeeRoleSearch}
-                    onChange={(event) => setEmployeeRoleSearch(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="table-responsive">
-                <table className="table table-dark table-hover align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Role Name</th>
-                      <th className="text-end">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedEmployeeRoles.length ? (
-                      paginatedEmployeeRoles.map((item) => (
-                        <tr key={`employee-role-${item.id}`}>
-                          <td>
-                            {editingEmployeeRoleId === String(item.id) ? (
-                              <input
-                                type="text"
-                                className="form-control form-control-sm"
-                                value={editingEmployeeRoleName}
-                                maxLength={getBusinessAutopilotMaxLength("employee_role")}
-                                onChange={(event) => setEditingEmployeeRoleName(limitedInput("employee_role", event.target.value))}
-                              />
-                            ) : (
-                              item.name
-                            )}
-                          </td>
-                          <td className="text-end">
-                            <div className="d-inline-flex gap-2">
-                              {editingEmployeeRoleId === String(item.id) ? (
-                                <>
-                                  <button type="button" className="btn btn-sm btn-success" disabled={savingEmployeeRoleRowId === String(item.id)} onClick={() => handleUpdateEmployeeRole(item.id)}>
-                                    {savingEmployeeRoleRowId === String(item.id) ? "Saving..." : "Save"}
-                                  </button>
-                                  <button type="button" className="btn btn-sm btn-outline-light" onClick={cancelEditEmployeeRole}>
-                                    Cancel
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => startEditEmployeeRole(item)}>
-                                    Edit
-                                  </button>
-                                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={deletingEmployeeRoleId === String(item.id)} onClick={() => handleDeleteEmployeeRole(item.id)}>
-                                    {deletingEmployeeRoleId === String(item.id) ? "Deleting..." : "Delete"}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr><td colSpan={2}>No employee roles found.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
-                <div className="small text-secondary">
-                  Showing {employeeRoleStartIndex} to {employeeRoleEndIndex} of {filteredEmployeeRoles.length} entries
-                </div>
-                <TablePagination page={normalizedEmployeeRolePage} totalPages={totalEmployeeRolePages} onPageChange={setEmployeeRolePage} />
-              </div>
-            </div>
-          </div>
-                <div className="col-12 col-xl-6">
-                  <div className="card p-3 h-100">
-                    <h6 className="mb-3">Department Master</h6>
+                    <h6 className="mb-3">Create Department</h6>
                     <form className="row g-2" onSubmit={handleCreateDepartment}>
                       <div className="col-12 col-md-8">
                         <input
@@ -2040,7 +2090,7 @@ export default function BusinessAutopilotUsersPage() {
                       </div>
                 <div className="col-12 col-md-4 d-grid">
                   <button type="submit" className="btn btn-outline-success" disabled={savingDepartment}>
-                    {savingDepartment ? "Adding..." : "Add Department"}
+                    {savingDepartment ? "Adding..." : "Create Department"}
                   </button>
                 </div>
               </form>
@@ -2122,13 +2172,111 @@ export default function BusinessAutopilotUsersPage() {
               </div>
             </div>
           </div>
+                <div className="col-12 col-xl-6">
+                  <div className="card p-3 h-100">
+                    <h6 className="mb-3">Create Employee Role</h6>
+                    <form className="row g-2" onSubmit={handleCreateEmployeeRole}>
+                      <div className="col-12 col-md-8">
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="Create Employee Role (e.g. Accountant)"
+                          value={newEmployeeRole}
+                          maxLength={getBusinessAutopilotMaxLength("employee_role")}
+                          onChange={(event) => setNewEmployeeRole(limitedInput("employee_role", event.target.value))}
+                        />
+                      </div>
+                <div className="col-12 col-md-4 d-grid">
+                  <button type="submit" className="btn btn-outline-success" disabled={savingEmployeeRole}>
+                    {savingEmployeeRole ? "Adding..." : "Create Role"}
+                  </button>
+                </div>
+              </form>
+              <hr className="my-3" />
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3 mb-2">
+                <span className="badge bg-secondary">{filteredEmployeeRoles.length} items</span>
+                <div className="table-search">
+                  <i className="bi bi-search" aria-hidden="true" />
+                  <input
+                    type="search"
+                    className="form-control form-control-sm"
+                    placeholder="Search roles"
+                    value={employeeRoleSearch}
+                    onChange={(event) => setEmployeeRoleSearch(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-dark table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Role Name</th>
+                      <th className="text-end">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedEmployeeRoles.length ? (
+                      paginatedEmployeeRoles.map((item) => (
+                        <tr key={`employee-role-${item.id}`}>
+                          <td>
+                            {editingEmployeeRoleId === String(item.id) ? (
+                              <input
+                                type="text"
+                                className="form-control form-control-sm"
+                                value={editingEmployeeRoleName}
+                                maxLength={getBusinessAutopilotMaxLength("employee_role")}
+                                onChange={(event) => setEditingEmployeeRoleName(limitedInput("employee_role", event.target.value))}
+                              />
+                            ) : (
+                              item.name
+                            )}
+                          </td>
+                          <td className="text-end">
+                            <div className="d-inline-flex gap-2">
+                              {editingEmployeeRoleId === String(item.id) ? (
+                                <>
+                                  <button type="button" className="btn btn-sm btn-success" disabled={savingEmployeeRoleRowId === String(item.id)} onClick={() => handleUpdateEmployeeRole(item.id)}>
+                                    {savingEmployeeRoleRowId === String(item.id) ? "Saving..." : "Save"}
+                                  </button>
+                                  <button type="button" className="btn btn-sm btn-outline-light" onClick={cancelEditEmployeeRole}>
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => startEditEmployeeRole(item)}>
+                                    Edit
+                                  </button>
+                                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={deletingEmployeeRoleId === String(item.id)} onClick={() => handleDeleteEmployeeRole(item.id)}>
+                                    {deletingEmployeeRoleId === String(item.id) ? "Deleting..." : "Delete"}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={2}>No employee roles found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+                <div className="small text-secondary">
+                  Showing {employeeRoleStartIndex} to {employeeRoleEndIndex} of {filteredEmployeeRoles.length} entries
+                </div>
+                <TablePagination page={normalizedEmployeeRolePage} totalPages={totalEmployeeRolePages} onPageChange={setEmployeeRolePage} />
+              </div>
+            </div>
+          </div>
               </div>
 
               <div className="card p-3">
                 <h6 className="mb-3">Create User</h6>
                 <form ref={userFormRef} className="d-flex flex-column gap-3" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
                   <div className="row g-2">
-                    <div className="col-12 col-md-6 col-xl-3">
+                    <div className="col-12 col-md-6 col-xl-2">
                       <input
                         type="text"
                         className="form-control"
@@ -2146,7 +2294,7 @@ export default function BusinessAutopilotUsersPage() {
                         required
                       />
                     </div>
-                    <div className="col-12 col-md-6 col-xl-3">
+                    <div className="col-12 col-md-6 col-xl-2">
                       <input
                         type="text"
                         className="form-control"
@@ -2163,7 +2311,7 @@ export default function BusinessAutopilotUsersPage() {
                         }}
                       />
                     </div>
-                    <div className="col-12 col-xl-4">
+                    <div className="col-12 col-md-6 col-xl-4">
                       <input
                         type="email"
                         className="form-control"
@@ -2180,58 +2328,6 @@ export default function BusinessAutopilotUsersPage() {
                         }}
                         required
                       />
-                    </div>
-                    <div className="col-12 col-md-6 col-xl-2">
-                      <input
-                        type="password"
-                        className="form-control"
-                        placeholder="Password"
-                        value={isEditingUser ? editForm.password : form.password}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          if (isEditingUser) {
-                            setEditForm((prev) => ({ ...prev, password: value }));
-                            return;
-                          }
-                          setForm((prev) => ({ ...prev, password: value }));
-                        }}
-                        minLength={6}
-                        required={!isEditingUser}
-                      />
-                    </div>
-                  </div>
-                  <div className="row g-2">
-                    <div className="col-12 col-md-6 col-xl-4">
-                      <div className="input-group">
-                        <PhoneCountryCodePicker
-                          value={isEditingUser ? editForm.phone_country_code : form.phone_country_code}
-                          onChange={(code) => {
-                            if (isEditingUser) {
-                              setEditForm((prev) => ({ ...prev, phone_country_code: code }));
-                              return;
-                            }
-                            setForm((prev) => ({ ...prev, phone_country_code: code }));
-                          }}
-                          options={DIAL_COUNTRY_PICKER_OPTIONS}
-                          style={{ maxWidth: "120px" }}
-                          ariaLabel="User phone country code"
-                        />
-                        <input
-                          type="tel"
-                          className="form-control"
-                          placeholder="Phone Number"
-                          value={isEditingUser ? editForm.phone_number_input : form.phone_number_input}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            if (isEditingUser) {
-                              setEditForm((prev) => ({ ...prev, phone_number_input: value }));
-                              return;
-                            }
-                            setForm((prev) => ({ ...prev, phone_number_input: value }));
-                          }}
-                          required
-                        />
-                      </div>
                     </div>
                     <div className="col-12 col-md-6 col-xl-2">
                       <select
@@ -2267,8 +2363,88 @@ export default function BusinessAutopilotUsersPage() {
                         {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                       </select>
                     </div>
-                    <div className="col-12 col-xl-4">
-                      <div className="d-grid d-xl-flex gap-2 h-100">
+                  </div>
+                  <div className="row g-2">
+                    <div className="col-12 col-md-6 col-xl-4">
+                      <div className="input-group">
+                        <PhoneCountryCodePicker
+                          value={isEditingUser ? editForm.phone_country_code : form.phone_country_code}
+                          onChange={(code) => {
+                            if (isEditingUser) {
+                              setEditForm((prev) => ({ ...prev, phone_country_code: code }));
+                              return;
+                            }
+                            setForm((prev) => ({ ...prev, phone_country_code: code }));
+                          }}
+                          options={DIAL_COUNTRY_PICKER_OPTIONS}
+                          style={{ maxWidth: "120px" }}
+                          ariaLabel="User phone country code"
+                        />
+                        <input
+                          type="tel"
+                          className="form-control"
+                          placeholder="Phone Number"
+                          value={isEditingUser ? editForm.phone_number_input : form.phone_number_input}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (isEditingUser) {
+                              setEditForm((prev) => ({ ...prev, phone_number_input: value }));
+                              return;
+                            }
+                            setForm((prev) => ({ ...prev, phone_number_input: value }));
+                          }}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-4">
+                      <input
+                        type="password"
+                        ref={createPasswordInputRef}
+                        className="form-control"
+                        placeholder="Password"
+                        value={isEditingUser ? editForm.password : form.password}
+                        maxLength={getBusinessAutopilotMaxLength("password")}
+                        onChange={(event) => {
+                          const value = limitedInput("password", event.target.value);
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, password: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, password: value }));
+                        }}
+                        minLength={6}
+                        required={!isEditingUser}
+                      />
+                      {!isEditingUser ? (
+                        <div className="mt-2">
+                          <div
+                            style={{
+                              width: "100%",
+                              height: "6px",
+                              borderRadius: "999px",
+                              background: "rgba(148, 163, 184, 0.22)",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: "block",
+                                height: "100%",
+                                width: `${createPasswordStrength.width}%`,
+                                background: createPasswordStrength.color,
+                                transition: "width 140ms ease, background-color 140ms ease",
+                              }}
+                            />
+                          </div>
+                          <small className="text-secondary">
+                            Password strength: {createPasswordStrength.label}
+                          </small>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-4">
+                      <div className="d-grid d-xl-flex gap-2 wz-form-actions">
                         <button type="submit" className="btn btn-primary flex-fill" disabled={isEditingUser ? savingEdit : saving} title={isEditingUser ? "Update User" : "Create User"}>
                           {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}
                         </button>
@@ -2338,6 +2514,14 @@ export default function BusinessAutopilotUsersPage() {
                         <td>
                           <div className="d-inline-flex gap-2">
                             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openViewUser(user)}>View</button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-success"
+                              onClick={() => handleResendCredentials(user)}
+                              disabled={!user.membership_id || sendingCredentialMembershipId === String(user.membership_id)}
+                            >
+                              {sendingCredentialMembershipId === String(user.membership_id) ? "Emailing..." : "Email"}
+                            </button>
                             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openEdit(user)}>Edit</button>
                             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
                               {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
@@ -2427,6 +2611,46 @@ export default function BusinessAutopilotUsersPage() {
                     <div className="text-secondary">No HR employee profile found for this user.</div>
                   )}
                 </div>
+              </div>
+            </div>
+          ) : null}
+
+          {credentialModal.open ? (
+            <div className="modal-overlay" onClick={() => setCredentialModal((prev) => ({ ...prev, open: false, copyNotice: "" }))}>
+              <div className="modal-panel" style={{ width: "min(560px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
+                <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+                  <div>
+                    <h5 className="mb-1">Login Credentials</h5>
+                    <div className="small text-secondary">
+                      {credentialModal.emailSent ? "Credentials email sent to user." : "Email failed. Share these credentials manually."}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() => setCredentialModal((prev) => ({ ...prev, open: false, copyNotice: "" }))}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="card p-3 mb-3">
+                  <div className="small text-secondary mb-1">Name</div>
+                  <div className="mb-2">{credentialModal.credentials?.name || "-"}</div>
+                  <div className="small text-secondary mb-1">Email</div>
+                  <div className="mb-2">{credentialModal.credentials?.email || "-"}</div>
+                  <div className="small text-secondary mb-1">Password</div>
+                  <div className="mb-2">{credentialModal.credentials?.password || "-"}</div>
+                  <div className="small text-secondary mb-1">Login URL</div>
+                  <div style={{ wordBreak: "break-all" }}>{credentialModal.credentials?.login_url || "-"}</div>
+                </div>
+                <div className="d-flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={handleCopyCredentials}>
+                    Copy Credentials
+                  </button>
+                </div>
+                {credentialModal.copyNotice ? (
+                  <div className="small text-secondary mt-2">{credentialModal.copyNotice}</div>
+                ) : null}
               </div>
             </div>
           ) : null}

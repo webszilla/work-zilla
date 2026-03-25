@@ -1,5 +1,5 @@
-const DEFAULT_INPUT_MAX_LENGTH = 120;
-const DEFAULT_TEXTAREA_MAX_LENGTH = 500;
+const DEFAULT_INPUT_MAX_LENGTH = 60;
+const DEFAULT_TEXTAREA_MAX_LENGTH = 180;
 const IMAGE_MAX_BYTES = 500 * 1024;
 const PDF_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -12,19 +12,34 @@ export function getBusinessAutopilotMaxLength(fieldKey, { isTextarea = false } =
   if (!key) {
     return isTextarea ? DEFAULT_TEXTAREA_MAX_LENGTH : DEFAULT_INPUT_MAX_LENGTH;
   }
-  if (key.includes("password")) return 64;
-  if (key.includes("email")) return 120;
+  if (key === "first_name" || key === "last_name") return 20;
+  if (key === "employee_role" || key === "employee_role_id") return 30;
+  if (key === "department" || key === "department_id") return 30;
+  if (key === "companyname") return 60;
+  if (key === "clientname") return 30;
+  if (
+    key === "categoryname" ||
+    key === "subcategoryname" ||
+    key === "sub category name" ||
+    key === "category name" ||
+    key.includes("subcategory name") ||
+    key.includes("sub category name") ||
+    (key.includes("category") && key.includes("name"))
+  ) return 25;
+  if (key.includes("password")) return 16;
+  if (key.includes("email")) return 40;
   if (key.includes("phone") || key.includes("mobile")) return 15;
-  if (key.includes("pincode") || key.includes("postal") || key.includes("zip")) return 12;
-  if (key.includes("gst")) return 20;
-  if (key.includes("ticketno") || key.includes("sku")) return 40;
-  if (key.includes("country") || key.includes("state") || key.includes("city")) return 80;
-  if (key.includes("company")) return 120;
-  if (key.includes("name")) return key.includes("company") ? 120 : 80;
-  if (key.includes("subject") || key.includes("title")) return 150;
-  if (key.includes("address")) return isTextarea ? 500 : 255;
+  if (key.includes("pincode") || key.includes("postal") || key.includes("zip")) return 10;
+  if (key.includes("gst")) return 15;
+  if (key.includes("ticketno") || key.includes("sku")) return 20;
+  if (key.includes("country") || key.includes("state") || key.includes("city")) return 30;
+  if (key.includes("company")) return 60;
+  if (key.includes("name")) return key.includes("company") ? 60 : 30;
+  if (key.includes("subject") || key.includes("title")) return 60;
+  if (key.includes("address")) return isTextarea ? 150 : 100;
+  if (key.includes("remark")) return isTextarea ? 100 : 80;
   if (key.includes("description") || key.includes("notes") || key.includes("remark") || key.includes("terms") || key.includes("footer") || key.includes("message")) {
-    return isTextarea ? 1000 : 255;
+    return isTextarea ? 180 : 100;
   }
   return isTextarea ? DEFAULT_TEXTAREA_MAX_LENGTH : DEFAULT_INPUT_MAX_LENGTH;
 }
@@ -84,4 +99,3 @@ export function validateBusinessAutopilotImageOrPdf(file, { label = "File" } = {
   }
   return validateBusinessAutopilotImage(file, { label });
 }
-

@@ -5974,3 +5974,22 @@ html[data-theme="dark"] .crm-inline-suggestions__item-sub {
 .app-shell form :is(.d-flex, .d-inline-flex):has(> input[type="submit"]) {
   justify-content: flex-end;
 }
+
+/* Prevent oversized stretched action buttons inside form flex/grid rows. */
+.app-shell form :is(.d-flex, .d-inline-flex, .d-grid) > .btn,
+.app-shell form :is(.d-flex, .d-inline-flex, .d-grid) > a.btn {
+  align-self: flex-start;
+}
+
+.app-shell .wz-form-actions {
+  align-items: flex-start;
+}
+
+.app-shell .wz-form-actions > .btn,
+.app-shell .wz-form-actions > a.btn {
+  min-height: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

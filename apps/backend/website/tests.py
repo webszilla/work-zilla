@@ -16,6 +16,8 @@ class AccountAccessScopeTests(TestCase):
             email="owner@workzilla.test",
             password="pw123456",
         )
+        self.owner.email_verified = True
+        self.owner.save(update_fields=["email_verified"])
         self.org = Organization.objects.create(
             name="Acme Corp",
             company_key="ACMEKEY",
@@ -61,6 +63,8 @@ class AccountAccessScopeTests(TestCase):
             email="user@workzilla.test",
             password="pw123456",
         )
+        self.employee.email_verified = True
+        self.employee.save(update_fields=["email_verified"])
         UserProfile.objects.create(user=self.employee, organization=self.org, role="org_user")
         UserProductAccess.objects.create(
             user=self.employee,
@@ -99,6 +103,8 @@ class AccountAccessScopeTests(TestCase):
             email="membership@workzilla.test",
             password="pw123456",
         )
+        employee.email_verified = True
+        employee.save(update_fields=["email_verified"])
         UserProfile.objects.create(user=employee, organization=self.org, role="org_user")
         OrganizationUser.objects.create(
             organization=self.org,
@@ -121,3 +127,24 @@ class AccountAccessScopeTests(TestCase):
         self.assertTrue(
             UserProductAccess.objects.filter(user=employee, product=self.ba_product).exists()
         )
+
+    def test_unverified_user_sees_email_verification_gate_on_my_account(self):
+        unverified = User.objects.create_user(
+            username="unverified@workzilla.test",
+            email="unverified@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(user=unverified, organization=self.org, role="org_user")
+        UserProductAccess.objects.create(
+            user=unverified,
+            product=self.ba_product,
+            permission=UserProductAccess.PERMISSION_VIEW,
+            granted_by=self.owner,
+        )
+        self.client.force_login(unverified)
+
+        response = self.client.get("/my-account/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "public/account_verification_required.html")
+        self.assertContains(response, "Email Verification Required")

@@ -549,7 +549,7 @@ const HR_TAB_CONFIG = {
       { key: "secondaryContactCountryCode", label: "Secondary Contact Number", type: "phoneCode", defaultValue: "+91", optional: true },
       { key: "secondaryContactNumber", label: "Secondary Contact Number", placeholder: "Secondary mobile number", type: "phoneNumber", optional: true },
       { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorced", "Widowed"] },
-      { key: "wifeName", label: "Wife Name", placeholder: "Wife name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
+      { key: "wifeName", label: "Spouse Name", placeholder: "Spouse name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
       { key: "permanentAddress", label: "Address", placeholder: "Permanent address", type: "textarea" },
       { key: "permanentCountry", label: "Country", placeholder: "Country", defaultValue: "India" },
       { key: "permanentState", label: "State", placeholder: "State" },
@@ -11168,6 +11168,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionView, setSubscriptionView] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionStatusTab, setSubscriptionStatusTab] = useState("all");
+  const [subscriptionTopTab, setSubscriptionTopTab] = useState("subscriptions");
   const [subscriptionClientSearchOpen, setSubscriptionClientSearchOpen] = useState(false);
   const [subscriptionEmailAlertSearch, setSubscriptionEmailAlertSearch] = useState("");
   const [subscriptionEmailAlertSearchOpen, setSubscriptionEmailAlertSearchOpen] = useState(false);
@@ -13281,18 +13282,20 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             <span className="small text-danger">{accountsSyncError}</span>
           </div>
         ) : null}
-        <div className="d-flex flex-wrap gap-2">
-          {accountTabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              className={`btn btn-sm ${activeTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {!subscriptionsOnly ? (
+          <div className="d-flex flex-wrap gap-2">
+            {accountTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`btn btn-sm ${activeTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {accountsFormNotice ? (
@@ -14077,6 +14080,25 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {activeTab === "subscriptions" ? (
         <>
+          <div className="d-flex flex-wrap gap-2 mb-3">
+            <button
+              type="button"
+              className={`btn btn-sm ${subscriptionTopTab === "subscriptions" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setSubscriptionTopTab("subscriptions")}
+            >
+              Subscriptions
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${subscriptionTopTab === "alerts" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setSubscriptionTopTab("alerts")}
+            >
+              Alert Settings
+            </button>
+          </div>
+
+          {subscriptionTopTab === "subscriptions" ? (
+            <>
           <div className="row g-3">
             <div className="col-12 col-xl-6">
               <div className="card p-3">
@@ -14472,7 +14494,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               )}
             />
           </div>
+            </>
+          ) : null}
 
+          {subscriptionTopTab === "alerts" ? (
           <div id="subscription-alert-setting" className="card p-3 mt-4">
             <h6 className="mb-3">Subscription Alert Setting</h6>
             <div className="row g-3">
@@ -14735,6 +14760,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
             </div>
           </div>
+          ) : null}
 
           {subscriptionLoading ? <div className="text-secondary small">Loading subscriptions...</div> : null}
         </>
@@ -14817,34 +14843,151 @@ function StandardModule({ heading, moduleData }) {
   );
 }
 
+const INPUT_TYPES_WITHOUT_CHAR_LIMIT = new Set([
+  "checkbox",
+  "radio",
+  "hidden",
+  "submit",
+  "button",
+  "reset",
+  "range",
+  "file",
+  "date",
+  "datetime-local",
+  "month",
+  "week",
+  "time",
+  "number",
+  "color",
+]);
+
+function resolveBusinessAutopilotFieldKey(target) {
+  if (!target) {
+    return "text";
+  }
+  const dataKey = String(target.getAttribute?.("data-field-key") || "").trim();
+  if (dataKey) {
+    return dataKey;
+  }
+  const name = String(target.getAttribute?.("name") || "").trim();
+  if (name) {
+    return name;
+  }
+  const id = String(target.getAttribute?.("id") || "").trim();
+  if (id) {
+    return id;
+  }
+  const placeholder = String(target.getAttribute?.("placeholder") || "").trim();
+  if (placeholder) {
+    return placeholder;
+  }
+  return "text";
+}
+
+function applyBusinessAutopilotCharacterLimit(target) {
+  if (!target || target.disabled || target.readOnly) {
+    return;
+  }
+  const isTextArea = target instanceof HTMLTextAreaElement;
+  const isInput = target instanceof HTMLInputElement;
+  if (!isTextArea && !isInput) {
+    return;
+  }
+  if (isInput) {
+    const inputType = String(target.type || "text").trim().toLowerCase();
+    if (INPUT_TYPES_WITHOUT_CHAR_LIMIT.has(inputType)) {
+      return;
+    }
+  }
+  const fieldKey = resolveBusinessAutopilotFieldKey(target);
+  const maxLength = getBusinessAutopilotMaxLength(fieldKey, { isTextarea: isTextArea });
+  if (!Number.isFinite(maxLength) || maxLength <= 0) {
+    return;
+  }
+  if (!isInput || target.maxLength !== maxLength) {
+    target.maxLength = maxLength;
+  }
+  const clamped = clampBusinessAutopilotText(fieldKey, target.value, { isTextarea: isTextArea });
+  if (target.value !== clamped) {
+    target.value = clamped;
+  }
+}
+
+function BusinessAutopilotFormLimitScope({ children }) {
+  return (
+    <div
+      onFocusCapture={(event) => applyBusinessAutopilotCharacterLimit(event.target)}
+      onInputCapture={(event) => applyBusinessAutopilotCharacterLimit(event.target)}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function BusinessAutopilotModulePage({ moduleKey = "crm", title, initialTab }) {
   const moduleData = MODULE_CONTENT[moduleKey] || MODULE_CONTENT.crm;
   const heading = title || moduleData.title;
 
   if (moduleKey === "crm") {
-    return <CrmOnePageModule />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <CrmOnePageModule />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "project-details") {
-    return <ProjectDetailPage />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <ProjectDetailPage />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "projects") {
-    return <ProjectManagementModule />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <ProjectManagementModule />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "hrm") {
-    return <HrManagementModule />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <HrManagementModule />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "ticketing") {
-    return <TicketingSystemModule />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <TicketingSystemModule />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "stocks") {
-    return <StocksManagementModule />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <StocksManagementModule />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "accounts") {
-    return <AccountsErpModule initialTab={initialTab} headingTitle={heading} />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <AccountsErpModule initialTab={initialTab} headingTitle={heading} />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
   if (moduleKey === "subscriptions") {
-    return <AccountsErpModule initialTab="subscriptions" subscriptionsOnly headingTitle={heading} />;
+    return (
+      <BusinessAutopilotFormLimitScope>
+        <AccountsErpModule initialTab="subscriptions" subscriptionsOnly headingTitle={heading} />
+      </BusinessAutopilotFormLimitScope>
+    );
   }
 
-  return <StandardModule heading={heading} moduleData={moduleData} />;
+  return (
+    <BusinessAutopilotFormLimitScope>
+      <StandardModule heading={heading} moduleData={moduleData} />
+    </BusinessAutopilotFormLimitScope>
+  );
 }

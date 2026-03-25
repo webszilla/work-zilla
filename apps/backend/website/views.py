@@ -1644,6 +1644,9 @@ def checkout_confirm(request):
 
 @login_required(login_url="/auth/login/")
 def billing_renew_start(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     product_slug = _normalize_product_slug(request.GET.get("product"))
     requested_plan_id = request.GET.get("plan") or request.GET.get("plan_id")
     org = _resolve_org_for_user(request.user)
@@ -1728,6 +1731,9 @@ def billing_renew_start(request):
 
 @login_required(login_url="/auth/login/")
 def billing_renew_view(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "billing"
@@ -1795,6 +1801,9 @@ def billing_renew_view(request):
 @require_POST
 @login_required(login_url="/auth/login/")
 def billing_renew_confirm(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     plan_id = request.session.get("renew_plan_id")
     product_slug = _normalize_product_slug(request.session.get("renew_product_slug"))
     currency = request.session.get("renew_currency") or "inr"
@@ -1914,6 +1923,9 @@ def billing_renew_confirm(request):
 
 @login_required(login_url="/auth/login/")
 def billing_addons_manage(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "billing"
@@ -2055,6 +2067,14 @@ def account_view(request):
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "products"
+    if request.user.email and not request.user.email_verified:
+        context.update(
+            {
+                "email_verification_required": True,
+                "email_verification_address": request.user.email or "",
+            }
+        )
+        return render(request, "public/account_verification_required.html", context)
     org = _resolve_org_for_user(request.user)
     profile = UserProfile.objects.filter(user=request.user).first()
     show_ticketing_tab = _is_org_admin_account(request, org, profile)
@@ -2381,6 +2401,9 @@ def account_update_verification_email(request):
 
 @login_required
 def billing_view(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "billing"
@@ -2599,6 +2622,9 @@ def billing_view(request):
 
 @login_required(login_url="/auth/login/")
 def account_bank_transfer(request, transfer_id=None):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "billing"
@@ -2658,6 +2684,9 @@ def account_bank_transfer(request, transfer_id=None):
 
 @login_required
 def profile_view(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "profile"
@@ -2730,6 +2759,9 @@ def profile_view(request):
 
 @login_required
 def account_ticketing_view(request):
+    if request.user.email and not request.user.email_verified:
+        messages.info(request, "Please verify your email to access My Account pages.")
+        return redirect("/my-account/")
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "ticketing"

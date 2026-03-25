@@ -1,0 +1,74 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Work Zilla | Verify Email{% endblock %}
+{% block meta_description %}Verify your email to continue to My Account.{% endblock %}
+{% block body_class %}account-page{% endblock %}
+
+{% block content %}
+<section class="section">
+  <div class="site-container account-layout">
+    <div class="account-header">
+      <h1 class="section-title">My Account</h1>
+    </div>
+
+    <div class="account-content card p-4">
+      <h2 class="section-title">Email Verification Required</h2>
+      <p class="text-secondary mt-2 mb-3">
+        Please verify your email before accessing My Account pages.
+      </p>
+
+      <div class="alert alert-warning">
+        Verification pending for
+        <button type="button" class="btn btn-link p-0 align-baseline js-verify-email-toggle">
+          {{ email_verification_address }}
+        </button>
+      </div>
+
+      <form class="mt-2 d-none" id="verify-email-update-form" method="post" action="/my-account/verification/update-email/">
+        {% csrf_token %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <input
+            type="email"
+            name="verification_email"
+            class="form-control"
+            style="max-width: 360px;"
+            value="{{ email_verification_address }}"
+            placeholder="Enter correct email"
+            required
+          />
+          <button type="submit" class="btn btn-outline btn-sm">Update + Send Verification</button>
+        </div>
+      </form>
+
+      <form class="mt-3 js-resend-verification-form" method="post" action="/my-account/verification/resend/">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline btn-sm">Resend Verification Email</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var verifyToggle = document.querySelector(".js-verify-email-toggle");
+    var verifyForm = document.getElementById("verify-email-update-form");
+    if (verifyToggle && verifyForm) {
+      verifyToggle.addEventListener("click", function () {
+        verifyForm.classList.toggle("d-none");
+      });
+    }
+
+    var resendVerificationForm = document.querySelector(".js-resend-verification-form");
+    if (resendVerificationForm) {
+      resendVerificationForm.addEventListener("submit", function () {
+        var btn = resendVerificationForm.querySelector("button[type='submit']");
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Sending...";
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}

@@ -174,3 +174,34 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertFalse(
             OrganizationUser.objects.filter(id=membership.id).exists()
         )
+
+    def test_user_list_includes_org_memberships_even_without_product_access_rows(self):
+        listed_user = User.objects.create_user(
+            username="listed@gmail.com",
+            email="listed@gmail.com",
+            password="pw123456",
+            first_name="Listed",
+            last_name="User",
+        )
+        UserProfile.objects.create(
+            user=listed_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=listed_user,
+            role="org_user",
+            is_active=True,
+            department="Design",
+            employee_role="Graphic Designer",
+        )
+        UserProductAccess.objects.filter(user=listed_user, product=self.ba_product).delete()
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/business-autopilot/users")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        user_emails = {row.get("email") for row in payload.get("users", [])}
+        self.assertIn("listed@gmail.com", user_emails)

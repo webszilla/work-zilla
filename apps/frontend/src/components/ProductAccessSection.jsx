@@ -123,17 +123,36 @@ export default function ProductAccessSection({
   const normalizedCurrentProductKey = normalizeProductKey(currentProductKey);
 
   const normalizedProducts = useMemo(() => {
+    const fallbackOrder = [
+      "monitor",
+      "imposition-software",
+      "ai-chatbot",
+      "storage",
+      "business-autopilot-erp",
+      "whatsapp-automation",
+      "digital-automation",
+    ];
+    const fallbackIndexMap = new Map(fallbackOrder.map((key, index) => [key, index + 1]));
+    const normalizeSortOrder = (item, key) => {
+      const candidates = [
+        item?.sort_order,
+        item?.sortOrder,
+        item?.display_order,
+        item?.displayOrder,
+        item?.position,
+        item?.rank,
+      ];
+      for (const value of candidates) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+      return 1000 + (fallbackIndexMap.get(key) || 999);
+    };
+
     let raw = products && products.length ? products : [];
     if (!raw.length) {
-      const fallbackOrder = [
-        "monitor",
-        "imposition-software",
-        "ai-chatbot",
-        "storage",
-        "business-autopilot-erp",
-        "whatsapp-automation",
-        "digital-automation",
-      ];
       const topLevelFallbackKeys = new Set(fallbackOrder);
       const fallbackKeys = new Set(fallbackOrder);
       activeProductKeys.forEach((key) => {
@@ -150,6 +169,7 @@ export default function ProductAccessSection({
         icon: productCopy[key]?.icon || "bi-box",
         description: productCopy[key]?.description || "",
         features: productCopy[key]?.features || [],
+        sort_order: fallbackIndexMap.get(key) || 999,
         status: "active",
       }));
     }
@@ -166,6 +186,7 @@ export default function ProductAccessSection({
           icon: item.icon || fallback.icon || "bi-box",
           description: item.description || fallback.description || "",
           features: item.features && item.features.length ? item.features : (fallback.features || []),
+          sortOrder: normalizeSortOrder(item, key),
           status: item.status || "active"
         };
         const prev = map.get(key);
@@ -182,12 +203,22 @@ export default function ProductAccessSection({
           (prev.features.length ? 1 : 0) +
           (prev.status === "active" ? 1 : 0);
         if (nextScore >= prevScore) {
-          map.set(key, next);
+          map.set(key, {
+            ...next,
+            sortOrder: Math.min(Number(prev.sortOrder || Infinity), Number(next.sortOrder || Infinity)),
+          });
         }
         return map;
       }, new Map())
         .values()
-    );
+    ).sort((a, b) => {
+      const orderA = Number(a.sortOrder || Infinity);
+      const orderB = Number(b.sortOrder || Infinity);
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
   }, [products, monitorLabel, activeProductKeys, normalizedCurrentProductKey]);
 
   if (isReadOnly) {

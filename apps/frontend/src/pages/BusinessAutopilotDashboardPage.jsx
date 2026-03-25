@@ -622,7 +622,7 @@ export default function BusinessAutopilotDashboardPage({
           <div className="text-secondary small mb-3">Enable or disable eligible ERP modules for your organization.</div>
           <div className="row g-2">
             {allModules.map((module) => (
-              <div className="col-12 col-md-6 col-xl-2" key={`toggle-${module.slug}`}>
+              <div className="col-12 col-md-6 col-lg-3" key={`toggle-${module.slug}`}>
                 <div className="d-flex align-items-center justify-content-between border rounded px-2 py-2 h-100 gap-2">
                   <div className="min-w-0">
                     <div className="fw-semibold">{module.name}</div>

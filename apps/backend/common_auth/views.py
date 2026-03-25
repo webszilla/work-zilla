@@ -11,6 +11,8 @@ from django.db import transaction
 from django.contrib import messages
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.utils import timezone
@@ -90,6 +92,8 @@ def _build_login_captcha(request):
 
 
 @require_http_methods(["GET", "POST"])
+@never_cache
+@ensure_csrf_cookie
 def login_view(request):
     next_url = request.GET.get("next") or request.POST.get("next") or "/my-account/"
     if request.method == "GET":
@@ -231,7 +235,11 @@ def signup_view(request):
     login(request, user)
     request.session.pop("signup_captcha_answer", None)
     request.session.pop("signup_captcha_question", None)
-    return redirect("/pricing/")
+    messages.info(
+        request,
+        f"Verification email sent to {user.email}. Please verify your email to continue to My Account.",
+    )
+    return redirect("/my-account/")
 
 
 @require_http_methods(["GET", "POST"])
