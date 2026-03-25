@@ -5,6 +5,7 @@ import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import { HrManagementModule } from "./BusinessAutopilotModulePage.jsx";
+import { clampBusinessAutopilotText, getBusinessAutopilotMaxLength } from "../lib/businessAutopilotFormRules.js";
 
 const defaultForm = {
   first_name: "",
@@ -102,6 +103,14 @@ const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "temporarySameAsPermanent", label: "Temporary Same As Permanent" },
   { key: "sourceUserEmail", label: "Linked User Email" },
 ];
+
+function limitedInput(fieldKey, value) {
+  return clampBusinessAutopilotText(fieldKey, value, { isTextarea: false });
+}
+
+function limitedTextarea(fieldKey, value) {
+  return clampBusinessAutopilotText(fieldKey, value, { isTextarea: true });
+}
 
 function createEmptySharedPartyForm() {
   return {
@@ -1927,7 +1936,8 @@ export default function BusinessAutopilotUsersPage() {
                           className="form-control"
                           placeholder="Create Employee Role (e.g. Accountant)"
                           value={newEmployeeRole}
-                          onChange={(event) => setNewEmployeeRole(event.target.value)}
+                          maxLength={getBusinessAutopilotMaxLength("employee_role")}
+                          onChange={(event) => setNewEmployeeRole(limitedInput("employee_role", event.target.value))}
                         />
                       </div>
                 <div className="col-12 col-md-4 d-grid">
@@ -1968,7 +1978,8 @@ export default function BusinessAutopilotUsersPage() {
                                 type="text"
                                 className="form-control form-control-sm"
                                 value={editingEmployeeRoleName}
-                                onChange={(event) => setEditingEmployeeRoleName(event.target.value)}
+                                maxLength={getBusinessAutopilotMaxLength("employee_role")}
+                                onChange={(event) => setEditingEmployeeRoleName(limitedInput("employee_role", event.target.value))}
                               />
                             ) : (
                               item.name
@@ -2023,7 +2034,8 @@ export default function BusinessAutopilotUsersPage() {
                           className="form-control"
                           placeholder="Create Department (e.g. Accounts)"
                           value={newDepartment}
-                          onChange={(event) => setNewDepartment(event.target.value)}
+                          maxLength={getBusinessAutopilotMaxLength("department")}
+                          onChange={(event) => setNewDepartment(limitedInput("department", event.target.value))}
                         />
                       </div>
                 <div className="col-12 col-md-4 d-grid">
@@ -2064,7 +2076,8 @@ export default function BusinessAutopilotUsersPage() {
                                 type="text"
                                 className="form-control form-control-sm"
                                 value={editingDepartmentName}
-                                onChange={(event) => setEditingDepartmentName(event.target.value)}
+                                maxLength={getBusinessAutopilotMaxLength("department")}
+                                onChange={(event) => setEditingDepartmentName(limitedInput("department", event.target.value))}
                               />
                             ) : (
                               item.name
@@ -2121,8 +2134,9 @@ export default function BusinessAutopilotUsersPage() {
                         className="form-control"
                         placeholder="First Name"
                         value={isEditingUser ? editForm.first_name : form.first_name}
+                        maxLength={getBusinessAutopilotMaxLength("first_name")}
                         onChange={(event) => {
-                          const value = event.target.value;
+                          const value = limitedInput("first_name", event.target.value);
                           if (isEditingUser) {
                             setEditForm((prev) => ({ ...prev, first_name: value }));
                             return;
@@ -2138,8 +2152,9 @@ export default function BusinessAutopilotUsersPage() {
                         className="form-control"
                         placeholder="Last Name"
                         value={isEditingUser ? editForm.last_name : form.last_name}
+                        maxLength={getBusinessAutopilotMaxLength("last_name")}
                         onChange={(event) => {
-                          const value = event.target.value;
+                          const value = limitedInput("last_name", event.target.value);
                           if (isEditingUser) {
                             setEditForm((prev) => ({ ...prev, last_name: value }));
                             return;
@@ -2154,8 +2169,9 @@ export default function BusinessAutopilotUsersPage() {
                         className="form-control"
                         placeholder="Official Email"
                         value={isEditingUser ? editForm.email : form.email}
+                        maxLength={getBusinessAutopilotMaxLength("email")}
                         onChange={(event) => {
-                          const value = event.target.value;
+                          const value = limitedInput("email", event.target.value);
                           if (isEditingUser) {
                             setEditForm((prev) => ({ ...prev, email: value }));
                             return;
@@ -2510,8 +2526,9 @@ export default function BusinessAutopilotUsersPage() {
                 rows="2"
                 placeholder="Notes for this role"
                 value={selectedRoleAccess.remarks || ""}
+                maxLength={getBusinessAutopilotMaxLength("remarks", { isTextarea: true })}
                 disabled={!canManageUsers}
-                onChange={(event) => updateRoleAccess((prev) => ({ ...prev, remarks: event.target.value }))}
+                onChange={(event) => updateRoleAccess((prev) => ({ ...prev, remarks: limitedTextarea("remarks", event.target.value) }))}
               />
             </div>
           </div>
@@ -2539,15 +2556,15 @@ export default function BusinessAutopilotUsersPage() {
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
-                  <input className="form-control" value={clientForm.companyName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, companyName: event.target.value, name: event.target.value }))} placeholder="Company name" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("companyName")} value={clientForm.companyName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, companyName: limitedInput("companyName", event.target.value), name: limitedInput("companyName", event.target.value) }))} placeholder="Company name" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Client Name</label>
-                  <input className="form-control" value={clientForm.clientName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, clientName: event.target.value }))} placeholder="Client / Contact person" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("clientName")} value={clientForm.clientName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, clientName: limitedInput("clientName", event.target.value) }))} placeholder="Client / Contact person" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">GSTIN</label>
-                  <input className="form-control" value={clientForm.gstin || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, gstin: event.target.value }))} placeholder="GSTIN" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("gstin")} value={clientForm.gstin || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, gstin: limitedInput("gstin", event.target.value) }))} placeholder="GSTIN" />
                 </div>
                 <div className="col-12 col-xl-6">
                   <label className="form-label small text-secondary mb-1">Phone Number</label>
@@ -2560,7 +2577,7 @@ export default function BusinessAutopilotUsersPage() {
                         style={{ maxWidth: "220px" }}
                         ariaLabel="Client phone country code"
                       />
-                      <input className="form-control" value={clientForm.phone || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("phone")} value={clientForm.phone || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, phone: limitedInput("phone", event.target.value) }))} placeholder="Phone number" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -2588,7 +2605,7 @@ export default function BusinessAutopilotUsersPage() {
                           placeholder="Additional contact number"
                           onChange={(event) => setClientForm((prev) => ({
                             ...prev,
-                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: event.target.value } : item))
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: limitedInput("phone", event.target.value) } : item))
                           }))}
                         />
                         <button
@@ -2609,7 +2626,7 @@ export default function BusinessAutopilotUsersPage() {
                   <label className="form-label small text-secondary mb-1">Email ID</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="Primary email" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("email")} value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -2627,7 +2644,7 @@ export default function BusinessAutopilotUsersPage() {
                           placeholder="Additional email ID"
                           onChange={(event) => setClientForm((prev) => ({
                             ...prev,
-                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? event.target.value : item))
+                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? limitedInput("email", event.target.value) : item))
                           }))}
                         />
                         <button
@@ -2657,7 +2674,7 @@ export default function BusinessAutopilotUsersPage() {
                       Billing and Shipping Same
                     </label>
                   </div>
-                  <textarea className="form-control mb-2" rows="2" value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: event.target.value }))} placeholder="Billing address" />
+                  <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
                   <div className="d-flex flex-column gap-2">
                     <div>
                       <label className="form-label small text-secondary mb-1">Country</label>
@@ -2673,19 +2690,19 @@ export default function BusinessAutopilotUsersPage() {
                           {billingStateOptions.map((state) => <option key={`users-client-state-${state}`} value={state}>{state}</option>)}
                         </select>
                       ) : (
-                        <input className="form-control" value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))} placeholder="State / Province / Region" />
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingState")} value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
                       )}
                     </div>
                     <div>
                       <label className="form-label small text-secondary mb-1">Pincode</label>
-                      <input className="form-control" value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: event.target.value }))} placeholder="Pincode" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
                     </div>
                   </div>
                 </div>
                 {!clientForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
                     <label className="form-label small text-secondary mb-1">Shipping Address</label>
-                    <textarea className="form-control mb-2" rows="2" value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: event.target.value }))} placeholder="Shipping address" />
+                    <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
                     <div className="d-flex flex-column gap-2">
                       <div>
                         <label className="form-label small text-secondary mb-1">Country</label>
@@ -2701,12 +2718,12 @@ export default function BusinessAutopilotUsersPage() {
                             {shippingStateOptions.map((state) => <option key={`users-client-shipping-state-${state}`} value={state}>{state}</option>)}
                           </select>
                         ) : (
-                          <input className="form-control" value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))} placeholder="State / Province / Region" />
+                          <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingState")} value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
                         )}
                       </div>
                       <div>
                         <label className="form-label small text-secondary mb-1">Pincode</label>
-                        <input className="form-control" value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: event.target.value }))} placeholder="Pincode" />
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
                       </div>
                     </div>
                   </div>
@@ -2800,15 +2817,15 @@ export default function BusinessAutopilotUsersPage() {
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
-                  <input className="form-control" value={vendorForm.companyName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, companyName: event.target.value, name: event.target.value }))} placeholder="Company name" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("companyName")} value={vendorForm.companyName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, companyName: limitedInput("companyName", event.target.value), name: limitedInput("companyName", event.target.value) }))} placeholder="Company name" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Vendor Name</label>
-                  <input className="form-control" value={vendorForm.clientName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, clientName: event.target.value }))} placeholder="Vendor / Contact person" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("clientName")} value={vendorForm.clientName || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, clientName: limitedInput("clientName", event.target.value) }))} placeholder="Vendor / Contact person" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">GSTIN</label>
-                  <input className="form-control" value={vendorForm.gstin || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, gstin: event.target.value }))} placeholder="GSTIN" />
+                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("gstin")} value={vendorForm.gstin || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, gstin: limitedInput("gstin", event.target.value) }))} placeholder="GSTIN" />
                 </div>
                 <div className="col-12 col-xl-6">
                   <label className="form-label small text-secondary mb-1">Phone Number</label>
@@ -2821,7 +2838,7 @@ export default function BusinessAutopilotUsersPage() {
                         style={{ maxWidth: "220px" }}
                         ariaLabel="Vendor phone country code"
                       />
-                      <input className="form-control" value={vendorForm.phone || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("phone")} value={vendorForm.phone || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, phone: limitedInput("phone", event.target.value) }))} placeholder="Phone number" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -2849,7 +2866,7 @@ export default function BusinessAutopilotUsersPage() {
                           placeholder="Additional contact number"
                           onChange={(event) => setVendorForm((prev) => ({
                             ...prev,
-                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: event.target.value } : item))
+                            additionalPhones: (prev.additionalPhones || []).map((item, i) => (i === index ? { ...item, number: limitedInput("phone", event.target.value) } : item))
                           }))}
                         />
                         <button
@@ -2870,7 +2887,7 @@ export default function BusinessAutopilotUsersPage() {
                   <label className="form-label small text-secondary mb-1">Email ID</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" value={vendorForm.email || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="Primary email" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("email")} value={vendorForm.email || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -2888,7 +2905,7 @@ export default function BusinessAutopilotUsersPage() {
                           placeholder="Additional email ID"
                           onChange={(event) => setVendorForm((prev) => ({
                             ...prev,
-                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? event.target.value : item))
+                            additionalEmails: (prev.additionalEmails || []).map((item, i) => (i === index ? limitedInput("email", event.target.value) : item))
                           }))}
                         />
                         <button
@@ -2918,7 +2935,7 @@ export default function BusinessAutopilotUsersPage() {
                       Billing and Shipping Same
                     </label>
                   </div>
-                  <textarea className="form-control mb-2" rows="2" value={vendorForm.billingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingAddress: event.target.value }))} placeholder="Billing address" />
+                  <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={vendorForm.billingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
                   <div className="d-flex flex-column gap-2">
                     <div>
                       <label className="form-label small text-secondary mb-1">Country</label>
@@ -2934,19 +2951,19 @@ export default function BusinessAutopilotUsersPage() {
                           {vendorBillingStateOptions.map((state) => <option key={`users-vendor-state-${state}`} value={state}>{state}</option>)}
                         </select>
                       ) : (
-                        <input className="form-control" value={vendorForm.billingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingState: event.target.value }))} placeholder="State / Province / Region" />
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingState")} value={vendorForm.billingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
                       )}
                     </div>
                     <div>
                       <label className="form-label small text-secondary mb-1">Pincode</label>
-                      <input className="form-control" value={vendorForm.billingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingPincode: event.target.value }))} placeholder="Pincode" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={vendorForm.billingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
                     </div>
                   </div>
                 </div>
                 {!vendorForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
                     <label className="form-label small text-secondary mb-1">Shipping Address</label>
-                    <textarea className="form-control mb-2" rows="2" value={vendorForm.shippingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingAddress: event.target.value }))} placeholder="Shipping address" />
+                    <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={vendorForm.shippingAddress || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
                     <div className="d-flex flex-column gap-2">
                       <div>
                         <label className="form-label small text-secondary mb-1">Country</label>
@@ -2962,12 +2979,12 @@ export default function BusinessAutopilotUsersPage() {
                             {vendorShippingStateOptions.map((state) => <option key={`users-vendor-shipping-state-${state}`} value={state}>{state}</option>)}
                           </select>
                         ) : (
-                          <input className="form-control" value={vendorForm.shippingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingState: event.target.value }))} placeholder="State / Province / Region" />
+                          <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingState")} value={vendorForm.shippingState || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
                         )}
                       </div>
                       <div>
                         <label className="form-label small text-secondary mb-1">Pincode</label>
-                        <input className="form-control" value={vendorForm.shippingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingPincode: event.target.value }))} placeholder="Pincode" />
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={vendorForm.shippingPincode || ""} onChange={(event) => setVendorForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
                       </div>
                     </div>
                   </div>

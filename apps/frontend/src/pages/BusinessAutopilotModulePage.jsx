@@ -6,6 +6,13 @@ import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOp
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { showUploadAlert } from "../lib/uploadAlert.js";
+import {
+  clampBusinessAutopilotText,
+  getBusinessAutopilotMaxLength,
+  validateBusinessAutopilotImage,
+  validateBusinessAutopilotImageOrPdf,
+  validateBusinessAutopilotPdf,
+} from "../lib/businessAutopilotFormRules.js";
 
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
@@ -4500,9 +4507,13 @@ function CrmOnePageModule() {
   );
 
   function setField(sectionKey, fieldKey, value) {
+    const fieldMeta = (CRM_SECTION_CONFIG[sectionKey]?.fields || []).find((field) => field.key === fieldKey);
+    const normalizedValue = typeof value === "string"
+      ? clampBusinessAutopilotText(fieldKey, value, { isTextarea: fieldMeta?.type === "textarea" })
+      : value;
     const normalizedFieldKey = String(fieldKey || "").toLowerCase();
     const isEmailInput = normalizedFieldKey.includes("email");
-    const trimmedValue = String(value || "").trim();
+    const trimmedValue = String(normalizedValue || "").trim();
     const hasInvalidEmail = isEmailInput && trimmedValue && !EMAIL_ADDRESS_RE.test(trimmedValue);
     setSectionFormErrors((prev) => ({
       ...prev,
@@ -4519,7 +4530,7 @@ function CrmOnePageModule() {
       ...prev,
       [sectionKey]: {
         ...prev[sectionKey],
-        [fieldKey]: value,
+        [fieldKey]: normalizedValue,
       },
     }));
   }
@@ -7310,15 +7321,19 @@ function ProjectManagementModule() {
   }
 
   function onChangeField(fieldKey, nextValue) {
+    const fieldMeta = (config.fields || []).find((field) => field.key === fieldKey);
+    const normalizedValue = typeof nextValue === "string"
+      ? clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      : nextValue;
     setFormValues((prev) => {
-      const next = { ...prev, [fieldKey]: nextValue };
-      if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
+      const next = { ...prev, [fieldKey]: normalizedValue };
+      if (activeTab === "attendance" && fieldKey === "status" && normalizedValue !== "Permission") {
         next.permissionHours = "";
       }
       return next;
     });
     if (activeTab === "projects" && fieldKey === "clientCompany") {
-      setShowProjectClientSuggestions(Boolean(String(nextValue || "").trim()));
+      setShowProjectClientSuggestions(Boolean(String(normalizedValue || "").trim()));
     }
   }
 
@@ -7763,6 +7778,7 @@ function ProjectManagementModule() {
                           className="form-control"
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
+                          maxLength={getBusinessAutopilotMaxLength(field.key)}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
                           onFocus={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
                           onClick={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
@@ -7817,6 +7833,7 @@ function ProjectManagementModule() {
                           className="form-control datalist-readable-input"
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
+                          maxLength={getBusinessAutopilotMaxLength(field.key)}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
                         />
                         <datalist id={`project-${field.key}-list`}>
@@ -7833,6 +7850,7 @@ function ProjectManagementModule() {
                         className="form-control"
                         placeholder={field.placeholder}
                         value={formValues[field.key] || ""}
+                        maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
                       />
                     )}
@@ -8122,15 +8140,9 @@ function ProjectDetailPage() {
     if (!file) {
       return;
     }
-    const lowerName = String(file.name || "").trim().toLowerCase();
-    const hasValidType = String(file.type || "").startsWith("image/") || String(file.type || "").trim() === "application/pdf";
-    const hasValidExtension = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"].some((ext) => lowerName.endsWith(ext));
-    if (!hasValidType && !hasValidExtension) {
-      showUploadAlert("Expense attachment must be an image or PDF.");
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      showUploadAlert("Expense attachment size must be under 1 MB.");
+    const validation = validateBusinessAutopilotImageOrPdf(file, { label: "Expense attachment" });
+    if (!validation.ok) {
+      showUploadAlert(validation.message);
       return;
     }
     setExpenseForm((prev) => ({
@@ -8373,7 +8385,7 @@ function ProjectDetailPage() {
             <form className="row g-3" onSubmit={saveExpense}>
               <div className="col-12 col-md-4">
                 <label className="form-label small text-secondary mb-1">Expense Title</label>
-                <input className="form-control" value={expenseForm.title || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="Travel, hosting, consultation..." />
+                <input className="form-control" maxLength={getBusinessAutopilotMaxLength("title")} value={expenseForm.title || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, title: clampBusinessAutopilotText("title", event.target.value) }))} placeholder="Travel, hosting, consultation..." />
               </div>
               <div className="col-12 col-md-3">
                 <label className="form-label small text-secondary mb-1">Category</label>
@@ -8397,10 +8409,11 @@ function ProjectDetailPage() {
                   <input
                     className="form-control"
                     value={expenseForm.payee || ""}
+                    maxLength={getBusinessAutopilotMaxLength("payee")}
                     onFocus={() => setExpensePayeeSearchOpen(true)}
                     onBlur={() => window.setTimeout(() => setExpensePayeeSearchOpen(false), 120)}
                     onChange={(event) => {
-                      const value = event.target.value;
+                      const value = clampBusinessAutopilotText("payee", event.target.value);
                       setExpenseForm((prev) => ({ ...prev, payee: value }));
                       setExpensePayeeSearchOpen(true);
                     }}
@@ -8459,15 +8472,18 @@ function ProjectDetailPage() {
               </div>
               <div className="col-12 col-md-4">
                 <label className="form-label small text-secondary mb-1">Notes</label>
-                <input className="form-control" value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional expense note" />
+                <input className="form-control" maxLength={getBusinessAutopilotMaxLength("notes")} value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: clampBusinessAutopilotText("notes", event.target.value) }))} placeholder="Optional expense note" />
               </div>
               <div className="col-12 col-md-4">
                 <label className="form-label small text-secondary mb-1">File Upload</label>
                 <input
                   type="file"
                   className="form-control"
-                  accept="image/*,.pdf"
-                  onChange={(event) => handleExpenseAttachmentChange(event.target.files?.[0])}
+                  accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                  onChange={(event) => {
+                    handleExpenseAttachmentChange(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
                 />
                 {expenseForm.attachmentName ? (
                   <div className="small text-secondary mt-2">
@@ -8978,12 +8994,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     if (!file) {
       return;
     }
-    if (!String(file.type || "").startsWith("image/")) {
-      showUploadAlert("Employee photo must be an image file.");
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      showUploadAlert("Employee photo size must be under 1 MB.");
+    const validation = validateBusinessAutopilotImage(file, { label: "Employee photo" });
+    if (!validation.ok) {
+      showUploadAlert(validation.message);
       return;
     }
     const reader = new FileReader();
@@ -9002,19 +9015,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     if (!file) {
       return;
     }
-    const allowedMimeTypes = [
-      "application/pdf",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ];
-    const lowerName = String(file.name || "").trim().toLowerCase();
-    const hasAllowedExtension = [".pdf", ".doc", ".docx"].some((ext) => lowerName.endsWith(ext));
-    if (!allowedMimeTypes.includes(String(file.type || "").trim()) && !hasAllowedExtension) {
-      showUploadAlert("Employee document must be PDF or Word file only.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      showUploadAlert("Employee document size must be under 5 MB.");
+    const validation = validateBusinessAutopilotPdf(file, { label: "Employee document" });
+    if (!validation.ok) {
+      showUploadAlert(validation.message);
       return;
     }
     setFormValues((prev) => ({
@@ -9066,6 +9069,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
+              maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
                           onClick={() => setAttendanceEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
@@ -9111,6 +9115,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
+              maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setHrEmployeeSuggestOpen(true)}
                           onClick={() => setHrEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setHrEmployeeSuggestOpen(false), 120)}
@@ -9198,6 +9203,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                   ? (formValues.secondaryContactNumber || "")
                   : (formValues.contactNumber || "")
               }
+              maxLength={getBusinessAutopilotMaxLength(
+                field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber"
+              )}
               onChange={(event) => onChangeField(
                 field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber",
                 event.target.value
@@ -9208,9 +9216,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <div className="d-flex flex-wrap align-items-center gap-2">
             <input
               type="file"
-              accept="image/*"
+              accept=".jpg,.jpeg,.png,image/jpeg,image/png"
               className="form-control"
-              onChange={(event) => handleHrEmployeePhotoChange(event.target.files?.[0])}
+              onChange={(event) => {
+                handleHrEmployeePhotoChange(event.target.files?.[0]);
+                event.target.value = "";
+              }}
             />
             {formValues.photoDataUrl ? (
               <>
@@ -9231,16 +9242,19 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 </button>
               </>
             ) : (
-              <span className="small text-secondary">Image only, max 1 MB.</span>
+              <span className="small text-secondary">JPG/JPEG/PNG only, max 500 KB.</span>
             )}
           </div>
         ) : activeTab === "employees" && field.type === "documentUpload" ? (
           <div className="d-flex flex-wrap align-items-center gap-2">
             <input
               type="file"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".pdf,application/pdf"
               className="form-control"
-              onChange={(event) => handleHrEmployeeDocumentChange(event.target.files?.[0])}
+              onChange={(event) => {
+                handleHrEmployeeDocumentChange(event.target.files?.[0]);
+                event.target.value = "";
+              }}
             />
             {formValues.documentName ? (
               <>
@@ -9262,7 +9276,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 </button>
               </>
             ) : (
-              <span className="small text-secondary">PDF / DOC / DOCX only, max 5 MB.</span>
+              <span className="small text-secondary">PDF only, max 5 MB.</span>
             )}
           </div>
         ) : activeTab === "employees" && field.key.endsWith("Country") ? (
@@ -9299,6 +9313,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 className="form-control"
                 placeholder={field.placeholder}
                 value={formValues[field.key] || ""}
+                maxLength={getBusinessAutopilotMaxLength(field.key)}
                 onChange={(event) => onChangeField(field.key, event.target.value)}
               />
             );
@@ -9320,6 +9335,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             rows={3}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
+            maxLength={getBusinessAutopilotMaxLength(field.key, { isTextarea: true })}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
         ) : field.type === "date" ? (
@@ -9337,6 +9353,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             className="form-control"
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
+            maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
         )}
@@ -9359,18 +9376,22 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       setFormValues(nextValues);
       return;
     }
+    const fieldMeta = employeeFieldMap.get(fieldKey);
+    const normalizedValue = typeof nextValue === "string"
+      ? clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      : nextValue;
     setFormValues((prev) => {
-      const next = { ...prev, [fieldKey]: nextValue };
+      const next = { ...prev, [fieldKey]: normalizedValue };
       if (activeTab === "employees" && fieldKey.endsWith("Country")) {
         next[fieldKey.replace(/Country$/, "State")] = "";
       }
       if (activeTab === "employees" && prev.temporarySameAsPermanent && fieldKey.startsWith("permanent")) {
         return syncTemporaryAddressFromPermanent(next);
       }
-      if (activeTab === "attendance" && fieldKey === "status" && nextValue !== "Permission") {
+      if (activeTab === "attendance" && fieldKey === "status" && normalizedValue !== "Permission") {
         next.permissionHours = "";
       }
-      if (activeTab === "attendance" && fieldKey === "entryMode" && nextValue === "User Side") {
+      if (activeTab === "attendance" && fieldKey === "entryMode" && normalizedValue === "User Side") {
         next.inTime = "";
         next.outTime = "";
       }
@@ -10360,7 +10381,11 @@ function CategoryCrudModule({
   }, [activeTab, moduleData]);
 
   function onChangeField(fieldKey, nextValue) {
-    setFormValues((prev) => ({ ...prev, [fieldKey]: nextValue }));
+    const fieldMeta = (config.fields || []).find((field) => field.key === fieldKey);
+    const normalizedValue = typeof nextValue === "string"
+      ? clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      : nextValue;
+    setFormValues((prev) => ({ ...prev, [fieldKey]: normalizedValue }));
   }
 
   function onEditRow(row) {
@@ -10753,6 +10778,7 @@ function CategoryCrudModule({
                       autoComplete="off"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
+                      maxLength={getBusinessAutopilotMaxLength(field.key)}
                       onFocus={() => setTicketingClientSearchOpen(true)}
                           onClick={() => setTicketingClientSearchOpen(true)}
                       onBlur={() => window.setTimeout(() => setTicketingClientSearchOpen(false), 120)}
@@ -10828,6 +10854,7 @@ function CategoryCrudModule({
                     rows={3}
                     placeholder={field.placeholder}
                     value={formValues[field.key] || ""}
+                    maxLength={getBusinessAutopilotMaxLength(field.key, { isTextarea: true })}
                     onChange={(event) => onChangeField(field.key, event.target.value)}
                   />
                 ) : (activeTab === "tasks" && field.key === "assignee") ? (
@@ -10838,6 +10865,7 @@ function CategoryCrudModule({
                       list="project-task-assign-to-list"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
+                      maxLength={getBusinessAutopilotMaxLength(field.key)}
                       onChange={(event) => onChangeField(field.key, event.target.value)}
                     />
                     <datalist id="project-task-assign-to-list">
@@ -10854,6 +10882,7 @@ function CategoryCrudModule({
                       list="inventory-main-category-list"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
+                      maxLength={getBusinessAutopilotMaxLength(field.key)}
                       onChange={(event) => {
                         onChangeField(field.key, event.target.value);
                         setFormValues((prev) => ({ ...prev, subCategory: "" }));
@@ -10873,6 +10902,7 @@ function CategoryCrudModule({
                       list="inventory-sub-category-list"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
+                      maxLength={getBusinessAutopilotMaxLength(field.key)}
                       onChange={(event) => onChangeField(field.key, event.target.value)}
                     />
                     <datalist id="inventory-sub-category-list">
@@ -10887,6 +10917,7 @@ function CategoryCrudModule({
                     className="form-control"
                     placeholder={field.placeholder}
                     value={formValues[field.key] || ""}
+                    maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
                     onChange={(event) => onChangeField(field.key, event.target.value)}
                   />
                 )}
@@ -12069,12 +12100,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (!file) {
       return;
     }
-    if (!String(file.type || "").startsWith("image/")) {
-      showUploadAlert("Please select an image file.");
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      showUploadAlert("Image size must be under 1 MB.");
+    const validation = validateBusinessAutopilotImage(file, { label: "Company logo" });
+    if (!validation.ok) {
+      showUploadAlert(validation.message);
       return;
     }
     const reader = new FileReader();
@@ -13905,9 +13933,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   <div className="d-flex flex-wrap align-items-center gap-2">
                     <input
                       type="file"
-                      accept="image/*"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                       className="form-control form-control-sm"
-                      onChange={(e) => handleBillingTemplateLogoChange(e.target.files?.[0])}
+                      onChange={(e) => {
+                        handleBillingTemplateLogoChange(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
                     />
                     {templateForm.companyLogoDataUrl ? (
                       <>
