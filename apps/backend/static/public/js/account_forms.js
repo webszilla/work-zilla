@@ -567,7 +567,7 @@ function attachGlobalCharacterLimits() {
 
     const identity = fieldIdentity(field);
     if (identity.includes("username") && !field.minLength) {
-      field.minLength = 4;
+      field.minLength = 5;
     }
 
     const applyLimit = () => {

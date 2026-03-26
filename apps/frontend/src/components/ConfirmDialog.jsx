@@ -42,8 +42,8 @@ export function ConfirmProvider({ children }) {
     <ConfirmContext.Provider value={confirm}>
       {children}
       {dialog.open ? (
-        <div className="modal-overlay" onClick={() => closeDialog(false)}>
-          <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-overlay" data-confirm-dialog="true" data-no-delete-confirm="true" onClick={() => closeDialog(false)}>
+          <div className="modal-panel" data-confirm-dialog="true" data-no-delete-confirm="true" onClick={(event) => event.stopPropagation()}>
             <h5>{dialog.title}</h5>
             {dialog.message ? (
               <div className="text-secondary mb-2">{dialog.message}</div>
@@ -52,6 +52,7 @@ export function ConfirmProvider({ children }) {
               <button
                 type="button"
                 className="btn app-btn-secondary"
+                data-no-delete-confirm="true"
                 onClick={() => closeDialog(false)}
               >
                 {dialog.cancelText}
@@ -59,6 +60,7 @@ export function ConfirmProvider({ children }) {
               <button
                 type="button"
                 className={`btn btn-${dialog.confirmVariant}`}
+                data-no-delete-confirm="true"
                 onClick={() => closeDialog(true)}
               >
                 {dialog.confirmText}

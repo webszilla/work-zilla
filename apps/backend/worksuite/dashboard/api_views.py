@@ -9,6 +9,8 @@ import math
 import os
 import re
 import threading
+import urllib.error
+import urllib.request
 from types import SimpleNamespace
 
 from django.contrib.auth import update_session_auth_hash, get_user_model
@@ -58,6 +60,10 @@ from core.models import (
     OrgSupportTicket,
     OrgSupportTicketMessage,
     OrgSupportTicketAttachment,
+    SocialPlatformConnection,
+    SocialMediaCompany,
+    SocialPostJob,
+    SocialPostDispatchLog,
 )
 from saas_admin.models import Product
 from dashboard import views as dashboard_views
@@ -133,6 +139,20 @@ PRODUCT_LABEL_OVERRIDES = {
     "whatsapp-automation": "Whatsapp Automation",
     "digital-card": "Digital Business Card",
     "ai-chat-widget": "AI Chat Widget",
+}
+SOCIAL_PLATFORM_ORDER = [
+    SocialPlatformConnection.PLATFORM_FACEBOOK,
+    SocialPlatformConnection.PLATFORM_INSTAGRAM,
+    SocialPlatformConnection.PLATFORM_YOUTUBE,
+    SocialPlatformConnection.PLATFORM_X,
+    SocialPlatformConnection.PLATFORM_LINKEDIN,
+]
+SOCIAL_PLATFORM_LABELS = {
+    SocialPlatformConnection.PLATFORM_FACEBOOK: "Facebook",
+    SocialPlatformConnection.PLATFORM_INSTAGRAM: "Instagram",
+    SocialPlatformConnection.PLATFORM_YOUTUBE: "YouTube",
+    SocialPlatformConnection.PLATFORM_X: "X.com",
+    SocialPlatformConnection.PLATFORM_LINKEDIN: "LinkedIn",
 }
 
 
@@ -661,6 +681,414 @@ def _get_org_or_error(request):
     return org, None
 
 
+def _social_admin_guard(request):
+    org, error = _get_org_or_error(request)
+    if error:
+        return None, None, error
+    profile = dashboard_views.get_profile(request.user)
+    is_org_admin = _is_org_admin_user(request, org) or _is_org_admin_profile(profile)
+    if not is_org_admin:
+        return None, None, _json_error("Access denied.", status=403)
+    return org, profile, None
+
+
+def _get_active_product_subscription(org, product_slug):
+    if not org:
+        return None
+    slug = str(product_slug or "").strip().lower()
+    if not slug:
+        return None
+    queryset = (
+        Subscription.objects
+        .filter(organization=org, status__in=("active", "trialing"))
+        .filter(plan__product__slug=slug)
+        .order_by("-start_date", "-id")
+    )
+    for sub in queryset:
+        if not sub.plan:
+            continue
+        dashboard_views.normalize_subscription_end_date(sub)
+        if is_subscription_active(sub):
+            return sub
+        dashboard_views.maybe_expire_subscription(sub)
+    return None
+
+
+def _parse_feature_limit(features, key, *, fallback=-1):
+    if not isinstance(features, dict):
+        return fallback
+    value = features.get(key, fallback)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _social_plan_capabilities(org):
+    subscription = _get_active_product_subscription(org, "digital-automation")
+    if not subscription or not subscription.plan:
+        return {
+            "has_subscription": False,
+            "enabled": False,
+            "api_connect_enabled": False,
+            "posting_enabled": False,
+            "company_wise_enabled": False,
+            "company_count_limit": 0,
+            "social_accounts_limit": 0,
+            "scheduled_posts_limit": 0,
+            "trial_full_access": False,
+        }
+
+    features = subscription.plan.features if isinstance(subscription.plan.features, dict) else {}
+    is_trial = bool(features.get("is_trial")) or subscription.status == "trialing"
+    trial_features = str(features.get("trial_features") or "").strip().lower()
+    trial_full_access = bool(
+        (is_trial and trial_features in {"all", "top", "pro", "premium"})
+        or (is_trial and bool(features.get("trial_unlock_top_features")))
+    )
+
+    def _feature_enabled(key, default=True):
+        if trial_full_access:
+            return True
+        if key not in features:
+            return bool(default)
+        return bool(features.get(key))
+
+    social_enabled = _feature_enabled("social_media_enabled", True)
+    api_connect_enabled = _feature_enabled("social_api_connect_enabled", True)
+    posting_enabled = _feature_enabled("social_posting_enabled", True)
+    company_wise_enabled = _feature_enabled("social_company_wise_enabled", True)
+
+    company_count_limit = -1 if trial_full_access else _parse_feature_limit(features, "company_count", fallback=1)
+    social_accounts_limit = -1 if trial_full_access else _parse_feature_limit(features, "social_accounts", fallback=-1)
+    scheduled_posts_limit = -1 if trial_full_access else _parse_feature_limit(features, "scheduled_posts", fallback=-1)
+
+    return {
+        "has_subscription": True,
+        "enabled": bool(social_enabled and company_wise_enabled),
+        "api_connect_enabled": bool(api_connect_enabled),
+        "posting_enabled": bool(posting_enabled),
+        "company_wise_enabled": bool(company_wise_enabled),
+        "company_count_limit": company_count_limit,
+        "social_accounts_limit": social_accounts_limit,
+        "scheduled_posts_limit": scheduled_posts_limit,
+        "trial_full_access": trial_full_access,
+    }
+
+
+def _social_usage_summary(org):
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
+    return {
+        "companies_used": SocialMediaCompany.objects.filter(organization=org, is_active=True).count(),
+        "connected_accounts": SocialPlatformConnection.objects.filter(organization=org, is_connected=True).count(),
+        "posts_this_month": SocialPostJob.objects.filter(
+            organization=org,
+            created_at__gte=month_start,
+            created_at__lt=month_end,
+        ).count(),
+    }
+
+
+def _social_feature_guard(org, *, require_api=False, require_posting=False):
+    capabilities = _social_plan_capabilities(org)
+    if not capabilities.get("has_subscription"):
+        return capabilities, _json_error("Active Digital Automation subscription required.", status=403)
+    if not capabilities.get("enabled"):
+        return capabilities, _json_error("Social Media feature is disabled for your plan.", status=403)
+    if require_api and not capabilities.get("api_connect_enabled"):
+        return capabilities, _json_error("API connect feature is disabled for your plan.", status=403)
+    if require_posting and not capabilities.get("posting_enabled"):
+        return capabilities, _json_error("Post publishing feature is disabled for your plan.", status=403)
+    return capabilities, None
+
+
+def _normalize_social_platforms(values):
+    normalized = []
+    seen = set()
+    for value in values or []:
+        platform = str(value or "").strip().lower()
+        if platform not in SOCIAL_PLATFORM_LABELS:
+            continue
+        if platform in seen:
+            continue
+        seen.add(platform)
+        normalized.append(platform)
+    return normalized
+
+
+def _mask_token(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= 8:
+        return "*" * len(raw)
+    return f"{raw[:4]}{'*' * (len(raw) - 8)}{raw[-4:]}"
+
+
+def _serialize_social_company(item):
+    if not item:
+        return {}
+    return {
+        "id": item.id,
+        "name": item.name,
+        "is_active": bool(item.is_active),
+        "api_accounts_count": int(getattr(item, "api_accounts_count", 0) or 0),
+        "created_at": _format_datetime(item.created_at),
+        "updated_at": _format_datetime(item.updated_at),
+    }
+
+
+def _resolve_social_company(org, company_id, *, required=True):
+    raw = str(company_id or "").strip()
+    if not raw:
+        return None, (_json_error("social_company_required", status=400) if required else None)
+    try:
+        company_pk = int(raw)
+    except (TypeError, ValueError):
+        return None, _json_error("invalid_social_company", status=400)
+    item = SocialMediaCompany.objects.filter(organization=org, id=company_pk, is_active=True).first()
+    if not item:
+        return None, _json_error("social_company_not_found", status=404)
+    return item, None
+
+
+def _serialize_social_connection(item):
+    if not item:
+        return {}
+    return {
+        "platform": item.platform,
+        "social_company_id": item.social_company_id,
+        "label": SOCIAL_PLATFORM_LABELS.get(item.platform, _title_case(item.platform)),
+        "is_connected": bool(item.is_connected),
+        "status": item.status,
+        "account_id": item.account_id or "",
+        "api_base_url": item.api_base_url or "",
+        "api_endpoint": item.api_endpoint or "",
+        "token_type": item.token_type or "Bearer",
+        "scopes": item.scopes or "",
+        "extra_headers": item.extra_headers or {},
+        "last_connected_at": _format_datetime(item.last_connected_at),
+        "last_error": item.last_error or "",
+        "access_token_masked": _mask_token(item.access_token),
+        "updated_at": _format_datetime(item.updated_at),
+    }
+
+
+def _social_payload_for_platform(platform, content, media_url):
+    text = str(content or "").strip()
+    media = str(media_url or "").strip()
+    if platform == SocialPlatformConnection.PLATFORM_FACEBOOK:
+        payload = {"message": text}
+        if media:
+            payload["link"] = media
+        return payload
+    if platform == SocialPlatformConnection.PLATFORM_INSTAGRAM:
+        payload = {"caption": text}
+        if media:
+            payload["image_url"] = media
+        return payload
+    if platform == SocialPlatformConnection.PLATFORM_LINKEDIN:
+        payload = {"commentary": text}
+        if media:
+            payload["content_url"] = media
+        return payload
+    if platform == SocialPlatformConnection.PLATFORM_YOUTUBE:
+        title = text[:100] or "Auto post"
+        payload = {"title": title, "description": text}
+        if media:
+            payload["video_url"] = media
+        return payload
+    return {"text": text, "media_url": media}
+
+
+def _resolve_social_platform_content(post_job, platform):
+    default_payload = {
+        "title": "",
+        "content": str(post_job.content or "").strip(),
+        "content_html": "",
+        "media_url": str(post_job.media_url or "").strip(),
+    }
+    result_payload = post_job.result_payload if isinstance(post_job.result_payload, dict) else {}
+    platform_content = result_payload.get("platform_content") if isinstance(result_payload.get("platform_content"), dict) else {}
+    custom_payload = platform_content.get(platform) if isinstance(platform_content.get(platform), dict) else {}
+    merged = {**default_payload, **custom_payload}
+    merged["title"] = str(merged.get("title") or "").strip()
+    merged["content"] = str(merged.get("content") or "").strip()
+    merged["content_html"] = str(merged.get("content_html") or "").strip()
+    merged["media_url"] = str(merged.get("media_url") or "").strip()
+    return merged
+
+
+def _execute_social_post_job(post_job):
+    now = timezone.now()
+    selected = _normalize_social_platforms(post_job.target_platforms or [])
+    if not selected:
+        post_job.status = SocialPostJob.STATUS_FAILED
+        post_job.error_message = "No platform selected."
+        post_job.publish_attempted_at = now
+        post_job.save(update_fields=["status", "error_message", "publish_attempted_at", "updated_at"])
+        return
+
+    post_job.status = SocialPostJob.STATUS_PROCESSING
+    post_job.error_message = ""
+    post_job.publish_attempted_at = now
+    post_job.save(update_fields=["status", "error_message", "publish_attempted_at", "updated_at"])
+
+    SocialPostDispatchLog.objects.filter(post_job=post_job).delete()
+    connections = {
+        row.platform: row
+        for row in SocialPlatformConnection.objects.filter(
+            organization=post_job.organization,
+            social_company=post_job.social_company,
+            platform__in=selected,
+        )
+    }
+    success_count = 0
+    failed_count = 0
+    dispatch_payload = []
+
+    for platform in selected:
+        connection = connections.get(platform)
+        if not connection or not connection.is_connected:
+            SocialPostDispatchLog.objects.create(
+                post_job=post_job,
+                organization=post_job.organization,
+                platform=platform,
+                connection=connection,
+                status=SocialPostDispatchLog.STATUS_FAILED,
+                error_message="Platform is not connected.",
+            )
+            failed_count += 1
+            dispatch_payload.append({"platform": platform, "status": "failed", "error": "Platform is not connected."})
+            continue
+        endpoint = str(connection.api_endpoint or connection.api_base_url or "").strip()
+        if not endpoint:
+            SocialPostDispatchLog.objects.create(
+                post_job=post_job,
+                organization=post_job.organization,
+                platform=platform,
+                connection=connection,
+                status=SocialPostDispatchLog.STATUS_FAILED,
+                error_message="API endpoint is missing.",
+            )
+            failed_count += 1
+            dispatch_payload.append({"platform": platform, "status": "failed", "error": "API endpoint is missing."})
+            continue
+        headers = {
+            "Content-Type": "application/json",
+        }
+        token = str(connection.access_token or "").strip()
+        if token:
+            token_type = str(connection.token_type or "Bearer").strip() or "Bearer"
+            headers["Authorization"] = f"{token_type} {token}"
+        for key, value in (connection.extra_headers or {}).items():
+            if key and value:
+                headers[str(key)] = str(value)
+        platform_content = _resolve_social_platform_content(post_job, platform)
+        text_body = platform_content.get("content_html") or platform_content.get("content") or post_job.content
+        payload = _social_payload_for_platform(platform, text_body, platform_content.get("media_url") or post_job.media_url)
+        if platform_content.get("title"):
+            payload["title"] = platform_content["title"]
+        response_text = ""
+        http_status = None
+        external_post_id = ""
+        status_value = SocialPostDispatchLog.STATUS_FAILED
+        error_message = ""
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                http_status = int(getattr(resp, "status", 200) or 200)
+                response_text = (resp.read() or b"").decode("utf-8", errors="replace")
+            if 200 <= int(http_status or 0) < 300:
+                status_value = SocialPostDispatchLog.STATUS_SUCCESS
+                success_count += 1
+                connection.status = SocialPlatformConnection.STATUS_CONNECTED
+                connection.last_error = ""
+                connection.last_connected_at = timezone.now()
+                try:
+                    response_json = json.loads(response_text) if response_text else {}
+                except json.JSONDecodeError:
+                    response_json = {}
+                external_post_id = (
+                    str(response_json.get("id") or response_json.get("post_id") or response_json.get("data", {}).get("id") or "")
+                    if isinstance(response_json, dict) else ""
+                )
+                connection.save(update_fields=["status", "last_error", "last_connected_at", "updated_at"])
+                dispatch_payload.append({"platform": platform, "status": "success", "http_status": http_status, "external_post_id": external_post_id})
+            else:
+                failed_count += 1
+                error_message = f"HTTP {http_status}"
+                connection.status = SocialPlatformConnection.STATUS_ERROR
+                connection.last_error = error_message
+                connection.save(update_fields=["status", "last_error", "updated_at"])
+                dispatch_payload.append({"platform": platform, "status": "failed", "http_status": http_status, "error": error_message})
+        except urllib.error.HTTPError as exc:
+            failed_count += 1
+            http_status = int(getattr(exc, "code", 0) or 0) or None
+            try:
+                response_text = (exc.read() or b"").decode("utf-8", errors="replace")
+            except Exception:
+                response_text = str(exc)
+            error_message = f"HTTP {http_status or '-'}"
+            connection.status = SocialPlatformConnection.STATUS_ERROR
+            connection.last_error = error_message
+            connection.save(update_fields=["status", "last_error", "updated_at"])
+            dispatch_payload.append({"platform": platform, "status": "failed", "http_status": http_status, "error": error_message})
+        except Exception as exc:
+            failed_count += 1
+            error_message = str(exc)[:500]
+            connection.status = SocialPlatformConnection.STATUS_ERROR
+            connection.last_error = error_message
+            connection.save(update_fields=["status", "last_error", "updated_at"])
+            dispatch_payload.append({"platform": platform, "status": "failed", "error": error_message})
+        SocialPostDispatchLog.objects.create(
+            post_job=post_job,
+            organization=post_job.organization,
+            platform=platform,
+            connection=connection,
+            status=status_value,
+            http_status=http_status,
+            external_post_id=external_post_id,
+            response_body=(response_text or "")[:5000],
+            error_message=(error_message or "")[:1000],
+        )
+
+    final_status = SocialPostJob.STATUS_FAILED
+    if success_count and failed_count:
+        final_status = SocialPostJob.STATUS_PARTIAL
+    elif success_count and not failed_count:
+        final_status = SocialPostJob.STATUS_SUCCESS
+    post_job.status = final_status
+    post_job.published_at = timezone.now()
+    existing_payload = post_job.result_payload if isinstance(post_job.result_payload, dict) else {}
+    post_job.result_payload = {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "dispatch": dispatch_payload,
+        "platform_content": existing_payload.get("platform_content") if isinstance(existing_payload.get("platform_content"), dict) else {},
+    }
+    post_job.error_message = "" if failed_count == 0 else f"{failed_count} platform(s) failed."
+    post_job.save(
+        update_fields=[
+            "status",
+            "published_at",
+            "result_payload",
+            "error_message",
+            "updated_at",
+        ]
+    )
+
+
 def _format_datetime(value):
     if not value:
         return ""
@@ -983,6 +1411,629 @@ def org_inbox_compose(request):
         "status": "ok",
         "message": "Notification sent successfully.",
         "notification": serialize_notification(item),
+    })
+
+
+def _serialize_social_post_row(item):
+    result_payload = item.result_payload if isinstance(item.result_payload, dict) else {}
+    return {
+        "id": item.id,
+        "social_company_id": item.social_company_id,
+        "social_company_name": item.social_company.name if getattr(item, "social_company", None) else "",
+        "content": item.content or "",
+        "media_url": item.media_url or "",
+        "target_platforms": _normalize_social_platforms(item.target_platforms or []),
+        "status": item.status,
+        "scheduled_at": _format_datetime(item.scheduled_at),
+        "published_at": _format_datetime(item.published_at),
+        "publish_attempted_at": _format_datetime(item.publish_attempted_at),
+        "error_message": item.error_message or "",
+        "result_payload": result_payload,
+        "platform_content": result_payload.get("platform_content") if isinstance(result_payload.get("platform_content"), dict) else {},
+        "created_at": _format_datetime(item.created_at),
+        "dispatch_logs": [
+            {
+                "id": row.id,
+                "platform": row.platform,
+                "label": SOCIAL_PLATFORM_LABELS.get(row.platform, _title_case(row.platform)),
+                "status": row.status,
+                "http_status": row.http_status,
+                "external_post_id": row.external_post_id or "",
+                "error_message": row.error_message or "",
+                "attempted_at": _format_datetime(row.attempted_at),
+            }
+            for row in item.dispatch_logs.all().order_by("-attempted_at", "-id")
+        ],
+    }
+
+
+def _parse_scheduled_datetime(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.datetime.fromisoformat(normalized)
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+@login_required
+@require_http_methods(["GET"])
+def social_media_automation_overview(request):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org)
+    if feature_error:
+        return feature_error
+    companies = list(
+        SocialMediaCompany.objects
+        .filter(organization=org, is_active=True)
+        .annotate(api_accounts_count=models.Count("platform_connections", filter=Q(platform_connections__is_connected=True)))
+        .order_by("name", "id")
+    )
+    selected_social_company = None
+    if companies:
+        selected_social_company, _ = _resolve_social_company(
+            org,
+            request.GET.get("social_company_id") or request.GET.get("company_id") or companies[0].id,
+            required=False,
+        )
+        if not selected_social_company:
+            selected_social_company = companies[0]
+
+    due_jobs = (
+        SocialPostJob.objects
+        .filter(
+            organization=org,
+            status=SocialPostJob.STATUS_SCHEDULED,
+            social_company=selected_social_company,
+            scheduled_at__isnull=False,
+            scheduled_at__lte=timezone.now(),
+        )
+        .order_by("scheduled_at", "id")[:5]
+    )
+    for job in due_jobs:
+        _execute_social_post_job(job)
+
+    connection_map = {
+        row.platform: row
+        for row in SocialPlatformConnection.objects.filter(organization=org, social_company=selected_social_company)
+    }
+    connections = [
+        _serialize_social_connection(connection_map.get(platform))
+        if connection_map.get(platform)
+        else {
+            "platform": platform,
+            "label": SOCIAL_PLATFORM_LABELS.get(platform, _title_case(platform)),
+            "is_connected": False,
+            "status": SocialPlatformConnection.STATUS_DISCONNECTED,
+            "account_id": "",
+            "api_base_url": "",
+            "api_endpoint": "",
+            "token_type": "Bearer",
+            "scopes": "",
+            "extra_headers": {},
+            "last_connected_at": "",
+            "last_error": "",
+            "access_token_masked": "",
+            "updated_at": "",
+        }
+        for platform in SOCIAL_PLATFORM_ORDER
+    ]
+    recent_posts = (
+        SocialPostJob.objects
+        .filter(organization=org, social_company=selected_social_company)
+        .prefetch_related("dispatch_logs")
+        .order_by("-created_at", "-id")[:10]
+    )
+    usage = _social_usage_summary(org)
+    usage["connected_accounts"] = SocialPlatformConnection.objects.filter(
+        organization=org,
+        social_company=selected_social_company,
+        is_connected=True,
+    ).count()
+    if selected_social_company:
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if month_start.month == 12:
+            month_end = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            month_end = month_start.replace(month=month_start.month + 1)
+        usage["posts_this_month"] = SocialPostJob.objects.filter(
+            organization=org,
+            social_company=selected_social_company,
+            created_at__gte=month_start,
+            created_at__lt=month_end,
+        ).count()
+    return JsonResponse({
+        "plan_capabilities": capabilities,
+        "usage": usage,
+        "companies": [_serialize_social_company(item) for item in companies],
+        "selected_social_company_id": selected_social_company.id if selected_social_company else None,
+        "connections": connections,
+        "posts": [_serialize_social_post_row(item) for item in recent_posts],
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def social_media_companies(request):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org)
+    if feature_error:
+        return feature_error
+
+    if request.method == "GET":
+        rows = (
+            SocialMediaCompany.objects
+            .filter(organization=org, is_active=True)
+            .annotate(api_accounts_count=models.Count("platform_connections", filter=Q(platform_connections__is_connected=True)))
+            .order_by("name", "id")
+        )
+        return JsonResponse({
+            "plan_capabilities": capabilities,
+            "items": [_serialize_social_company(item) for item in rows],
+        })
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return _json_error("invalid_json", status=400)
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return _json_error("name_required", status=400)
+    company_count_limit = int(capabilities.get("company_count_limit", 1) or 1)
+    current_count = SocialMediaCompany.objects.filter(organization=org, is_active=True).count()
+    if company_count_limit >= 0 and current_count >= company_count_limit:
+        return _json_error(
+            f"Company count limit reached ({company_count_limit}).",
+            status=403,
+        )
+    item, created = SocialMediaCompany.objects.get_or_create(
+        organization=org,
+        name=name,
+        defaults={
+            "is_active": True,
+            "created_by": request.user,
+        },
+    )
+    if not created and not item.is_active:
+        item.is_active = True
+        item.save(update_fields=["is_active", "updated_at"])
+    rows = (
+        SocialMediaCompany.objects
+        .filter(organization=org, is_active=True)
+        .annotate(api_accounts_count=models.Count("platform_connections", filter=Q(platform_connections__is_connected=True)))
+        .order_by("name", "id")
+    )
+    usage = _social_usage_summary(org)
+    return JsonResponse({
+        "created": created,
+        "company": _serialize_social_company(item),
+        "plan_capabilities": capabilities,
+        "usage": usage,
+        "items": [_serialize_social_company(row) for row in rows],
+    })
+
+
+@login_required
+@require_http_methods(["PUT", "DELETE"])
+def social_media_company_detail(request, company_id):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org)
+    if feature_error:
+        return feature_error
+    item = SocialMediaCompany.objects.filter(organization=org, id=company_id, is_active=True).first()
+    if not item:
+        return _json_error("social_company_not_found", status=404)
+
+    if request.method == "DELETE":
+        item.is_active = False
+        item.save(update_fields=["is_active", "updated_at"])
+        rows = (
+            SocialMediaCompany.objects
+            .filter(organization=org, is_active=True)
+            .annotate(api_accounts_count=models.Count("platform_connections", filter=Q(platform_connections__is_connected=True)))
+            .order_by("name", "id")
+        )
+        usage = _social_usage_summary(org)
+        return JsonResponse({
+            "deleted": True,
+            "items": [_serialize_social_company(row) for row in rows],
+            "usage": usage,
+            "plan_capabilities": capabilities,
+        })
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return _json_error("invalid_json", status=400)
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return _json_error("name_required", status=400)
+    duplicate = SocialMediaCompany.objects.filter(organization=org, is_active=True, name=name).exclude(id=item.id).exists()
+    if duplicate:
+        return _json_error("company_name_exists", status=400)
+    item.name = name
+    item.save(update_fields=["name", "updated_at"])
+    rows = (
+        SocialMediaCompany.objects
+        .filter(organization=org, is_active=True)
+        .annotate(api_accounts_count=models.Count("platform_connections", filter=Q(platform_connections__is_connected=True)))
+        .order_by("name", "id")
+    )
+    usage = _social_usage_summary(org)
+    return JsonResponse({
+        "updated": True,
+        "company": _serialize_social_company(item),
+        "items": [_serialize_social_company(row) for row in rows],
+        "usage": usage,
+        "plan_capabilities": capabilities,
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def social_media_connections(request):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org, require_api=True)
+    if feature_error:
+        return feature_error
+
+    if request.method == "GET":
+        selected_social_company, _ = _resolve_social_company(
+            org,
+            request.GET.get("social_company_id") or request.GET.get("company_id"),
+            required=False,
+        )
+        connection_map = {
+            row.platform: row
+            for row in SocialPlatformConnection.objects.filter(organization=org, social_company=selected_social_company)
+        }
+        usage = _social_usage_summary(org)
+        if selected_social_company:
+            usage["connected_accounts"] = SocialPlatformConnection.objects.filter(
+                organization=org,
+                social_company=selected_social_company,
+                is_connected=True,
+            ).count()
+        return JsonResponse({
+            "plan_capabilities": capabilities,
+            "usage": usage,
+            "selected_social_company_id": selected_social_company.id if selected_social_company else None,
+            "connections": [
+                _serialize_social_connection(connection_map.get(platform))
+                if connection_map.get(platform)
+                else {
+                    "platform": platform,
+                    "label": SOCIAL_PLATFORM_LABELS.get(platform, _title_case(platform)),
+                    "is_connected": False,
+                    "status": SocialPlatformConnection.STATUS_DISCONNECTED,
+                    "account_id": "",
+                    "api_base_url": "",
+                    "api_endpoint": "",
+                    "token_type": "Bearer",
+                    "scopes": "",
+                    "extra_headers": {},
+                    "last_connected_at": "",
+                    "last_error": "",
+                    "access_token_masked": "",
+                    "updated_at": "",
+                }
+                for platform in SOCIAL_PLATFORM_ORDER
+            ]
+        })
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return _json_error("invalid_json", status=400)
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    if platform not in SOCIAL_PLATFORM_LABELS:
+        return _json_error("invalid_platform", status=400)
+    api_endpoint = str(payload.get("api_endpoint") or "").strip()
+    api_base_url = str(payload.get("api_base_url") or "").strip()
+    access_token = str(payload.get("access_token") or "").strip()
+    token_type = str(payload.get("token_type") or "Bearer").strip() or "Bearer"
+    if not api_endpoint and not api_base_url:
+        return _json_error("api_endpoint_required", status=400)
+    if not access_token:
+        return _json_error("access_token_required", status=400)
+    extra_headers = payload.get("extra_headers") if isinstance(payload.get("extra_headers"), dict) else {}
+    social_company, company_error = _resolve_social_company(org, payload.get("social_company_id"), required=True)
+    if company_error:
+        return company_error
+    item, _ = SocialPlatformConnection.objects.get_or_create(
+        organization=org,
+        social_company=social_company,
+        platform=platform,
+        defaults={"updated_by": request.user},
+    )
+    social_accounts_limit = int(capabilities.get("social_accounts_limit", -1) or -1)
+    if social_accounts_limit >= 0:
+        connected_count = (
+            SocialPlatformConnection.objects
+            .filter(organization=org, social_company=social_company, is_connected=True)
+            .exclude(id=item.id)
+            .count()
+        )
+        if connected_count >= social_accounts_limit:
+            return _json_error(
+                f"Social account limit reached ({social_accounts_limit}). Upgrade plan or disconnect an existing account.",
+                status=403,
+            )
+    item.account_id = str(payload.get("account_id") or "").strip()
+    item.api_base_url = api_base_url
+    item.api_endpoint = api_endpoint
+    item.access_token = access_token
+    item.refresh_token = str(payload.get("refresh_token") or "").strip()
+    item.token_type = token_type
+    item.scopes = str(payload.get("scopes") or "").strip()
+    item.extra_headers = extra_headers
+    item.status = SocialPlatformConnection.STATUS_CONNECTED
+    item.is_connected = True
+    item.last_error = ""
+    item.last_connected_at = timezone.now()
+    item.updated_by = request.user
+    item.save()
+    return JsonResponse({
+        "saved": True,
+        "plan_capabilities": capabilities,
+        "usage": _social_usage_summary(org),
+        "connection": _serialize_social_connection(item),
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def social_media_connection_disconnect(request, platform):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org, require_api=True)
+    if feature_error:
+        return feature_error
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform not in SOCIAL_PLATFORM_LABELS:
+        return _json_error("invalid_platform", status=400)
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        payload = {}
+    social_company, company_error = _resolve_social_company(org, payload.get("social_company_id"), required=True)
+    if company_error:
+        return company_error
+    item = SocialPlatformConnection.objects.filter(
+        organization=org,
+        social_company=social_company,
+        platform=normalized_platform,
+    ).first()
+    if not item:
+        return JsonResponse({"updated": False})
+    item.is_connected = False
+    item.status = SocialPlatformConnection.STATUS_DISCONNECTED
+    item.last_error = ""
+    item.access_token = ""
+    item.refresh_token = ""
+    item.updated_by = request.user
+    item.save(
+        update_fields=[
+            "is_connected",
+            "status",
+            "last_error",
+            "access_token",
+            "refresh_token",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return JsonResponse({
+        "updated": True,
+        "plan_capabilities": capabilities,
+        "usage": _social_usage_summary(org),
+    })
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def social_media_posts(request):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org, require_posting=(request.method == "POST"))
+    if feature_error:
+        return feature_error
+    selected_social_company = None
+    if request.method == "GET":
+        selected_social_company, _ = _resolve_social_company(
+            org,
+            request.GET.get("social_company_id") or request.GET.get("company_id"),
+            required=False,
+        )
+
+    due_jobs_qs = (
+        SocialPostJob.objects
+        .filter(
+            organization=org,
+            status=SocialPostJob.STATUS_SCHEDULED,
+            scheduled_at__isnull=False,
+            scheduled_at__lte=timezone.now(),
+        )
+        .order_by("scheduled_at", "id")
+    )
+    if request.method == "GET" and selected_social_company:
+        due_jobs_qs = due_jobs_qs.filter(social_company=selected_social_company)
+    due_jobs = due_jobs_qs[:5]
+    for job in due_jobs:
+        _execute_social_post_job(job)
+
+    if request.method == "GET":
+        try:
+            page = max(int(request.GET.get("page", 1)), 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.GET.get("page_size", 20))
+        except (TypeError, ValueError):
+            page_size = 20
+        page_size = min(max(page_size, 5), 100)
+        queryset = (
+            SocialPostJob.objects
+            .filter(organization=org)
+            .prefetch_related("dispatch_logs")
+            .order_by("-created_at", "-id")
+        )
+        if selected_social_company:
+            queryset = queryset.filter(social_company=selected_social_company)
+        paginator = Paginator(queryset, page_size)
+        page_obj = paginator.get_page(page)
+        return JsonResponse({
+            "plan_capabilities": capabilities,
+            "usage": _social_usage_summary(org),
+            "selected_social_company_id": selected_social_company.id if selected_social_company else None,
+            "items": [_serialize_social_post_row(item) for item in page_obj.object_list],
+            "pagination": {
+                "page": page_obj.number,
+                "page_size": page_size,
+                "total_items": paginator.count,
+                "total_pages": paginator.num_pages,
+            },
+        })
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return _json_error("invalid_json", status=400)
+    content = str(payload.get("content") or "").strip()
+    media_url = str(payload.get("media_url") or "").strip()
+    social_company, company_error = _resolve_social_company(org, payload.get("social_company_id"), required=True)
+    if company_error:
+        return company_error
+    selected = _normalize_social_platforms(payload.get("platforms") or [])
+    platform_content_raw = payload.get("platform_content") if isinstance(payload.get("platform_content"), dict) else {}
+    platform_content = {}
+    for platform in selected:
+        row = platform_content_raw.get(platform) if isinstance(platform_content_raw.get(platform), dict) else {}
+        platform_content[platform] = {
+            "title": str(row.get("title") or "").strip(),
+            "content": str(row.get("content") or "").strip(),
+            "content_html": str(row.get("content_html") or "").strip(),
+            "media_url": str(row.get("media_url") or media_url).strip(),
+        }
+
+    if not content:
+        has_platform_content = any(
+            bool(
+                str(item.get("title") or "").strip()
+                or str(item.get("content") or "").strip()
+                or str(item.get("content_html") or "").strip()
+            )
+            for item in platform_content.values()
+        )
+        if not has_platform_content:
+            return _json_error("content_required", status=400)
+    if not content:
+        content = next(
+            (
+                str(item.get("content") or item.get("content_html") or "").strip()
+                for item in platform_content.values()
+                if str(item.get("content") or item.get("content_html") or "").strip()
+            ),
+            "",
+        )
+    if not selected:
+        return _json_error("platform_required", status=400)
+
+    scheduled_posts_limit = int(capabilities.get("scheduled_posts_limit", -1) or -1)
+    if scheduled_posts_limit >= 0:
+        usage = _social_usage_summary(org)
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if month_start.month == 12:
+            month_end = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            month_end = month_start.replace(month=month_start.month + 1)
+        usage["posts_this_month"] = SocialPostJob.objects.filter(
+            organization=org,
+            social_company=social_company,
+            created_at__gte=month_start,
+            created_at__lt=month_end,
+        ).count()
+        if int(usage.get("posts_this_month") or 0) >= scheduled_posts_limit:
+            return _json_error(
+                f"Monthly social post limit reached ({scheduled_posts_limit}).",
+                status=403,
+            )
+
+    scheduled_at = _parse_scheduled_datetime(payload.get("scheduled_at"))
+    publish_now = bool(payload.get("publish_now"))
+    if scheduled_at and scheduled_at <= timezone.now():
+        publish_now = True
+        scheduled_at = None
+    status = SocialPostJob.STATUS_SCHEDULED if (scheduled_at and not publish_now) else SocialPostJob.STATUS_DRAFT
+    post_job = SocialPostJob.objects.create(
+        organization=org,
+        social_company=social_company,
+        created_by=request.user,
+        content=content,
+        media_url=media_url,
+        target_platforms=selected,
+        status=status,
+        scheduled_at=scheduled_at,
+        result_payload={"platform_content": platform_content},
+    )
+    if publish_now:
+        _execute_social_post_job(post_job)
+        post_job.refresh_from_db()
+    return JsonResponse({
+        "created": True,
+        "plan_capabilities": capabilities,
+        "usage": _social_usage_summary(org),
+        "post": _serialize_social_post_row(
+            SocialPostJob.objects.prefetch_related("dispatch_logs").get(id=post_job.id)
+        ),
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def social_media_post_publish(request, post_id):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org, require_posting=True)
+    if feature_error:
+        return feature_error
+    post_job = (
+        SocialPostJob.objects
+        .filter(organization=org, id=post_id)
+        .prefetch_related("dispatch_logs")
+        .first()
+    )
+    if not post_job:
+        return _json_error("post_not_found", status=404)
+    _execute_social_post_job(post_job)
+    post_job.refresh_from_db()
+    post_job = SocialPostJob.objects.prefetch_related("dispatch_logs").get(id=post_job.id)
+    return JsonResponse({
+        "published": True,
+        "plan_capabilities": capabilities,
+        "usage": _social_usage_summary(org),
+        "post": _serialize_social_post_row(post_job),
     })
 
 

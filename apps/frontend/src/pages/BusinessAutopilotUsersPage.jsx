@@ -82,8 +82,8 @@ const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "dateOfJoining", label: "Date of Joining" },
   { key: "dateOfBirth", label: "Date of Birth" },
   { key: "bloodGroup", label: "Blood Group" },
-  { key: "fatherName", label: "Father Name" },
-  { key: "motherName", label: "Mother Name" },
+  { key: "fatherName", label: "Father's Name" },
+  { key: "motherName", label: "Mother's Name" },
   { key: "maritalStatus", label: "Marital Status" },
   { key: "wifeName", label: "Spouse Name" },
   { key: "contactCountryCode", label: "Contact Country Code" },
@@ -437,7 +437,11 @@ function writeBusinessAutopilotUserDirectory(users) {
 
 function writeSharedHrEmployees(rows = []) {
   try {
-    const nextData = { employees: Array.isArray(rows) ? rows : [] };
+    const existingRaw = window.localStorage.getItem(HR_STORAGE_KEY);
+    const existingData = existingRaw ? JSON.parse(existingRaw) : {};
+    const nextData = (existingData && typeof existingData === "object")
+      ? { ...existingData, employees: Array.isArray(rows) ? rows : [] }
+      : { employees: Array.isArray(rows) ? rows : [] };
     window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(nextData));
     window.dispatchEvent(new Event("storage"));
   } catch {
@@ -614,11 +618,63 @@ export default function BusinessAutopilotUsersPage() {
   const [editingClientId, setEditingClientId] = useState("");
   const [vendorForm, setVendorForm] = useState(() => createEmptySharedPartyForm());
   const [editingVendorId, setEditingVendorId] = useState("");
+  const [actionDialog, setActionDialog] = useState({
+    open: false,
+    variant: "alert",
+    title: "Notice",
+    message: "",
+    confirmText: "OK",
+    cancelText: "Cancel",
+  });
+  const actionDialogResolveRef = useRef(null);
   const clientImportInputRef = useRef(null);
   const vendorImportInputRef = useRef(null);
   const userFormRef = useRef(null);
   const createPasswordInputRef = useRef(null);
   const pageSize = 5;
+
+  function closeActionDialog(result) {
+    const resolver = actionDialogResolveRef.current;
+    actionDialogResolveRef.current = null;
+    setActionDialog((prev) => ({ ...prev, open: false }));
+    if (typeof resolver === "function") {
+      resolver(Boolean(result));
+    }
+  }
+
+  function openAlertDialog(message, options = {}) {
+    if (typeof actionDialogResolveRef.current === "function") {
+      actionDialogResolveRef.current(false);
+    }
+    return new Promise((resolve) => {
+      actionDialogResolveRef.current = () => resolve(true);
+      setActionDialog({
+        open: true,
+        variant: "alert",
+        title: String(options.title || "Notice"),
+        message: String(message || ""),
+        confirmText: String(options.confirmText || "OK"),
+        cancelText: "Cancel",
+      });
+    });
+  }
+
+  function openConfirmDialog(message, options = {}) {
+    if (typeof actionDialogResolveRef.current === "function") {
+      actionDialogResolveRef.current(false);
+    }
+    return new Promise((resolve) => {
+      actionDialogResolveRef.current = (nextValue) => resolve(Boolean(nextValue));
+      setActionDialog({
+        open: true,
+        variant: "confirm",
+        title: String(options.title || "Please Confirm"),
+        message: String(message || ""),
+        confirmText: String(options.confirmText || "Continue"),
+        cancelText: String(options.cancelText || "Cancel"),
+      });
+    });
+  }
 
   async function loadUsers() {
     setLoading(true);
@@ -773,8 +829,9 @@ export default function BusinessAutopilotUsersPage() {
     if (!membershipId || sendingCredentialMembershipId) {
       return;
     }
-    const confirmed = window.confirm(
-      "Email login details again to this user? The password will be reset and changed. Do you want to continue?"
+    const confirmed = await openConfirmDialog(
+      "Email login details again to this user? The password will be reset and changed. Do you want to continue?",
+      { title: "Confirm Credential Reset", confirmText: "Continue", cancelText: "Cancel" }
     );
     if (!confirmed) {
       setNotice("Credentials resend cancelled.");
@@ -904,7 +961,12 @@ export default function BusinessAutopilotUsersPage() {
           const confirmationMessage = existingProductNames
             ? `This user is already assigned to ${existingProductNames}. The same password will continue to work for Business Autopilot too. Do you want to continue?`
             : "This user is already assigned in this organization. The same password will continue to work for Business Autopilot too. Do you want to continue?";
-          if (!window.confirm(confirmationMessage)) {
+          const confirmed = await openConfirmDialog(confirmationMessage, {
+            title: "Existing User Found",
+            confirmText: "Continue",
+            cancelText: "Cancel",
+          });
+          if (!confirmed) {
             setNotice("User creation cancelled.");
             return;
           }
@@ -980,6 +1042,8 @@ export default function BusinessAutopilotUsersPage() {
       const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
       if (detail === "employee_role_exists") {
         setNotice("This employee role already exists.");
+      } else if (detail === "employee_role_matches_department_name") {
+        setNotice("This name already exists as a department. Please choose a different employee role name.");
       } else if (detail === "name_required") {
         setNotice("Employee role name is required.");
       } else {
@@ -1011,7 +1075,16 @@ export default function BusinessAutopilotUsersPage() {
       setNewDepartment("");
       setNotice("Department created.");
     } catch (error) {
-      setNotice(error?.message || "Unable to create department.");
+      const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
+      if (detail === "department_exists") {
+        setNotice("This department already exists.");
+      } else if (detail === "department_matches_employee_role_name") {
+        setNotice("This name already exists as an employee role. Please choose a different department name.");
+      } else if (detail === "name_required") {
+        setNotice("Department name is required.");
+      } else {
+        setNotice(error?.message || "Unable to create department.");
+      }
     } finally {
       setSavingDepartment(false);
     }
@@ -1072,7 +1145,17 @@ export default function BusinessAutopilotUsersPage() {
       cancelEditEmployeeRole();
       setNotice("Employee role updated.");
     } catch (error) {
-      setNotice(error?.message || "Unable to update employee role.");
+      const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
+      if (error?.status === 403) {
+        cancelEditEmployeeRole();
+        setNotice("You do not have permission to update employee roles.");
+      } else if (detail === "employee_role_matches_department_name") {
+        setNotice("This name already exists as a department. Please choose a different employee role name.");
+      } else if (detail === "employee_role_exists") {
+        setNotice("This employee role already exists.");
+      } else {
+        setNotice(error?.message || "Unable to update employee role.");
+      }
     } finally {
       setSavingEmployeeRoleRowId("");
     }
@@ -1133,7 +1216,17 @@ export default function BusinessAutopilotUsersPage() {
       cancelEditDepartment();
       setNotice("Department updated.");
     } catch (error) {
-      setNotice(error?.message || "Unable to update department.");
+      const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
+      if (error?.status === 403) {
+        cancelEditDepartment();
+        setNotice("You do not have permission to update departments.");
+      } else if (detail === "department_matches_employee_role_name") {
+        setNotice("This name already exists as an employee role. Please choose a different department name.");
+      } else if (detail === "department_exists") {
+        setNotice("This department already exists.");
+      } else {
+        setNotice(error?.message || "Unable to update department.");
+      }
     } finally {
       setSavingDepartmentRowId("");
     }
@@ -1507,7 +1600,7 @@ export default function BusinessAutopilotUsersPage() {
   function exportClientsAsPdf() {
     const win = window.open("", "_blank", "width=1000,height=700");
     if (!win) {
-      window.alert("Popup blocked. Please allow popups to export PDF.");
+      void openAlertDialog("Popup blocked. Please allow popups to export PDF.", { title: "Export Failed" });
       return;
     }
     const escapeHtml = (value) => String(value ?? "")
@@ -1667,7 +1760,7 @@ export default function BusinessAutopilotUsersPage() {
         })
         .filter(Boolean);
       if (!nextRows.length) {
-        window.alert("Imported file is empty or invalid.");
+        await openAlertDialog("Imported file is empty or invalid.", { title: "Import Failed" });
         return;
       }
       const nextCustomers = [...nextRows, ...sharedCustomers];
@@ -1675,7 +1768,7 @@ export default function BusinessAutopilotUsersPage() {
       await persistSharedAccountsCustomers(nextCustomers);
       setNotice("Clients imported successfully.");
     } catch {
-      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+      await openAlertDialog("Unable to import this file. Use the exported template structure in CSV or Excel format.", { title: "Import Failed" });
     }
   }
 
@@ -1836,7 +1929,7 @@ export default function BusinessAutopilotUsersPage() {
   function exportVendorsAsPdf() {
     const win = window.open("", "_blank", "width=1000,height=700");
     if (!win) {
-      window.alert("Popup blocked. Please allow popups to export PDF.");
+      void openAlertDialog("Popup blocked. Please allow popups to export PDF.", { title: "Export Failed" });
       return;
     }
     const escapeHtml = (value) => String(value ?? "")
@@ -1996,7 +2089,7 @@ export default function BusinessAutopilotUsersPage() {
         })
         .filter(Boolean);
       if (!nextRows.length) {
-        window.alert("Imported file is empty or invalid.");
+        await openAlertDialog("Imported file is empty or invalid.", { title: "Import Failed" });
         return;
       }
       const nextVendors = [...nextRows, ...sharedVendors];
@@ -2017,7 +2110,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       setNotice("Vendors imported successfully.");
     } catch {
-      window.alert("Unable to import this file. Use the exported template structure in CSV or Excel format.");
+      await openAlertDialog("Unable to import this file. Use the exported template structure in CSV or Excel format.", { title: "Import Failed" });
     }
   }
 
@@ -2109,7 +2202,7 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
               </div>
               <div className="table-responsive">
-                <table className="table table-dark table-hover align-middle mb-0">
+                <table className="table table-dark table-hover align-middle mb-0 wz-priority-header-table">
                   <thead>
                     <tr>
                       <th>Department Name</th>
@@ -2207,7 +2300,7 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
               </div>
               <div className="table-responsive">
-                <table className="table table-dark table-hover align-middle mb-0">
+                <table className="table table-dark table-hover align-middle mb-0 wz-priority-header-table">
                   <thead>
                     <tr>
                       <th>Role Name</th>
@@ -3295,6 +3388,28 @@ export default function BusinessAutopilotUsersPage() {
           </div>
         </>
       )}
+      {actionDialog.open ? (
+        <div className="modal-overlay" onClick={() => closeActionDialog(actionDialog.variant !== "confirm")}>
+          <div className="modal-panel" style={{ width: "min(520px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3">
+              <h5 className="mb-1">{actionDialog.title}</h5>
+              <div className="text-secondary" style={{ whiteSpace: "pre-wrap" }}>
+                {actionDialog.message}
+              </div>
+            </div>
+            <div className="d-flex flex-wrap justify-content-end gap-2">
+              {actionDialog.variant === "confirm" ? (
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => closeActionDialog(false)}>
+                  {actionDialog.cancelText}
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => closeActionDialog(true)}>
+                {actionDialog.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -30,7 +30,7 @@
               <option value="all" {% if billing_product_slug == "all" %}selected{% endif %}>All</option>
               {% for product in billing_products %}
                 <option value="{{ product.slug }}" {% if billing_product_slug == product.slug %}selected{% endif %}>
-                  {{ product.name }}
+                  {% if product.slug == "monitor" or product.slug == "worksuite" or product.slug == "work-suite" %}Work Suite{% else %}{{ product.name }}{% endif %}
                 </option>
               {% endfor %}
             </select>
@@ -55,7 +55,7 @@
             <tbody>
               {% for transfer in approved_transfers %}
                 <tr>
-                  <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
+                  <td>{% if transfer.plan.product and transfer.plan.product.slug == "monitor" %}Work Suite{% else %}{{ transfer.plan.product.name|default:"Work Suite" }}{% endif %}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
                   <td>{{ transfer.user_count_display|default:"-" }}</td>
@@ -107,7 +107,7 @@
             <tbody>
               {% for transfer in pending_transfers %}
                 <tr>
-                  <td>{{ transfer.plan.product.name|default:"Work Suite" }}</td>
+                  <td>{% if transfer.plan.product and transfer.plan.product.slug == "monitor" %}Work Suite{% else %}{{ transfer.plan.product.name|default:"Work Suite" }}{% endif %}</td>
                   <td>{{ transfer.plan.name|default:"-" }}</td>
                   <td>{{ transfer.billing_cycle|title }}</td>
                   <td>{{ transfer.request_type|title }}</td>

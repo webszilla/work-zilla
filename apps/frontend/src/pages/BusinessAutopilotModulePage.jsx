@@ -530,32 +530,32 @@ const HR_TAB_CONFIG = {
       { key: "designation", label: "Employee Role" }
     ],
     fields: [
-      { key: "name", label: "Name", placeholder: "Select employee from created users" },
+      { key: "name", label: "Name", placeholder: "Select Employee From Created Users" },
       { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other"] },
-      { key: "department", label: "Department", placeholder: "Auto from user / editable" },
-      { key: "designation", label: "Employee Role", placeholder: "Auto from user / editable" },
+      { key: "department", label: "Department", placeholder: "Auto From User / Editable" },
+      { key: "designation", label: "Employee Role", placeholder: "Auto From User / Editable" },
       { key: "dateOfJoining", label: "Date of Joining", type: "date" },
       { key: "dateOfBirth", label: "Date of Birth", type: "date" },
       { key: "bloodGroup", label: "Blood Group", type: "select", options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
-      { key: "fatherName", label: "Father Name", placeholder: "Father name" },
-      { key: "motherName", label: "Mother Name", placeholder: "Mother name" },
+      { key: "fatherName", label: "Father's Name", placeholder: "Father's Name" },
+      { key: "motherName", label: "Mother's Name", placeholder: "Mother's Name" },
       { key: "photoDataUrl", label: "Employee Photo", type: "imageUpload", optional: true },
       { key: "photoName", label: "Employee Photo Name", optional: true },
       { key: "documentName", label: "Employee Document", type: "documentUpload", optional: true },
       { key: "documentMimeType", label: "Employee Document Type", optional: true },
       { key: "documentSizeLabel", label: "Employee Document Size", optional: true },
       { key: "contactCountryCode", label: "Contact Number", type: "phoneCode", defaultValue: "+91" },
-      { key: "contactNumber", label: "Contact Number", placeholder: "Primary mobile number", type: "phoneNumber" },
+      { key: "contactNumber", label: "Contact Number", placeholder: "Primary Mobile Number", type: "phoneNumber" },
       { key: "secondaryContactCountryCode", label: "Secondary Contact Number", type: "phoneCode", defaultValue: "+91", optional: true },
-      { key: "secondaryContactNumber", label: "Secondary Contact Number", placeholder: "Secondary mobile number", type: "phoneNumber", optional: true },
-      { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorced", "Widowed"] },
-      { key: "wifeName", label: "Spouse Name", placeholder: "Spouse name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
-      { key: "permanentAddress", label: "Address", placeholder: "Permanent address", type: "textarea" },
+      { key: "secondaryContactNumber", label: "Secondary Contact Number", placeholder: "Secondary Mobile Number", type: "phoneNumber", optional: true },
+      { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single", "Married", "Divorcee", "Widower"] },
+      { key: "wifeName", label: "Spouse Name", placeholder: "Spouse Name", optional: true, conditionalOn: { key: "maritalStatus", value: "Married" } },
+      { key: "permanentAddress", label: "Address", placeholder: "Permanent Address", type: "textarea" },
       { key: "permanentCountry", label: "Country", placeholder: "Country", defaultValue: "India" },
       { key: "permanentState", label: "State", placeholder: "State" },
       { key: "permanentCity", label: "City", placeholder: "City" },
       { key: "permanentPincode", label: "Pincode", placeholder: "Pincode" },
-      { key: "temporaryAddress", label: "Address", placeholder: "Temporary address", type: "textarea" },
+      { key: "temporaryAddress", label: "Address", placeholder: "Temporary Address", type: "textarea" },
       { key: "temporaryCountry", label: "Country", placeholder: "Country", defaultValue: "India" },
       { key: "temporaryState", label: "State", placeholder: "State" },
       { key: "temporaryCity", label: "City", placeholder: "City" },
@@ -631,6 +631,16 @@ const HR_TAB_CONFIG = {
     fields: [],
   }
 };
+
+const HR_EMPLOYEE_REQUIRED_KEYS = new Set([
+  "name",
+  "gender",
+  "department",
+  "designation",
+  "dateOfJoining",
+  "dateOfBirth",
+  "bloodGroup",
+]);
 
 const DEFAULT_HR_DATA = {
   employees: [
@@ -1727,6 +1737,19 @@ function isValidHrData(value) {
   return value && typeof value === "object" && Object.keys(HR_TAB_CONFIG).every((key) => Array.isArray(value[key]));
 }
 
+function normalizeHrData(value) {
+  if (!value || typeof value !== "object") {
+    return Object.fromEntries(
+      Object.keys(HR_TAB_CONFIG).map((key) => [key, Array.isArray(DEFAULT_HR_DATA[key]) ? [...DEFAULT_HR_DATA[key]] : []])
+    );
+  }
+  const next = {};
+  Object.keys(HR_TAB_CONFIG).forEach((key) => {
+    next[key] = Array.isArray(value[key]) ? value[key] : [];
+  });
+  return next;
+}
+
 function isValidCrmData(value) {
   return value && typeof value === "object" && Object.keys(CRM_SECTION_CONFIG).every((key) => !value[key] || Array.isArray(value[key]));
 }
@@ -2110,9 +2133,6 @@ function readSharedHrEmployees() {
       return [];
     }
     const parsed = JSON.parse(raw);
-    if (!isValidHrData(parsed)) {
-      return [];
-    }
     return Array.isArray(parsed.employees) ? parsed.employees : [];
   } catch (_error) {
     return [];
@@ -4265,7 +4285,6 @@ function CrmOnePageModule() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [meetingPopup, setMeetingPopup] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [meetingStatusTab, setMeetingStatusTab] = useState("all");
   const [followUpStatusTab, setFollowUpStatusTab] = useState("all");
@@ -4689,26 +4708,6 @@ function CrmOnePageModule() {
     if (editingIds[sectionKey] === rowId) {
       resetSectionForm(sectionKey);
     }
-  }
-
-  function openDeleteConfirm(sectionKey, row) {
-    setDeleteConfirm({
-      sectionKey,
-      rowId: row.id,
-      label: String(row?.name || row?.subject || row?.title || row?.dealName || row?.company || row?.relatedTo || "this item").trim(),
-    });
-  }
-
-  function closeDeleteConfirm() {
-    setDeleteConfirm(null);
-  }
-
-  function confirmDelete() {
-    if (!deleteConfirm) {
-      return;
-    }
-    onDelete(deleteConfirm.sectionKey, deleteConfirm.rowId);
-    setDeleteConfirm(null);
   }
 
   function onSubmit(sectionKey, event) {
@@ -6768,6 +6767,7 @@ function CrmOnePageModule() {
                 </div>
               ) : null}
               searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+              pageSize={sectionKey === "leads" ? 15 : DEFAULT_TABLE_PAGE_SIZE}
               exportCellValue={(row, column) => {
                 if (column.key === "phone") {
                   const phone = String(row.phone || "").trim();
@@ -6836,7 +6836,7 @@ function CrmOnePageModule() {
                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEdit(sectionKey, row)}>
                     Edit
                   </button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => openDeleteConfirm(sectionKey, row)}>
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDelete(sectionKey, row.id)}>
                     Delete
                   </button>
                 </div>
@@ -7017,36 +7017,6 @@ function CrmOnePageModule() {
               ) : (
                 <div className="small text-secondary">No employees found.</div>
               )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {deleteConfirm ? (
-        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={closeDeleteConfirm}>
-          <div
-            className="modal-panel"
-            style={{ width: "min(420px, 92vw)" }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
-              <div>
-                <h5 className="mb-1">Delete Confirmation</h5>
-                <div className="small text-secondary">This action cannot be undone.</div>
-              </div>
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeDeleteConfirm}>
-                <i className="bi bi-x-lg" aria-hidden="true" />
-              </button>
-            </div>
-            <div className="mb-3">
-              Are you sure you want to delete <span className="fw-semibold">{deleteConfirm.label || "this item"}</span>?
-            </div>
-            <div className="d-flex justify-content-end gap-2">
-              <button type="button" className="btn btn-outline-light" onClick={closeDeleteConfirm}>
-                No
-              </button>
-              <button type="button" className="btn btn-danger" onClick={confirmDelete}>
-                Yes
-              </button>
             </div>
           </div>
         </div>
@@ -8627,6 +8597,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     date: "",
     notes: "",
   });
+  const [employeeViewModal, setEmployeeViewModal] = useState({ open: false, row: null });
   const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
   const [attendanceMonthFilter, setAttendanceMonthFilter] = useState("");
   const showOnlyEmployeeForm = Boolean(embeddedEmployeeOnly);
@@ -8638,9 +8609,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         return;
       }
       const parsed = JSON.parse(raw);
-      if (isValidHrData(parsed)) {
-        setModuleData(parsed);
-      }
+      setModuleData(normalizeHrData(parsed));
     } catch (_error) {
       // Ignore invalid cached module data.
     }
@@ -8734,6 +8703,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     setFormValues(next);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== "employees") {
+      setEmployeeViewModal({ open: false, row: null });
+    }
+  }, [activeTab]);
+
   const config = HR_TAB_CONFIG[activeTab];
   const isPayrollManagementTab = PAYROLL_MANAGEMENT_TABS.has(activeTab);
   const hrTableColumns = useMemo(() => {
@@ -8760,6 +8735,49 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   }, [activeTab, config.columns]);
   const currentRows = moduleData[activeTab] || [];
   const todayIso = getTodayIsoDate();
+  function normalizeIsoDateValue(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) {
+      return "";
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+    const slashMatch = value.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (slashMatch) {
+      const day = Number(slashMatch[1]);
+      const month = Number(slashMatch[2]);
+      const year = Number(slashMatch[3]);
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900 && year <= 9999) {
+        return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      const yyyy = parsed.getFullYear();
+      const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+      const dd = String(parsed.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return value;
+  }
+  function isAgeAtLeastYears(dobIso, minYears = 18) {
+    const value = String(dobIso || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return true;
+    }
+    const dob = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(dob.getTime())) {
+      return true;
+    }
+    const today = new Date(`${todayIso}T00:00:00`);
+    let age = today.getFullYear() - dob.getFullYear();
+    const monthDiff = today.getMonth() - dob.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+      age -= 1;
+    }
+    return age >= minYears;
+  }
   const employeeNameOptions = useMemo(
     () => Array.from(new Set((moduleData.employees || []).map((item) => String(item.name || "").trim()).filter(Boolean))),
     [moduleData.employees]
@@ -9055,6 +9073,10 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       hrFieldErrors[field.key]
       || (linkedPhoneNumberKey && hrFieldErrors[linkedPhoneNumberKey])
     );
+    const showUnderAgeWarning = activeTab === "employees"
+      && field.key === "dateOfBirth"
+      && String(formValues.dateOfBirth || "").trim()
+      && !isAgeAtLeastYears(formValues.dateOfBirth, 18);
     return (
       <div className={className} key={field.key}>
         <label className={`form-label small mb-1 ${hasFieldError ? "text-danger" : "text-secondary"}`}>
@@ -9193,11 +9215,11 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             <input
               type="tel"
               className={`form-control hr-phone-input ${hasFieldError ? "is-invalid" : ""}`}
-              placeholder={
-                field.key === "secondaryContactCountryCode"
-                  ? employeeFieldMap.get("secondaryContactNumber")?.placeholder || "Secondary mobile number"
-                  : employeeFieldMap.get("contactNumber")?.placeholder || "Primary mobile number"
-              }
+                placeholder={
+                  field.key === "secondaryContactCountryCode"
+                  ? employeeFieldMap.get("secondaryContactNumber")?.placeholder || "Secondary Mobile Number"
+                  : employeeFieldMap.get("contactNumber")?.placeholder || "Primary Mobile Number"
+                }
               value={
                 field.key === "secondaryContactCountryCode"
                   ? (formValues.secondaryContactNumber || "")
@@ -9339,14 +9361,21 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
         ) : field.type === "date" ? (
-          <input
-            type="date"
-            className="form-control"
-            placeholder={field.placeholder}
-            value={formValues[field.key] || ""}
-            max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
-            onChange={(event) => onChangeField(field.key, event.target.value)}
-          />
+          <>
+            <input
+              type="date"
+              className="form-control"
+              placeholder={field.placeholder}
+              value={formValues[field.key] || ""}
+              max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
+              onInput={(event) => onChangeField(field.key, event.target.value)}
+              onChange={(event) => onChangeField(field.key, event.target.value)}
+              onBlur={(event) => onChangeField(field.key, event.target.value)}
+            />
+            {showUnderAgeWarning ? (
+              <div className="small text-danger mt-1">Candidate age below 18.</div>
+            ) : null}
+          </>
         ) : (
           <input
             type={field.type || "text"}
@@ -9378,7 +9407,11 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     }
     const fieldMeta = employeeFieldMap.get(fieldKey);
     const normalizedValue = typeof nextValue === "string"
-      ? clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      ? (
+        fieldMeta?.type === "date"
+          ? normalizeIsoDateValue(nextValue)
+          : clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      )
       : nextValue;
     setFormValues((prev) => {
       const next = { ...prev, [fieldKey]: normalizedValue };
@@ -9433,14 +9466,45 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     setFormValues(next);
   }
 
-  function onDeleteRow(rowId) {
+  function onDeleteRow(rowOrId) {
+    const targetId = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.id : rowOrId) || "").trim();
+    const targetName = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.name : "") || "").trim().toLowerCase();
     setModuleData((prev) => ({
       ...prev,
-      [activeTab]: (prev[activeTab] || []).filter((row) => row.id !== rowId)
+      [activeTab]: (prev[activeTab] || []).filter((row) => {
+        const rowId = String(row?.id || "").trim();
+        const rowName = String(row?.name || "").trim().toLowerCase();
+        if (targetId && rowId) {
+          return rowId !== targetId;
+        }
+        if (targetName && rowName) {
+          return rowName !== targetName;
+        }
+        return true;
+      })
     }));
-    if (editingId === rowId) {
+    if (targetId && String(editingId || "").trim() === targetId) {
       onCancelEdit();
     }
+  }
+
+  function openEmployeeViewModal(row) {
+    setEmployeeViewModal({ open: true, row: row || null });
+  }
+
+  function closeEmployeeViewModal() {
+    setEmployeeViewModal({ open: false, row: null });
+  }
+
+  function getEmployeeViewValue(row, key) {
+    if (!row) return "-";
+    if (key === "contactNumber") {
+      return [row.contactCountryCode, row.contactNumber].filter(Boolean).join(" ").trim() || "-";
+    }
+    if (key === "secondaryContactNumber") {
+      return [row.secondaryContactCountryCode, row.secondaryContactNumber].filter(Boolean).join(" ").trim() || "-";
+    }
+    return String(row[key] || "").trim() || "-";
   }
 
   async function onSubmit(event) {
@@ -9459,7 +9523,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       }
       return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
+    const missingFields = visibleFields.filter((field) => {
+      const isRequired = activeTab === "employees"
+        ? HR_EMPLOYEE_REQUIRED_KEYS.has(field.key)
+        : !field.optional;
+      return isRequired && !String(formValues[field.key] || "").trim();
+    });
     if (missingFields.length) {
       const fieldErrorMap = {};
       missingFields.forEach((field) => {
@@ -9501,7 +9570,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         return;
       }
     }
-    const nextRowId = editingId || `${activeTab}_${Date.now()}`;
+    const nextRowId = editingId || `${activeTab}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
@@ -10067,15 +10136,77 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                   </>
                 );
               })() : null}
+              {activeTab === "employees" ? (
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openEmployeeViewModal(row)}>
+                  View
+                </button>
+              ) : null}
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                 Edit
               </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
                 Delete
               </button>
             </div>
           )}
         />
+      ) : null}
+
+      {activeTab === "employees" && employeeViewModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-employee-view-overlay"
+          onClick={closeEmployeeViewModal}
+        >
+          <div
+            className="modal-panel wz-employee-view-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Employee Details</h5>
+                <div className="small wz-employee-view-name">{getEmployeeViewValue(employeeViewModal.row, "name")}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-employee-view-close" onClick={closeEmployeeViewModal}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="row g-3">
+              {[
+                ["gender", "Gender"],
+                ["department", "Department"],
+                ["designation", "Employee Role"],
+                ["dateOfJoining", "Date of Joining"],
+                ["dateOfBirth", "Date of Birth"],
+                ["bloodGroup", "Blood Group"],
+                ["fatherName", "Father's Name"],
+                ["motherName", "Mother's Name"],
+                ["maritalStatus", "Marital Status"],
+                ["wifeName", "Spouse Name"],
+                ["contactNumber", "Contact Number"],
+                ["secondaryContactNumber", "Secondary Contact Number"],
+                ["permanentAddress", "Permanent Address"],
+                ["permanentCountry", "Permanent Country"],
+                ["permanentState", "Permanent State"],
+                ["permanentCity", "Permanent City"],
+                ["permanentPincode", "Permanent Pincode"],
+                ["temporaryAddress", "Temporary Address"],
+                ["temporaryCountry", "Temporary Country"],
+                ["temporaryState", "Temporary State"],
+                ["temporaryCity", "Temporary City"],
+                ["temporaryPincode", "Temporary Pincode"],
+              ].map(([key, label]) => (
+                <div className="col-12 col-md-6 col-xl-4" key={`employee-view-${key}`}>
+                  <div className="wz-employee-view-item">
+                    <div className="small wz-employee-view-label mb-1">{label}</div>
+                    <div className="wz-employee-view-value">{getEmployeeViewValue(employeeViewModal.row, key)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceTaskModal.open ? (
@@ -10414,13 +10545,28 @@ function CategoryCrudModule({
     setFormValues(buildEmptyValues(config.fields));
   }
 
-  function onDeleteRow(rowId) {
+  function onDeleteRow(rowOrId) {
+    const targetId = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.id : rowOrId) || "").trim();
+    const targetName = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.name : "") || "").trim().toLowerCase();
     setModuleData((prev) => ({
       ...prev,
-      [activeTab]: (prev[activeTab] || []).filter((row) => row.id !== rowId)
+      [activeTab]: (prev[activeTab] || []).filter((row) => {
+        const rowId = String(row?.id || "").trim();
+        const rowName = String(row?.name || "").trim().toLowerCase();
+        if (targetId && rowId) {
+          return rowId !== targetId;
+        }
+        if (targetName && rowName) {
+          return rowName !== targetName;
+        }
+        return true;
+      })
     }));
-    if (editingId === rowId) {
+    if (targetId && String(editingId || "").trim() === targetId) {
       onCancelEdit();
+    }
+    if (activeTab === "employees") {
+      setHrFormNotice("Employee deleted.");
     }
   }
 
@@ -10700,7 +10846,7 @@ function CategoryCrudModule({
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                 Edit
               </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
                 Delete
               </button>
             </div>

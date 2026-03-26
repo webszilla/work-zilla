@@ -16,6 +16,14 @@ function enhanceDateInput(input) {
     allowInput: true,
     disableMobile: true,
     monthSelectorType: "dropdown",
+    onValueUpdate: (_selectedDates, dateStr) => {
+      const nextValue = String(dateStr || "");
+      if (input.value !== nextValue) {
+        input.value = nextValue;
+      }
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    },
   };
   if (input.min) {
     config.minDate = input.min;
@@ -67,4 +75,3 @@ export function bindGlobalDatePickerEnhancer() {
 
   bindNow();
 }
-

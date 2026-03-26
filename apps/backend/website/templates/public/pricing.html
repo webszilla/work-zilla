@@ -222,6 +222,14 @@
       return title;
     }
 
+    function displayProductName(product) {
+      const slug = String(product?.slug || "").trim().toLowerCase();
+      if (slug === "monitor" || slug === "worksuite" || slug === "work-suite") {
+        return "Work Suite";
+      }
+      return product?.name || "Product";
+    }
+
     function formatStorageLabel(gbValue) {
       const gb = Number(gbValue);
       if (!Number.isFinite(gb) || gb <= 0) return "-";
@@ -1319,7 +1327,7 @@
         btn.type = "button";
         btn.className = `product-tab ${pricingState.product === product.slug || (!pricingState.product && index === 0) ? "active" : ""}`;
         btn.dataset.product = product.slug;
-        btn.textContent = product.name;
+        btn.textContent = displayProductName(product);
         container.appendChild(btn);
       });
       bindProductTabs();
@@ -1337,7 +1345,7 @@
       window.__pricingProducts.forEach((product) => {
         const opt = document.createElement("option");
         opt.value = product.id ? String(product.id) : product.slug;
-        opt.textContent = product.name;
+        opt.textContent = displayProductName(product);
         if (current && (current === opt.value)) {
           opt.selected = true;
         }

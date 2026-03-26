@@ -158,8 +158,14 @@
       {% if products %}
         {% for product in products %}
           <div class="card">
-            <h3>{{ product.name }}</h3>
-            <p>{{ product.short_description|default:"A Work Zilla product module." }}</p>
+            <h3>{% if product.slug == "monitor" %}Work Suite{% else %}{{ product.name }}{% endif %}</h3>
+            <p>
+              {% if product.slug == "monitor" %}
+                Work Suite monitoring and productivity insights.
+              {% else %}
+                {{ product.short_description|default:"A Work Zilla product module." }}
+              {% endif %}
+            </p>
             <a class="btn btn-outline" href="/products/{{ product.slug }}/">Explore</a>
           </div>
         {% endfor %}

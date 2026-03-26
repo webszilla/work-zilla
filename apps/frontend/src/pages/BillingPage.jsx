@@ -126,6 +126,17 @@ function formatUserLimit(value) {
   return value;
 }
 
+function formatPlanLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return formatValue(value);
+  }
+  if (parsed < 0) {
+    return "Unlimited";
+  }
+  return parsed;
+}
+
 function getErpPerUserPriceFromLimits(limits, cycle, currency) {
   const source = limits || {};
   if (currency === "USD") {
@@ -242,6 +253,7 @@ export default function BillingPage() {
   const isAiChatbot = resolvedSlug === "ai-chatbot";
   const isStorage = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const isBusinessAutopilot = resolvedSlug === "business-autopilot-erp";
+  const isDigitalAutomation = resolvedSlug === "digital-automation";
   const productSlug = resolvedSlug;
   const apiProductSlug = productSlug === "worksuite" ? "monitor" : productSlug;
   const [state, setState] = useState(emptyState);
@@ -769,6 +781,63 @@ export default function BillingPage() {
                           <span>{formatUserLimit(getMaxUsers(sub))}</span>
                         </div>
                       </>
+                    ) : isDigitalAutomation ? (
+                      <>
+                        <div className="billing-current-plan__row">
+                          <span>Social Accounts</span>
+                          <span>{formatPlanLimit(sub.features?.social_accounts)}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>Scheduled Posts / Month</span>
+                          <span>{formatPlanLimit(sub.features?.scheduled_posts)}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>AI Content Words</span>
+                          <span>{formatPlanLimit(sub.features?.ai_words_limit)}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>WordPress Sites</span>
+                          <span>{formatPlanLimit(sub.features?.wp_sites)}</span>
+                        </div>
+                        <div className="billing-current-plan__row">
+                          <span>Hosting Accounts</span>
+                          <span>{formatPlanLimit(sub.features?.hosting_accounts)}</span>
+                        </div>
+                        <div className="plan-feature-divider" />
+                        <div className="plan-feature">
+                          <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
+                          <span>Social Media Automation</span>
+                        </div>
+                        <div className="plan-feature">
+                          <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
+                          <span>AI Content Writer</span>
+                        </div>
+                        <div className="plan-feature">
+                          <i
+                            className={`bi ${formatPlanLimit(sub.features?.wp_sites) === 0 ? "bi-x-circle-fill text-danger" : "bi-check-circle-fill text-success"} plan-feature-icon`}
+                            aria-hidden="true"
+                          />
+                          <span>WordPress Auto Post</span>
+                        </div>
+                        <div className="plan-feature">
+                          <i
+                            className={`bi ${sub.features?.whm_billing_access ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                            aria-hidden="true"
+                          />
+                          <span>WHM Billing Access</span>
+                        </div>
+                        <div className="plan-feature">
+                          <i
+                            className={`bi ${sub.features?.white_label ? "bi-check-circle-fill text-success" : "bi-x-circle-fill text-danger"} plan-feature-icon`}
+                            aria-hidden="true"
+                          />
+                          <span>White-label</span>
+                        </div>
+                        <div className="plan-feature">
+                          <i className="bi bi-check-circle-fill plan-feature-icon text-success" aria-hidden="true" />
+                          <span>Support: {formatValue(sub.features?.support)}</span>
+                        </div>
+                      </>
                     ) : isBusinessAutopilot ? (
                       <>
                         <div className="billing-current-plan__row">
@@ -852,7 +921,7 @@ export default function BillingPage() {
                       <span>Billing Cycle</span>
                       <span>{titleCase(sub.billing_cycle)}</span>
                     </div>
-                    {!isAiChatbot && !isStorage && !isBusinessAutopilot ? (
+                    {!isAiChatbot && !isStorage && !isBusinessAutopilot && !isDigitalAutomation ? (
                       <div className="billing-current-plan__row">
                         <span>Screenshot Storage</span>
                         <span>{formatValue(sub.retention_days)} day(s)</span>
@@ -881,7 +950,7 @@ export default function BillingPage() {
               )}
             </div>
 
-            {sub && !isAiChatbot && !isStorage ? (
+            {sub && !isAiChatbot && !isStorage && !isDigitalAutomation ? (
               <div className="card p-3">
                 <h6>Add Employee Add-ons</h6>
                 {!sub.allow_addons ? (

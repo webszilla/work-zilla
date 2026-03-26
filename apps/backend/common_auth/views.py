@@ -352,5 +352,8 @@ def verify_email_view(request, user_id, token):
         messages.error(request, "Invalid or expired verification link. Please request a new one.")
         return redirect("/my-account/")
     mark_email_verified(user)
+    # Drop any stale queued flash messages (for example, old "email updated" alerts)
+    # so the user sees only the final verification result after opening the link.
+    list(messages.get_messages(request))
     messages.success(request, f"Email verified successfully: {user.email}")
     return redirect("/my-account/")

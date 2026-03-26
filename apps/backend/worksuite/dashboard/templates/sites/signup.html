@@ -46,7 +46,8 @@
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label">Username</label>
-              <input type="text" name="username" class="form-control" minlength="4" maxlength="30" required>
+              <input type="text" name="username" class="form-control" minlength="5" maxlength="30" required>
+              <div class="text-danger small mt-1 d-none" data-username-live-error>Username must be at least 5 characters.</div>
               {% if form and form.username.errors %}
                 <div class="text-danger small">{{ form.username.errors|striptags }}</div>
               {% endif %}
@@ -111,6 +112,7 @@
             <div class="col-12 col-md-6">
               <label class="form-label">Confirm Password</label>
               <input type="password" name="password2" class="form-control" minlength="8" maxlength="128" required>
+              <div class="text-danger small mt-1 d-none" data-password-match-error>Passwords do not match.</div>
               {% if form and form.password2.errors %}
                 <div class="text-danger small">{{ form.password2.errors|striptags }}</div>
               {% endif %}
@@ -183,6 +185,10 @@
 
     (function () {
       var passwordInput = document.querySelector("[data-password-strength-input]");
+      var confirmPasswordInput = document.querySelector("input[name='password2']");
+      var passwordMatchError = document.querySelector("[data-password-match-error]");
+      var usernameInput = document.querySelector("input[name='username']");
+      var usernameError = document.querySelector("[data-username-live-error]");
       var fill = document.querySelector("[data-password-strength-fill]");
       var text = document.querySelector("[data-password-strength-text]");
       var form = document.querySelector("[data-auth-loading-form]");
@@ -228,12 +234,56 @@
         } else {
           passwordInput.setCustomValidity("");
         }
+        updatePasswordMatch();
+      }
+
+      function updatePasswordMatch() {
+        if (!confirmPasswordInput) return;
+        var passwordValue = String(passwordInput.value || "");
+        var confirmValue = String(confirmPasswordInput.value || "");
+        if (!confirmValue) {
+          confirmPasswordInput.setCustomValidity("");
+          if (passwordMatchError) passwordMatchError.classList.add("d-none");
+          return;
+        }
+        if (passwordValue !== confirmValue) {
+          confirmPasswordInput.setCustomValidity("Passwords do not match.");
+          if (passwordMatchError) passwordMatchError.classList.remove("d-none");
+        } else {
+          confirmPasswordInput.setCustomValidity("");
+          if (passwordMatchError) passwordMatchError.classList.add("d-none");
+        }
+      }
+
+      function updateUsernameValidation() {
+        if (!usernameInput) return;
+        var usernameValue = String(usernameInput.value || "").trim();
+        if (!usernameValue) {
+          usernameInput.setCustomValidity("");
+          if (usernameError) usernameError.classList.add("d-none");
+          return;
+        }
+        if (usernameValue.length < 5) {
+          usernameInput.setCustomValidity("Username must be at least 5 characters.");
+          if (usernameError) usernameError.classList.remove("d-none");
+        } else {
+          usernameInput.setCustomValidity("");
+          if (usernameError) usernameError.classList.add("d-none");
+        }
       }
 
       passwordInput.addEventListener("input", updateStrength);
+      if (confirmPasswordInput) {
+        confirmPasswordInput.addEventListener("input", updatePasswordMatch);
+      }
+      if (usernameInput) {
+        usernameInput.addEventListener("input", updateUsernameValidation);
+      }
       if (form) {
         form.addEventListener("submit", function (event) {
           updateStrength();
+          updatePasswordMatch();
+          updateUsernameValidation();
           if (!form.checkValidity()) {
             event.preventDefault();
             form.reportValidity();
@@ -241,6 +291,8 @@
         });
       }
       updateStrength();
+      updatePasswordMatch();
+      updateUsernameValidation();
     })();
   </script>
 {% endblock %}

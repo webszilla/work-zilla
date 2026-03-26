@@ -47,6 +47,7 @@ const WHATSAPP_CLIENT_EVENT_OPTIONS = [
 const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
 const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const PROFILE_PHOTO_MAX_BYTES = 500 * 1024;
 const COMPANY_PROFILE_CURRENCIES = ["INR", "USD", "EUR", "AED", "SGD", "GBP", "AUD", "CAD"];
 const PROFILE_EMPLOYEE_DETAILS_FIELDS = [
   ["Department", "department"],
@@ -55,8 +56,8 @@ const PROFILE_EMPLOYEE_DETAILS_FIELDS = [
   ["Date of Joining", "dateOfJoining"],
   ["Date of Birth", "dateOfBirth"],
   ["Blood Group", "bloodGroup"],
-  ["Father Name", "fatherName"],
-  ["Mother Name", "motherName"],
+  ["Father's Name", "fatherName"],
+  ["Mother's Name", "motherName"],
   ["Primary Mobile", "contactNumberFull"],
   ["Secondary Mobile", "secondaryContactNumberFull"],
   ["Marital Status", "maritalStatus"],
@@ -351,6 +352,7 @@ export default function ProfilePage() {
   const [employeeProfile, setEmployeeProfile] = useState(null);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [photoUploadState, setPhotoUploadState] = useState({ loading: false, error: "", success: "" });
+  const [passwordResetModalOpen, setPasswordResetModalOpen] = useState(false);
   const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
   const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
   const currentProductSlug = globalSlug
@@ -738,6 +740,7 @@ export default function ProfilePage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setPasswordResetModalOpen(false);
     } catch (error) {
       setState((prev) => ({
         ...prev,
@@ -750,6 +753,12 @@ export default function ProfilePage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) {
+      return;
+    }
+    if (file.size > PROFILE_PHOTO_MAX_BYTES) {
+      const message = "Profile photo must be 500KB or smaller.";
+      setPhotoUploadState({ loading: false, error: message, success: "" });
+      showUploadAlert(message);
       return;
     }
     setPhotoUploadState({ loading: true, error: "", success: "" });
@@ -1328,10 +1337,9 @@ export default function ProfilePage() {
                     )}
                   </div>
                   <div className="wz-profile-photo-card__body">
-                    <h5 className="mb-1">Profile Photo</h5>
-                    <p className="text-secondary mb-0">Recommended size: 250x250px. Maximum file size: 500MB.</p>
+                    <h5 className="mb-1">Profile Photo <span className="text-secondary">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h5>
                     <div className="wz-profile-photo-card__actions">
-                      <label className="btn btn-outline-light btn-sm wz-profile-photo-card__upload-btn">
+                      <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
                         {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
                         <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
                       </label>
@@ -1538,7 +1546,7 @@ export default function ProfilePage() {
 
       {!isBusinessAutopilotOrgUser && profileTopTab === "profile" ? (
       <div className="row g-3 mt-1">
-        <div className="col-12 col-lg-6">
+        <div className="col-12">
           <div className="card p-3 h-100">
             <h5>Account</h5>
             <p>
@@ -1554,10 +1562,9 @@ export default function ProfilePage() {
                 )}
               </div>
               <div className="wz-profile-photo-card__body">
-                <h6 className="mb-1">Profile Photo</h6>
-                <p className="text-secondary mb-0">Recommended size: 250x250px. Maximum file size: 500MB.</p>
+                <h6 className="mb-1">Profile Photo <span className="text-secondary">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h6>
                 <div className="wz-profile-photo-card__actions">
-                  <label className="btn btn-outline-light btn-sm wz-profile-photo-card__upload-btn">
+                  <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
                     {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
                     <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
                   </label>
@@ -1568,59 +1575,81 @@ export default function ProfilePage() {
             </div>
 
             <form className="mt-3" onSubmit={handleEmailSubmit}>
-              <div className="mb-2">
-                <label className="form-label">Email</label>
-                <input
-                  type="email"
-                  className="form-control"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="mb-2">
-                <label className="form-label">Mobile Number</label>
-                <div className="input-group">
-                  <PhoneCountryCodePicker
-                    value={phoneCountry}
-                    onChange={(code) => setPhoneCountry(code)}
-                    options={phoneCountries}
-                    style={{ maxWidth: "170px" }}
-                    ariaLabel="Profile phone country code"
-                  />
+              <div className="row g-2 align-items-end">
+                <div className={`col-12 ${showTimezone ? "col-xl-4" : "col-xl-6"}`}>
+                  <label className="form-label">Email</label>
                   <input
-                    type="tel"
+                    type="email"
                     className="form-control"
-                    value={phoneNumber}
-                    onChange={(event) => setPhoneNumber(event.target.value)}
-                    placeholder="Phone number"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
                   />
                 </div>
-              </div>
-              {showTimezone ? (
-                <div className="mb-2">
-                  <label className="form-label">Organization Timezone</label>
-                <select
-                  className="form-select"
-                  value={orgTimezone}
-                  onChange={(event) => setOrgTimezone(event.target.value)}
-                >
-                  {tzList.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
+                <div className={`col-12 ${showTimezone ? "col-xl-4" : "col-xl-6"}`}>
+                  <label className="form-label">Mobile Number</label>
+                  <div className="input-group">
+                    <PhoneCountryCodePicker
+                      value={phoneCountry}
+                      onChange={(code) => setPhoneCountry(code)}
+                      options={phoneCountries}
+                      style={{ maxWidth: "170px" }}
+                      ariaLabel="Profile phone country code"
+                    />
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={phoneNumber}
+                      onChange={(event) => setPhoneNumber(event.target.value)}
+                      placeholder="Phone number"
+                    />
+                  </div>
                 </div>
-              ) : null}
-              <button className="btn btn-primary btn-sm">Update Details</button>
+                {showTimezone ? (
+                  <div className="col-12 col-xl-4">
+                    <label className="form-label">Organization Timezone</label>
+                    <select
+                      className="form-select"
+                      value={orgTimezone}
+                      onChange={(event) => setOrgTimezone(event.target.value)}
+                    >
+                      {tzList.map((tz) => (
+                        <option key={tz.value} value={tz.value}>
+                          {tz.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </div>
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                <button className="btn btn-primary btn-sm">Update Details</button>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => setPasswordResetModalOpen(true)}
+                >
+                  Password Reset
+                </button>
+              </div>
             </form>
           </div>
         </div>
+      </div>
+      ) : null}
 
-        <div className="col-12 col-lg-6">
-          <div className="card p-3 h-100">
-            <h5>Update Password</h5>
+      {passwordResetModalOpen ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setPasswordResetModalOpen(false)}>
+          <div className="modal-panel" style={{ width: "min(520px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Password Reset</h5>
+                <div className="small text-secondary">Update your login password.</div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={() => setPasswordResetModalOpen(false)}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
             <form onSubmit={handlePasswordSubmit}>
               <div className="mb-2">
                 <label className="form-label">Current Password</label>
@@ -1642,7 +1671,7 @@ export default function ProfilePage() {
                   required
                 />
               </div>
-              <div className="mb-2">
+              <div className="mb-3">
                 <label className="form-label">Confirm New Password</label>
                 <input
                   type="password"
@@ -1652,11 +1681,15 @@ export default function ProfilePage() {
                   required
                 />
               </div>
-              <button className="btn btn-warning btn-sm">Update Password</button>
+              <div className="d-flex justify-content-end gap-2">
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setPasswordResetModalOpen(false)}>
+                  Cancel
+                </button>
+                <button className="btn btn-warning btn-sm" type="submit">Update Password</button>
+              </div>
             </form>
           </div>
         </div>
-      </div>
       ) : null}
 
       {profileTopTab === "companyProfile" ? (

@@ -206,7 +206,7 @@ def _can_manage_users(user: User):
     profile = UserProfile.objects.filter(user=user).only("role").first()
     if not profile:
         return False
-    return profile.role in {"company_admin", "superadmin", "super_admin"}
+    return profile.role in {"company_admin", "org_admin", "superadmin", "super_admin"}
 
 
 def _can_manage_openai(user: User, org: Organization = None):
@@ -1416,12 +1416,18 @@ def org_users(request):
             )
             _grant_business_autopilot_access(user, request.user, role)
 
-        if newly_created_user:
+        is_existing_user_added = bool(existing_user) and not newly_created_user
+        if newly_created_user or is_existing_user_added:
             login_url = PUBLIC_LOGIN_URL
+            password_for_share = (
+                plain_password_for_share
+                if newly_created_user
+                else "Use your existing password"
+            )
             created_user_credentials = {
                 "name": _get_org_user_display_name(user),
                 "email": str(user.email or "").strip(),
-                "password": plain_password_for_share,
+                "password": password_for_share,
                 "login_url": login_url,
             }
             mail_sent = send_templated_email(
@@ -1431,13 +1437,13 @@ def org_users(request):
                 {
                     "name": created_user_credentials["name"] or "User",
                     "email": created_user_credentials["email"],
-                    "password": plain_password_for_share,
+                    "password": password_for_share,
                     "login_url": login_url,
                     "organization_name": str(org.name or "").strip(),
                 },
             )
             credential_delivery = {
-                "is_new_user": True,
+                "is_new_user": bool(newly_created_user),
                 "email_sent": bool(mail_sent),
                 "status": "sent" if mail_sent else "failed",
             }
@@ -1715,6 +1721,13 @@ def org_employee_roles(request):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        conflicting_department_exists = (
+            OrganizationDepartment.objects
+            .filter(organization=org, name__iexact=name, is_active=True)
+            .exists()
+        )
+        if conflicting_department_exists:
+            return JsonResponse({"detail": "employee_role_matches_department_name"}, status=400)
         existing_role = (
             OrganizationEmployeeRole.objects
             .filter(organization=org, name__iexact=name)
@@ -1784,6 +1797,13 @@ def org_employee_role_detail(request, role_id: int):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        conflicting_department_exists = (
+            OrganizationDepartment.objects
+            .filter(organization=org, name__iexact=name, is_active=True)
+            .exists()
+        )
+        if conflicting_department_exists:
+            return JsonResponse({"detail": "employee_role_matches_department_name"}, status=400)
         duplicate = (
             OrganizationEmployeeRole.objects
             .filter(organization=org, name__iexact=name, is_active=True)
@@ -1834,6 +1854,13 @@ def org_departments(request):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        conflicting_role_exists = (
+            OrganizationEmployeeRole.objects
+            .filter(organization=org, name__iexact=name, is_active=True)
+            .exists()
+        )
+        if conflicting_role_exists:
+            return JsonResponse({"detail": "department_matches_employee_role_name"}, status=400)
         existing_department = (
             OrganizationDepartment.objects
             .filter(organization=org, name__iexact=name)
@@ -1902,6 +1929,13 @@ def org_department_detail(request, department_id: int):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        conflicting_role_exists = (
+            OrganizationEmployeeRole.objects
+            .filter(organization=org, name__iexact=name, is_active=True)
+            .exists()
+        )
+        if conflicting_role_exists:
+            return JsonResponse({"detail": "department_matches_employee_role_name"}, status=400)
         duplicate = (
             OrganizationDepartment.objects
             .filter(organization=org, name__iexact=name, is_active=True)

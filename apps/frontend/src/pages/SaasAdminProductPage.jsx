@@ -1431,6 +1431,7 @@ export default function SaasAdminProductPage() {
             yearly_price: plan.yearly_price ?? "",
             usd_monthly_price: plan.usd_monthly_price ?? "",
             usd_yearly_price: plan.usd_yearly_price ?? "",
+            company_count: features.company_count ?? 1,
             social_accounts: features.social_accounts ?? "",
             scheduled_posts: features.scheduled_posts ?? features.social_post_limit ?? "",
             ai_words_limit: features.ai_words_limit ?? "",
@@ -1438,6 +1439,11 @@ export default function SaasAdminProductPage() {
             hosting_accounts: features.hosting_accounts ?? features.whm_accounts_limit ?? "",
             support: features.support ?? "email",
             is_popular: Boolean(features.is_popular),
+            social_media_enabled: features.social_media_enabled !== false,
+            social_api_connect_enabled: features.social_api_connect_enabled !== false,
+            social_posting_enabled: features.social_posting_enabled !== false,
+            social_company_wise_enabled: features.social_company_wise_enabled !== false,
+            trial_unlock_top_features: Boolean(features.trial_unlock_top_features),
           }
         : {
             name: "",
@@ -1445,6 +1451,7 @@ export default function SaasAdminProductPage() {
             yearly_price: "",
             usd_monthly_price: "",
             usd_yearly_price: "",
+            company_count: 1,
             social_accounts: "",
             scheduled_posts: "",
             ai_words_limit: "",
@@ -1452,6 +1459,11 @@ export default function SaasAdminProductPage() {
             hosting_accounts: "",
             support: "email",
             is_popular: false,
+            social_media_enabled: true,
+            social_api_connect_enabled: true,
+            social_posting_enabled: true,
+            social_company_wise_enabled: true,
+            trial_unlock_top_features: false,
           })
       : isBusinessAutopilotProduct
       ? (plan
@@ -1654,6 +1666,7 @@ export default function SaasAdminProductPage() {
           "yearly_price",
           "usd_monthly_price",
           "usd_yearly_price",
+          "company_count",
           "social_accounts",
           "scheduled_posts",
           "ai_words_limit",
@@ -1680,6 +1693,7 @@ export default function SaasAdminProductPage() {
         }
 
         const parsedFeatures = {
+          company_count: Number(planModal.form.company_count || 1),
           social_accounts: Number(planModal.form.social_accounts || 0),
           scheduled_posts: Number(planModal.form.scheduled_posts || 0),
           ai_words_limit: Number(planModal.form.ai_words_limit || 0),
@@ -1687,6 +1701,11 @@ export default function SaasAdminProductPage() {
           hosting_accounts: Number(planModal.form.hosting_accounts || 0),
           support: String(planModal.form.support || "email").trim().toLowerCase(),
           is_popular: Boolean(planModal.form.is_popular),
+          social_media_enabled: Boolean(planModal.form.social_media_enabled),
+          social_api_connect_enabled: Boolean(planModal.form.social_api_connect_enabled),
+          social_posting_enabled: Boolean(planModal.form.social_posting_enabled),
+          social_company_wise_enabled: Boolean(planModal.form.social_company_wise_enabled),
+          trial_unlock_top_features: Boolean(planModal.form.trial_unlock_top_features),
         };
 
         const payload = {
@@ -2967,6 +2986,7 @@ export default function SaasAdminProductPage() {
                       )}
                       {isStorageProduct ? null : isDigitalAutomationProduct ? (
                         <>
+                          <th>Company Count</th>
                           <th>Social Accounts</th>
                           <th>Scheduled Posts/mo</th>
                           <th>AI Words</th>
@@ -3021,6 +3041,7 @@ export default function SaasAdminProductPage() {
                           )}
                           {isStorageProduct ? null : isDigitalAutomationProduct ? (
                             <>
+                              <td>{formatLimitValue(plan.features?.company_count)}</td>
                               <td>{formatLimitValue(plan.features?.social_accounts)}</td>
                               <td>{formatLimitValue(plan.features?.scheduled_posts)}</td>
                               <td>{formatLimitValue(plan.features?.ai_words_limit)}</td>
@@ -5338,6 +5359,22 @@ export default function SaasAdminProductPage() {
                     {getFieldError("usd_yearly_price")}
                   </div>
                   <div className="modal-form-field">
+                    <label className="form-label">Company Count</label>
+                    <input
+                      type="number"
+                      min="-1"
+                      className="form-control"
+                      value={planModal.form.company_count ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, company_count: event.target.value }
+                        }))
+                      }
+                    />
+                    {getFieldError("company_count")}
+                  </div>
+                  <div className="modal-form-field">
                     <label className="form-label">Social Accounts</label>
                     <input
                       type="number"
@@ -5446,6 +5483,86 @@ export default function SaasAdminProductPage() {
                     >
                       <option value="false">No</option>
                       <option value="true">Yes</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Social Media Feature</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.social_media_enabled ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, social_media_enabled: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">API Connect Mode</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.social_api_connect_enabled ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, social_api_connect_enabled: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Post Publishing Mode</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.social_posting_enabled ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, social_posting_enabled: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Company-wise Handle</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.social_company_wise_enabled ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, social_company_wise_enabled: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Free Trial Top Features</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.trial_unlock_top_features ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, trial_unlock_top_features: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="false">Disabled</option>
+                      <option value="true">Enabled</option>
                     </select>
                   </div>
                 </>

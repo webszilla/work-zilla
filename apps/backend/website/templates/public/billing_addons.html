@@ -23,7 +23,7 @@
       <div class="plan-summary">
         <div class="plan-summary__row">
           <span>Product</span>
-          <strong>{{ addon_subscription.plan.product.name|default:"Work Suite" }}</strong>
+          <strong>{% if addon_subscription.plan.product and addon_subscription.plan.product.slug == "monitor" %}Work Suite{% else %}{{ addon_subscription.plan.product.name|default:"Work Suite" }}{% endif %}</strong>
         </div>
         <div class="plan-summary__row">
           <span>Plan</span>

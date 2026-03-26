@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from unittest.mock import patch
 
 from apps.backend.business_autopilot.models import OrganizationUser
 from apps.backend.products.models import Product
@@ -148,3 +149,29 @@ class AccountAccessScopeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "public/account_verification_required.html")
         self.assertContains(response, "Email Verification Required")
+
+    @patch("apps.backend.website.views.send_email_verification")
+    def test_unverified_user_can_update_email_and_reverify(self, mock_send_email_verification):
+        mock_send_email_verification.return_value = True
+        unverified = User.objects.create_user(
+            username="change-email@workzilla.test",
+            email="wrong@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(user=unverified, organization=self.org, role="org_user")
+        self.client.force_login(unverified)
+
+        response = self.client.post(
+            "/my-account/verification/update-email/",
+            {"verification_email": "correct@workzilla.test"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/my-account/")
+        unverified.refresh_from_db()
+        self.assertEqual(unverified.email, "correct@workzilla.test")
+        self.assertFalse(unverified.email_verified)
+        self.assertIsNone(unverified.email_verified_at)
+        self.assertEqual(mock_send_email_verification.call_count, 1)
+        _, call_kwargs = mock_send_email_verification.call_args
+        self.assertEqual(call_kwargs.get("force"), True)

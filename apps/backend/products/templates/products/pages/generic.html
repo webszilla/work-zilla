@@ -1,6 +1,6 @@
 {% extends "public/base.html" %}
-{% block meta_title %}{{ product.name }} | Work Zilla{% endblock %}
-{% block meta_description %}{{ product.short_description|default:"Work Zilla product" }}{% endblock %}
+{% block meta_title %}{% if product.slug == "monitor" %}Work Suite{% else %}{{ product.name }}{% endif %} | Work Zilla{% endblock %}
+{% block meta_description %}{% if product.slug == "monitor" %}Work Suite monitoring and productivity insights.{% else %}{{ product.short_description|default:"Work Zilla product" }}{% endif %}{% endblock %}
 
 {% block content %}
 <section class="z-hero full-bleed">
@@ -8,8 +8,8 @@
     <div class="z-hero-grid">
       <div>
         <span class="eyebrow">Product</span>
-        <h1>{{ product.name }}</h1>
-        <p>{{ product.short_description|default:"Work Zilla product overview." }}</p>
+        <h1>{% if product.slug == "monitor" %}Work Suite{% else %}{{ product.name }}{% endif %}</h1>
+        <p>{% if product.slug == "monitor" %}Work Suite monitoring and productivity insights.{% else %}{{ product.short_description|default:"Work Zilla product overview." }}{% endif %}</p>
         <div class="z-hero-cta">
           <a class="btn btn-primary" href="/contact">Talk to sales</a>
           <a class="btn btn-outline" href="/pricing">View plans</a>

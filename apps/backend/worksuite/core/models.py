@@ -616,6 +616,188 @@ class AiUsageEvent(models.Model):
         return f"{self.organization.name} {self.product_slug} {self.period_yyyymm}"
 
 
+class SocialPlatformConnection(models.Model):
+    PLATFORM_FACEBOOK = "facebook"
+    PLATFORM_INSTAGRAM = "instagram"
+    PLATFORM_YOUTUBE = "youtube"
+    PLATFORM_X = "x"
+    PLATFORM_LINKEDIN = "linkedin"
+    PLATFORM_CHOICES = (
+        (PLATFORM_FACEBOOK, "Facebook"),
+        (PLATFORM_INSTAGRAM, "Instagram"),
+        (PLATFORM_YOUTUBE, "YouTube"),
+        (PLATFORM_X, "X"),
+        (PLATFORM_LINKEDIN, "LinkedIn"),
+    )
+
+    STATUS_CONNECTED = "connected"
+    STATUS_DISCONNECTED = "disconnected"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_CONNECTED, "Connected"),
+        (STATUS_DISCONNECTED, "Disconnected"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="social_platform_connections")
+    social_company = models.ForeignKey(
+        "SocialMediaCompany",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="platform_connections",
+    )
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DISCONNECTED)
+    is_connected = models.BooleanField(default=False)
+    account_id = models.CharField(max_length=200, blank=True, default="")
+    api_base_url = models.URLField(max_length=500, blank=True, default="")
+    api_endpoint = models.URLField(max_length=700, blank=True, default="")
+    access_token = models.TextField(blank=True, default="")
+    refresh_token = models.TextField(blank=True, default="")
+    token_type = models.CharField(max_length=40, blank=True, default="Bearer")
+    scopes = models.TextField(blank=True, default="")
+    extra_headers = models.JSONField(default=dict, blank=True)
+    last_connected_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_social_platform_connections",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization", "social_company", "platform")
+        indexes = [
+            models.Index(fields=["organization", "social_company", "platform"]),
+            models.Index(fields=["organization", "is_connected"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.platform}:{self.status}"
+
+
+class SocialPostJob(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_PROCESSING = "processing"
+    STATUS_SUCCESS = "success"
+    STATUS_PARTIAL = "partial"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_SCHEDULED, "Scheduled"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_PARTIAL, "Partial"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="social_post_jobs")
+    social_company = models.ForeignKey(
+        "SocialMediaCompany",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="post_jobs",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="social_post_jobs",
+    )
+    content = models.TextField()
+    media_url = models.URLField(max_length=1000, blank=True, default="")
+    target_platforms = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    publish_attempted_at = models.DateTimeField(null=True, blank=True)
+    result_payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+            models.Index(fields=["organization", "social_company", "status"]),
+            models.Index(fields=["organization", "scheduled_at"]),
+            models.Index(fields=["organization", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.id}:{self.status}"
+
+
+class SocialPostDispatchLog(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    post_job = models.ForeignKey(SocialPostJob, on_delete=models.CASCADE, related_name="dispatch_logs")
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="social_post_dispatch_logs")
+    platform = models.CharField(max_length=20, choices=SocialPlatformConnection.PLATFORM_CHOICES)
+    connection = models.ForeignKey(
+        SocialPlatformConnection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dispatch_logs",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    http_status = models.PositiveIntegerField(null=True, blank=True)
+    external_post_id = models.CharField(max_length=255, blank=True, default="")
+    response_body = models.TextField(blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    attempted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "platform", "attempted_at"]),
+            models.Index(fields=["post_job", "platform"]),
+        ]
+
+    def __str__(self):
+        return f"{self.post_job_id}:{self.platform}:{self.status}"
+
+
+class SocialMediaCompany(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="social_media_companies")
+    name = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_social_media_companies",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization", "name")
+        indexes = [
+            models.Index(fields=["organization", "is_active"]),
+            models.Index(fields=["organization", "name"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.name}"
+
+
 @receiver(pre_save, sender=AiMediaLibraryItem)
 def ai_media_library_replace_file(sender, instance, **kwargs):
     if not instance.pk:

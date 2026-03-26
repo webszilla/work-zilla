@@ -80,6 +80,7 @@ import DigitalCardVisitorAnalyticsPage from "./pages/DigitalCardVisitorAnalytics
 import DigitalAutomationOverviewPage from "./pages/DigitalAutomationOverviewPage.jsx";
 import DigitalAutomationModulePage from "./pages/DigitalAutomationModulePage.jsx";
 import DigitalAutomationSubscriptionPage from "./pages/DigitalAutomationSubscriptionPage.jsx";
+import SocialMediaAutomationPage from "./pages/SocialMediaAutomationPage.jsx";
 import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
@@ -350,7 +351,7 @@ const reactPages = [
   { label: "Website & Catalogue", path: "/dashboard/catalogue", icon: "bi-grid-3x3-gap", productOnly: "whatsapp-automation" },
   { label: "Digital Business Card", path: "/dashboard/digital-card", icon: "bi-person-vcard", productOnly: "whatsapp-automation" },
   { label: "Visitor Analytics", path: "/dashboard/digital-card/analytics", icon: "bi-graph-up-arrow", productOnly: "whatsapp-automation" },
-  { label: "Social Media Automation", path: "/dashboard/social-media-automation", icon: "bi-share", productOnly: "digital-automation" },
+  { label: "Social Media", path: "/dashboard/social-media-automation", icon: "bi-share", productOnly: "digital-automation" },
   { label: "AI Content Writer", path: "/dashboard/ai-content-writer", icon: "bi-magic", productOnly: "digital-automation" },
   { label: "WordPress Auto Post", path: "/dashboard/wordpress-auto-post", icon: "bi-wordpress", productOnly: "digital-automation" },
   { label: "Subscription", path: "/dashboard/subscription", icon: "bi-hdd-network", productOnly: "digital-automation" },
@@ -1642,7 +1643,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/dashboard/social-media-automation"
             element={
               productSlug === "digital-automation"
-                ? <DigitalAutomationModulePage moduleKey="social" />
+                ? <SocialMediaAutomationPage />
                 : <Navigate to={withBase("/")} replace />
             }
           />
@@ -1902,15 +1903,19 @@ function AppShell({ state, productPrefix, productSlug }) {
               Please choose a paid plan to continue without interruption.
             </div>
             <div className="d-flex justify-content-end gap-2 mt-3">
-              <Link className="btn btn-primary" to={withBase("/plans")}>
+              <Link
+                className="btn btn-primary"
+                to={withBase("/plans")}
+                onClick={() => setShowFreePlanModal(false)}
+              >
                 View Plans
               </Link>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-outline-secondary"
                 onClick={() => setShowFreePlanModal(false)}
               >
-                Later
+                Remind Me Later
               </button>
             </div>
           </div>
@@ -1981,6 +1986,9 @@ function GlobalDeleteConfirmBridge() {
         return false;
       }
       if (el.hasAttribute("data-no-delete-confirm")) {
+        return false;
+      }
+      if (el.closest("[data-confirm-dialog='true']")) {
         return false;
       }
       if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") {
@@ -2262,7 +2270,7 @@ export default function App() {
       });
       if (!form.checkValidity()) {
         event.preventDefault();
-        form.reportValidity();
+        event.stopPropagation();
       }
     };
 
