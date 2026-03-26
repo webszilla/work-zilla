@@ -9087,7 +9087,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <div className="position-relative">
             <input
               type="text"
-              className="form-control"
+              className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
@@ -9133,7 +9133,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <div className="crm-inline-suggestions-wrap">
             <input
               type="text"
-              className="form-control"
+              className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
@@ -9173,7 +9173,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </div>
         ) : activeTab === "employees" && field.key === "department" ? (
           <select
-            className="form-select"
+            className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
@@ -9189,7 +9189,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </select>
         ) : activeTab === "employees" && field.key === "designation" ? (
           <select
-            className="form-select"
+            className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
@@ -9303,7 +9303,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </div>
         ) : activeTab === "employees" && field.key.endsWith("Country") ? (
           <select
-            className="form-select"
+            className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || field.defaultValue || "India"}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
@@ -9318,7 +9318,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             if (stateOptions.length) {
               return (
                 <select
-                  className="form-select"
+                  className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
                   value={formValues[field.key] || ""}
                   onChange={(event) => onChangeField(field.key, event.target.value)}
                 >
@@ -9332,7 +9332,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             return (
               <input
                 type="text"
-                className="form-control"
+                className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
                 placeholder={field.placeholder}
                 value={formValues[field.key] || ""}
                 maxLength={getBusinessAutopilotMaxLength(field.key)}
@@ -9342,7 +9342,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           })()
         ) : activeTab === "employees" && field.type === "phoneNumber" ? null : field.type === "select" ? (
           <select
-            className="form-select"
+            className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || field.defaultValue || ""}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
@@ -9353,7 +9353,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </select>
         ) : field.type === "textarea" ? (
           <textarea
-            className="form-control"
+            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
             rows={3}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
@@ -9364,7 +9364,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <>
             <input
               type="date"
-              className="form-control"
+              className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
               max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
@@ -9379,7 +9379,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         ) : (
           <input
             type={field.type || "text"}
-            className="form-control"
+            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
             maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
