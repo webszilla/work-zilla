@@ -360,7 +360,7 @@ const CRM_SECTION_CONFIG = {
       { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: ["App Alert"] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
-      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: "15" },
+      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: ["15"] },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "" }
     ]
   }
@@ -1180,6 +1180,32 @@ function getCrmMeetingReminderMinuteLabel(value) {
   return CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => option.value === normalizedValue)?.label || normalizedValue;
 }
 
+function parseCrmMeetingReminderMinuteValues(reminderMinutes) {
+  const rawValues = Array.isArray(reminderMinutes)
+    ? reminderMinutes
+    : typeof reminderMinutes === "string"
+      ? reminderMinutes.split(",")
+      : reminderMinutes === null || reminderMinutes === undefined
+        ? []
+        : [reminderMinutes];
+  const normalized = rawValues
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .map((item) => {
+      const labelMatch = CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => option.label.toLowerCase() === item.toLowerCase());
+      if (labelMatch) {
+        return labelMatch.value;
+      }
+      const minutesMatch = item.match(/(\d+)\s*min/i);
+      if (minutesMatch) {
+        return String(Number(minutesMatch[1]));
+      }
+      return /^\d+$/.test(item) ? String(Number(item)) : "";
+    })
+    .filter(Boolean);
+  return Array.from(new Set(normalized)).sort((a, b) => Number(a) - Number(b));
+}
+
 function parseCrmMeetingReminderDayValues(reminderDays) {
   const rawValues = Array.isArray(reminderDays)
     ? reminderDays
@@ -1295,9 +1321,15 @@ function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminder
   if (dayCounts.length) {
     parts.push(dayCounts.map((dayCount) => formatCrmMeetingReminderDayLabel(dayCount, true)).filter(Boolean).join(", "));
   }
-  const minuteLabel = getCrmMeetingReminderMinuteLabel(reminderMinutes);
-  if (minuteLabel) {
-    parts.push(`${minuteLabel} before`);
+  const minuteValues = parseCrmMeetingReminderMinuteValues(reminderMinutes);
+  if (minuteValues.length) {
+    const minuteLabel = minuteValues
+      .map((value) => getCrmMeetingReminderMinuteLabel(value))
+      .filter(Boolean)
+      .join(", ");
+    if (minuteLabel) {
+      parts.push(`${minuteLabel} before`);
+    }
   }
   return [channels.join(", "), ...parts].filter(Boolean).join(" • ");
 }
@@ -4337,6 +4369,8 @@ function CrmOnePageModule() {
   const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
   const [meetingReminderDaySearch, setMeetingReminderDaySearch] = useState("");
   const [meetingReminderDaySearchOpen, setMeetingReminderDaySearchOpen] = useState(false);
+  const [meetingReminderMinuteSearch, setMeetingReminderMinuteSearch] = useState("");
+  const [meetingReminderMinuteSearchOpen, setMeetingReminderMinuteSearchOpen] = useState(false);
   const [meetingEmployeeSearch, setMeetingEmployeeSearch] = useState("");
   const [meetingEmployeeSearchOpen, setMeetingEmployeeSearchOpen] = useState(false);
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
@@ -4449,6 +4483,8 @@ function CrmOnePageModule() {
       setMeetingReminderChannelSearchOpen(false);
       setMeetingReminderDaySearch("");
       setMeetingReminderDaySearchOpen(false);
+      setMeetingReminderMinuteSearch("");
+      setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4604,6 +4640,8 @@ function CrmOnePageModule() {
       setMeetingReminderChannelSearchOpen(false);
       setMeetingReminderDaySearch("");
       setMeetingReminderDaySearchOpen(false);
+      setMeetingReminderMinuteSearch("");
+      setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4666,6 +4704,8 @@ function CrmOnePageModule() {
       setMeetingReminderChannelSearchOpen(false);
       setMeetingReminderDaySearch("");
       setMeetingReminderDaySearchOpen(false);
+      setMeetingReminderMinuteSearch("");
+      setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
@@ -4819,6 +4859,7 @@ function CrmOnePageModule() {
       payload.owner = meetingOwners.join(", ");
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
+      payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
     }
     if (sectionKey === "followUps") {
@@ -5014,6 +5055,26 @@ function CrmOnePageModule() {
     });
   }
 
+  function toggleMeetingReminderMinute(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentMinutes = parseCrmMeetingReminderMinuteValues(prev.meetings?.reminderMinutes);
+      const nextMinutes = currentMinutes.includes(normalizedValue)
+        ? currentMinutes.filter((item) => item !== normalizedValue)
+        : parseCrmMeetingReminderMinuteValues([...currentMinutes, normalizedValue]);
+      return {
+        ...prev,
+        meetings: {
+          ...prev.meetings,
+          reminderMinutes: nextMinutes,
+        },
+      };
+    });
+  }
+
   function importRows(sectionKey, importedRows) {
     const config = CRM_SECTION_CONFIG[sectionKey];
     const expectedHeaders = (config.columns || []).map((column) => column.label);
@@ -5116,11 +5177,11 @@ function CrmOnePageModule() {
               }
               const reminderMinuteOption = CRM_MEETING_REMINDER_MINUTE_OPTIONS.find((option) => reminderMeta.includes(option.label.toLowerCase()));
               if (reminderMinuteOption) {
-                payload.reminderMinutes = reminderMinuteOption.value;
+                payload.reminderMinutes = [reminderMinuteOption.value];
               } else {
                 const reminderMatch = reminderMeta.match(/(\d+)\s*min/i);
                 if (reminderMatch) {
-                  payload.reminderMinutes = reminderMatch[1];
+                  payload.reminderMinutes = [reminderMatch[1]];
                 }
               }
             }
@@ -5138,6 +5199,7 @@ function CrmOnePageModule() {
               .filter(Boolean);
           payload.reminderChannel = reminderChannels.length ? reminderChannels : defaultValues.reminderChannel;
           payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
+          payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
           payload.reminderSummary = payload.reminderSummary
             || buildCrmMeetingReminderSummary(payload.reminderChannel, payload.reminderDays, payload.reminderMinutes);
         }
@@ -5455,15 +5517,21 @@ function CrmOnePageModule() {
             }).slice(0, 6)
           : [];
         const showLeadCompanySuggestions = sectionKey === "leads" && leadCompanySearchOpen;
-        const meetingCrmContactMatches = sectionKey === "meetings" && meetingCompanyQuery
+        const meetingCrmContactMatches = sectionKey === "meetings"
           ? (moduleData.contacts || []).filter((contact) => {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              if (!meetingCompanyQuery) {
+                return true;
+              }
               return haystack.includes(meetingCompanyQuery);
             }).slice(0, 6)
           : [];
-        const meetingCustomerMatches = sectionKey === "meetings" && meetingCompanyQuery
+        const meetingCustomerMatches = sectionKey === "meetings"
           ? sharedCustomerOptions.filter((customer) => {
               const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+              if (!meetingCompanyQuery) {
+                return true;
+              }
               return haystack.includes(meetingCompanyQuery);
             }).slice(0, 6)
           : [];
@@ -5520,6 +5588,9 @@ function CrmOnePageModule() {
         const selectedMeetingReminderDays = sectionKey === "meetings"
           ? parseCrmMeetingReminderDayValues(formValues.reminderDays)
           : [];
+        const selectedMeetingReminderMinutes = sectionKey === "meetings"
+          ? parseCrmMeetingReminderMinuteValues(formValues.reminderMinutes)
+          : [];
         const filteredMeetingReminderChannels = sectionKey === "meetings"
           ? CRM_MEETING_REMINDER_CHANNEL_OPTIONS.filter((option) => {
               const normalizedSearch = String(meetingReminderChannelSearch || "").trim().toLowerCase();
@@ -5535,6 +5606,15 @@ function CrmOnePageModule() {
         const filteredMeetingReminderDayOptions = sectionKey === "meetings"
           ? meetingReminderDayOptions.filter((option) => {
               const normalizedSearch = String(meetingReminderDaySearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return option.label.toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const filteredMeetingReminderMinuteOptions = sectionKey === "meetings"
+          ? CRM_MEETING_REMINDER_MINUTE_OPTIONS.filter((option) => {
+              const normalizedSearch = String(meetingReminderMinuteSearch || "").trim().toLowerCase();
               if (!normalizedSearch) {
                 return true;
               }
@@ -6541,15 +6621,77 @@ function CrmOnePageModule() {
                               }
                               if (sectionKey === "meetings" && field.key === "reminderMinutes") {
                                 return (
-                                  <select
-                                    className="form-select"
-                                    value={formValues[field.key] || field.defaultValue || ""}
-                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                                  >
-                                    {CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => (
-                                      <option key={`meeting-reminder-minute-${option.value}`} value={option.value}>{option.label}</option>
-                                    ))}
-                                  </select>
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search reminder minutes"
+                                        value={meetingReminderMinuteSearch}
+                                        onFocus={() => setMeetingReminderMinuteSearchOpen(true)}
+                                        onClick={() => setMeetingReminderMinuteSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setMeetingReminderMinuteSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setMeetingReminderMinuteSearch(event.target.value);
+                                          setMeetingReminderMinuteSearchOpen(true);
+                                        }}
+                                      />
+                                      {meetingReminderMinuteSearchOpen ? (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Reminder Before (Minutes)</div>
+                                            {filteredMeetingReminderMinuteOptions.length ? filteredMeetingReminderMinuteOptions.map((option) => (
+                                              <button
+                                                key={`meeting-reminder-minute-${option.value}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleMeetingReminderMinute(option.value)}
+                                              >
+                                                <span className="d-flex align-items-center gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-0"
+                                                    checked={selectedMeetingReminderMinutes.includes(option.value)}
+                                                    readOnly
+                                                  />
+                                                  <span className="crm-inline-suggestions__item-main">{option.label}</span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No reminder minute options found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedMeetingReminderMinutes.length ? selectedMeetingReminderMinutes.map((value) => {
+                                        const optionLabel = getCrmMeetingReminderMinuteLabel(value) || `${value} Min`;
+                                        return (
+                                          <span
+                                            key={`meeting-selected-reminder-minute-${value}`}
+                                            className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                                          >
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                                              aria-label={`Remove ${optionLabel}`}
+                                              onClick={() => toggleMeetingReminderMinute(value)}
+                                            >
+                                              &times;
+                                            </button>
+                                            <span>{optionLabel}</span>
+                                          </span>
+                                        );
+                                      }) : (
+                                        <div className="small text-secondary">No reminder minute selected yet.</div>
+                                      )}
+                                    </div>
+                                  </div>
                                 );
                               }
                               if (field.type === "datalist") {
