@@ -153,15 +153,28 @@ fi
 venv/bin/python apps/backend/manage.py migrate
 venv/bin/python apps/backend/manage.py collectstatic --noinput
 
-pgrep -f "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" | xargs -r kill
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  if ! ss -ltnp | grep -q ':8000 '; then
-    break
-  fi
-  sleep 1
-done
-mkdir -p "${SERVER_PROJECT_PATH}/logs"
-nohup env DJANGO_DEBUG=0 venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >"${SERVER_PROJECT_PATH}/logs/gunicorn.out" 2>&1 </dev/null &
+if systemctl list-unit-files | grep -q '^workzilla-gunicorn.service'; then
+  # Prevent duplicate bind conflicts with older manual gunicorn launches.
+  pgrep -f "venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" | xargs -r kill || true
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if ! ss -ltnp | grep -q ':8000 '; then
+      break
+    fi
+    sleep 1
+  done
+  systemctl daemon-reload
+  systemctl restart workzilla-gunicorn.service
+else
+  pgrep -f "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" | xargs -r kill
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if ! ss -ltnp | grep -q ':8000 '; then
+      break
+    fi
+    sleep 1
+  done
+  mkdir -p "${SERVER_PROJECT_PATH}/logs"
+  nohup env DJANGO_DEBUG=0 venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >"${SERVER_PROJECT_PATH}/logs/gunicorn.out" 2>&1 </dev/null &
+fi
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if ss -ltnp | grep -q ':8000 '; then
     break
