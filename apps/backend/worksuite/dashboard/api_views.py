@@ -7380,23 +7380,33 @@ def profile_update_email(request):
 
     user = request.user
     profile = dashboard_views.get_profile(user)
+    changed_fields = []
     old_email = (user.email or "").strip().lower()
     new_email = email.lower()
     if old_email != new_email:
         duplicate = User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists()
         if duplicate:
             return _json_error("Email already in use.", status=400)
+    user_update_fields = []
     user.email = email
+    if old_email != new_email:
+        user_update_fields.append("email")
     if old_email != new_email:
         user.email_verified = False
         user.email_verified_at = None
-    user.save()
+        user_update_fields.extend(["email_verified", "email_verified_at"])
+        changed_fields.append("Email")
+    if user_update_fields:
+        user.save(update_fields=user_update_fields)
 
     phone_value = ""
     if phone_number:
         phone_value = f"{phone_country} {phone_number}".strip()
-    profile.phone_number = phone_value
-    profile.save()
+    old_phone_value = str(profile.phone_number or "").strip()
+    if old_phone_value != phone_value:
+        profile.phone_number = phone_value
+        profile.save(update_fields=["phone_number"])
+        changed_fields.append("Mobile Number")
     saved_timezone = None
     saved_public_server_ip = ""
     saved_public_server_domain = ""
@@ -7404,11 +7414,17 @@ def profile_update_email(request):
         theme_settings = ThemeSettings.get_active()
         updates = []
         if "public_server_ip" in payload:
-            theme_settings.public_server_ip = public_server_ip
-            updates.append("public_server_ip")
+            current_public_server_ip = str(theme_settings.public_server_ip or "").strip()
+            if current_public_server_ip != public_server_ip:
+                theme_settings.public_server_ip = public_server_ip
+                updates.append("public_server_ip")
+                changed_fields.append("Online Server IP")
         if "public_server_domain" in payload:
-            theme_settings.public_server_domain = public_server_domain
-            updates.append("public_server_domain")
+            current_public_server_domain = str(theme_settings.public_server_domain or "").strip().lower()
+            if current_public_server_domain != public_server_domain:
+                theme_settings.public_server_domain = public_server_domain
+                updates.append("public_server_domain")
+                changed_fields.append("Online Server Domain")
         if updates:
             theme_settings.save(update_fields=updates)
         saved_public_server_ip = str(theme_settings.public_server_ip or "").strip()
@@ -7420,27 +7436,46 @@ def profile_update_email(request):
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
         updates = []
         if org_timezone:
-            settings_obj.org_timezone = normalize_timezone(org_timezone)
-            updates.append("org_timezone")
+            normalized_timezone = normalize_timezone(org_timezone)
+            if str(settings_obj.org_timezone or "UTC") != normalized_timezone:
+                settings_obj.org_timezone = normalized_timezone
+                updates.append("org_timezone")
+                changed_fields.append("Organization Timezone")
         if "theme_primary" in payload:
-            settings_obj.theme_primary_color = theme_primary
-            updates.append("theme_primary_color")
+            if str(settings_obj.theme_primary_color or "") != str(theme_primary or ""):
+                settings_obj.theme_primary_color = theme_primary
+                updates.append("theme_primary_color")
+                changed_fields.append("Primary Theme Color")
         if "theme_secondary" in payload:
-            settings_obj.theme_secondary_color = theme_secondary
-            updates.append("theme_secondary_color")
+            if str(settings_obj.theme_secondary_color or "") != str(theme_secondary or ""):
+                settings_obj.theme_secondary_color = theme_secondary
+                updates.append("theme_secondary_color")
+                changed_fields.append("Secondary Theme Color")
         if "sidebar_menu_style" in payload:
-            settings_obj.sidebar_menu_style = sidebar_menu_style or "default"
-            updates.append("sidebar_menu_style")
+            next_sidebar_style = sidebar_menu_style or "default"
+            if str(settings_obj.sidebar_menu_style or "default") != next_sidebar_style:
+                settings_obj.sidebar_menu_style = next_sidebar_style
+                updates.append("sidebar_menu_style")
+                changed_fields.append("Sidebar Menu Style")
         if updates:
             settings_obj.save(update_fields=updates)
         saved_timezone = settings_obj.org_timezone or "UTC"
     if old_email != new_email:
         send_email_verification(user, request=request, force=True)
 
-    dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}", request=request)
+    if changed_fields:
+        if changed_fields == ["Email"]:
+            dashboard_views.log_admin_activity(user, "Update Email", f"Updated email to {email}", request=request)
+        else:
+            dashboard_views.log_admin_activity(
+                user,
+                "Update Profile",
+                f"Updated {', '.join(changed_fields)}",
+                request=request,
+            )
 
     return JsonResponse({
-        "updated": True,
+        "updated": bool(changed_fields),
         "email": user.email,
         "phone_number": profile.phone_number or "",
         "org_timezone": saved_timezone,

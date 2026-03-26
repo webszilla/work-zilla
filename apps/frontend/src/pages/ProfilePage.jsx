@@ -1337,7 +1337,7 @@ export default function ProfilePage() {
                     )}
                   </div>
                   <div className="wz-profile-photo-card__body">
-                    <h5 className="mb-1">Profile Photo <span className="text-secondary">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h5>
+                    <h5 className="mb-1">Profile Photo <span className="text-secondary fw-normal">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h5>
                     <div className="wz-profile-photo-card__actions">
                       <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
                         {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
@@ -1562,7 +1562,7 @@ export default function ProfilePage() {
                 )}
               </div>
               <div className="wz-profile-photo-card__body">
-                <h6 className="mb-1">Profile Photo <span className="text-secondary">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h6>
+                <h6 className="mb-1">Profile Photo <span className="text-secondary fw-normal">(Recommended size: 250x250px. Maximum file size: 500KB.)</span></h6>
                 <div className="wz-profile-photo-card__actions">
                   <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
                     {photoUploadState.loading ? "Uploading..." : "Upload Photo"}

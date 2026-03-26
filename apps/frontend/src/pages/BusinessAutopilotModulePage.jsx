@@ -632,16 +632,6 @@ const HR_TAB_CONFIG = {
   }
 };
 
-const HR_EMPLOYEE_REQUIRED_KEYS = new Set([
-  "name",
-  "gender",
-  "department",
-  "designation",
-  "dateOfJoining",
-  "dateOfBirth",
-  "bloodGroup",
-]);
-
 const DEFAULT_HR_DATA = {
   employees: [
     { id: "e1", name: "Guru", department: "Engineering", designation: "Project Lead" },
@@ -9523,12 +9513,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       }
       return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const missingFields = visibleFields.filter((field) => {
-      const isRequired = activeTab === "employees"
-        ? HR_EMPLOYEE_REQUIRED_KEYS.has(field.key)
-        : !field.optional;
-      return isRequired && !String(formValues[field.key] || "").trim();
-    });
+    const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
     if (missingFields.length) {
       const fieldErrorMap = {};
       missingFields.forEach((field) => {
