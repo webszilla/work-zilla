@@ -133,6 +133,15 @@ run_preflight_cleanup
 
 cd "$SERVER_PROJECT_PATH"
 
+if [ ! -f "apps/backend/.env" ]; then
+  echo "ERROR: apps/backend/.env missing on server. Aborting to prevent DB fallback."
+  exit 1
+fi
+if ! grep -Eq '^DB_ENGINE=postgres(ql)?$' apps/backend/.env; then
+  echo "ERROR: DB_ENGINE is not postgresql in apps/backend/.env. Aborting deploy to prevent SQLite fallback."
+  exit 1
+fi
+
 if [ "${SERVER_DEPLOY_MODE:-git}" = "git" ]; then
   git config --global --add safe.directory "$SERVER_PROJECT_PATH" >/dev/null 2>&1 || true
   git pull origin main

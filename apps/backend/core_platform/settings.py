@@ -5,6 +5,7 @@ Django settings for the Work Zilla platform backend.
 from pathlib import Path
 import os
 import sys
+from django.core.exceptions import ImproperlyConfigured
 
 
 # apps/backend
@@ -152,29 +153,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "apps.backend.core_platform.wsgi.application"
 
 
-DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite").strip().lower()
-if DB_ENGINE in {"postgres", "postgresql"}:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("DB_NAME", "workzilla"),
-            "USER": os.environ.get("DB_USER", "workzilla"),
-            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-            "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
-            "PORT": os.environ.get("DB_PORT", "5432"),
-            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
-            "OPTIONS": {
-                "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
-            },
-        }
+DB_ENGINE = os.environ.get("DB_ENGINE", "postgresql").strip().lower()
+if DB_ENGINE not in {"postgres", "postgresql"}:
+    raise ImproperlyConfigured(
+        "Only PostgreSQL is supported. Set DB_ENGINE=postgresql in apps/backend/.env."
+    )
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME", "workzilla"),
+        "USER": os.environ.get("DB_USER", "workzilla"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+        "OPTIONS": {
+            "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
+        },
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 
 AUTH_PASSWORD_VALIDATORS = [

@@ -44,25 +44,24 @@ HARD RULES
    - Never run `--delete` deploy without DB excludes.
    - For normal SaaS code deploys, do NOT create/replace server DB backup files unless explicitly requested for a DB task.
 12) Keep production data separate from code deploy:
-   - Treat `apps/backend/db.sqlite3` as live data, not deployment artifact.
+   - Do NOT use SQLite for SaaS runtime.
    - Code deploy must not change DB contents unless explicit migration/data task is requested.
-   - Local SQLite backup on laptop is the default backup source for routine deploy flows.
+   - PostgreSQL is the only supported runtime database for local and production.
 
 CURRENT DATABASE MODE (IMPORTANT)
-- Current active DB in project: `SQLite` (`apps/backend/db.sqlite3`)
-- Target DB for SaaS scale: `PostgreSQL` (migration in progress)
-- Django DB switch is now env-based in `apps/backend/core_platform/settings.py`:
-  - `DB_ENGINE=sqlite` (default)
-  - `DB_ENGINE=postgresql` + `DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT`
-- Local migration helper script:
-  - `./scripts/migrate_sqlite_to_postgres_local.sh`
-- Migration runbook:
-  - `docs/sqlite_to_postgres_migration.md`
-- Backup/report path used by migration helper:
-  - `apps/backend/backups/postgres_migration/<timestamp>/`
-- Data safety during migration:
-  - Keep SQLite backup always.
-  - Remove temporary JSON dump by default (no unwanted dump retention).
+- Current active DB in project: `PostgreSQL`
+- Local and production must both run with:
+  - `DB_ENGINE=postgresql`
+  - `DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT`
+- SQLite runtime is disabled in `apps/backend/core_platform/settings.py`.
+- `apps/backend/db.sqlite3` must not exist as active runtime DB.
+- First-time production cutover rule:
+  - Export local PostgreSQL data.
+  - Import into production PostgreSQL.
+  - Switch production `.env` to PostgreSQL before restart.
+- Ongoing deploy rule:
+  - Deploy code only; never sync DB files.
+  - Run migrations on production PostgreSQL only.
 
 CURRENT CLEAN STRUCTURE EXPECTATION
 - No external installer staging folders outside repo.
@@ -232,7 +231,7 @@ FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
 - Then actual sync:
   - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
 - PostgreSQL mode note:
-  - If production is switched to PostgreSQL, still keep sqlite exclude rules to avoid accidental test DB upload.
+  - PostgreSQL is mandatory; keep sqlite exclude rules permanently to avoid accidental test DB upload.
 - Immediately after fallback sync, always run:
   - source venv/bin/activate
   - venv/bin/python apps/backend/manage.py collectstatic --noinput
