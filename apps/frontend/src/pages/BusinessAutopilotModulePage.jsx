@@ -262,7 +262,7 @@ const CRM_SECTION_CONFIG = {
       { key: "email", label: "Email", placeholder: "contact@example.com" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
-      { key: "tag", label: "Tag", type: "select", options: ["Customer", "Prospect", "Vendor"], defaultValue: "Customer" }
+      { key: "tag", label: "Tag", type: "select", options: ["Customer", "Prospect", "Vendor"], defaultValue: "" }
     ]
   },
   teams: {
@@ -355,13 +355,13 @@ const CRM_SECTION_CONFIG = {
       { key: "companyOrClientName", label: "Company / Client Name", type: "datalist", datalistSource: "crmContacts", placeholder: "Select company / client from contacts" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
       { key: "meetingDate", label: "Meeting Date", type: "date" },
-      { key: "meetingTime", label: "Meeting Time", type: "time" },
+      { key: "meetingTime", label: "Meeting Time", type: "text", placeholder: "06:30 PM" },
       { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
       { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: ["App Alert"] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
       { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "select", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: "15" },
-      { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "Scheduled" }
+      { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "" }
     ]
   }
 };
@@ -3580,6 +3580,35 @@ function formatTimeToAmPm(value) {
   return `${hours}:${minutes} ${suffix}`;
 }
 
+function normalizeMeetingTimeValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const hmMatch = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (hmMatch) {
+    const hours = Number(hmMatch[1]);
+    const minutes = Number(hmMatch[2]);
+    if (Number.isFinite(hours) && Number.isFinite(minutes) && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    }
+    return raw;
+  }
+  const twelveHourMatch = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (twelveHourMatch) {
+    let hours = Number(twelveHourMatch[1]);
+    const minutes = Number(twelveHourMatch[2]);
+    const suffix = String(twelveHourMatch[3] || "").toUpperCase();
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+      return raw;
+    }
+    if (suffix === "PM" && hours < 12) hours += 12;
+    if (suffix === "AM" && hours === 12) hours = 0;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+  return raw;
+}
+
 function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -4609,6 +4638,10 @@ function CrmOnePageModule() {
         } else {
           nextValues[field.key] = [];
         }
+      } else if (sectionKey === "meetings" && field.key === "meetingTime") {
+        const timeValue = rowValue ?? field.defaultValue ?? "";
+        const formattedTime = formatTimeToAmPm(timeValue);
+        nextValues[field.key] = formattedTime === "-" ? "" : formattedTime;
       } else {
         nextValues[field.key] = rowValue ?? field.defaultValue ?? "";
       }
@@ -4782,6 +4815,7 @@ function CrmOnePageModule() {
           .map((item) => item.trim())
           .filter(Boolean);
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
+      payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
       payload.owner = meetingOwners.join(", ");
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
@@ -6852,14 +6886,7 @@ function CrmOnePageModule() {
                   </div>
                 </div>
 
-                <div
-                  className="mb-2"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                    gap: "8px",
-                  }}
-                >
+                <div className="mb-2 crm-meeting-calendar-grid">
                   {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayLabel) => (
                     <div key={dayLabel} className="small text-secondary text-center fw-semibold py-1">
                       {dayLabel}
@@ -6868,14 +6895,7 @@ function CrmOnePageModule() {
                   {meetingCalendar.cells.map((cell) => (
                     <div
                       key={cell.isoDate}
-                      style={{
-                        minHeight: "84px",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        borderRadius: "10px",
-                        padding: "8px",
-                        backgroundColor: cell.inMonth ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.01)",
-                        opacity: cell.inMonth ? 1 : 0.55,
-                      }}
+                      className={`crm-meeting-calendar-cell ${cell.inMonth ? "crm-meeting-calendar-cell--in-month" : "crm-meeting-calendar-cell--out-month"}`}
                     >
                       <div className="small fw-semibold mb-1">{cell.day}</div>
                       <div className="d-flex flex-column gap-1">

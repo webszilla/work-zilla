@@ -1176,6 +1176,38 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   animation: crm-edit-border-blink 2.8s ease-in-out infinite;
 }
 
+.crm-meeting-calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7, minmax(0, 1fr));
+  gap:8px;
+}
+
+.crm-meeting-calendar-cell{
+  min-height:84px;
+  border:1px solid rgba(var(--color-primary-rgb, 97, 23, 124), 0.30);
+  border-radius:10px;
+  padding:8px;
+}
+
+.crm-meeting-calendar-cell--in-month{
+  background:rgba(var(--color-primary-rgb, 97, 23, 124), 0.06);
+  opacity:1;
+}
+
+.crm-meeting-calendar-cell--out-month{
+  background:rgba(var(--color-primary-rgb, 97, 23, 124), 0.03);
+  opacity:0.7;
+}
+
+html[data-theme="light"] .crm-meeting-calendar-cell{
+  border-color:rgba(var(--color-primary-rgb, 97, 23, 124), 0.24);
+  background:#fff;
+}
+
+html[data-theme="light"] .crm-meeting-calendar-cell--out-month{
+  background:#f8fafc;
+}
+
 @keyframes crm-edit-border-blink{
   0%{
     border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.28);
