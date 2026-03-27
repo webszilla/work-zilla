@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
+import { formatDateLikeValue } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -13,7 +14,7 @@ function formatValue(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
   }
-  return value;
+  return formatDateLikeValue(value, "-");
 }
 
 function titleCase(value) {
@@ -1016,8 +1017,8 @@ export default function BillingPage() {
                             {entry.status_label || titleCase(entry.status)}
                           </span>
                         </td>
-                        <td>{entry.start_date || "-"}</td>
-                        <td>{entry.end_date || "-"}</td>
+                        <td>{formatValue(entry.start_date)}</td>
+                        <td>{formatValue(entry.end_date)}</td>
                         <td>{entry.action_label || "-"}</td>
                         <td>
                           {entry.renew_pending ? (
@@ -1100,7 +1101,7 @@ export default function BillingPage() {
                               {entry.status_label || titleCase(entry.status) || "Approved"}
                             </span>
                           </td>
-                          <td>{entry.updated_at || "-"}</td>
+                          <td>{formatValue(entry.updated_at)}</td>
                           <td>
                             {entry.invoice_available && entry.id ? (
                               <a
@@ -1190,7 +1191,7 @@ export default function BillingPage() {
                               {entry.status_label || titleCase(entry.status)}
                             </span>
                           </td>
-                          <td>{entry.created_at || "-"}</td>
+                          <td>{formatValue(entry.created_at)}</td>
                           <td>-</td>
                         </tr>
                       ))
@@ -1350,7 +1351,7 @@ export default function BillingPage() {
               {approvedView.entry.status_label || titleCase(approvedView.entry.status)}
             </div>
             <div className="mb-2">
-              <strong>Approved:</strong> {approvedView.entry.updated_at || "-"}
+              <strong>Approved:</strong> {formatValue(approvedView.entry.updated_at)}
             </div>
             <div className="mb-2">
               <strong>Reference / UTR:</strong> {approvedView.entry.reference_no || "-"}

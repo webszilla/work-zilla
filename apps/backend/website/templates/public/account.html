@@ -138,8 +138,10 @@
             </table>
           </div>
         {% else %}
+          <span class="account-view-pricing-wrap">
+            <a class="btn btn-outline btn-sm account-view-pricing-btn" href="/pricing/" style="width: 150px; margin-bottom: 20px;">View pricing</a>
+          </span>
           <p class="text-secondary">No subscriptions yet.</p>
-          <a class="btn btn-outline align-items-center justify-content-center" style="display:inline-flex !important; width:auto !important; max-width:max-content;" href="/pricing/">View pricing</a>
         {% endif %}
 
         {% if show_account_billing_sections %}
@@ -378,6 +380,20 @@
 </div>
 
 <style>
+  .account-view-pricing-wrap {
+    display: inline-flex !important;
+    width: auto !important;
+    max-width: fit-content !important;
+  }
+  .account-view-pricing-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+  }
   .info-modal {
     position: fixed;
     inset: 0;

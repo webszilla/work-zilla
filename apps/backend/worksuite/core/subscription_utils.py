@@ -9,7 +9,7 @@ from django.http import JsonResponse
 from .models import PendingTransfer, Subscription, SubscriptionHistory, Organization, UserProfile
 from .email_utils import send_templated_email
 
-FREE_TRIAL_DAYS = 7
+FREE_TRIAL_DAYS = 15
 
 
 def normalize_product_slug(value, default="monitor"):

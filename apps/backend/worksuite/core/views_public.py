@@ -8,7 +8,7 @@ from django.views.decorators.http import require_http_methods
 from .models import Plan, ChatWidget
 from apps.backend.products.models import Product
 from saas_admin.models import Product as SaaSAdminProduct
-from core.subscription_utils import is_free_plan
+from core.subscription_utils import FREE_TRIAL_DAYS, is_free_plan
 from dashboard.views import get_active_org
 from core.models import Subscription, SubscriptionHistory
 from apps.backend.storage.models import Product as StorageProduct, Plan as StoragePlan, AddOn as StorageAddOn, OrgSubscription as StorageOrgSubscription
@@ -379,6 +379,9 @@ def public_plans(request):
             addons["extra_conv_pack_small_inr"] = addons.get("extra_conv_pack_small_inr")
         if "extra_conv_pack_small_usdt" not in addons:
             addons["extra_conv_pack_small_usdt"] = addons.get("extra_conv_pack_small_usdt")
+        features = dict(plan.features or {})
+        if is_free_plan(plan) or "trial" in (plan.name or "").strip().lower() or "trial_days" in features:
+            features["trial_days"] = FREE_TRIAL_DAYS
         response_plans.append({
             "id": plan.id,
             "code": slugify(plan.name),
@@ -393,7 +396,7 @@ def public_plans(request):
             "addon_usd_monthly_price": plan.addon_usd_monthly_price or 0,
             "addon_usd_yearly_price": plan.addon_usd_yearly_price or 0,
             "limits": limits,
-            "features": dict(plan.features or {}),
+            "features": features,
             "addons": addons,
             "is_popular": False,
         })
@@ -441,19 +444,19 @@ def public_plans(request):
             if override:
                 response_flags.update(override)
             response_plans[-1]["flags"] = response_flags
-            response_plans[-1]["features"] = dict(plan.features or {})
+            response_plans[-1]["features"] = features
         if normalized_slug == "ai-chatbot":
-            features = plan.features or {}
+            plan_features = plan.features or {}
             response_plans[-1]["flags"] = {
                 "allow_addons": plan.allow_addons,
-                "remove_branding": bool(features.get("remove_branding")),
-                "analytics_basic": bool(features.get("analytics_basic")),
-                "csv_export": bool(features.get("csv_export")),
-                "agent_inbox": bool(features.get("agent_inbox")),
+                "remove_branding": bool(plan_features.get("remove_branding")),
+                "analytics_basic": bool(plan_features.get("analytics_basic")),
+                "csv_export": bool(plan_features.get("csv_export")),
+                "agent_inbox": bool(plan_features.get("agent_inbox")),
             }
-            response_plans[-1]["features"] = {
-                "ai_enabled": bool(features.get("ai_enabled", False)),
-            }
+            response_plans[-1]["features"] = {"ai_enabled": bool(plan_features.get("ai_enabled", False))}
+            if "trial_days" in features:
+                response_plans[-1]["features"]["trial_days"] = features["trial_days"]
     if normalized_slug == "storage":
         if not response_addons:
             addon = addons_qs.first() if "addons_qs" in locals() else None
@@ -471,7 +474,7 @@ def public_plans(request):
     response_product_name = _public_product_name(product.name if product else "Online Storage", response_product_slug)
     return JsonResponse({
         "product": {"slug": response_product_slug, "name": response_product_name},
-        "trial_days": 7,
+        "trial_days": FREE_TRIAL_DAYS,
         "free_eligible": free_eligible,
         "trial_plan_id": trial_plan_id,
         "plans": response_plans,

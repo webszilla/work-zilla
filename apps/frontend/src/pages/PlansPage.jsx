@@ -169,6 +169,7 @@ function getErpPlanFeatures(plan) {
   const flags = plan?.flags || {};
   const limits = plan?.limits || {};
   const planKey = String(plan?.name || "").trim().toLowerCase();
+  const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
   const tier = planKey.includes("starter")
     ? "starter"
     : planKey.includes("growth")
@@ -177,6 +178,7 @@ function getErpPlanFeatures(plan) {
         ? "pro"
         : "free";
   const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
+  const allowPrioritySupport = !(trialPro || isTrialPlan);
 
   const defaultsByTier = {
     free: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
@@ -215,11 +217,8 @@ function getErpPlanFeatures(plan) {
     { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
     { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
     { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
-    { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+    { text: "Priority Support", ok: allowPrioritySupport && boolFrom(["priority_support"], defaults.priority) },
   ];
-  if (trialPro) {
-    rows.push({ text: "2 Add-on Users Included (Trial)" });
-  }
   return rows;
 }
 
@@ -287,6 +286,7 @@ function getWhatsappAutomationPlanFeatures(plan) {
   const flags = plan?.flags || {};
   const limits = plan?.limits || {};
   const planKey = String(plan?.name || "").trim().toLowerCase();
+  const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
   const tier = (planKey.includes("starter") || planKey.includes("basic"))
     ? "starter"
     : (planKey.includes("growth") || planKey.includes("plus"))
@@ -301,6 +301,7 @@ function getWhatsappAutomationPlanFeatures(plan) {
     pro: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: true },
   };
   const defaults = defaultsByTier[tier] || defaultsByTier.free;
+  const allowPrioritySupport = !isTrialPlan;
   const boolFrom = (keys, fallback) => {
     for (const key of keys) {
       if (typeof features[key] === "boolean") return features[key];
@@ -327,7 +328,7 @@ function getWhatsappAutomationPlanFeatures(plan) {
     { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
     { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },
     { text: "Advanced Automation Flows", ok: boolFrom(["advanced_automation", "automation_flows"], defaults.advancedAuto) },
-    { text: "Priority Support", ok: boolFrom(["priority_support"], defaults.priority) },
+    { text: "Priority Support", ok: allowPrioritySupport && boolFrom(["priority_support"], defaults.priority) },
   ];
 }
 
@@ -344,6 +345,8 @@ function formatDigitalAutomationLimit(value) {
 
 function getDigitalAutomationPlanFeatures(plan) {
   const features = plan?.features || {};
+  const planKey = String(plan?.name || "").trim().toLowerCase();
+  const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
   const numericLimitEnabled = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return false;
@@ -356,7 +359,7 @@ function getDigitalAutomationPlanFeatures(plan) {
   const hasHosting = numericLimitEnabled(features.hosting_accounts);
   const hasWhmBilling = Boolean(features.whm_billing_access) || hasHosting;
   const supportKey = String(features.support || "").toLowerCase();
-  const hasPrioritySupport = supportKey.includes("priority") || supportKey.includes("dedicated");
+  const hasPrioritySupport = !isTrialPlan && (supportKey.includes("priority") || supportKey.includes("dedicated"));
   return [
     { text: "Social Media Automation", ok: hasSocial || hasScheduled },
     { text: `Social Accounts: ${formatDigitalAutomationLimit(features.social_accounts)}`, ok: hasSocial },
@@ -1166,24 +1169,12 @@ export default function PlansPage() {
                           {getPlanPrice(plan, cycle, currency) || "-"} / {cycle === "yearly" ? "year" : "month"}
                         </div>
                         <div className="plan-metric">
-                          Per user ({currency}): {formatCurrencyLabel(currency)}{" "}
+                          Per user : {formatCurrencyLabel(currency)}{" "}
                           {getErpPerUserPrice(plan, cycle, currency) || "-"} / {cycle === "yearly" ? "year" : "month"}
                         </div>
                         <div className="plan-metric">
                           Employees allowed: {plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}
                         </div>
-                        {plan.allow_addons ? (
-                          <>
-                            <div className="plan-metric">
-                              Add-on Monthly: {formatCurrencyLabel(currency)} {addonMonthly || "-"}
-                            </div>
-                            <div className="plan-metric">
-                              Add-on Yearly: {formatCurrencyLabel(currency)} {addonYearly || "-"}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="plan-metric">Add-ons disabled</div>
-                        )}
                         <div className="plan-feature-divider" />
                         {getErpPlanFeatures(plan).map((feature) => {
                           const hasFlag = typeof feature?.ok === "boolean";
@@ -1245,7 +1236,7 @@ export default function PlansPage() {
                         })}
                         {plan.features?.is_trial ? (
                           <div className="plan-metric">
-                            {Number(plan.features?.trial_days || 7)}-day free trial with full feature access
+                            {Number(plan.features?.trial_days || 15)}-day free trial with full feature access
                           </div>
                         ) : null}
                       </div>

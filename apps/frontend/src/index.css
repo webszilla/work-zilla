@@ -710,6 +710,12 @@ html[data-theme="light"] .media-library .media-library-folders .list-group-item.
   box-shadow: 0 0 0 0.2rem rgba(var(--color-accent-rgb, 56, 189, 248), 0.2);
 }
 
+/* Keep textarea size stable across all React form screens. */
+.app-shell textarea,
+.app-shell textarea.form-control {
+  resize: none !important;
+}
+
 .form-label.wz-required-invalid {
   color: #ef4444 !important;
 }

@@ -19,6 +19,7 @@ import TablePagination from "../components/TablePagination.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
 import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
 import { showUploadAlert } from "../lib/uploadAlert.js";
+import { formatDateLikeValue } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -53,7 +54,7 @@ function formatValue(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
   }
-  return value;
+  return formatDateLikeValue(value, "-");
 }
 
 function truncate(value, length = 120) {

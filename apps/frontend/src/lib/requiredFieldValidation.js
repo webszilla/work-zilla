@@ -17,9 +17,24 @@ function isHiddenControl(control) {
   return false;
 }
 
+function hasRequiredLabelMarker(control) {
+  const labels = getAssociatedLabels(control);
+  return labels.some((label) => /\*/.test(String(label?.textContent || "")));
+}
+
+function isMarkedRequired(control) {
+  if (!isSupportedControl(control)) return false;
+  if (control.required) return true;
+  const ariaRequired = String(control.getAttribute("aria-required") || "").trim().toLowerCase();
+  if (ariaRequired === "true") return true;
+  const dataRequired = String(control.getAttribute("data-required") || "").trim().toLowerCase();
+  if (dataRequired === "true") return true;
+  return hasRequiredLabelMarker(control);
+}
+
 function shouldValidate(control) {
   if (!isSupportedControl(control)) return false;
-  if (!control.required) return false;
+  if (!isMarkedRequired(control)) return false;
   if (control.disabled || control.readOnly) return false;
   if (isHiddenControl(control)) return false;
   return true;
@@ -61,7 +76,14 @@ function validateRequiredControl(control, { force = false } = {}) {
   if (!force && !control.classList.contains("is-invalid")) {
     return true;
   }
-  const valid = control.checkValidity();
+  const value = "value" in control ? String(control.value || "").trim() : "";
+  let valid = value.length > 0;
+  if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) {
+    valid = control.checked;
+  }
+  if (control.required) {
+    valid = valid && control.checkValidity();
+  }
   setValidationState(control, !valid);
   return valid;
 }

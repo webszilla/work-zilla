@@ -3044,7 +3044,7 @@ def dashboard_summary(request):
     if active_sub and active_sub.plan:
         sub_payload = {
             "plan": active_sub.plan.name,
-            "employee_limit": active_sub.plan.employee_limit,
+            "employee_limit": dashboard_views.get_effective_employee_limit(active_sub.plan),
             "addon_count": active_sub.addon_count or 0,
             "billing_cycle": active_sub.billing_cycle,
             "end_date": _format_datetime(active_sub.end_date),
@@ -3122,7 +3122,7 @@ def employees_list(request):
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
     allowed_intervals = list(DEFAULT_ALLOWED_INTERVALS)
 
-    employee_limit = sub.plan.employee_limit if sub and sub.plan else 0
+    employee_limit = dashboard_views.get_effective_employee_limit(sub.plan) if sub and sub.plan else 0
     addon_count = sub.addon_count if sub else 0
     if employee_limit != 0:
         employee_limit = employee_limit + addon_count
@@ -3159,7 +3159,7 @@ def employees_list(request):
             "allow_addons": sub.plan.allow_addons,
             "addon_count": sub.addon_count or 0,
             "billing_cycle": sub.billing_cycle,
-            "employee_limit": sub.plan.employee_limit,
+            "employee_limit": dashboard_views.get_effective_employee_limit(sub.plan),
         }
 
     return JsonResponse({
@@ -3192,7 +3192,7 @@ def employees_create(request):
     if not dashboard_views.is_subscription_active(sub):
         return _json_error("subscription_required", status=403, extra={"redirect": "/dashboard/plans/"})
 
-    employee_limit = sub.plan.employee_limit if sub and sub.plan else 0
+    employee_limit = dashboard_views.get_effective_employee_limit(sub.plan) if sub and sub.plan else 0
     addon_count = sub.addon_count if sub else 0
     if employee_limit == 0:
         employee_limit = 0
@@ -4938,7 +4938,7 @@ def company_summary(request):
         sub_payload = {
             "plan": sub.plan.name,
             "status": sub.status,
-            "employee_limit": sub.plan.employee_limit,
+            "employee_limit": dashboard_views.get_effective_employee_limit(sub.plan),
             "retention_days": sub.retention_days,
             "plan_retention_days": sub.plan.retention_days,
             "screenshot_min_minutes": sub.plan.screenshot_min_minutes,
@@ -5572,7 +5572,7 @@ def billing_summary(request):
         sub_payload = {
             "plan": plan.name,
             "status": sub.status,
-            "employee_limit": plan.employee_limit,
+            "employee_limit": dashboard_views.get_effective_employee_limit(plan),
             "start_date": _format_datetime(sub.start_date),
             "end_date": _format_datetime(sub.end_date),
             "billing_cycle": sub.billing_cycle,
@@ -6347,7 +6347,7 @@ def plans_list(request):
                 "addon_yearly_price": plan.addon_yearly_price,
                 "addon_usd_monthly_price": plan.addon_usd_monthly_price,
                 "addon_usd_yearly_price": plan.addon_usd_yearly_price,
-                "employee_limit": plan.employee_limit,
+                "employee_limit": dashboard_views.get_effective_employee_limit(plan),
                 "retention_days": plan.retention_days,
                 "allow_addons": plan.allow_addons,
                 "allow_app_usage": plan.allow_app_usage,
@@ -6517,6 +6517,8 @@ def plans_subscribe(request, plan_id):
             sub.end_date = end_date
             sub.billing_cycle = billing_cycle
             sub.retention_days = retention_days
+            sub.addon_count = 0
+            sub.addon_next_cycle_count = 0
             sub.razorpay_order_id = None
             sub.razorpay_payment_id = None
             sub.razorpay_signature = None
@@ -6531,6 +6533,8 @@ def plans_subscribe(request, plan_id):
                 end_date=end_date,
                 billing_cycle=billing_cycle,
                 retention_days=retention_days,
+                addon_count=0,
+                addon_next_cycle_count=0,
             )
         if active_sub and dashboard_views.is_subscription_active(active_sub):
             if active_sub.plan and not dashboard_views.is_free_plan(active_sub.plan):

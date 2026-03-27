@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
+import { formatDateLikeValue } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -13,7 +14,7 @@ function formatValue(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
   }
-  return value;
+  return formatDateLikeValue(value, "-");
 }
 
 function titleCase(value) {

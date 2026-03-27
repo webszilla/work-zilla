@@ -130,6 +130,69 @@ function parseDateTimeAsUtc(value) {
   );
 }
 
+function formatDateParts(value, { includeTime = false, hour12 = false } = {}) {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const options = includeTime
+    ? {
+        timeZone: getOrgTimezone(),
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12,
+      }
+    : {
+        timeZone: getOrgTimezone(),
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      };
+  const formatter = new Intl.DateTimeFormat("en-GB", options);
+  const parts = formatter.formatToParts(parsed).reduce((acc, part) => {
+    if (part.type !== "literal") {
+      acc[part.type] = part.value;
+    }
+    return acc;
+  }, {});
+  const dateLabel = `${parts.day || "00"}-${parts.month || "00"}-${parts.year || "0000"}`;
+  if (!includeTime) {
+    return dateLabel;
+  }
+  const timeLabel = `${parts.hour || "00"}:${parts.minute || "00"}:${parts.second || "00"}`;
+  const period = String(parts.dayPeriod || "").trim().toUpperCase();
+  return `${dateLabel} ${timeLabel}${period ? ` ${period}` : ""}`;
+}
+
+export function formatDateLikeValue(value, fallback = "-") {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+  const dateOnlyMatch = DATE_ONLY_RE.exec(raw);
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return `${day}-${month}-${year}`;
+  }
+  const dateTimeMatch = DATE_TIME_RE.exec(raw);
+  if (dateTimeMatch) {
+    const [, year, month, day, hour, minute, second = "00"] = dateTimeMatch;
+    return `${day}-${month}-${year} ${hour}:${minute}:${second}`;
+  }
+  const parsed = parseDateTimeAsUtc(raw);
+  if (parsed) {
+    return formatDateParts(parsed, { includeTime: true, hour12: false });
+  }
+  return raw;
+}
+
 export function formatDeviceDate(value, fallback = "-") {
   if (!value) {
     return fallback;
@@ -138,7 +201,7 @@ export function formatDeviceDate(value, fallback = "-") {
   if (!parsed) {
     return value;
   }
-  return parsed.toLocaleDateString(undefined, { timeZone: getOrgTimezone() });
+  return formatDateParts(parsed, { includeTime: false });
 }
 
 export function formatDeviceDateTime(value, fallback = "-") {
@@ -149,7 +212,7 @@ export function formatDeviceDateTime(value, fallback = "-") {
   if (!parsed) {
     return value;
   }
-  return parsed.toLocaleString(undefined, { timeZone: getOrgTimezone() });
+  return formatDateParts(parsed, { includeTime: true, hour12: false });
 }
 
 export function formatDeviceDateTimeAmPm(value, fallback = "-") {
@@ -160,10 +223,7 @@ export function formatDeviceDateTimeAmPm(value, fallback = "-") {
   if (!parsed) {
     return value;
   }
-  return parsed.toLocaleString(undefined, {
-    timeZone: getOrgTimezone(),
-    hour12: true,
-  });
+  return formatDateParts(parsed, { includeTime: true, hour12: true });
 }
 
 export function formatDeviceTimeWithDate(timeValue, dateValue, fallback = "-") {

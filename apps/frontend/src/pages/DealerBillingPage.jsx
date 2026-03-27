@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
+import { formatDateLikeValue } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
   error: "",
   data: null
 };
+
+function formatValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return formatDateLikeValue(value, "-");
+}
 
 export default function DealerBillingPage() {
   const [state, setState] = useState(emptyState);
@@ -121,8 +129,8 @@ export default function DealerBillingPage() {
                       {row.currency} {row.amount}
                     </td>
                     <td>{row.status_label || row.status}</td>
-                    <td>{row.created_at || "-"}</td>
-                    <td>{row.updated_at || "-"}</td>
+                    <td>{formatValue(row.created_at)}</td>
+                    <td>{formatValue(row.updated_at)}</td>
                   </tr>
                 ))
               ) : (

@@ -73,7 +73,7 @@
   <div class="site-container">
     <div class="card p-4">
       <h3>Free trial included</h3>
-      <p class="text-secondary">All plans include a 7-day free trial. No credit card required. Upgrade anytime.</p>
+      <p class="text-secondary">All plans include a 15-day free trial. No credit card required. Upgrade anytime.</p>
     </div>
   </div>
 </section>
@@ -356,72 +356,7 @@
         ];
       }
       if (productSlug === "business-autopilot-erp") {
-        const featureFlags = plan.features || {};
-        const moduleLabelMap = {
-          crm: "CRM Module",
-          hrm: "HR Management",
-          projects: "Project Management",
-          accounts: "Accounts / ERP",
-          ticketing: "Ticketing System",
-          stocks: "Stocks Management"
-        };
-        const configuredModules = Array.isArray(featureFlags.erp_enabled_modules)
-          ? featureFlags.erp_enabled_modules.map((slug) => moduleLabelMap[String(slug || "").toLowerCase()]).filter(Boolean)
-          : [];
-        const roleBasedAccessEnabled = featureFlags.role_based_access !== false;
-        const planKey = String(plan.name || "").toLowerCase();
-        const buildProItems = () => {
-          const items = [
-            "Everything in Growth",
-            "HR + Payroll Integration",
-            "CRM Integration",
-            "Automation Workflows",
-            "Advanced Role Permissions",
-            "Priority Support"
-          ];
-          if (roleBasedAccessEnabled) items.push("Role Based Access");
-          if (configuredModules.length) items.push(...configuredModules);
-          return Array.from(new Set(items));
-        };
-        if (planKey === "free") {
-          if (String(featureFlags.trial_features || "").toLowerCase() === "pro") {
-            return Array.from(new Set([
-              ...buildProItems(),
-              "2 Add-on Users Included (Trial)"
-            ]));
-          }
-          const items = configuredModules.length
-            ? [...configuredModules]
-            : ["CRM Module", "HR Management", "Project Management", "Accounts / ERP"];
-          if (roleBasedAccessEnabled) items.push("Role Based Access");
-          return Array.from(new Set(items));
-        }
-        if (planKey.includes("starter")) {
-          const items = [
-            "Basic Accounting",
-            "Invoice & Billing",
-            "GST Ready (India)",
-            "1 Organization",
-            "Email Support"
-          ];
-          if (roleBasedAccessEnabled) items.push("Role Based Access");
-          if (configuredModules.length) items.push(...configuredModules);
-          return Array.from(new Set(items));
-        }
-        if (planKey.includes("growth")) {
-          const items = [
-            "Everything in Starter",
-            "Inventory Management",
-            "Vendor Management",
-            "Project Accounting",
-            "Multi-branch Support",
-            "Whatsapp & Open Ai API"
-          ];
-          if (roleBasedAccessEnabled) items.push("Role Based Access");
-          if (configuredModules.length) items.push(...configuredModules);
-          return Array.from(new Set(items));
-        }
-        return buildProItems();
+        return buildBusinessAutopilotPricingFeatures(plan, { prioritySupportEnabled });
       }
       if (productSlug === "whatsapp-automation") {
         const key = String(plan.name || "").toLowerCase();
@@ -538,6 +473,7 @@
       const flags = plan.flags || {};
       const limits = plan.limits || {};
       const planKey = String(plan.name || "").trim().toLowerCase();
+      const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
       const tier = planKey.includes("starter")
         ? "starter"
         : planKey.includes("growth")
@@ -546,18 +482,22 @@
             ? "pro"
             : "free";
       const trialPro = tier === "free" && String(features.trial_features || "").toLowerCase() === "pro";
+      const allowPrioritySupport = !(trialPro || isTrialPlan);
 
       const defaultsByTier = {
-        free: { crm: true, hrm: true, projects: true, accounts: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-        starter: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-        growth: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
-        pro: { crm: true, hrm: true, projects: true, accounts: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
+        free: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+        starter: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+        growth: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
+        pro: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
       };
       const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
 
       const configuredModules = Array.isArray(features.erp_enabled_modules)
         ? features.erp_enabled_modules.map((s) => String(s || "").toLowerCase())
         : null;
+      if (Array.isArray(configuredModules) && configuredModules.includes("accounts") && !configuredModules.includes("subscriptions")) {
+        configuredModules.push("subscriptions");
+      }
       const hasModule = (slug, fallback) => (configuredModules ? configuredModules.includes(slug) : fallback);
       const boolFrom = (keys, fallback) => {
         for (const key of keys) {
@@ -573,6 +513,7 @@
         { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
         { text: "Project Management", ok: hasModule("projects", defaults.projects) },
         { text: "Accounts / ERP", ok: hasModule("accounts", defaults.accounts) },
+        { text: "Subscriptions Module", ok: hasModule("subscriptions", defaults.subscriptions) },
         { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
         { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
         { text: "Invoice & Billing", ok: boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
@@ -580,9 +521,8 @@
         { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
         { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
         { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
-        { text: "Priority Support", ok: !!prioritySupportEnabled },
+        { text: "Priority Support", ok: allowPrioritySupport && boolFrom(["priority_support"], defaults.priority) },
       ];
-      if (trialPro) rows.push({ text: "2 Add-on Users Included (Trial)" });
       return rows;
     }
 
@@ -591,6 +531,7 @@
       const flags = plan.flags || {};
       const limits = plan.limits || {};
       const planKey = String(plan.name || "").trim().toLowerCase();
+      const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
       const tier = (planKey.includes("starter") || planKey.includes("basic"))
         ? "starter"
         : (planKey.includes("growth") || planKey.includes("plus"))
@@ -606,6 +547,7 @@
         pro: { card: true, catalogue: true, basicAuto: true, advancedAuto: true, team: true, addons: true, priority: true },
       };
       const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
+      const allowPrioritySupport = !(trialPro || isTrialPlan);
       const boolFrom = (keys, fallback) => {
         for (const key of keys) {
           if (typeof features[key] === "boolean") return features[key];
@@ -632,12 +574,14 @@
         { text: "Add-on Users (Digital Card)", ok: (plan.allow_addons === true) || boolFrom(["allow_addons"], defaults.addons) },
         { text: "Team Management", ok: boolFrom(["team_management"], defaults.team) },
         { text: "Advanced Automation Flows", ok: boolFrom(["advanced_automation", "automation_flows"], defaults.advancedAuto) },
-        { text: "Priority Support", ok: !!prioritySupportEnabled },
+        { text: "Priority Support", ok: allowPrioritySupport && !!prioritySupportEnabled },
       ];
     }
 
     function buildDigitalAutomationPricingFeatures(plan) {
       const features = plan.features || {};
+      const planKey = String(plan.name || "").trim().toLowerCase();
+      const isTrialPlan = Boolean(features.is_trial) || planKey.includes("trial");
       const toLimitLabel = (value) => {
         const numeric = Number(value);
         if (Number.isFinite(numeric) && numeric < 0) return "Unlimited";
@@ -657,7 +601,7 @@
       const hasWhmBilling = Boolean(features.whm_billing_access) || hasHosting;
       const supportKey = String(features.support || "").toLowerCase();
       const hasPrioritySupport =
-        supportKey.includes("priority") || supportKey.includes("dedicated");
+        !isTrialPlan && (supportKey.includes("priority") || supportKey.includes("dedicated"));
       return [
         { text: "Social Media Automation", ok: hasSocial || hasScheduled },
         { text: `Social Accounts: ${toLimitLabel(features.social_accounts)}`, ok: hasSocial },
@@ -746,7 +690,7 @@
     function erpPlanDescription(planName) {
       const key = String(planName || "").toLowerCase();
       if (key === "free") {
-        return "7-day free trial with Pro ERP feature access. Upgrade to any paid plan after trial.";
+        return "15-day free trial with Pro ERP feature access. Upgrade to any paid plan after trial.";
       }
       if (key.includes("starter")) {
         return "Best for small shops, startups, and service companies.";
@@ -760,7 +704,7 @@
     function whatsappAutomationPlanDescription(planName) {
       const key = String(planName || "").toLowerCase();
       if (key === "free") {
-        return "7-day free trial with all WhatsApp Automation features enabled. Upgrade after trial.";
+        return "15-day free trial with all WhatsApp Automation features enabled. Upgrade after trial.";
       }
       if (key.includes("starter") || key.includes("basic")) {
         return "Digital Card + Catalogue + Automation in ONE Platform for teams getting started.";
@@ -774,7 +718,7 @@
     function impositionPlanDescription(planName) {
       const key = String(planName || "").toLowerCase();
       if (key.includes("free") || key.includes("trial")) {
-        return "7-day free trial with all imposition functions enabled and 2 users included.";
+        return "15-day free trial with all imposition functions enabled and 2 users included.";
       }
       if (key === "starter") {
         return "Basic imposition setup for ID and business card print layouts.";
@@ -794,7 +738,7 @@
     function digitalAutomationPlanDescription(planName) {
       const key = String(planName || "").toLowerCase();
       if (key.includes("free")) {
-        return "7-day free trial with full Digital Automation access. Upgrade to a paid plan after trial.";
+        return "15-day free trial with full Digital Automation access. Upgrade to a paid plan after trial.";
       }
       if (key.includes("starter")) {
         return "For small teams to automate social posting, AI content, and WordPress workflows.";
@@ -841,7 +785,7 @@
             },
             features: {
               is_trial: true,
-              trial_days: data.trial_days || 7,
+              trial_days: data.trial_days || 15,
               basic_imposition: true,
               advanced_imposition: true,
               id_card_layout: true,
@@ -963,7 +907,7 @@
         card.className = "plan-card card";
         card.setAttribute("data-plan-card", "1");
         card.setAttribute("data-plan-id", plan.id);
-        const trialDays = Number((plan.features || {}).trial_days || data.trial_days || (isMonitor ? 15 : 7));
+        const trialDays = Number((plan.features || {}).trial_days || data.trial_days || 15);
         const trialSuffix = trialLikePlan
           ? `${trialDays} days free trial`
           : null;

@@ -114,7 +114,6 @@ export function bindGlobalEmailRealtimeValidation() {
       event.preventDefault();
       event.stopPropagation();
       firstInvalid.focus();
-      firstInvalid.reportValidity();
     }
   };
 

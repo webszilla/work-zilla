@@ -19,7 +19,7 @@ from io import BytesIO
 import re
 import time
 from urllib.parse import urlparse
-from dashboard.views import get_active_org
+from dashboard.views import get_active_org, get_effective_employee_limit
 from core.subscription_utils import (
     get_effective_end_date,
     has_active_subscription_for_org,
@@ -980,10 +980,11 @@ def register_employee(request):
 
         current_count = Employee.objects.filter(org=org).count()
         if sub and sub.plan:
-            if sub.plan.employee_limit == 0:
+            plan_employee_limit = get_effective_employee_limit(sub.plan)
+            if plan_employee_limit == 0:
                 allowed = 0
             else:
-                allowed = sub.plan.employee_limit + (sub.addon_count or 0)
+                allowed = plan_employee_limit + (sub.addon_count or 0)
         else:
             allowed = 0
         if allowed and current_count >= allowed:

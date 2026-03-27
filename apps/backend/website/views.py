@@ -30,7 +30,7 @@ from apps.backend.products.models import Product
 from saas_admin.models import Product as SaaSAdminProduct
 from apps.backend.website import application_downloads
 from core.observability import log_event
-from core.subscription_utils import is_free_plan, is_subscription_active
+from core.subscription_utils import FREE_TRIAL_DAYS, is_free_plan, is_subscription_active
 from core.access_control import get_access_role, iter_accessible_product_slugs
 from core.models import (
     Organization,
@@ -1472,7 +1472,7 @@ def subscription_start(request):
         ).filter(product_filter).exists()
         has_storage_sub = False
 
-    trial_days = 7
+    trial_days = FREE_TRIAL_DAYS
     trial_available = (
         trial_days > 0
         and not has_history

@@ -322,6 +322,27 @@ def get_plan_amount(plan, billing_cycle, currency="INR"):
 def is_free_plan(plan):
     return is_free_plan_util(plan)
 
+def get_effective_employee_limit(plan):
+    if not plan:
+        return 0
+    try:
+        base_limit = int(getattr(plan, "employee_limit", 0) or 0)
+    except (TypeError, ValueError):
+        base_limit = 0
+    product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
+    if product_slug == "business-autopilot-erp" and is_free_plan(plan):
+        limits = getattr(plan, "limits", {}) or {}
+        for key in ("trial_included_users", "included_users", "user_limit"):
+            raw = limits.get(key)
+            try:
+                parsed = int(raw)
+            except (TypeError, ValueError):
+                parsed = 0
+            if parsed > 0:
+                return parsed
+        return 2
+    return base_limit
+
 
 # =====================================================
 #  SELECT ORGANIZATION (VERY IMPORTANT)
@@ -544,7 +565,7 @@ def employee_list(request):
     min_interval = sub.plan.screenshot_min_minutes if sub and sub.plan else None
     if min_interval:
         allowed_intervals = [i for i in allowed_intervals if i >= min_interval]
-    employee_limit = sub.plan.employee_limit if sub and sub.plan else 0
+    employee_limit = get_effective_employee_limit(sub.plan) if sub and sub.plan else 0
     addon_count = sub.addon_count if sub else 0
     if employee_limit != 0:
         employee_limit = employee_limit + addon_count
@@ -1634,7 +1655,7 @@ def employee_create(request):
         messages.error(request, "Please activate a plan first.")
         return redirect("/dashboard/plans/")
 
-    employee_limit = sub.plan.employee_limit if sub and sub.plan else 0
+    employee_limit = get_effective_employee_limit(sub.plan) if sub and sub.plan else 0
     addon_count = sub.addon_count if sub else 0
     if employee_limit == 0:
         employee_limit = 0

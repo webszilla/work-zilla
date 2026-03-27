@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { apiFetch, getCsrfToken } from "../lib/api.js";
+import { formatDateLikeValue } from "../lib/datetime.js";
 
 const emptyState = {
   loading: true,
@@ -19,7 +20,7 @@ function formatValue(value, fallback = "-") {
       return fallback;
     }
   }
-  return String(value);
+  return formatDateLikeValue(String(value), fallback);
 }
 
 export default function DealerBankTransferPage() {

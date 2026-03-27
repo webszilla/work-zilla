@@ -192,6 +192,18 @@ function readThemeOverride() {
   }
 }
 
+function normalizeSidebarMenuStyle(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "compact" || normalized === "icons") {
+    return normalized;
+  }
+  return "default";
+}
+
+function toServerSidebarMenuStyle(value) {
+  return normalizeSidebarMenuStyle(value) === "default" ? "default" : "compact";
+}
+
 function validateTicketImages(files) {
   const rows = Array.from(files || []);
   if (rows.length > PROFILE_TICKET_MAX_ATTACHMENTS) {
@@ -380,7 +392,7 @@ export default function ProfilePage() {
       setThemeSecondary(normalizeHexColor(overrideTheme.secondary, "#f59e0b"));
     }
     if (overrideTheme.sidebarMenuStyle) {
-      setSidebarMenuStyle(overrideTheme.sidebarMenuStyle === "compact" ? "compact" : "default");
+      setSidebarMenuStyle(normalizeSidebarMenuStyle(overrideTheme.sidebarMenuStyle));
     }
   }, []);
 
@@ -425,7 +437,7 @@ export default function ProfilePage() {
         setThemeDefaults(defaults);
         setThemePrimary(normalizeHexColor(data.theme_primary, defaults.primary));
         setThemeSecondary(normalizeHexColor(data.theme_secondary, defaults.secondary));
-        setSidebarMenuStyle(data.sidebar_menu_style === "compact" ? "compact" : "default");
+        setSidebarMenuStyle(normalizeSidebarMenuStyle(data.sidebar_menu_style));
         const securitySettings = data.security || {};
         setSecurityTimeoutMinutes(normalizeTimeoutMinutes(securitySettings.session_timeout_minutes, 30));
         setSecurityRetentionDays(normalizeTimeoutMinutes(securitySettings.login_activity_retention_days, 30));
@@ -613,12 +625,23 @@ export default function ProfilePage() {
           org_timezone: orgTimezone,
           theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
           theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
-          sidebar_menu_style: sidebarMenuStyle === "compact" ? "compact" : "default",
+          sidebar_menu_style: toServerSidebarMenuStyle(sidebarMenuStyle),
         })
       });
       applyOrgTimezone(orgTimezone || "UTC");
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+        if (normalizeSidebarMenuStyle(sidebarMenuStyle) === "icons") {
+          window.localStorage.setItem(
+            THEME_OVERRIDE_KEY,
+            JSON.stringify({
+              primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+              secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+              sidebarMenuStyle: "icons",
+            })
+          );
+        } else {
+          window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+        }
       }
       applyOrgThemePreview({
         primary: normalizeHexColor(themePrimary, themeDefaults.primary),
@@ -627,7 +650,7 @@ export default function ProfilePage() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("wz:sidebar-menu-style-change", {
-            detail: { style: sidebarMenuStyle === "compact" ? "compact" : "default" }
+            detail: { style: normalizeSidebarMenuStyle(sidebarMenuStyle) }
           })
         );
       }
@@ -653,12 +676,23 @@ export default function ProfilePage() {
           org_timezone: orgTimezone,
           theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
           theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
-          sidebar_menu_style: sidebarMenuStyle === "compact" ? "compact" : "default",
+          sidebar_menu_style: toServerSidebarMenuStyle(sidebarMenuStyle),
         })
       });
       applyOrgTimezone(orgTimezone || "UTC");
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+        if (normalizeSidebarMenuStyle(sidebarMenuStyle) === "icons") {
+          window.localStorage.setItem(
+            THEME_OVERRIDE_KEY,
+            JSON.stringify({
+              primary: normalizeHexColor(themePrimary, themeDefaults.primary),
+              secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
+              sidebarMenuStyle: "icons",
+            })
+          );
+        } else {
+          window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+        }
       }
       applyOrgThemePreview({
         primary: normalizeHexColor(themePrimary, themeDefaults.primary),
@@ -667,7 +701,7 @@ export default function ProfilePage() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("wz:sidebar-menu-style-change", {
-            detail: { style: sidebarMenuStyle === "compact" ? "compact" : "default" }
+            detail: { style: normalizeSidebarMenuStyle(sidebarMenuStyle) }
           })
         );
       }
@@ -691,7 +725,7 @@ export default function ProfilePage() {
     const nextTheme = {
       primary: normalizeHexColor(themePrimary, themeDefaults.primary),
       secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
-      sidebarMenuStyle: sidebarMenuStyle === "compact" ? "compact" : "default",
+      sidebarMenuStyle: normalizeSidebarMenuStyle(sidebarMenuStyle),
     };
     if (typeof window !== "undefined") {
       window.localStorage.setItem(THEME_OVERRIDE_KEY, JSON.stringify(nextTheme));
@@ -1508,6 +1542,13 @@ export default function ProfilePage() {
                             >
                               Compact Center Menu
                             </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${sidebarMenuStyle === "icons" ? "btn-primary" : "btn-outline-light"}`}
+                              onClick={() => setSidebarMenuStyle("icons")}
+                            >
+                              Icons Menu
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -1921,9 +1962,16 @@ export default function ProfilePage() {
                 >
                   Compact Center Menu
                 </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${sidebarMenuStyle === "icons" ? "btn-primary" : "btn-outline-light"}`}
+                  onClick={() => setSidebarMenuStyle("icons")}
+                >
+                  Icons Menu
+                </button>
               </div>
               <div className="form-text text-secondary mt-2 mb-3">
-                Option 2 uses reduced sidebar width, bigger centered icons/text, and icon-only light/dark toggle buttons.
+                Option 2 uses reduced sidebar width with centered icon + text. Option 3 shows icon-only menu with hover tooltips.
               </div>
             </div>
             <button className="btn btn-primary btn-sm" type="submit">Save UI Theme</button>

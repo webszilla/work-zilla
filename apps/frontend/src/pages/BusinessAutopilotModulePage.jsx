@@ -203,10 +203,10 @@ const MODULE_CONTENT = {
 
 const CRM_MEETING_REMINDER_CHANNEL_OPTIONS = ["App Alert", "Email", "SMS", "WhatsApp"];
 const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
-  { value: "5", label: "5 Min" },
-  { value: "10", label: "10 Min" },
-  { value: "15", label: "15 Min" },
-  { value: "30", label: "30 Min" },
+  { value: "5", label: "5 Mins" },
+  { value: "10", label: "10 Mins" },
+  { value: "15", label: "15 Mins" },
+  { value: "30", label: "30 Mins" },
   { value: "60", label: "1 Hr" },
   { value: "120", label: "2 Hrs" },
   { value: "180", label: "3 Hrs" },
@@ -355,12 +355,12 @@ const CRM_SECTION_CONFIG = {
       { key: "companyOrClientName", label: "Company / Client Name", type: "datalist", datalistSource: "crmContacts", placeholder: "Select company / client from contacts" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
       { key: "meetingDate", label: "Meeting Date", type: "date" },
-      { key: "meetingTime", label: "Meeting Time", type: "text", placeholder: "06:30 PM" },
+      { key: "meetingTime", label: "Meeting Time", type: "time" },
       { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
-      { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "Online" },
-      { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: ["App Alert"] },
+      { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "" },
+      { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: [] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
-      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: ["15"] },
+      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: [] },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "" }
     ]
   }
@@ -3641,6 +3641,48 @@ function normalizeMeetingTimeValue(value) {
   return raw;
 }
 
+function normalizeMeetingDateValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return raw;
+  }
+  const dmyOrMdyMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmyOrMdyMatch) {
+    let first = Number(dmyOrMdyMatch[1]);
+    let second = Number(dmyOrMdyMatch[2]);
+    const year = Number(dmyOrMdyMatch[3]);
+    if (!Number.isFinite(first) || !Number.isFinite(second) || !Number.isFinite(year)) {
+      return "";
+    }
+    if (first > 12) {
+      const day = first;
+      const month = second;
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      return "";
+    }
+    const month = first;
+    const day = second;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+    return "";
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const yyyy = parsed.getFullYear();
+    const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+    const dd = String(parsed.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return "";
+}
+
 function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -4582,9 +4624,21 @@ function CrmOnePageModule() {
 
   function setField(sectionKey, fieldKey, value) {
     const fieldMeta = (CRM_SECTION_CONFIG[sectionKey]?.fields || []).find((field) => field.key === fieldKey);
-    const normalizedValue = typeof value === "string"
+    let normalizedValue = typeof value === "string"
       ? clampBusinessAutopilotText(fieldKey, value, { isTextarea: fieldMeta?.type === "textarea" })
       : value;
+    if (sectionKey === "meetings" && fieldKey === "meetingDate") {
+      const normalizedMeetingDate = normalizeMeetingDateValue(normalizedValue);
+      if (normalizedMeetingDate) {
+        normalizedValue = normalizedMeetingDate;
+      }
+    }
+    if (sectionKey === "meetings" && fieldKey === "meetingTime") {
+      const normalizedMeetingTime = normalizeMeetingTimeValue(normalizedValue);
+      if (normalizedMeetingTime) {
+        normalizedValue = normalizedMeetingTime;
+      }
+    }
     const normalizedFieldKey = String(fieldKey || "").toLowerCase();
     const isEmailInput = normalizedFieldKey.includes("email");
     const trimmedValue = String(normalizedValue || "").trim();
@@ -4795,6 +4849,9 @@ function CrmOnePageModule() {
       if (!isCrmFieldRequired(sectionKey, field, values)) {
         return false;
       }
+      if (sectionKey === "meetings" && field.key === "meetingDate") {
+        return !normalizeMeetingDateValue(values[field.key]);
+      }
       if (field.type === "multiselect") {
         return !Array.isArray(values[field.key]) || values[field.key].length === 0;
       }
@@ -4855,6 +4912,7 @@ function CrmOnePageModule() {
           .map((item) => item.trim())
           .filter(Boolean);
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
+      payload.meetingDate = normalizeMeetingDateValue(payload.meetingDate);
       payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
       payload.owner = meetingOwners.join(", ");
       payload.reminderChannel = reminderChannels;
@@ -4925,6 +4983,11 @@ function CrmOnePageModule() {
         },
       };
     });
+    setSectionFieldErrors((prev) => {
+      const teamErrors = { ...(prev.teams || {}) };
+      delete teamErrors.members;
+      return { ...prev, teams: teamErrors };
+    });
   }
 
   function toggleCrmTeamMember(value) {
@@ -4944,6 +5007,11 @@ function CrmOnePageModule() {
           members: nextMembers,
         },
       };
+    });
+    setSectionFieldErrors((prev) => {
+      const teamErrors = { ...(prev.teams || {}) };
+      delete teamErrors.members;
+      return { ...prev, teams: teamErrors };
     });
   }
 
@@ -5683,10 +5751,12 @@ function CrmOnePageModule() {
                 {sectionKey === "teams" ? (
                   <div className="d-flex flex-column gap-3">
                     <div>
-                      <label className="form-label small text-secondary mb-1">Team Name</label>
+                      <label className={`form-label small mb-1 ${sectionFieldErrors[sectionKey]?.name ? "text-danger" : "text-secondary"}`}>
+                        Team Name *
+                      </label>
                       <input
                         type="text"
-                        className="form-control"
+                        className={`form-control ${sectionFieldErrors[sectionKey]?.name ? "is-invalid" : ""}`}
                         placeholder="Type a new team name"
                         value={formValues.name || ""}
                         onChange={(event) => setField(sectionKey, "name", event.target.value)}
@@ -5809,11 +5879,13 @@ function CrmOnePageModule() {
                     </div>
 
                     <div>
-                      <label className="form-label small text-secondary mb-1">Available Employees</label>
+                      <label className={`form-label small mb-1 ${sectionFieldErrors[sectionKey]?.members ? "text-danger" : "text-secondary"}`}>
+                        Available Employees *
+                      </label>
                       <div className="crm-inline-suggestions-wrap">
                         <input
                           type="search"
-                          className="form-control"
+                          className={`form-control ${sectionFieldErrors[sectionKey]?.members ? "is-invalid" : ""}`}
                           autoComplete="off"
                           placeholder="Search and select employees"
                           value={teamMemberSearch}
@@ -5862,6 +5934,9 @@ function CrmOnePageModule() {
                           </div>
                         ) : null}
                       </div>
+                      {sectionFieldErrors[sectionKey]?.members ? (
+                        <div className="text-danger small mt-1">Employees is required.</div>
+                      ) : null}
                     </div>
 
                     <div>
@@ -6020,6 +6095,7 @@ function CrmOnePageModule() {
                                       className="form-control"
                                       placeholder={field.placeholder}
                                       value={formValues.phone || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
                                       onChange={(event) => setField(sectionKey, "phone", event.target.value)}
                                     />
                                   </div>
@@ -6033,6 +6109,7 @@ function CrmOnePageModule() {
                                       className="form-control"
                                       placeholder={field.placeholder}
                                       value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
                                       onFocus={() => setLeadCompanySearchOpen(true)}
                           onClick={() => setLeadCompanySearchOpen(true)}
                                       onBlur={() => window.setTimeout(() => setLeadCompanySearchOpen(false), 120)}
@@ -6214,6 +6291,7 @@ function CrmOnePageModule() {
                                         className="form-control"
                                         placeholder={field.placeholder}
                                         value={followUpRelatedToSearch}
+                                        required={isCrmFieldRequired(sectionKey, field, formValues)}
                                         onFocus={() => setFollowUpRelatedToSearchOpen(true)}
                           onClick={() => setFollowUpRelatedToSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setFollowUpRelatedToSearchOpen(false), 120)}
@@ -6262,6 +6340,7 @@ function CrmOnePageModule() {
                                         autoComplete="off"
                                         placeholder="Search employees"
                                         value={followUpOwnerSearch}
+                                        required={isCrmFieldRequired(sectionKey, field, formValues)}
                                         onFocus={() => setFollowUpOwnerSearchOpen(true)}
                           onClick={() => setFollowUpOwnerSearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setFollowUpOwnerSearchOpen(false), 120)}
@@ -6338,6 +6417,7 @@ function CrmOnePageModule() {
                                       autoComplete="off"
                                       placeholder={field.placeholder}
                                       value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
                                       onFocus={() => setMeetingCompanySearchOpen(true)}
                           onClick={() => setMeetingCompanySearchOpen(true)}
                                       onBlur={() => window.setTimeout(() => setMeetingCompanySearchOpen(false), 120)}
@@ -6670,7 +6750,7 @@ function CrmOnePageModule() {
                                     </div>
                                     <div className="d-flex flex-wrap gap-2">
                                       {selectedMeetingReminderMinutes.length ? selectedMeetingReminderMinutes.map((value) => {
-                                        const optionLabel = getCrmMeetingReminderMinuteLabel(value) || `${value} Min`;
+                                        const optionLabel = getCrmMeetingReminderMinuteLabel(value) || `${value} Mins`;
                                         return (
                                           <span
                                             key={`meeting-selected-reminder-minute-${value}`}
@@ -6703,6 +6783,7 @@ function CrmOnePageModule() {
                                       className="form-control datalist-readable-input"
                                       placeholder={field.placeholder}
                                       value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
                                       onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                     />
                                     <datalist id={`${sectionKey}-${field.key}-datalist`}>
@@ -6735,6 +6816,7 @@ function CrmOnePageModule() {
                                     multiple
                                     size={1}
                                     value={Array.isArray(formValues[field.key]) ? formValues[field.key] : []}
+                                    required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => {
                                       const selectedValues = Array.from(event.target.selectedOptions).map((option) => option.value);
                                       setField(sectionKey, field.key, selectedValues);
@@ -6751,6 +6833,7 @@ function CrmOnePageModule() {
                                   <select
                                     className="form-select"
                                     value={formValues[field.key] || field.defaultValue || ""}
+                                    required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                   >
                                     <option value="">Select {field.label}</option>
@@ -6766,6 +6849,7 @@ function CrmOnePageModule() {
                                     type={field.type}
                                     className="form-control"
                                     value={formValues[field.key] || ""}
+                                    required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                   />
                                 );
@@ -6785,6 +6869,7 @@ function CrmOnePageModule() {
                                   className="form-control"
                                   placeholder={field.placeholder}
                                   value={formValues[field.key] || ""}
+                                  required={isCrmFieldRequired(sectionKey, field, formValues)}
                                   onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                 />
                               );
@@ -7350,13 +7435,62 @@ function ProjectManagementModule() {
     });
   }
 
+  function getProjectClientRequiredFieldLabels(form) {
+    const labels = [];
+    const companyName = String(form.companyName || form.name || "").trim();
+    const clientName = String(form.clientName || "").trim();
+    const primaryPhone = String(form.phone || "").trim();
+    const primaryEmail = String(form.email || "").trim();
+    const billingAddress = String(form.billingAddress || "").trim();
+    const billingState = String(form.billingState || "").trim();
+    const billingPincode = String(form.billingPincode || "").trim();
+    const useSameShipping = Boolean(form.billingShippingSame);
+    const shippingAddress = String(form.shippingAddress || "").trim();
+    const shippingState = String(form.shippingState || "").trim();
+    const shippingPincode = String(form.shippingPincode || "").trim();
+
+    if (!companyName) labels.push("Company Name");
+    if (!clientName) labels.push("Client Name");
+    if (!primaryPhone) labels.push("Phone Number");
+    if (!primaryEmail) labels.push("Email ID");
+    if (!billingAddress) labels.push("Billing Address");
+    if (!billingState) labels.push("Billing State");
+    if (!billingPincode) labels.push("Billing Pincode");
+    if (!useSameShipping) {
+      if (!shippingAddress) labels.push("Shipping Address");
+      if (!shippingState) labels.push("Shipping State");
+      if (!shippingPincode) labels.push("Shipping Pincode");
+    }
+    return labels;
+  }
+
+  function isProjectClientFieldRequired(fieldKey) {
+    const alwaysRequired = new Set([
+      "companyName",
+      "clientName",
+      "phone",
+      "email",
+      "billingAddress",
+      "billingState",
+      "billingPincode",
+    ]);
+    if (alwaysRequired.has(fieldKey)) {
+      return true;
+    }
+    if (["shippingAddress", "shippingState", "shippingPincode"].includes(fieldKey)) {
+      return !Boolean(projectClientForm.billingShippingSame);
+    }
+    return false;
+  }
+
   function saveProjectClient(event) {
     event.preventDefault();
-    const companyName = String(projectClientForm.companyName || projectClientForm.name || "").trim();
-    if (!companyName) {
-      setProjectFormNotice("Company name is required.");
+    const missingLabels = getProjectClientRequiredFieldLabels(projectClientForm);
+    if (missingLabels.length) {
+      setProjectFormNotice(`Please fill mandatory fields: ${missingLabels.join(", ")}`);
       return;
     }
+    const companyName = String(projectClientForm.companyName || projectClientForm.name || "").trim();
     const clientName = String(projectClientForm.clientName || "").trim();
     const primaryPhone = String(projectClientForm.phone || "").trim();
     const primaryEmail = String(projectClientForm.email || "").trim();
@@ -7630,19 +7764,19 @@ function ProjectManagementModule() {
               ) : null}
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Company Name</label>
-                  <input className="form-control" value={projectClientForm.companyName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, companyName: e.target.value, name: e.target.value }))} placeholder="Company name" />
+                  <label className="form-label small text-secondary mb-1">Company Name {isProjectClientFieldRequired("companyName") ? "*" : ""}</label>
+                  <input className="form-control" required={isProjectClientFieldRequired("companyName")} value={projectClientForm.companyName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, companyName: e.target.value, name: e.target.value }))} placeholder="Company name" />
                 </div>
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Client Name</label>
-                  <input className="form-control" value={projectClientForm.clientName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, clientName: e.target.value }))} placeholder="Client / Contact person" />
+                  <label className="form-label small text-secondary mb-1">Client Name {isProjectClientFieldRequired("clientName") ? "*" : ""}</label>
+                  <input className="form-control" required={isProjectClientFieldRequired("clientName")} value={projectClientForm.clientName || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, clientName: e.target.value }))} placeholder="Client / Contact person" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">GSTIN</label>
                   <input className="form-control" value={projectClientForm.gstin || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, gstin: e.target.value }))} placeholder="GSTIN" />
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <label className="form-label small text-secondary mb-1">Phone Number {isProjectClientFieldRequired("phone") ? "*" : ""}</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
                       <PhoneCountryCodePicker
@@ -7652,7 +7786,7 @@ function ProjectManagementModule() {
                         style={{ maxWidth: "220px" }}
                         ariaLabel="Project client phone country code"
                       />
-                      <input className="form-control" value={projectClientForm.phone || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
+                      <input className="form-control" required={isProjectClientFieldRequired("phone")} value={projectClientForm.phone || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -7691,10 +7825,10 @@ function ProjectManagementModule() {
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <label className="form-label small text-secondary mb-1">Email ID {isProjectClientFieldRequired("email") ? "*" : ""}</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" value={projectClientForm.email || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
+                      <input className="form-control" required={isProjectClientFieldRequired("email")} value={projectClientForm.email || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -7722,7 +7856,7 @@ function ProjectManagementModule() {
                 </div>
                 <div className="col-12 col-xl-6">
                   <div className="d-flex align-items-center justify-content-between mb-1">
-                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-label small text-secondary mb-0">Billing Address {isProjectClientFieldRequired("billingAddress") ? "*" : ""}</label>
                     <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
                       <input
                         type="checkbox"
@@ -7733,7 +7867,7 @@ function ProjectManagementModule() {
                       Billing and Shipping Same
                     </label>
                   </div>
-                  <textarea className="form-control mb-2" rows="2" value={projectClientForm.billingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingAddress: e.target.value }))} placeholder="Billing address" />
+                  <textarea className="form-control mb-2" required={isProjectClientFieldRequired("billingAddress")} rows="2" value={projectClientForm.billingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingAddress: e.target.value }))} placeholder="Billing address" />
                   <div className="d-flex flex-column gap-2">
                     <div>
                       <label className="form-label small text-secondary mb-1">Country</label>
@@ -7744,28 +7878,28 @@ function ProjectManagementModule() {
                       </select>
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">State</label>
+                      <label className="form-label small text-secondary mb-1">State {isProjectClientFieldRequired("billingState") ? "*" : ""}</label>
                       {projectBillingStateOptions.length ? (
-                        <select className="form-select" value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))}>
+                        <select className="form-select" required={isProjectClientFieldRequired("billingState")} value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))}>
                           <option value="">Select State</option>
                           {projectBillingStateOptions.map((state) => (
                             <option key={`project-billing-state-${state}`} value={state}>{state}</option>
                           ))}
                         </select>
                       ) : (
-                        <input className="form-control" value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))} placeholder="State / Province / Region" />
+                        <input className="form-control" required={isProjectClientFieldRequired("billingState")} value={projectClientForm.billingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingState: e.target.value }))} placeholder="State / Province / Region" />
                       )}
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">Pincode</label>
-                      <input className="form-control" value={projectClientForm.billingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingPincode: e.target.value }))} placeholder="Pincode" />
+                      <label className="form-label small text-secondary mb-1">Pincode {isProjectClientFieldRequired("billingPincode") ? "*" : ""}</label>
+                      <input className="form-control" required={isProjectClientFieldRequired("billingPincode")} value={projectClientForm.billingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, billingPincode: e.target.value }))} placeholder="Pincode" />
                     </div>
                   </div>
                 </div>
                 {!projectClientForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
-                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
-                    <textarea className="form-control mb-2" rows="2" value={projectClientForm.shippingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingAddress: e.target.value }))} placeholder="Shipping address" />
+                    <label className="form-label small text-secondary mb-1">Shipping Address {isProjectClientFieldRequired("shippingAddress") ? "*" : ""}</label>
+                    <textarea className="form-control mb-2" required={isProjectClientFieldRequired("shippingAddress")} rows="2" value={projectClientForm.shippingAddress || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingAddress: e.target.value }))} placeholder="Shipping address" />
                     <div className="d-flex flex-column gap-2">
                       <div>
                         <label className="form-label small text-secondary mb-1">Country</label>
@@ -7776,21 +7910,21 @@ function ProjectManagementModule() {
                         </select>
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">State</label>
+                        <label className="form-label small text-secondary mb-1">State {isProjectClientFieldRequired("shippingState") ? "*" : ""}</label>
                         {projectShippingStateOptions.length ? (
-                          <select className="form-select" value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))}>
+                          <select className="form-select" required={isProjectClientFieldRequired("shippingState")} value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))}>
                             <option value="">Select State</option>
                             {projectShippingStateOptions.map((state) => (
                               <option key={`project-shipping-state-${state}`} value={state}>{state}</option>
                             ))}
                           </select>
                         ) : (
-                          <input className="form-control" value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))} placeholder="State / Province / Region" />
+                          <input className="form-control" required={isProjectClientFieldRequired("shippingState")} value={projectClientForm.shippingState || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingState: e.target.value }))} placeholder="State / Province / Region" />
                         )}
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">Pincode</label>
-                        <input className="form-control" value={projectClientForm.shippingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingPincode: e.target.value }))} placeholder="Pincode" />
+                        <label className="form-label small text-secondary mb-1">Pincode {isProjectClientFieldRequired("shippingPincode") ? "*" : ""}</label>
+                        <input className="form-control" required={isProjectClientFieldRequired("shippingPincode")} value={projectClientForm.shippingPincode || ""} onChange={(e) => setProjectClientForm((p) => ({ ...p, shippingPincode: e.target.value }))} placeholder="Pincode" />
                       </div>
                     </div>
                   </div>
@@ -7866,6 +8000,8 @@ function ProjectManagementModule() {
                   return null;
                 }
                 const isInlineProjectsTab = activeTab === "projects";
+                const isTaskTab = activeTab === "tasks";
+                const isRequiredField = !field.optional;
                 return (
                   <div
                     className={
@@ -7877,15 +8013,21 @@ function ProjectManagementModule() {
                               ? "col-12 col-md-6 col-xl-3"
                               : "col-12 col-md-4"
                           )
+                        : isTaskTab
+                        ? "col-12 col-md-6 col-xl-3"
                         : "col-12 col-md-4"
                     }
                     key={field.key}
                   >
-                    <label className="form-label small text-secondary mb-1">{field.label}</label>
+                    <label className="form-label small text-secondary mb-1">
+                      {field.label}
+                      {isRequiredField ? " *" : ""}
+                    </label>
                     {field.type === "select" ? (
                       <select
                         className="form-select"
                         value={formValues[field.key] || field.defaultValue || ""}
+                        required={isRequiredField}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
                       >
                         <option value="">Select {field.label}</option>
@@ -7900,6 +8042,7 @@ function ProjectManagementModule() {
                           className="form-control"
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
+                          required={isRequiredField}
                           maxLength={getBusinessAutopilotMaxLength(field.key)}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
                           onFocus={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
@@ -7955,6 +8098,7 @@ function ProjectManagementModule() {
                           className="form-control datalist-readable-input"
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
+                          required={isRequiredField}
                           maxLength={getBusinessAutopilotMaxLength(field.key)}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
                         />
@@ -7972,6 +8116,7 @@ function ProjectManagementModule() {
                         className="form-control"
                         placeholder={field.placeholder}
                         value={formValues[field.key] || ""}
+                        required={isRequiredField}
                         maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
                       />
@@ -9243,6 +9388,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
+              required={isRequiredField}
               maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
                           onClick={() => setAttendanceEmployeeSuggestOpen(true)}
@@ -9289,6 +9435,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               autoComplete="off"
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
+              required={isRequiredField}
               maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setHrEmployeeSuggestOpen(true)}
                           onClick={() => setHrEmployeeSuggestOpen(true)}
@@ -9327,6 +9474,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
+            required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
             <option value="">Select Department</option>
@@ -9343,6 +9491,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
+            required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
             <option value="">Select Employee Role</option>
@@ -9377,6 +9526,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                   ? (formValues.secondaryContactNumber || "")
                   : (formValues.contactNumber || "")
               }
+              required={isRequiredField}
               maxLength={getBusinessAutopilotMaxLength(
                 field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber"
               )}
@@ -9457,6 +9607,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || field.defaultValue || "India"}
+            required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
             {COUNTRY_OPTIONS.map((country) => (
@@ -9472,6 +9623,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 <select
                   className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
                   value={formValues[field.key] || ""}
+                  required={isRequiredField}
                   onChange={(event) => onChangeField(field.key, event.target.value)}
                 >
                   <option value="">Select State</option>
@@ -9487,6 +9639,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
                 placeholder={field.placeholder}
                 value={formValues[field.key] || ""}
+                required={isRequiredField}
                 maxLength={getBusinessAutopilotMaxLength(field.key)}
                 onChange={(event) => onChangeField(field.key, event.target.value)}
               />
@@ -9496,6 +9649,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || field.defaultValue || ""}
+            required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
             <option value="">Select {field.label}</option>
@@ -9509,6 +9663,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             rows={3}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
+            required={isRequiredField}
             maxLength={getBusinessAutopilotMaxLength(field.key, { isTextarea: true })}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
@@ -9519,6 +9674,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
+              required={isRequiredField}
               max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
               onInput={(event) => onChangeField(field.key, event.target.value)}
               onChange={(event) => onChangeField(field.key, event.target.value)}
@@ -9534,6 +9690,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
+            required={isRequiredField}
             maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           />
@@ -9659,6 +9816,19 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     return String(row[key] || "").trim() || "-";
   }
 
+  function getHrRequiredFieldLabel(field) {
+    const label = String(field?.label || "").trim();
+    const key = String(field?.key || "").trim();
+    if (!key) return label || "Field";
+    if (key.startsWith("permanent")) {
+      return `Permanent ${label}`.trim();
+    }
+    if (key.startsWith("temporary")) {
+      return `Temporary ${label}`.trim();
+    }
+    return label || "Field";
+  }
+
   async function onSubmit(event) {
     event.preventDefault();
     const visibleFields = config.fields.filter((field) => {
@@ -9681,8 +9851,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       missingFields.forEach((field) => {
         fieldErrorMap[field.key] = true;
       });
+      const missingLabels = Array.from(new Set(missingFields.map((field) => getHrRequiredFieldLabel(field))));
       setHrFieldErrors(fieldErrorMap);
-      setHrFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
+      setHrFormNotice(`Please fill mandatory fields: ${missingLabels.join(", ")}`);
       return;
     }
     setHrFieldErrors({});
@@ -12545,13 +12716,59 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     });
   }
 
+  function getCustomerRequiredFieldLabels(form) {
+    const labels = [];
+    const companyName = String(form.companyName || form.name || "").trim();
+    const clientName = String(form.clientName || "").trim();
+    const primaryPhone = String(form.phone || "").trim();
+    const primaryEmail = String(form.email || "").trim();
+    const billingAddress = String(form.billingAddress || "").trim();
+    const billingState = String(form.billingState || "").trim();
+    const billingPincode = String(form.billingPincode || "").trim();
+    const useSameShipping = Boolean(form.billingShippingSame);
+    const shippingAddress = useSameShipping ? billingAddress : String(form.shippingAddress || "").trim();
+    const shippingState = useSameShipping ? billingState : String(form.shippingState || "").trim();
+    const shippingPincode = useSameShipping ? billingPincode : String(form.shippingPincode || "").trim();
+
+    if (!companyName) labels.push("Company Name");
+    if (!clientName) labels.push("Client Name");
+    if (!primaryPhone) labels.push("Phone Number");
+    if (!primaryEmail) labels.push("Email ID");
+    if (!billingAddress) labels.push("Billing Address");
+    if (!billingState) labels.push("Billing State");
+    if (!billingPincode) labels.push("Billing Pincode");
+    if (!shippingAddress) labels.push("Shipping Address");
+    if (!shippingState) labels.push("Shipping State");
+    if (!shippingPincode) labels.push("Shipping Pincode");
+
+    return labels;
+  }
+
+  function isCustomerFieldRequired(fieldKey) {
+    const alwaysRequired = new Set([
+      "companyName",
+      "clientName",
+      "phone",
+      "email",
+      "billingAddress",
+      "billingState",
+      "billingPincode",
+    ]);
+    if (alwaysRequired.has(fieldKey)) return true;
+    if (fieldKey === "shippingAddress" || fieldKey === "shippingState" || fieldKey === "shippingPincode") {
+      return !customerForm.billingShippingSame;
+    }
+    return false;
+  }
+
   function saveCustomer(event) {
     event.preventDefault();
-    const companyName = String(customerForm.companyName || customerForm.name || "").trim();
-    if (!companyName) {
-      setAccountsFormNotice("Customer company name is required.");
+    const missingLabels = getCustomerRequiredFieldLabels(customerForm);
+    if (missingLabels.length) {
+      setAccountsFormNotice(`Please fill mandatory fields: ${missingLabels.join(", ")}`);
       return;
     }
+    const companyName = String(customerForm.companyName || customerForm.name || "").trim();
     const clientName = String(customerForm.clientName || "").trim();
     const primaryPhone = String(customerForm.phone || "").trim();
     const primaryEmail = String(customerForm.email || "").trim();
@@ -13751,19 +13968,19 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             <form className="d-flex flex-column gap-3" onSubmit={saveCustomer}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Company Name</label>
-                  <input className="form-control" value={customerForm.companyName || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, companyName: e.target.value, name: e.target.value }))} placeholder="Company name" />
+                  <label className="form-label small text-secondary mb-1">Company Name {isCustomerFieldRequired("companyName") ? "*" : ""}</label>
+                  <input className="form-control" required={isCustomerFieldRequired("companyName")} value={customerForm.companyName || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, companyName: e.target.value, name: e.target.value }))} placeholder="Company name" />
                 </div>
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Client Name</label>
-                  <input className="form-control" value={customerForm.clientName || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, clientName: e.target.value }))} placeholder="Client / Contact person" />
+                  <label className="form-label small text-secondary mb-1">Client Name {isCustomerFieldRequired("clientName") ? "*" : ""}</label>
+                  <input className="form-control" required={isCustomerFieldRequired("clientName")} value={customerForm.clientName || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, clientName: e.target.value }))} placeholder="Client / Contact person" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">GSTIN</label>
                   <input className="form-control" value={customerForm.gstin || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, gstin: e.target.value }))} placeholder="GSTIN" />
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <label className="form-label small text-secondary mb-1">Phone Number {isCustomerFieldRequired("phone") ? "*" : ""}</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
                       <PhoneCountryCodePicker
@@ -13773,7 +13990,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         style={{ maxWidth: "220px" }}
                         ariaLabel="Customer phone country code"
                       />
-                      <input className="form-control" value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
+                      <input className="form-control" required={isCustomerFieldRequired("phone")} value={customerForm.phone || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -13821,10 +14038,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <label className="form-label small text-secondary mb-1">Email ID {isCustomerFieldRequired("email") ? "*" : ""}</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" value={customerForm.email || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
+                      <input className="form-control" required={isCustomerFieldRequired("email")} value={customerForm.email || ""} onChange={(e) => setCustomerForm((p) => ({ ...p, email: e.target.value }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -13861,7 +14078,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </div>
                 <div className="col-12 col-xl-6">
                   <div className="d-flex align-items-center justify-content-between mb-1">
-                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-label small text-secondary mb-0">Billing Address {isCustomerFieldRequired("billingAddress") ? "*" : ""}</label>
                     <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
                       <input
                         type="checkbox"
@@ -13879,6 +14096,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   </div>
                   <textarea
                     className="form-control mb-2"
+                    required={isCustomerFieldRequired("billingAddress")}
                     rows="2"
                     value={customerForm.billingAddress || ""}
                     onChange={(e) => setCustomerForm((p) => ({ ...p, billingAddress: e.target.value }))}
@@ -13898,10 +14116,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       </select>
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">State</label>
+                      <label className="form-label small text-secondary mb-1">State {isCustomerFieldRequired("billingState") ? "*" : ""}</label>
                       {billingStateOptions.length ? (
                         <select
                           className="form-select"
+                          required={isCustomerFieldRequired("billingState")}
                           value={customerForm.billingState || ""}
                           onChange={(e) => setCustomerForm((p) => ({ ...p, billingState: e.target.value }))}
                         >
@@ -13913,6 +14132,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       ) : (
                         <input
                           className="form-control"
+                          required={isCustomerFieldRequired("billingState")}
                           value={customerForm.billingState || ""}
                           onChange={(e) => setCustomerForm((p) => ({ ...p, billingState: e.target.value }))}
                           placeholder="State / Province / Region"
@@ -13920,9 +14140,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       )}
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">Pincode</label>
+                      <label className="form-label small text-secondary mb-1">Pincode {isCustomerFieldRequired("billingPincode") ? "*" : ""}</label>
                       <input
                         className="form-control"
+                        required={isCustomerFieldRequired("billingPincode")}
                         value={customerForm.billingPincode || ""}
                         onChange={(e) => setCustomerForm((p) => ({ ...p, billingPincode: e.target.value }))}
                         placeholder="Pincode"
@@ -13932,9 +14153,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </div>
                 {!customerForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
-                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <label className="form-label small text-secondary mb-1">Shipping Address {isCustomerFieldRequired("shippingAddress") ? "*" : ""}</label>
                     <textarea
                       className="form-control mb-2"
+                      required={isCustomerFieldRequired("shippingAddress")}
                       rows="2"
                       value={customerForm.shippingAddress || ""}
                       onChange={(e) => setCustomerForm((p) => ({ ...p, shippingAddress: e.target.value }))}
@@ -13954,10 +14176,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         </select>
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">State</label>
+                        <label className="form-label small text-secondary mb-1">State {isCustomerFieldRequired("shippingState") ? "*" : ""}</label>
                         {shippingStateOptions.length ? (
                           <select
                             className="form-select"
+                            required={isCustomerFieldRequired("shippingState")}
                             value={customerForm.shippingState || ""}
                             onChange={(e) => setCustomerForm((p) => ({ ...p, shippingState: e.target.value }))}
                           >
@@ -13969,6 +14192,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         ) : (
                           <input
                             className="form-control"
+                            required={isCustomerFieldRequired("shippingState")}
                             value={customerForm.shippingState || ""}
                             onChange={(e) => setCustomerForm((p) => ({ ...p, shippingState: e.target.value }))}
                             placeholder="State / Province / Region"
@@ -13976,9 +14200,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         )}
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <label className="form-label small text-secondary mb-1">Pincode {isCustomerFieldRequired("shippingPincode") ? "*" : ""}</label>
                         <input
                           className="form-control"
+                          required={isCustomerFieldRequired("shippingPincode")}
                           value={customerForm.shippingPincode || ""}
                           onChange={(e) => setCustomerForm((p) => ({ ...p, shippingPincode: e.target.value }))}
                           placeholder="Pincode"

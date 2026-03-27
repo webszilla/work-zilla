@@ -121,6 +121,14 @@ const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
 const BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 
+function normalizeSidebarMenuStyle(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "compact" || normalized === "icons") {
+    return normalized;
+  }
+  return "default";
+}
+
 function readBusinessAutopilotRoleAccessMap() {
   if (typeof window === "undefined") {
     return {};
@@ -438,7 +446,28 @@ function AppShell({ state, productPrefix, productSlug }) {
     : "";
   const themePrimary = state.themePrimary;
   const themeSecondary = state.themeSecondary;
-  const sidebarMenuStyle = state.sidebarMenuStyle === "compact" ? "compact" : "default";
+  const sidebarMenuStyle = (() => {
+    if (typeof window !== "undefined") {
+      const raw = window.localStorage.getItem(THEME_OVERRIDE_KEY);
+      if (raw && raw !== "default") {
+        try {
+          const parsed = JSON.parse(raw);
+          const overrideStyle = normalizeSidebarMenuStyle(parsed?.sidebarMenuStyle);
+          if (overrideStyle === "icons") {
+            return "icons";
+          }
+        } catch {
+          // ignore invalid local override
+        }
+      }
+    }
+    return normalizeSidebarMenuStyle(state.sidebarMenuStyle);
+  })();
+  const effectiveSidebarMenuStyle =
+    sidebarMenuStyle === "icons" && !sidebarCollapsed
+      ? "default"
+      : sidebarMenuStyle;
+  const showIconsMenuTooltips = sidebarMenuStyle === "icons" && sidebarCollapsed;
   const onboarding = state.onboarding || { enabled: false, state: "active" };
   const isSaasAdminRoute = location.pathname.startsWith("/saas-admin");
   const isMonitorProduct = productSlug === "worksuite";
@@ -628,6 +657,12 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     applyThemeColors(themeToApply);
   }, [themePrimary, themeSecondary]);
+
+  useEffect(() => {
+    if (sidebarMenuStyle === "icons") {
+      setSidebarCollapsed(true);
+    }
+  }, [sidebarMenuStyle]);
 
   useEffect(() => {
     if (!shouldShowCurrentProductFreePlanPopup) {
@@ -1044,12 +1079,29 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     return normalizedPathname === "/";
   })();
+  const getSidebarNavProps = (label) => ({
+    title: showIconsMenuTooltips ? undefined : label,
+    "aria-label": label,
+    "data-tooltip": showIconsMenuTooltips ? label : undefined,
+  });
+  const renderSidebarNavLabel = (label) => (
+    <>
+      <span className="wz-nav-copy">{label}</span>
+      <span className="wz-nav-tooltip" aria-hidden="true">{label}</span>
+    </>
+  );
 
   return (
     <div
       className={`app-shell wz-admin-shell ${isSaasAdminRoute ? "saas-admin" : ""} ${
         sidebarCollapsed ? "sidebar-collapsed" : ""
-      } ${sidebarMenuStyle === "compact" ? "sidebar-style-compact" : "sidebar-style-default"}`}
+      } ${
+        effectiveSidebarMenuStyle === "compact"
+          ? "sidebar-style-compact"
+          : effectiveSidebarMenuStyle === "icons"
+            ? "sidebar-style-icons"
+            : "sidebar-style-default"
+      }`}
     >
       <aside className="sidebar wz-sidebar">
         <div className="wz-sidebar__inner">
@@ -1094,14 +1146,14 @@ function AppShell({ state, productPrefix, productSlug }) {
                     key={item.path}
                     to={navPath(item.path)}
                     end={item.path === "/dealer-dashboard"}
-                    title={item.label}
+                    {...getSidebarNavProps(item.label)}
                     onClick={handleSidebarNavClick}
                     className={({ isActive }) => `nav-link wz-nav-link ${isActive ? "active" : ""}`}
                   >
                     {item.icon ? (
                       <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
                     ) : null}
-                    <span className="wz-nav-copy">{item.label}</span>
+                    {renderSidebarNavLabel(item.label)}
                   </NavLink>
                 ))
               : isSaasAdminRoute
@@ -1139,13 +1191,13 @@ function AppShell({ state, productPrefix, productSlug }) {
                         key={item.key}
                         href={item.path}
                         className="nav-link wz-nav-link"
-                        title={item.label}
+                        {...getSidebarNavProps(item.label)}
                         onClick={handleSidebarNavClick}
                       >
                         {item.icon ? (
                           <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
                         ) : null}
-                        <span className="wz-nav-copy">{item.label}</span>
+                        {renderSidebarNavLabel(item.label)}
                       </a>
                     );
                   }
@@ -1153,7 +1205,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                     <NavLink
                       key={item.key}
                       to={navPath(href)}
-                      title={item.label}
+                      {...getSidebarNavProps(item.label)}
                       onClick={() => {
                         handleSidebarNavClick();
                         if (item.moduleKey === "ticketing") {
@@ -1165,7 +1217,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                       {item.icon ? (
                         <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
                       ) : null}
-                      <span className="wz-nav-copy">{item.label}</span>
+                      {renderSidebarNavLabel(item.label)}
                     </NavLink>
                   );
                 })
@@ -1194,7 +1246,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                           setUpgradeAlertMessage("Upgrade to next plan to access Gaming / OTT Usage.");
                         }
                       }}
-                      title={item.label}
+                      {...getSidebarNavProps(item.label)}
                       className={({ isActive }) =>
                         `nav-link wz-nav-link ${isActive ? "active" : ""} ${
                           (item.requiresAppUsage && !allowAppUsage) ||
@@ -1213,13 +1265,13 @@ function AppShell({ state, productPrefix, productSlug }) {
                       {item.icon ? (
                         <i className={`bi ${item.icon} nav-icon wz-nav-icon`} aria-hidden="true" />
                       ) : null}
-                      <span className="wz-nav-copy">{item.label}</span>
+                      {renderSidebarNavLabel(item.label)}
                     </NavLink>
                   )
                 ))}
-            <a className="nav-link wz-nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} title="Logout">
+            <a className="nav-link wz-nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} {...getSidebarNavProps("Logout")}>
               <i className="bi bi-box-arrow-right nav-icon wz-nav-icon" aria-hidden="true" />
-              <span className="wz-nav-copy">Logout</span>
+              {renderSidebarNavLabel("Logout")}
             </a>
           </nav>
 
@@ -2070,7 +2122,7 @@ export default function App() {
       allowGamingOttUsage: data.allow_gaming_ott_usage !== false,
       themePrimary: data.theme_primary || "",
       themeSecondary: data.theme_secondary || "",
-      sidebarMenuStyle: data.sidebar_menu_style === "compact" ? "compact" : "default",
+      sidebarMenuStyle: normalizeSidebarMenuStyle(data.sidebar_menu_style),
       freePlanPopup: Boolean(data.free_plan_popup),
       freePlanExpiry: data.free_plan_expiry || "",
       onboarding: data.onboarding || { enabled: false, state: "active" },
@@ -2113,7 +2165,7 @@ export default function App() {
 
   useEffect(() => {
     const handleSidebarStyleChange = (event) => {
-      const nextStyle = event?.detail?.style === "compact" ? "compact" : "default";
+      const nextStyle = normalizeSidebarMenuStyle(event?.detail?.style);
       setState((prev) => ({ ...prev, sidebarMenuStyle: nextStyle }));
     };
     window.addEventListener("wz:sidebar-menu-style-change", handleSidebarStyleChange);
@@ -2124,8 +2176,8 @@ export default function App() {
 
   useEffect(() => {
     const TEXT_INPUT_TYPES = new Set(["text", "email", "url", "tel", "search", "password", "number"]);
-    const DEFAULT_INPUT_MAX = 255;
-    const DEFAULT_TEXTAREA_MAX = 1000;
+    const DEFAULT_INPUT_MAX = 120;
+    const DEFAULT_TEXTAREA_MAX = 500;
     const TEXT_OVERFLOW_CLASS = "wz-text-limit-overflow";
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const WEB_RE = /^(https?:\/\/|www\.|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(\/.*)?$/i;
@@ -2145,17 +2197,24 @@ export default function App() {
 
     const inferLimit = (el, fallback) => {
       const text = semanticText(el);
-      if (hasAny(text, ["slug"])) return 80;
+      if (hasAny(text, ["otp", "pin"])) return 8;
+      if (hasAny(text, ["gstin"])) return 15;
+      if (hasAny(text, ["pan"])) return 10;
+      if (hasAny(text, ["postal", "pincode", "zip"])) return 10;
+      if (hasAny(text, ["phone", "mobile", "whatsapp"])) return 15;
+      if (hasAny(text, ["slug"])) return 40;
       if (hasAny(text, ["search", "query"])) return 80;
-      if (hasAny(text, ["title", "name", "subject", "label", "category"])) return 120;
-      if (hasAny(text, ["email"])) return 120;
-      if (hasAny(text, ["website", "url", "domain", "link"])) return 255;
-      if (hasAny(text, ["phone", "mobile", "whatsapp", "postal", "pincode", "zip"])) return 20;
-      if (hasAny(text, ["price", "amount", "cost", "qty", "quantity"])) return 32;
-      if (hasAny(text, ["state", "city", "country"])) return 80;
-      if (hasAny(text, ["address"])) return 260;
+      if (hasAny(text, ["email"])) return 30;
+      if (hasAny(text, ["website", "url", "domain", "link"])) return 180;
+      if (hasAny(text, ["company"])) return 45;
+      if (hasAny(text, ["title", "subject", "label", "category"])) return 40;
+      if (hasAny(text, ["first name", "last name", "contact name", "person name", "full name", "name"])) return 30;
+      if (hasAny(text, ["state", "city", "country", "district"])) return 60;
+      if (hasAny(text, ["address"])) return el instanceof HTMLTextAreaElement ? 180 : 130;
+      if (hasAny(text, ["password"])) return 64;
+      if (hasAny(text, ["price", "amount", "cost", "qty", "quantity", "rate"])) return 8;
       if (hasAny(text, ["description", "message", "note", "content", "bio", "about", "highlight"])) {
-        return el instanceof HTMLTextAreaElement ? 1000 : 320;
+        return el instanceof HTMLTextAreaElement ? 350 : 180;
       }
       return fallback;
     };
@@ -2163,8 +2222,14 @@ export default function App() {
     const sanitizeValue = (el, value) => {
       const text = semanticText(el);
       let next = String(value ?? "");
-      if (hasAny(text, ["phone", "mobile", "whatsapp", "postal", "pincode", "zip"])) {
+      if (hasAny(text, ["phone", "mobile", "whatsapp"])) {
         next = next.replace(/[^\d+]/g, "");
+      } else if (hasAny(text, ["postal", "pincode", "zip", "otp", "pin"])) {
+        next = next.replace(/[^\d]/g, "");
+      } else if (hasAny(text, ["gstin"])) {
+        next = next.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      } else if (hasAny(text, ["pan"])) {
+        next = next.toUpperCase().replace(/[^A-Z0-9]/g, "");
       } else if (hasAny(text, ["slug"])) {
         next = next.toLowerCase().replace(/[^a-z0-9-]/g, "");
       }

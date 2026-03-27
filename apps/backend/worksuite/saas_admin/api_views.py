@@ -2585,6 +2585,30 @@ def _parse_bool(value):
         return value.strip().lower() in ("true", "1", "yes", "on")
     return bool(value)
 
+def _normalize_business_autopilot_plan_rules(plan):
+    product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
+    if product_slug != "business-autopilot-erp":
+        return
+    plan_name = str(getattr(plan, "name", "") or "").strip().lower()
+    features = dict(getattr(plan, "features", {}) or {})
+    limits = dict(getattr(plan, "limits", {}) or {})
+    trial_like = (
+        bool(features.get("is_trial"))
+        or "trial" in plan_name
+        or plan_name == "free"
+    )
+    if trial_like:
+        plan.employee_limit = 2
+        plan.allow_addons = False
+        limits["included_users"] = 2
+        limits["user_limit"] = 2
+    else:
+        plan.employee_limit = 0
+        plan.allow_addons = True
+        limits["included_users"] = 0
+        limits["user_limit"] = 0
+    plan.limits = limits
+
 
 def _update_plan_from_payload(plan, data):
     errors = {}
@@ -2667,6 +2691,7 @@ def _update_plan_from_payload(plan, data):
         plan.limits = data.get("limits") or {}
     if "features" in data and isinstance(data.get("features"), dict):
         plan.features = data.get("features") or {}
+    _normalize_business_autopilot_plan_rules(plan)
     if errors:
         raise ValueError(errors)
 
