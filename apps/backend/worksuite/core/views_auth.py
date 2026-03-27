@@ -115,8 +115,14 @@ def company_signup(request):
                 "login_url": request.build_absolute_uri("/accounts/login/")
             }
         )
-        send_email_verification(user, request=request, force=True)
-        messages.success(request, "Account Created Successfully. Please Login.")
+        verification_sent = send_email_verification(user, request=request, force=True)
+        if verification_sent:
+            messages.success(request, "Account Created Successfully. Please Login.")
+        else:
+            messages.warning(
+                request,
+                "Account created, but verification email could not be sent right now. Please try resend verification after login.",
+            )
         return redirect("/accounts/login/")
 
     return render(request, "sites/signup.html")
@@ -178,8 +184,14 @@ def agent_signup(request):
                 "login_url": request.build_absolute_uri("/accounts/login/")
             }
         )
-        send_email_verification(user, request=request, force=True)
-        messages.success(request, "Agent account created. Please login.")
+        verification_sent = send_email_verification(user, request=request, force=True)
+        if verification_sent:
+            messages.success(request, "Agent account created. Please login.")
+        else:
+            messages.warning(
+                request,
+                "Agent account created, but verification email could not be sent right now. Please try resend verification after login.",
+            )
         return redirect("/accounts/login/")
 
     return render(request, "sites/agent_signup.html", {

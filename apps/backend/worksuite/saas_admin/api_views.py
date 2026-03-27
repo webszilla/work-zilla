@@ -4685,14 +4685,27 @@ def ses_settings(request):
     configuration_set = str(payload.get("configuration_set", "") or "").strip()
     is_active = bool(payload.get("is_active", False))
 
-    if is_active and not access_key_id and not settings_obj.access_key_id:
-        return JsonResponse({"access_key_id": ["required"], "detail": "AWS Access Key ID is required."}, status=400)
-    if is_active and not secret_access_key and not settings_obj.secret_access_key:
-        return JsonResponse({"secret_access_key": ["required"], "detail": "AWS Secret Access Key is required."}, status=400)
     if is_active and not aws_region:
         return JsonResponse({"aws_region": ["required"], "detail": "AWS Region is required."}, status=400)
     if is_active and not sender_email:
         return JsonResponse({"sender_email": ["required"], "detail": "Sender Email is required."}, status=400)
+    effective_smtp_username = smtp_username if payload.get("smtp_username") is not None else settings_obj.smtp_username
+    effective_smtp_password = smtp_password if payload.get("smtp_password") is not None else settings_obj.smtp_password
+    effective_access_key_id = access_key_id or settings_obj.access_key_id
+    effective_secret_access_key = secret_access_key or settings_obj.secret_access_key
+    has_smtp_pair = bool(str(effective_smtp_username or "").strip() and str(effective_smtp_password or "").strip())
+    has_api_pair = bool(str(effective_access_key_id or "").strip() and str(effective_secret_access_key or "").strip())
+    if is_active and not (has_smtp_pair or has_api_pair):
+        return JsonResponse(
+            {
+                "detail": "Provide either SES SMTP credentials or AWS API credentials.",
+                "smtp_username": ["required_without_api"],
+                "smtp_password": ["required_without_api"],
+                "access_key_id": ["required_without_smtp"],
+                "secret_access_key": ["required_without_smtp"],
+            },
+            status=400,
+        )
 
     if aws_region:
         settings_obj.aws_region = aws_region

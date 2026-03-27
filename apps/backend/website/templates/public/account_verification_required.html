@@ -16,8 +16,8 @@
         Please verify your email before accessing My Account pages.
       </p>
 
-      <div class="alert alert-warning">
-        Verification pending for <strong>{{ email_verification_address }}</strong>. Please check your inbox and spam folder.
+      <div class="alert {% if email_verification_banner_level == 'success' %}alert-success{% else %}alert-warning{% endif %}">
+        {{ email_verification_banner_text|default:"Verification pending. Please check your inbox and spam folder." }}
       </div>
 
       <div class="card p-3 mt-2">

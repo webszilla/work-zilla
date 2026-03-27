@@ -288,7 +288,7 @@ def signup_view(request):
             "login_url": request.build_absolute_uri("/auth/login/"),
         },
     )
-    send_email_verification(user, request=request, force=True)
+    verification_sent = send_email_verification(user, request=request, force=True)
     transaction.on_commit(
         lambda: user_registration_success.send(
             sender=signup_view,
@@ -300,10 +300,16 @@ def signup_view(request):
     login(request, user)
     request.session.pop("signup_captcha_answer", None)
     request.session.pop("signup_captcha_question", None)
-    messages.info(
-        request,
-        f"Verification email sent to {user.email}. Please verify your email to continue to My Account.",
-    )
+    if verification_sent:
+        messages.info(
+            request,
+            f"Verification email sent to {user.email}. Please verify your email to continue to My Account.",
+        )
+    else:
+        messages.warning(
+            request,
+            "Account created, but verification email could not be sent right now. Please use resend verification from My Account.",
+        )
     return redirect("/my-account/")
 
 

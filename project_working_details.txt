@@ -184,6 +184,30 @@ SES CREDENTIALS (SECURE NOTES)
   - `export SES_REGION=us-east-1`
 - Then load SES keys in app settings from env (or platform secrets) and save via:
   - Amazon SES page in SaaS Admin -> /saas-admin/ses
+- SES credentials rule:
+  - For SMTP mode use **SES SMTP Username + SES SMTP Password** (not IAM secret key directly).
+  - For API mode use **AWS Access Key ID + AWS Secret Access Key**.
+  - Keep sender identity/domain verified in SES.
+- Live mode rule:
+  - Production server must use `ENVIRONMENT=production` and `DJANGO_DEBUG=0`.
+  - Do not keep production in local/debug mode for email flows.
+- Verification status update:
+  - Test mail delivery confirmed to `saicreatives123@gmail.com` (WorkZilla Test Email) on 2026-03-27.
+
+EMAIL AUTO-RESOLVE RULE (LOCAL + LIVE)
+- Email sending is now auto-resolved in code; no code change required when moving local to server.
+- Transport priority:
+  1) SaaS Admin Amazon SES config (DB, when active)
+  2) Environment SES SMTP (`SES_SMTP_USERNAME` + `SES_SMTP_PASSWORD`)
+  3) Environment generic SMTP (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`)
+  4) Environment SES API (`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`)
+  5) Django configured fallback backend
+- Keep same env variable names on local and production so deploys stay zero-change.
+- Minimum recommended env for stable SES in both local/live:
+  - `SES_REGION`
+  - `SES_SENDER_EMAIL`
+  - `SES_SMTP_USERNAME`
+  - `SES_SMTP_PASSWORD`
 
 ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
 - Maintain below block on each production publish:

@@ -2084,11 +2084,20 @@ def account_view(request):
     context = _base_context(request)
     context["is_logged_in"] = True
     context["account_section"] = "products"
+    verification_banner_text = request.session.pop("email_verification_banner_text", "")
+    verification_banner_level = request.session.pop("email_verification_banner_level", "warning")
+    if not verification_banner_text:
+        verification_banner_text = (
+            f"Verification pending for {request.user.email or ''}. "
+            "Please check your inbox and spam folder."
+        ).strip()
     if request.user.email and not request.user.email_verified:
         context.update(
             {
                 "email_verification_required": True,
                 "email_verification_address": request.user.email or "",
+                "email_verification_banner_text": verification_banner_text,
+                "email_verification_banner_level": verification_banner_level,
             }
         )
         return render(request, "public/account_verification_required.html", context)
@@ -2375,6 +2384,8 @@ def account_view(request):
         "pending_renewal_rows": pending_renewal_rows,
         "email_verification_required": bool(request.user.email and not request.user.email_verified),
         "email_verification_address": request.user.email or "",
+        "email_verification_banner_text": verification_banner_text,
+        "email_verification_banner_level": verification_banner_level,
     })
     return render(request, "public/account.html", context)
 
@@ -2385,11 +2396,21 @@ def account_resend_verification(request):
     if request.user.email_verified:
         messages.info(request, "Email already verified.")
         return redirect("/my-account/")
-    sent = send_email_verification(request.user, request=request, force=False)
+    sent = send_email_verification(request.user, request=request, force=True)
     if sent:
         messages.success(request, f"Verification email sent to {request.user.email}.")
+        request.session["email_verification_banner_level"] = "success"
+        request.session["email_verification_banner_text"] = (
+            f"Verification email sent again to {request.user.email}. "
+            "Please check your inbox and spam folder."
+        )
     else:
         messages.error(request, "Unable to send verification email. Please update your email and try again.")
+        request.session["email_verification_banner_level"] = "warning"
+        request.session["email_verification_banner_text"] = (
+            f"Verification pending for {request.user.email}. "
+            "Unable to send now. Please update your email and try again."
+        )
     return redirect("/my-account/")
 
 
@@ -2411,8 +2432,18 @@ def account_update_verification_email(request):
     sent = send_email_verification(request.user, request=request, force=True)
     if sent:
         messages.success(request, f"Email updated. Verification mail sent to {email}.")
+        request.session["email_verification_banner_level"] = "success"
+        request.session["email_verification_banner_text"] = (
+            f"Verification email sent now to {email}. "
+            "Please check your inbox and spam folder."
+        )
     else:
         messages.error(request, "Email updated but verification mail failed to send.")
+        request.session["email_verification_banner_level"] = "warning"
+        request.session["email_verification_banner_text"] = (
+            f"Verification pending for {email}. "
+            "Email updated but verification mail failed to send."
+        )
     return redirect("/my-account/")
 
 
