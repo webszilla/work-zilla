@@ -24,8 +24,8 @@ class SignupForm(forms.Form):
 
     def clean_username(self) -> str:
         username = self.cleaned_data["username"].strip()
-        if len(username) < 4:
-            raise ValidationError("Username must be at least 4 characters.")
+        if len(username) < 5:
+            raise ValidationError("Username must be at least 5 characters.")
         if not re.match(r"^[A-Za-z0-9_.-]+$", username):
             raise ValidationError("Username can contain only letters, numbers, dot, underscore, and hyphen.")
         if User.objects.filter(username__iexact=username).exists():

@@ -473,6 +473,7 @@ function attachLiveEmailValidation() {
   const fields = document.querySelectorAll("input[type='email'], input[name*='email' i], input[id*='email' i]");
   fields.forEach((field) => {
     if (!(field instanceof HTMLInputElement)) return;
+    if (field.dataset.skipGlobalEmailValidation === "1") return;
     const errorNode = ensureLiveErrorNode(field);
     const validate = () => {
       const value = String(field.value || "").trim();

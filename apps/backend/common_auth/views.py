@@ -9,8 +9,10 @@ from django.core.exceptions import ValidationError
 from django.core.cache import cache
 from django.db import transaction
 from django.contrib import messages
+from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_GET
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
@@ -29,6 +31,69 @@ from .signals import user_registration_success
 
 LOGIN_MAX_FAILED_ATTEMPTS = 4
 LOGIN_LOCK_SECONDS = 15 * 60
+
+
+@require_GET
+def signup_check_username_view(request):
+    username = (request.GET.get("username") or "").strip()
+    if not username:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Username is required."},
+            status=400,
+        )
+    if len(username) < 5:
+        return JsonResponse(
+            {
+                "ok": False,
+                "available": False,
+                "message": "Username must be at least 5 characters.",
+            },
+            status=400,
+        )
+
+    exists = User.objects.filter(username__iexact=username).exists()
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": not exists,
+            "message": (
+                "This username is already in use. Please change your username."
+                if exists else
+                "Username is available."
+            ),
+        }
+    )
+
+
+@require_GET
+def signup_check_email_view(request):
+    email = (request.GET.get("email") or "").strip().lower()
+    if not email:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Email is required."},
+            status=400,
+        )
+    if "@" not in email:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Enter a valid email."},
+            status=400,
+        )
+
+    exists = (
+        User.objects.filter(email__iexact=email).exists()
+        or User.objects.filter(username__iexact=email).exists()
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": not exists,
+            "message": (
+                "This email is already registered. Please login or use a different email."
+                if exists else
+                "Email is available."
+            ),
+        }
+    )
 
 
 def _login_attempt_cache_key(identifier: str, ip_address: str) -> str:

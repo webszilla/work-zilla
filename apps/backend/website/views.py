@@ -14,6 +14,7 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
 from django.db.utils import OperationalError, ProgrammingError
 import json
+import re
 from datetime import timedelta, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 import os
@@ -333,6 +334,22 @@ def download_managed_file(request, filename):
 
 def application_downloads_page(request):
     items = application_downloads.list_application_downloads()
+    route_rows = []
+    for route in application_downloads.DIRECT_DOWNLOAD_ROUTES:
+        label = str(route.get("label") or "")
+        path = str(route.get("path") or "")
+        haystack = f"{label} {path}".lower()
+        icon_class = "bi-cloud-arrow-down"
+        if "windows" in haystack:
+            icon_class = "bi-windows"
+        elif "mac" in haystack:
+            icon_class = "bi-apple"
+        route_rows.append({
+            "label": label,
+            "path": path,
+            "icon_class": icon_class,
+        })
+
     table_rows = []
     for item in items:
         download_href = item["download_url"]
@@ -352,7 +369,7 @@ def application_downloads_page(request):
         "public/application_downloads.html",
         {
             "download_items": table_rows,
-            "download_routes": application_downloads.DIRECT_DOWNLOAD_ROUTES,
+            "download_routes": route_rows,
             "download_location_label": "Backblaze Application Downloads",
         },
     )
@@ -2727,6 +2744,25 @@ def profile_view(request):
 
         request.user.first_name = (request.POST.get("first_name") or "").strip()
         request.user.last_name = (request.POST.get("last_name") or "").strip()
+        new_username = (request.POST.get("username") or "").strip()
+        old_username = (request.user.username or "").strip()
+        if not new_username:
+            messages.error(request, "Username is required.")
+            return redirect("/my-account/profile/")
+        if len(new_username) < 5:
+            messages.error(request, "Username must be at least 5 characters.")
+            return redirect("/my-account/profile/")
+        if not re.match(r"^[A-Za-z0-9_.-]+$", new_username):
+            messages.error(
+                request,
+                "Username can contain only letters, numbers, dot, underscore, and hyphen.",
+            )
+            return redirect("/my-account/profile/")
+        if old_username.lower() != new_username.lower():
+            if User.objects.filter(username__iexact=new_username).exclude(id=request.user.id).exists():
+                messages.error(request, "This username is already in use. Please change your username.")
+                return redirect("/my-account/profile/")
+        request.user.username = new_username
         email = (request.POST.get("email") or "").strip()
         if email:
             old_email = (request.user.email or "").strip().lower()
@@ -2755,6 +2791,44 @@ def profile_view(request):
         "show_ticketing_tab": _is_org_admin_account(request, org, profile),
     })
     return render(request, "public/profile.html", context)
+
+
+@login_required
+@require_http_methods(["GET"])
+def profile_check_username(request):
+    username = (request.GET.get("username") or "").strip()
+    if not username:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Username is required."},
+            status=400,
+        )
+    if len(username) < 5:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Username must be at least 5 characters."},
+            status=400,
+        )
+    if not re.match(r"^[A-Za-z0-9_.-]+$", username):
+        return JsonResponse(
+            {
+                "ok": False,
+                "available": False,
+                "message": "Username can contain only letters, numbers, dot, underscore, and hyphen.",
+            },
+            status=400,
+        )
+
+    exists = User.objects.filter(username__iexact=username).exclude(id=request.user.id).exists()
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": not exists,
+            "message": (
+                "This username is already in use. Please change your username."
+                if exists else
+                "Username is available."
+            ),
+        }
+    )
 
 
 @login_required

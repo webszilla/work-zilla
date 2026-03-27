@@ -33,6 +33,7 @@ urlpatterns = [
     path("my-account/billing/renew/confirm/", views.billing_renew_confirm, name="account_billing_renew_confirm"),
     path("my-account/ticketing/", views.account_ticketing_view, name="account_ticketing"),
     path("my-account/profile/", views.profile_view, name="account_profile"),
+    path("my-account/profile/check-username/", views.profile_check_username, name="account_profile_check_username"),
     path("downloads/windows-agent/", views.download_windows_agent, name="download_windows_agent"),
     path("downloads/windows-product-agent/", views.download_windows_product_agent, name="download_windows_product_agent"),
     path("downloads/windows-monitor-product-agent/", views.download_windows_monitor_product_agent, name="download_windows_monitor_product_agent"),

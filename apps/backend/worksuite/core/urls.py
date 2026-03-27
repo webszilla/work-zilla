@@ -35,6 +35,9 @@ urlpatterns = [
 
     # Signup
     path("signup/", views_auth.company_signup, name="company_signup"),
+    path("signup/check-email/", views_auth.signup_email_availability, name="signup_email_availability"),
+    path("signup/check-username/", views_auth.signup_username_availability, name="signup_username_availability"),
+    path("auth/signup/check-username/", views_auth.signup_username_availability),
     path("agent-signup/", views_auth.agent_signup, name="agent_signup"),
 
     # Public

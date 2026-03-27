@@ -46,8 +46,10 @@
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label">Username</label>
-              <input type="text" name="username" class="form-control" minlength="5" maxlength="30" required>
+              <input type="text" name="username" class="form-control" minlength="5" maxlength="30" required data-username-check-url="/auth/signup/check-username/">
               <div class="text-danger small mt-1 d-none" data-username-live-error>Username must be at least 5 characters.</div>
+              <div class="alert alert-danger mt-2 py-2 d-none mb-0" role="alert" data-username-live-alert></div>
+              <div class="small mt-1 d-none" style="font-size:0.8em;" data-username-live-status></div>
               {% if form and form.username.errors %}
                 <div class="text-danger small">{{ form.username.errors|striptags }}</div>
               {% endif %}
@@ -74,9 +76,11 @@
 
           <div class="mb-3">
               <label class="form-label">Email</label>
-              <input type="email" name="email" class="form-control" maxlength="120" required>
+              <input type="email" name="email" class="form-control" maxlength="120" required data-email-live-input data-email-check-url="/auth/signup/check-email/" data-skip-global-email-validation="1">
+              <div class="alert alert-danger mt-2 py-2 d-none mb-0" role="alert" data-email-live-alert></div>
+              <div class="small text-secondary mt-1 d-none" data-email-live-status></div>
               {% if form and form.email.errors %}
-                <div class="text-danger small">{{ form.email.errors|striptags }}</div>
+                <div class="text-danger small" data-email-server-error>{{ form.email.errors|striptags }}</div>
               {% endif %}
           </div>
 
@@ -90,8 +94,9 @@
                 </select>
                 <input type="text" name="phone_number_input" class="form-control" data-phone-number placeholder="Phone number" value="" required>
               </div>
+              <div class="small mt-1 d-none" style="font-size:0.8em;" data-phone-live-status></div>
               {% if form and form.phone_number.errors %}
-                <div class="text-danger small">{{ form.phone_number.errors|striptags }}</div>
+                <div class="text-danger small" data-phone-server-error>{{ form.phone_number.errors|striptags }}</div>
               {% endif %}
           </div>
 
@@ -189,10 +194,298 @@
       var passwordMatchError = document.querySelector("[data-password-match-error]");
       var usernameInput = document.querySelector("input[name='username']");
       var usernameError = document.querySelector("[data-username-live-error]");
+      var usernameAlert = document.querySelector("[data-username-live-alert]");
+      var usernameStatus = document.querySelector("[data-username-live-status]");
+      var emailInput = document.querySelector("[data-email-live-input]");
+      var emailAlert = document.querySelector("[data-email-live-alert]");
+      var emailStatus = document.querySelector("[data-email-live-status]");
+      var emailServerError = document.querySelector("[data-email-server-error]");
+      var phoneInput = document.querySelector("input[data-phone-number]");
+      var phoneCountry = document.querySelector("select[data-phone-country]");
+      var phoneStatus = document.querySelector("[data-phone-live-status]");
+      var phoneServerError = document.querySelector("[data-phone-server-error]");
       var fill = document.querySelector("[data-password-strength-fill]");
       var text = document.querySelector("[data-password-strength-text]");
       var form = document.querySelector("[data-auth-loading-form]");
       if (!passwordInput || !fill || !text) return;
+      var emailDebounceTimer = null;
+      var latestEmailRequested = "";
+      var latestEmailChecked = "";
+      var emailPending = false;
+      var emailExists = false;
+      var emailRequestId = 0;
+      var usernameDebounceTimer = null;
+      var usernamePending = false;
+      var usernameExists = false;
+      var latestUsernameChecked = "";
+      var latestUsernameRequested = "";
+      var usernameRequestId = 0;
+
+      function isValidEmailFormat(value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+      }
+
+      function setEmailAlert(message) {
+        if (!emailAlert) return;
+        if (!message) {
+          emailAlert.classList.add("d-none");
+          emailAlert.textContent = "";
+          return;
+        }
+        emailAlert.textContent = message;
+        emailAlert.classList.remove("d-none");
+      }
+
+      function setEmailStatus(message, tone) {
+        if (!emailStatus) return;
+        if (!message) {
+          emailStatus.classList.add("d-none");
+          emailStatus.classList.remove("text-success", "text-danger", "text-secondary");
+          emailStatus.textContent = "";
+          return;
+        }
+        emailStatus.classList.remove("text-success", "text-danger", "text-secondary");
+        if (tone === "success") {
+          emailStatus.classList.add("text-success");
+        } else if (tone === "error") {
+          emailStatus.classList.add("text-danger");
+        } else {
+          emailStatus.classList.add("text-secondary");
+        }
+        emailStatus.textContent = message;
+        emailStatus.classList.remove("d-none");
+      }
+
+      function clearEmailValidationState() {
+        emailPending = false;
+        emailExists = false;
+        latestEmailChecked = "";
+        setEmailAlert("");
+        setEmailStatus("", "neutral");
+        if (emailInput) emailInput.setCustomValidity("");
+      }
+
+      function setPhoneStatus(message, tone) {
+        if (!phoneStatus) return;
+        if (!message) {
+          phoneStatus.classList.add("d-none");
+          phoneStatus.classList.remove("text-success", "text-danger", "text-secondary");
+          phoneStatus.textContent = "";
+          return;
+        }
+        phoneStatus.classList.remove("text-success", "text-danger", "text-secondary");
+        if (tone === "success") {
+          phoneStatus.classList.add("text-success");
+        } else if (tone === "error") {
+          phoneStatus.classList.add("text-danger");
+        } else {
+          phoneStatus.classList.add("text-secondary");
+        }
+        phoneStatus.textContent = message;
+        phoneStatus.classList.remove("d-none");
+      }
+
+      function validatePhoneLive() {
+        if (!phoneInput) return;
+        var raw = String(phoneInput.value || "").trim();
+        var digits = raw.replace(/\D+/g, "");
+        var hasCountry = phoneCountry ? String(phoneCountry.value || "").trim() : "";
+        if (phoneServerError) phoneServerError.classList.add("d-none");
+        if (!raw) {
+          phoneInput.setCustomValidity("Mobile number is required.");
+          setPhoneStatus("Mobile number is required.", "error");
+          return;
+        }
+        if (!hasCountry) {
+          phoneInput.setCustomValidity("Country code is required.");
+          setPhoneStatus("Country code is required.", "error");
+          return;
+        }
+        if (digits.length < 6 || digits.length > 15) {
+          phoneInput.setCustomValidity("Enter a valid mobile number.");
+          setPhoneStatus("Enter a valid mobile number.", "error");
+          return;
+        }
+        phoneInput.setCustomValidity("");
+        setPhoneStatus("Mobile number is valid.", "success");
+      }
+
+      function setUsernameAlert(message) {
+        if (!usernameAlert) return;
+        if (!message) {
+          usernameAlert.classList.add("d-none");
+          usernameAlert.textContent = "";
+          return;
+        }
+        usernameAlert.textContent = message;
+        usernameAlert.classList.remove("d-none");
+      }
+
+      function setUsernameStatus(message, tone) {
+        if (!usernameStatus) return;
+        if (!message) {
+          usernameStatus.classList.add("d-none");
+          usernameStatus.classList.remove("text-success", "text-danger", "text-secondary");
+          usernameStatus.textContent = "";
+          return;
+        }
+        usernameStatus.classList.remove("text-success", "text-danger", "text-secondary");
+        if (tone === "success") {
+          usernameStatus.classList.add("text-success");
+        } else if (tone === "error") {
+          usernameStatus.classList.add("text-danger");
+        } else {
+          usernameStatus.classList.add("text-secondary");
+        }
+        usernameStatus.textContent = message;
+        usernameStatus.classList.remove("d-none");
+      }
+
+      function checkUsernameAvailability() {
+        if (!usernameInput) return;
+        var value = String(usernameInput.value || "").trim();
+        if (!value) {
+          usernamePending = false;
+          usernameExists = false;
+          latestUsernameChecked = "";
+          usernameInput.setCustomValidity("");
+          if (usernameError) usernameError.classList.add("d-none");
+          setUsernameAlert("");
+          setUsernameStatus("", "neutral");
+          return;
+        }
+        if (value.length < 5) {
+          usernamePending = false;
+          usernameExists = false;
+          latestUsernameChecked = "";
+          usernameInput.setCustomValidity("Username must be at least 5 characters.");
+          if (usernameError) usernameError.classList.add("d-none");
+          setUsernameAlert("");
+          setUsernameStatus("Username must be at least 5 characters.", "error");
+          return;
+        }
+
+        if (latestUsernameChecked === value && !usernamePending) {
+          usernameInput.setCustomValidity(
+            usernameExists ? "This username is already in use. Please change your username." : ""
+          );
+          return;
+        }
+
+        var checkUrl = usernameInput.getAttribute("data-username-check-url");
+        if (!checkUrl) return;
+        if (usernameError) usernameError.classList.add("d-none");
+        setUsernameAlert("");
+        setUsernameStatus("Checking username availability...", "neutral");
+        usernamePending = true;
+        latestUsernameRequested = value;
+        usernameInput.setCustomValidity("Checking username availability...");
+        var requestId = ++usernameRequestId;
+        fetch(checkUrl + "?username=" + encodeURIComponent(value), {
+          method: "GET",
+          credentials: "same-origin",
+          headers: {"X-Requested-With": "XMLHttpRequest"},
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("username-check-failed");
+            return response.json();
+          })
+          .then(function (payload) {
+            if (requestId !== usernameRequestId || latestUsernameRequested !== value) return;
+            usernamePending = false;
+            latestUsernameChecked = value;
+            usernameExists = !payload.available;
+            if (usernameExists) {
+              usernameInput.setCustomValidity("This username is already in use. Please change your username.");
+              setUsernameAlert("");
+              setUsernameStatus(payload.message || "This username is already in use. Please change your username.", "error");
+            } else {
+              usernameInput.setCustomValidity("");
+              setUsernameAlert("");
+              setUsernameStatus(payload.message || "Username is available.", "success");
+            }
+          })
+          .catch(function () {
+            if (requestId !== usernameRequestId || latestUsernameRequested !== value) return;
+            usernamePending = false;
+            latestUsernameChecked = "";
+            usernameExists = false;
+            usernameInput.setCustomValidity("Unable to validate username right now. Try again.");
+            setUsernameAlert("");
+            setUsernameStatus("Unable to validate username right now. Please check again.", "error");
+          });
+      }
+
+      function triggerEmailCheck() {
+        if (!emailInput) return;
+        var rawValue = String(emailInput.value || "").trim();
+        var value = rawValue.toLowerCase();
+        if (!value) {
+          clearEmailValidationState();
+          return;
+        }
+        if (emailServerError) emailServerError.classList.add("d-none");
+        if (!isValidEmailFormat(value)) {
+          emailPending = false;
+          emailExists = false;
+          latestEmailChecked = "";
+          setEmailAlert("");
+          setEmailStatus("Enter a valid email address.", "error");
+          emailInput.setCustomValidity("Enter a valid email address.");
+          return;
+        }
+        if (latestEmailChecked === value && !emailPending) {
+          emailInput.setCustomValidity(emailExists ? "This email is already registered." : "");
+          return;
+        }
+        var checkUrl = emailInput.getAttribute("data-email-check-url");
+        if (!checkUrl) return;
+        emailPending = true;
+        latestEmailRequested = value;
+        emailInput.setCustomValidity("Checking email availability...");
+        setEmailAlert("");
+        setEmailStatus("Checking email availability...", "neutral");
+        var requestId = ++emailRequestId;
+        fetch(checkUrl + "?email=" + encodeURIComponent(value), {
+          method: "GET",
+          credentials: "same-origin",
+          headers: {"X-Requested-With": "XMLHttpRequest"},
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("email-check-failed");
+            return response.json();
+          })
+          .then(function (payload) {
+            if (requestId !== emailRequestId || latestEmailRequested !== value) return;
+            emailPending = false;
+            latestEmailChecked = value;
+            emailExists = !payload.available;
+            if (emailExists) {
+              emailInput.setCustomValidity("This email is already registered.");
+              setEmailAlert("");
+              setEmailStatus(payload.message || "This email is already registered.", "error");
+            } else {
+              emailInput.setCustomValidity("");
+              setEmailAlert("");
+              setEmailStatus(payload.message || "Email is available.", "success");
+            }
+          })
+          .catch(function () {
+            if (requestId !== emailRequestId || latestEmailRequested !== value) return;
+            emailPending = false;
+            latestEmailChecked = "";
+            emailExists = false;
+            emailInput.setCustomValidity("Unable to validate email right now. Try again.");
+            setEmailAlert("");
+            setEmailStatus("Unable to validate email right now. Please check again.", "error");
+          });
+      }
+
+      function updateEmailValidation() {
+        if (!emailInput) return;
+        if (emailDebounceTimer) clearTimeout(emailDebounceTimer);
+        emailDebounceTimer = setTimeout(triggerEmailCheck, 350);
+      }
 
       function evaluateStrength(value) {
         var score = 0;
@@ -261,14 +554,22 @@
         if (!usernameValue) {
           usernameInput.setCustomValidity("");
           if (usernameError) usernameError.classList.add("d-none");
+          setUsernameAlert("");
+          setUsernameStatus("", "neutral");
           return;
         }
         if (usernameValue.length < 5) {
           usernameInput.setCustomValidity("Username must be at least 5 characters.");
-          if (usernameError) usernameError.classList.remove("d-none");
-        } else {
-          usernameInput.setCustomValidity("");
           if (usernameError) usernameError.classList.add("d-none");
+          setUsernameAlert("");
+          setUsernameStatus("Username must be at least 5 characters.", "error");
+        } else {
+          if (!usernamePending && !usernameExists) {
+            usernameInput.setCustomValidity("");
+          }
+          if (usernameError) usernameError.classList.add("d-none");
+          if (usernameDebounceTimer) clearTimeout(usernameDebounceTimer);
+          usernameDebounceTimer = setTimeout(checkUsernameAvailability, 350);
         }
       }
 
@@ -278,12 +579,52 @@
       }
       if (usernameInput) {
         usernameInput.addEventListener("input", updateUsernameValidation);
+        usernameInput.addEventListener("blur", checkUsernameAvailability);
+      }
+      if (emailInput) {
+        emailInput.addEventListener("input", updateEmailValidation);
+        emailInput.addEventListener("blur", triggerEmailCheck);
+      }
+      if (phoneInput) {
+        phoneInput.addEventListener("input", validatePhoneLive);
+        phoneInput.addEventListener("blur", validatePhoneLive);
+      }
+      if (phoneCountry) {
+        phoneCountry.addEventListener("change", validatePhoneLive);
       }
       if (form) {
         form.addEventListener("submit", function (event) {
           updateStrength();
           updatePasswordMatch();
           updateUsernameValidation();
+          validatePhoneLive();
+          if (usernameInput) {
+            var currentUsername = String(usernameInput.value || "").trim();
+            if (currentUsername && currentUsername.length >= 5 && latestUsernameChecked !== currentUsername) {
+              checkUsernameAvailability();
+            }
+            if (usernamePending) {
+              event.preventDefault();
+              usernameInput.reportValidity();
+              return;
+            }
+          }
+          if (emailInput) {
+            var currentEmail = String(emailInput.value || "").trim().toLowerCase();
+            if (currentEmail && isValidEmailFormat(currentEmail) && latestEmailChecked !== currentEmail) {
+              triggerEmailCheck();
+            }
+            if (emailPending) {
+              event.preventDefault();
+              emailInput.reportValidity();
+              return;
+            }
+          }
+          if (phoneInput && !phoneInput.checkValidity()) {
+            event.preventDefault();
+            phoneInput.reportValidity();
+            return;
+          }
           if (!form.checkValidity()) {
             event.preventDefault();
             form.reportValidity();
@@ -293,6 +634,12 @@
       updateStrength();
       updatePasswordMatch();
       updateUsernameValidation();
+      if (emailInput) {
+        clearEmailValidationState();
+      }
+      if (phoneInput) {
+        setPhoneStatus("", "neutral");
+      }
     })();
   </script>
 {% endblock %}

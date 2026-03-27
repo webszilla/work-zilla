@@ -42,10 +42,13 @@
       </form>
       </div>
 
-      <form class="mt-3 js-resend-verification-form" method="post" action="/my-account/verification/resend/">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-outline btn-sm">Resend Verification Email</button>
-      </form>
+      <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+        <form class="js-resend-verification-form mb-0" method="post" action="/my-account/verification/resend/">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline btn-sm">Resend Verification Email</button>
+        </form>
+        <a class="btn btn-outline btn-sm" href="/auth/logout/">Signout</a>
+      </div>
     </div>
   </div>
 </section>

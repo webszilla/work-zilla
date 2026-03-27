@@ -21,11 +21,27 @@
           {% endfor %}
         {% endif %}
         <h2 class="section-title">Profile Details</h2>
-        <form class="mt-3" method="post" data-account-form>
+        <form class="mt-3" method="post" data-account-form data-profile-form>
           {% csrf_token %}
           <input type="hidden" name="form_action" value="profile">
           <input type="hidden" name="phone_number" data-phone-hidden value="{{ profile.phone_number|default:'' }}">
           <div class="form-grid">
+            <div class="form-field">
+              <label>Username</label>
+              <input
+                type="text"
+                name="username"
+                value="{{ request.user.username|default:'' }}"
+                minlength="5"
+                maxlength="30"
+                required
+                data-profile-username-input
+                data-username-check-url="{% url 'account_profile_check_username' %}"
+              >
+              <div class="text-danger small mt-1 d-none" data-profile-username-live-error>Username must be at least 5 characters.</div>
+              <div class="alert alert-danger mt-2 py-2 d-none mb-0" role="alert" data-profile-username-live-alert></div>
+              <div class="small text-secondary mt-1 d-none" data-profile-username-live-status></div>
+            </div>
             <div class="form-field">
               <label>First Name</label>
               <input type="text" name="first_name" value="{{ request.user.first_name|default:'' }}">
@@ -77,4 +93,167 @@
   </div>
 </section>
 <script src="{% static 'public/js/account_forms.js' %}" defer></script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var form = document.querySelector("[data-profile-form]");
+    var usernameInput = document.querySelector("[data-profile-username-input]");
+    var usernameError = document.querySelector("[data-profile-username-live-error]");
+    var usernameAlert = document.querySelector("[data-profile-username-live-alert]");
+    var usernameStatus = document.querySelector("[data-profile-username-live-status]");
+    if (!form || !usernameInput) return;
+
+    var debounceTimer = null;
+    var latestChecked = "";
+    var latestRequested = "";
+    var pending = false;
+    var exists = false;
+    var requestId = 0;
+
+    function setAlert(message) {
+      if (!usernameAlert) return;
+      if (!message) {
+        usernameAlert.classList.add("d-none");
+        usernameAlert.textContent = "";
+        return;
+      }
+      usernameAlert.textContent = message;
+      usernameAlert.classList.remove("d-none");
+    }
+
+    function setStatus(message, tone) {
+      if (!usernameStatus) return;
+      if (!message) {
+        usernameStatus.classList.add("d-none");
+        usernameStatus.classList.remove("text-success", "text-danger", "text-secondary");
+        usernameStatus.textContent = "";
+        return;
+      }
+      usernameStatus.classList.remove("text-success", "text-danger", "text-secondary");
+      if (tone === "success") {
+        usernameStatus.classList.add("text-success");
+      } else if (tone === "error") {
+        usernameStatus.classList.add("text-danger");
+      } else {
+        usernameStatus.classList.add("text-secondary");
+      }
+      usernameStatus.textContent = message;
+      usernameStatus.classList.remove("d-none");
+    }
+
+    function validateLocal(value) {
+      if (!value) {
+        usernameInput.setCustomValidity("Username is required.");
+        if (usernameError) usernameError.classList.add("d-none");
+        setAlert("");
+        setStatus("", "neutral");
+        return false;
+      }
+      if (value.length < 5) {
+        usernameInput.setCustomValidity("Username must be at least 5 characters.");
+        if (usernameError) usernameError.classList.remove("d-none");
+        setAlert("");
+        setStatus("Username must be at least 5 characters.", "error");
+        return false;
+      }
+      if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
+        usernameInput.setCustomValidity("Username can contain only letters, numbers, dot, underscore, and hyphen.");
+        if (usernameError) usernameError.classList.add("d-none");
+        setAlert("");
+        setStatus("Username can contain only letters, numbers, dot, underscore, and hyphen.", "error");
+        return false;
+      }
+      if (usernameError) usernameError.classList.add("d-none");
+      return true;
+    }
+
+    function runAvailabilityCheck() {
+      var value = String(usernameInput.value || "").trim();
+      if (!validateLocal(value)) {
+        pending = false;
+        exists = false;
+        latestChecked = "";
+        return;
+      }
+      if (latestChecked === value && !pending) {
+        usernameInput.setCustomValidity(exists ? "This username is already in use. Please change your username." : "");
+        return;
+      }
+
+      var checkUrl = usernameInput.getAttribute("data-username-check-url");
+      if (!checkUrl) return;
+      pending = true;
+      latestRequested = value;
+      usernameInput.setCustomValidity("Checking username availability...");
+      setAlert("");
+      setStatus("Checking username availability...", "neutral");
+      var currentRequestId = ++requestId;
+
+      fetch(checkUrl + "?username=" + encodeURIComponent(value), {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {"X-Requested-With": "XMLHttpRequest"}
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("username-check-failed");
+          return response.json();
+        })
+        .then(function (payload) {
+          if (currentRequestId !== requestId || latestRequested !== value) return;
+          pending = false;
+          latestChecked = value;
+          exists = !payload.available;
+          if (exists) {
+            usernameInput.setCustomValidity("This username is already in use. Please change your username.");
+            setAlert("");
+            setStatus(payload.message || "This username is already in use. Please change your username.", "error");
+          } else {
+            usernameInput.setCustomValidity("");
+            setAlert("");
+            setStatus(payload.message || "Username is available.", "success");
+          }
+        })
+        .catch(function () {
+          if (currentRequestId !== requestId || latestRequested !== value) return;
+          pending = false;
+          latestChecked = "";
+          exists = false;
+          usernameInput.setCustomValidity("Unable to validate username right now. Try again.");
+          setAlert("");
+          setStatus("Unable to validate username right now. Please check again.", "error");
+        });
+    }
+
+    function queueCheck() {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(runAvailabilityCheck, 350);
+    }
+
+    usernameInput.addEventListener("input", queueCheck);
+    usernameInput.addEventListener("blur", runAvailabilityCheck);
+
+    form.addEventListener("submit", function (event) {
+      var value = String(usernameInput.value || "").trim();
+      if (!validateLocal(value)) {
+        event.preventDefault();
+        form.reportValidity();
+        return;
+      }
+      if (latestChecked !== value) {
+        runAvailabilityCheck();
+      }
+      if (pending) {
+        event.preventDefault();
+        usernameInput.reportValidity();
+        return;
+      }
+      if (!form.checkValidity()) {
+        event.preventDefault();
+        form.reportValidity();
+      }
+    });
+  })();
+</script>
 {% endblock %}

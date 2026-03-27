@@ -3,50 +3,220 @@
 {% block meta_title %}Application Downloads | Work Zilla{% endblock %}
 {% block meta_description %}Browse the latest Work Zilla application installers and direct download links.{% endblock %}
 
-{% block content %}
-<section class="hero-section">
-  <div class="hero-copy">
-    <span class="eyebrow">Application Downloads</span>
-    <h1>Latest installer files</h1>
-    <p>
-      Files are published from {{ download_location_label }} and exposed here with direct download buttons.
-    </p>
-  </div>
-</section>
+{% block extra_head %}
+<style>
+  .adl-shell {
+    margin-top: 28px;
+    margin-bottom: 56px;
+  }
+  .adl-hero {
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    background:
+      radial-gradient(900px 360px at 100% 0%, color-mix(in srgb, var(--color-primary) 10%, #ffffff) 0%, transparent 60%),
+      linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--color-primary) 4%, #ffffff) 100%);
+    padding: 28px;
+    box-shadow: var(--shadow-soft);
+  }
+  .adl-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    font-weight: 700;
+  }
+  .adl-title {
+    margin: 10px 0 10px;
+    font-family: var(--font-display);
+    font-size: clamp(1.9rem, 3.1vw, 2.6rem);
+    line-height: 1.1;
+  }
+  .adl-lead {
+    margin: 0;
+    color: var(--color-muted);
+    max-width: 72ch;
+  }
+  .adl-hero-actions {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .adl-section {
+    margin-top: 22px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0;
+  }
+  .adl-section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 30px;
+    margin-bottom: 14px;
+  }
+  .adl-section h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.65rem;
+  }
+  .adl-sub {
+    margin: 4px 0 0;
+    color: var(--color-muted);
+  }
+  .adl-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .adl-card {
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 14px;
+    text-decoration: none;
+    color: inherit;
+    background: linear-gradient(180deg, #ffffff, color-mix(in srgb, var(--color-primary) 3%, #ffffff));
+    display: flex;
+    flex-direction: column;
+    min-height: 176px;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .adl-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+    color: inherit;
+  }
+  .adl-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--color-primary) 12%, #ffffff);
+    color: var(--color-primary);
+    margin-bottom: 10px;
+    font-size: 1.65rem;
+  }
+  .adl-card-title {
+    margin: 0 0 6px;
+    font-family: var(--font-display);
+    font-size: 1.28rem;
+    line-height: 1.2;
+    color: var(--color-secondary);
+  }
+  .adl-card-path {
+    margin-top: auto;
+    font-size: 0.95rem;
+    color: var(--color-muted);
+    word-break: break-word;
+  }
+  .adl-table-wrap {
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .adl-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+  }
+  .adl-table thead th {
+    background: color-mix(in srgb, var(--color-secondary) 92%, #ffffff);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.94rem;
+    padding: 12px 10px;
+    white-space: nowrap;
+  }
+  .adl-table tbody td {
+    border-top: 1px solid var(--color-border);
+    padding: 12px 10px;
+    vertical-align: middle;
+  }
+  .adl-file-name {
+    font-weight: 600;
+    color: var(--color-secondary);
+    word-break: break-word;
+  }
+  .adl-empty {
+    text-align: center;
+    color: var(--color-muted);
+    padding: 28px 12px;
+  }
+  .adl-download-btn {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+  @media (max-width: 1200px) {
+    .adl-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px) {
+    .adl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .adl-shell { margin-top: 20px; }
+    .adl-hero { padding: 18px; }
+    .adl-section { padding: 16px; }
+    .adl-grid { grid-template-columns: 1fr; }
+    .adl-table thead th, .adl-table tbody td { padding: 10px 8px; }
+  }
+</style>
+{% endblock %}
 
-<section class="section-block">
-  <div class="section-card">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-      <div>
-        <h2 class="section-title mb-1">Direct download routes</h2>
-        <p class="section-subtitle mb-0">Stable website paths for app downloads.</p>
-      </div>
-      <a class="btn btn-outline" href="/">Back to Website</a>
+{% block content %}
+<section class="section adl-shell">
+  <div class="adl-hero">
+    <span class="adl-kicker"><i class="bi bi-box-arrow-down"></i> Application Downloads</span>
+    <h1 class="adl-title">Latest Installer Files</h1>
+    <p class="adl-lead">
+      Files are published from <strong>{{ download_location_label }}</strong> and exposed here with stable routes and direct download buttons.
+    </p>
+    <div class="adl-hero-actions">
+      <a class="btn btn-outline" href="/">
+        <i class="bi bi-arrow-left me-1"></i> Back to Website
+      </a>
     </div>
-    <div class="row g-3">
+  </div>
+
+  <div class="adl-section">
+    <div class="adl-section-head">
+      <div>
+        <h2>Direct Download Routes</h2>
+        <p class="adl-sub">Use these permanent paths for application download links.</p>
+      </div>
+    </div>
+    <div class="adl-grid">
       {% for route in download_routes %}
-        <div class="col-12 col-md-6 col-xl-3">
-          <a class="feature-card h-100 d-block" href="{{ route.path }}">
-            <div class="feature-icon"><i class="bi bi-cloud-download"></i></div>
-            <h3>{{ route.label }}</h3>
-            <p>{{ route.path }}</p>
-          </a>
-        </div>
+        <a class="adl-card" href="{{ route.path }}">
+          <span class="adl-icon"><i class="bi {{ route.icon_class }}"></i></span>
+          <h3 class="adl-card-title">{{ route.label }}</h3>
+          <div class="adl-card-path">{{ route.path }}</div>
+        </a>
       {% endfor %}
     </div>
   </div>
-</section>
 
-<section class="section-block">
-  <div class="section-card">
-    <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+  <div class="adl-section">
+    <div class="adl-section-head">
       <div>
-        <h2 class="section-title mb-1">Application folder</h2>
-        <p class="section-subtitle mb-0">Current files available for download.</p>
+        <h2>Application Folder</h2>
+        <p class="adl-sub">Current files available for download.</p>
       </div>
     </div>
-    <div class="table-responsive">
-      <table class="table table-dark align-middle mb-0">
+    <div class="adl-table-wrap table-responsive">
+      <table class="adl-table">
         <thead>
           <tr>
             <th>File</th>
@@ -61,19 +231,21 @@
         <tbody>
           {% for item in download_items %}
             <tr>
-              <td>{{ item.filename }}</td>
+              <td class="adl-file-name">{{ item.filename }}</td>
               <td>{{ item.product }}</td>
               <td>{{ item.platform }}</td>
               <td>{{ item.arch }}</td>
               <td>{{ item.size_bytes|filesizeformat }}</td>
               <td>{% if item.last_modified %}{{ item.last_modified|date:"d M Y, H:i" }}{% else %}-{% endif %}</td>
               <td class="text-end">
-                <a class="btn btn-primary btn-sm" href="{{ item.download_url }}">Download</a>
+                <a class="btn btn-primary btn-sm adl-download-btn" href="{{ item.download_url }}">
+                  <i class="bi bi-download me-1"></i> Download
+                </a>
               </td>
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="text-center text-secondary">No application files available.</td>
+              <td colspan="7" class="adl-empty">No application files available.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -294,6 +294,65 @@ def custom_logout(request):
 
 
 @require_GET
+def signup_email_availability(request):
+    email = (request.GET.get("email") or "").strip().lower()
+    if not email:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Email is required."},
+            status=400,
+        )
+    if "@" not in email:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Enter a valid email."},
+            status=400,
+        )
+
+    exists = (
+        User.objects.filter(username__iexact=email).exists()
+        or User.objects.filter(email__iexact=email).exists()
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": not exists,
+            "message": (
+                "This email is already registered. Please login or use a different email."
+                if exists else
+                "Email is available."
+            ),
+        }
+    )
+
+
+@require_GET
+def signup_username_availability(request):
+    username = (request.GET.get("username") or "").strip()
+    if not username:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Username is required."},
+            status=400,
+        )
+    if len(username) < 5:
+        return JsonResponse(
+            {"ok": False, "available": False, "message": "Username must be at least 5 characters."},
+            status=400,
+        )
+
+    exists = User.objects.filter(username__iexact=username).exists()
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": not exists,
+            "message": (
+                "This username is already in use. Please change your username."
+                if exists else
+                "Username is available."
+            ),
+        }
+    )
+
+
+@require_GET
 def auth_me(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
