@@ -2394,18 +2394,17 @@ def account_view(request):
 @login_required(login_url="/auth/login/")
 def account_resend_verification(request):
     if request.user.email_verified:
-        messages.info(request, "Email already verified.")
+        request.session["email_verification_banner_level"] = "success"
+        request.session["email_verification_banner_text"] = "Email already verified."
         return redirect("/my-account/")
     sent = send_email_verification(request.user, request=request, force=True)
     if sent:
-        messages.success(request, f"Verification email sent to {request.user.email}.")
         request.session["email_verification_banner_level"] = "success"
         request.session["email_verification_banner_text"] = (
             f"Verification email sent again to {request.user.email}. "
             "Please check your inbox and spam folder."
         )
     else:
-        messages.error(request, "Unable to send verification email. Please update your email and try again.")
         request.session["email_verification_banner_level"] = "warning"
         request.session["email_verification_banner_text"] = (
             f"Verification pending for {request.user.email}. "
@@ -2419,11 +2418,13 @@ def account_resend_verification(request):
 def account_update_verification_email(request):
     email = (request.POST.get("verification_email") or "").strip().lower()
     if not email:
-        messages.error(request, "Email is required.")
+        request.session["email_verification_banner_level"] = "warning"
+        request.session["email_verification_banner_text"] = "Email is required."
         return redirect("/my-account/")
     existing = User.objects.filter(email__iexact=email).exclude(id=request.user.id).exists()
     if existing:
-        messages.error(request, "This email is already in use.")
+        request.session["email_verification_banner_level"] = "warning"
+        request.session["email_verification_banner_text"] = "This email is already in use."
         return redirect("/my-account/")
     request.user.email = email
     request.user.email_verified = False
@@ -2431,14 +2432,12 @@ def account_update_verification_email(request):
     request.user.save(update_fields=["email", "email_verified", "email_verified_at"])
     sent = send_email_verification(request.user, request=request, force=True)
     if sent:
-        messages.success(request, f"Email updated. Verification mail sent to {email}.")
         request.session["email_verification_banner_level"] = "success"
         request.session["email_verification_banner_text"] = (
             f"Verification email sent now to {email}. "
             "Please check your inbox and spam folder."
         )
     else:
-        messages.error(request, "Email updated but verification mail failed to send.")
         request.session["email_verification_banner_level"] = "warning"
         request.session["email_verification_banner_text"] = (
             f"Verification pending for {email}. "

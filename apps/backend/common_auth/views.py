@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.cache import cache
 from django.db import transaction
 from django.contrib import messages
+from django.contrib.messages import get_messages
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
@@ -235,6 +236,10 @@ def login_view(request):
 
 @require_http_methods(["GET", "POST"])
 def logout_view(request):
+    # Drain pending flash messages so old success/error toasts don't appear
+    # after logout on unrelated pages (for example login page).
+    for _ in get_messages(request):
+        pass
     logout(request)
     return redirect("/")
 
