@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Syncing generated application downloads to Backblaze"
-python3 "$ROOT_DIR/scripts/sync_application_downloads.py" "$@"
+python3 "$ROOT_DIR/scripts/sync_application_downloads.py" --delete-local "$@"
 
 echo "Verifying download URLs"
 curl -I -s https://getworkzilla.com/downloads/windows-agent/ | head -n 5

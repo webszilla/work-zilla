@@ -133,6 +133,17 @@ run_preflight_cleanup
 
 cd "$SERVER_PROJECT_PATH"
 
+cleanup_server_installers() {
+  find "${SERVER_PROJECT_PATH}/apps/bootstrap_installer/dist" -maxdepth 1 -type f \
+    \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.pkg' \) -delete 2>/dev/null || true
+  find "${SERVER_PROJECT_PATH}/apps/desktop_app/dist" -maxdepth 1 -type f \
+    \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.pkg' \) -delete 2>/dev/null || true
+  find "${SERVER_PROJECT_PATH}/apps/backend/static/downloads" -maxdepth 1 -type f \
+    \( -name 'Work Zilla * Setup *.exe' -o -name 'Work Zilla *-*.dmg' -o -name 'Work Zilla *-*.zip' -o -name 'Work Zilla *-*.pkg' \) -delete 2>/dev/null || true
+}
+
+cleanup_server_installers
+
 if [ ! -f "apps/backend/.env" ]; then
   echo "ERROR: apps/backend/.env missing on server. Aborting to prevent DB fallback."
   exit 1
@@ -152,6 +163,7 @@ fi
 . venv/bin/activate
 venv/bin/python apps/backend/manage.py migrate
 venv/bin/python apps/backend/manage.py collectstatic --noinput
+cleanup_server_installers
 
 if systemctl list-unit-files | grep -q '^workzilla-gunicorn.service'; then
   # Prevent duplicate bind conflicts with older manual gunicorn launches.
@@ -189,6 +201,7 @@ else
 fi
 echo "Gunicorn:"
 pgrep -af "apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000"
+echo "Server project size: $(du -sh "$SERVER_PROJECT_PATH" | awk '{print $1}')"
 EOF
 
 echo "Verifying live URLs"

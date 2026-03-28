@@ -137,10 +137,27 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - Reason: public/global CSS and JS under `/static/...` break if code is updated without refreshing `apps/backend/staticfiles`
 
 2.6) Application download publish rule (mandatory when installers change)
-- Generate installers in their app build output folders.
-- Publish them to Backblaze by running:
-  - `python3 scripts/sync_application_downloads.py`
-- Reason: `/downloads/...` must resolve from Backblaze `application-downloads/`, not from server static files.
+- BEFORE every new installer build, clear old local installer binaries:
+  - `./scripts/prepare_installer_build.sh`
+- Generate installers in app build output folders only.
+- AFTER build completes, publish + auto-clean local installers:
+  - `./scripts/upload_installers.sh`
+  - This runs `sync_application_downloads.py --delete-local`
+- If troubleshooting requires keeping local artifacts:
+  - `python3 scripts/sync_application_downloads.py --keep-local`
+- Reason: `/downloads/...` must resolve from Backblaze `application-downloads/`, not from server/static local binaries.
+
+2.7) Installer retention and cleanup policy (mandatory local + server)
+- Local:
+  - Never keep old installer binaries after successful upload.
+  - Keep only generated installers temporarily during build/publish window.
+- Server:
+  - Installer binaries must not remain in:
+    - `apps/bootstrap_installer/dist`
+    - `apps/desktop_app/dist`
+    - `apps/backend/static/downloads` (except lightweight metadata files)
+  - Deploy script must auto-prune these binaries after deploy/migrate.
+- Website download links must always resolve via Backblaze signed/object links.
 
 3) Restart backend (important)
 Preferred manual gunicorn flow:

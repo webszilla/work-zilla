@@ -449,3 +449,19 @@ def sync_local_application_downloads(delete_local=False):
         "deleted_local": deleted_local,
         "folder_prefix": context.base_prefix,
     }
+
+
+def clear_local_application_downloads():
+    deleted = []
+    seen_paths = set()
+    for _family, pattern in LOCAL_SOURCE_GLOBS:
+        for path in _iter_local_matches(pattern):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            try:
+                os.remove(path)
+                deleted.append(os.path.basename(path))
+            except OSError:
+                continue
+    return deleted
