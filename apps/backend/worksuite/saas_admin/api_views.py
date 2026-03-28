@@ -1236,6 +1236,12 @@ def _normalize_product_slugs(slug):
     product_slug = raw_slug
     catalog_slug = raw_slug
 
+    # Always prefer the exact requested slug first when it exists.
+    if raw_slug in product_candidates:
+        product_candidates = [raw_slug] + [candidate for candidate in product_candidates if candidate != raw_slug]
+    if raw_slug in catalog_candidates:
+        catalog_candidates = [raw_slug] + [candidate for candidate in catalog_candidates if candidate != raw_slug]
+
     existing_product_slugs = set(Product.objects.filter(slug__in=product_candidates).values_list("slug", flat=True))
     if existing_product_slugs:
         for candidate in product_candidates:
@@ -1260,7 +1266,8 @@ def _normalize_product_slugs(slug):
 def _plans_queryset_for_catalog_slug(catalog_slug):
     catalog_slug = str(catalog_slug or "").strip().lower()
     if catalog_slug in {"business-autopilot", "business-autopilot-erp"}:
-        return Plan.objects.filter(product__slug__in=["business-autopilot", "business-autopilot-erp"])
+        # Keep product-specific isolation strict for Business Autopilot variants.
+        return Plan.objects.filter(product__slug=catalog_slug)
     if catalog_slug == "monitor":
         monitor_plans = Plan.objects.filter(product__slug="monitor")
         return monitor_plans if monitor_plans.exists() else Plan.objects.filter(product__isnull=True)
