@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class BackupRecord(models.Model):
@@ -165,3 +166,63 @@ class FeatureToggle(models.Model):
     route = models.CharField(max_length=255)
     permission = models.CharField(max_length=255)
     enabled = models.BooleanField(default=True)
+
+
+class OrgGoogleDriveBackupSettings(models.Model):
+    SCHEDULE_CHOICES = (
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+    )
+
+    organization = models.OneToOneField(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="org_google_backup_settings",
+    )
+
+    is_active = models.BooleanField(default=True)
+    product_slug = models.CharField(max_length=120, default="business-autopilot-erp")
+
+    google_access_token = models.TextField(blank=True, default="")
+    google_refresh_token = models.TextField(blank=True, default="")
+    google_token_expiry = models.DateTimeField(null=True, blank=True)
+    google_drive_folder_id = models.CharField(max_length=255, blank=True, default="")
+
+    oauth_state = models.CharField(max_length=255, blank=True, default="")
+    oauth_state_created_at = models.DateTimeField(null=True, blank=True)
+
+    scheduler_enabled = models.BooleanField(default=False)
+    schedule_frequency = models.CharField(max_length=16, choices=SCHEDULE_CHOICES, default="daily")
+    schedule_weekday = models.PositiveSmallIntegerField(default=0)
+    schedule_hour_utc = models.PositiveSmallIntegerField(default=2)
+    schedule_minute_utc = models.PositiveSmallIntegerField(default=0)
+    keep_last_backups = models.PositiveSmallIntegerField(default=7)
+    scheduler_last_run_at = models.DateTimeField(null=True, blank=True)
+
+    last_backup_status = models.CharField(max_length=32, blank=True, default="")
+    last_backup_at = models.DateTimeField(null=True, blank=True)
+    last_error_message = models.TextField(blank=True, default="")
+
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Organization Google Backup Settings"
+        verbose_name_plural = "Organization Google Backup Settings"
+
+    @classmethod
+    def for_org(cls, organization):
+        obj, _ = cls.objects.get_or_create(
+            organization=organization,
+            defaults={"product_slug": "business-autopilot-erp"},
+        )
+        return obj
+
+    @property
+    def google_connected(self):
+        return bool(self.google_refresh_token)
+
+    def token_expired(self):
+        if not self.google_access_token or not self.google_token_expiry:
+            return True
+        return self.google_token_expiry <= timezone.now()

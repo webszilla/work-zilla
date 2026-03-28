@@ -164,7 +164,7 @@ def login_view(request):
     next_url = request.GET.get("next") or request.POST.get("next") or "/my-account/"
     if request.method == "GET":
         if request.user.is_authenticated:
-            return redirect(next_url)
+            return redirect("/my-account/")
         captcha_question = _build_login_captcha(request)
         return render(request, "sites/login.html", {"next": next_url, "captcha_question": captcha_question})
 
@@ -231,7 +231,7 @@ def login_view(request):
     org_for_security = get_user_organization(user, profile)
     apply_request_session_timeout(request, org=org_for_security)
     log_user_login_activity(request, user, org=org_for_security, profile=profile)
-    return redirect(next_url)
+    return redirect("/my-account/")
 
 
 @require_http_methods(["GET", "POST"])

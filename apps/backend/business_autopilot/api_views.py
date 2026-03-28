@@ -55,7 +55,7 @@ DEFAULT_ERP_MODULES = [
     {"name": "CRM", "slug": "crm", "sort_order": 1},
     {"name": "HR Management", "slug": "hrm", "sort_order": 2},
     {"name": "Project Management", "slug": "projects", "sort_order": 3},
-    {"name": "Accounts / ERP", "slug": "accounts", "sort_order": 4},
+    {"name": "Accounts", "slug": "accounts", "sort_order": 4},
     {"name": "Subscriptions", "slug": "subscriptions", "sort_order": 5},
     {"name": "Ticketing System", "slug": "ticketing", "sort_order": 6},
     {"name": "Inventory", "slug": "stocks", "sort_order": 7},

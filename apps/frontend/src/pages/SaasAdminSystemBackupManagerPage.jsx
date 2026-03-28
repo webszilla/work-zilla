@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 
 const TABS = [
   { key: "system", label: "System Backup" },
-  { key: "org", label: "Organization Backup" },
-  { key: "restore", label: "Restore Manager" },
-  { key: "scheduler", label: "Scheduler" },
   { key: "logs", label: "Logs" },
 ];
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const PROVIDER_TABS = [
+  { key: "blackblaze", label: "Blackblaze" },
+  { key: "google_drive", label: "Google Drive" },
+];
 
 function errMsg(error, fallback) {
   return error?.data?.detail || error?.message || fallback;
@@ -27,18 +28,42 @@ function Badge({ value }) {
   return <span className={`badge ${cls}`}>{value || "-"}</span>;
 }
 
+function formatSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return "-";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function recentDays(count = 7) {
+  const now = new Date();
+  const items = [];
+  for (let i = 0; i < count; i += 1) {
+    const date = new Date(now);
+    date.setDate(now.getDate() - i);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    items.push(`${y}-${m}-${d}`);
+  }
+  return items;
+}
+
 export default function SaasAdminSystemBackupManagerPage() {
   const [tab, setTab] = useState("system");
+  const [providerTab, setProviderTab] = useState("blackblaze");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [bbSaving, setBbSaving] = useState(false);
+  const [bbRunningType, setBbRunningType] = useState("");
+  const [bbExpanded, setBbExpanded] = useState({});
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [dashboard, setDashboard] = useState(null);
   const [sysLogs, setSysLogs] = useState([]);
-  const [orgLogs, setOrgLogs] = useState([]);
-  const [restoreLogs, setRestoreLogs] = useState([]);
-  const [availableBackups, setAvailableBackups] = useState([]);
   const [form, setForm] = useState({
     is_active: false,
     google_client_id: "",
@@ -52,26 +77,33 @@ export default function SaasAdminSystemBackupManagerPage() {
     schedule_minute_utc: 0,
     keep_last_backups: 7,
   });
-  const [selectedOrgId, setSelectedOrgId] = useState("");
-  const [restoreOrgId, setRestoreOrgId] = useState("");
-  const [selectedBackupFile, setSelectedBackupFile] = useState("");
-
-  const organizations = dashboard?.organizations || [];
+  const [bbForm, setBbForm] = useState({
+    db_enabled: true,
+    db_interval_hours: 4,
+    db_retention_days: 7,
+    script_enabled: true,
+    script_daily_hour_local: 21,
+    script_daily_minute_local: 0,
+    script_retention_days: 7,
+  });
+  const [bbGrouped, setBbGrouped] = useState({ db: {}, script: {} });
 
   const loadDashboard = async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
     try {
-      const [dash, systemLogs, orgBackupLogs, orgRestoreLogs] = await Promise.all([
+      const [dash, systemLogs] = await Promise.all([
         apiFetch("/api/saas-admin/system-backup-manager/dashboard"),
         apiFetch("/api/saas-admin/system-backup-manager/logs?limit=10"),
-        apiFetch("/api/saas-admin/system-backup-manager/org-backups/logs?limit=20"),
-        apiFetch("/api/saas-admin/system-backup-manager/restore/logs?limit=20"),
       ]);
       setDashboard(dash);
+      const dashProviderTabs = Array.isArray(dash?.provider_tabs) ? dash.provider_tabs : [];
+      if (dashProviderTabs.includes(providerTab) === false) {
+        setProviderTab(dashProviderTabs[0] || "blackblaze");
+      }
       setSysLogs(systemLogs?.items || []);
-      setOrgLogs(orgBackupLogs?.items || []);
-      setRestoreLogs(orgRestoreLogs?.items || []);
+      setBbGrouped(dash?.blackblaze_grouped || { db: {}, script: {} });
       const s = dash?.settings || {};
+      const bb = dash?.blackblaze || {};
       setForm((prev) => ({
         ...prev,
         is_active: !!s.is_active,
@@ -86,8 +118,15 @@ export default function SaasAdminSystemBackupManagerPage() {
         schedule_minute_utc: Number(s.schedule_minute_utc ?? 0),
         keep_last_backups: Number(s.keep_last_backups || 7),
       }));
-      if (!selectedOrgId && (dash?.organizations || []).length) setSelectedOrgId(String(dash.organizations[0].id));
-      if (!restoreOrgId && (dash?.organizations || []).length) setRestoreOrgId(String(dash.organizations[0].id));
+      setBbForm({
+        db_enabled: !!bb.db_enabled,
+        db_interval_hours: Number(bb.db_interval_hours || 4),
+        db_retention_days: Number(bb.db_retention_days || 7),
+        script_enabled: !!bb.script_enabled,
+        script_daily_hour_local: Number(bb.script_daily_hour_local || 21),
+        script_daily_minute_local: Number(bb.script_daily_minute_local || 0),
+        script_retention_days: Number(bb.script_retention_days || 7),
+      });
       setError("");
     } catch (e) {
       setError(errMsg(e, "Unable to load backup manager."));
@@ -103,27 +142,12 @@ export default function SaasAdminSystemBackupManagerPage() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!restoreOrgId) {
-      setAvailableBackups([]);
-      return;
-    }
-    let active = true;
-    apiFetch(`/api/saas-admin/system-backup-manager/restore/available?org_id=${encodeURIComponent(restoreOrgId)}`)
-      .then((data) => {
-        if (!active) return;
-        const items = Array.isArray(data?.items) ? data.items : [];
-        setAvailableBackups(items);
-        if (items.length && !items.some((f) => f.id === selectedBackupFile)) {
-          setSelectedBackupFile(items[0].id);
-        }
-      })
-      .catch(() => {
-        if (!active) return;
-        setAvailableBackups([]);
-      });
-    return () => { active = false; };
-  }, [restoreOrgId]);
+  const onBbChange = (key) => (e) => {
+    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    setBbForm((prev) => ({ ...prev, [key]: value }));
+    setError("");
+    setSuccess("");
+  };
 
   const onChange = (key) => (e) => {
     const v = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -165,52 +189,6 @@ export default function SaasAdminSystemBackupManagerPage() {
     }
   };
 
-  const runOrgBackup = async () => {
-    if (!selectedOrgId) return;
-    try {
-      setError(""); setSuccess("");
-      await apiFetch("/api/saas-admin/system-backup-manager/org-backups/run", {
-        method: "POST",
-        body: JSON.stringify({ org_id: Number(selectedOrgId) }),
-      });
-      setSuccess("Organization backup queued.");
-      await loadDashboard(true);
-    } catch (e) {
-      setError(errMsg(e, "Unable to queue organization backup."));
-    }
-  };
-
-  const runAllOrgBackups = async () => {
-    try {
-      setError(""); setSuccess("");
-      await apiFetch("/api/saas-admin/system-backup-manager/org-backups/run-all", { method: "POST", body: JSON.stringify({}) });
-      setSuccess("Backup All Organizations queued.");
-      await loadDashboard(true);
-    } catch (e) {
-      setError(errMsg(e, "Unable to queue all-organization backup."));
-    }
-  };
-
-  const runRestore = async () => {
-    if (!restoreOrgId || !selectedBackupFile) return;
-    const fileMeta = availableBackups.find((f) => f.id === selectedBackupFile);
-    try {
-      setError(""); setSuccess("");
-      await apiFetch("/api/saas-admin/system-backup-manager/restore/run", {
-        method: "POST",
-        body: JSON.stringify({
-          org_id: Number(restoreOrgId),
-          backup_file_id: selectedBackupFile,
-          backup_file_name: fileMeta?.name || "",
-        }),
-      });
-      setSuccess("Restore job queued. Safe staged restore flow will validate before applying.");
-      await loadDashboard(true);
-    } catch (e) {
-      setError(errMsg(e, "Unable to queue restore."));
-    }
-  };
-
   const connectGoogleDrive = async () => {
     try {
       const data = await apiFetch("/api/saas-admin/system-backup-manager/google-drive/auth-start");
@@ -231,15 +209,112 @@ export default function SaasAdminSystemBackupManagerPage() {
     }
   };
 
+  const saveBlackblazeSettings = async () => {
+    setBbSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      await apiFetch("/api/saas-admin/system-backup-manager/blackblaze/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          ...bbForm,
+          is_active: Boolean(bbForm.db_enabled || bbForm.script_enabled),
+          db_interval_hours: Number(bbForm.db_interval_hours || 4),
+          db_retention_days: Number(bbForm.db_retention_days || 7),
+          script_daily_hour_local: Number(bbForm.script_daily_hour_local || 21),
+          script_daily_minute_local: Number(bbForm.script_daily_minute_local || 0),
+          script_retention_days: Number(bbForm.script_retention_days || 7),
+        }),
+      });
+      setSuccess("Blackblaze schedule settings saved.");
+      await loadDashboard(true);
+    } catch (e) {
+      setError(errMsg(e, "Unable to save Blackblaze settings."));
+    } finally {
+      setBbSaving(false);
+    }
+  };
+
+  const runBlackblazeBackup = async (backupType) => {
+    setError("");
+    setSuccess("");
+    setBbRunningType(backupType);
+    try {
+      await apiFetch("/api/saas-admin/system-backup-manager/blackblaze/run", {
+        method: "POST",
+        body: JSON.stringify({ backup_type: backupType }),
+      });
+      setSuccess(backupType === "db" ? "Database backup queued." : "SaaS files backup queued.");
+      await loadDashboard(true);
+    } catch (e) {
+      setError(errMsg(e, "Unable to queue Blackblaze backup."));
+    } finally {
+      setBbRunningType("");
+    }
+  };
+
+  const liveDbDownload = () => {
+    window.open("/api/saas-admin/system-backup-manager/live-db-download", "_blank", "noopener,noreferrer");
+  };
+
   const topStats = useMemo(() => {
     const s = dashboard?.settings || {};
+    const bb = dashboard?.blackblaze || {};
+    if (providerTab === "google_drive") {
+      return [
+        { key: "gd_last_backup", label: "Last Backup Date", value: s.last_backup_date || "-", icon: "bi-calendar3", active: true },
+        { key: "gd_backup_status", label: "Backup Status", value: s.last_backup_status || "never", icon: "bi-shield-check", active: true },
+        {
+          key: "gd_connection",
+          label: "Google Drive",
+          value: s.google_drive_connection_status || "not_connected",
+          icon: "bi-google",
+          active: true,
+        },
+        {
+          key: "gd_scheduler",
+          label: "Scheduler",
+          value: s.is_active ? "enabled" : "disabled",
+          icon: "bi-clock-history",
+          active: true,
+        },
+      ];
+    }
+
     return [
-      { label: "Last Backup Date", value: s.last_backup_date || "-" },
-      { label: "Backup Status", value: s.last_backup_status || "never" },
-      { label: "Google Drive", value: s.google_drive_connection_status || "not_connected" },
-      { label: "Scheduler", value: s.scheduler_enabled ? "enabled" : "disabled" },
+      { key: "bb_last_db", label: "Last DB Backup", value: bb.last_db_backup_at || "-", icon: "bi-database", active: true },
+      { key: "bb_last_files", label: "Last Files Backup", value: bb.last_script_backup_at || "-", icon: "bi-file-earmark-zip", active: true },
+      { key: "bb_status", label: "Blackblaze", value: bb.status || "offline", icon: "bi-hdd-rack", active: true },
+      {
+        key: "bb_storage",
+        label: "Storage Mode",
+        value: bb.storage_mode || "local",
+        icon: "bi-hdd-network",
+        active: true,
+      },
     ];
-  }, [dashboard]);
+  }, [dashboard, providerTab]);
+
+  const last7Days = useMemo(() => recentDays(7), []);
+  const blackblazeStatus = String(dashboard?.blackblaze?.status || "offline").toLowerCase();
+  const blackblazeOnline = blackblazeStatus === "online";
+  const blackblazeLogRows = useMemo(() => {
+    const items = [];
+    const grouped = bbGrouped || {};
+    ["db", "script"].forEach((backupType) => {
+      const dayMap = grouped[backupType] || {};
+      Object.keys(dayMap).forEach((day) => {
+        const rows = Array.isArray(dayMap[day]) ? dayMap[day] : [];
+        rows.forEach((row) => {
+          items.push({
+            ...row,
+            backup_type: backupType === "db" ? "Database" : "SaaS Files",
+          });
+        });
+      });
+    });
+    return items.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  }, [bbGrouped]);
 
   if (loading) {
     return <div className="card p-4 text-center"><div className="spinner" /><p className="mb-0">Loading Backup Manager...</p></div>;
@@ -247,14 +322,25 @@ export default function SaasAdminSystemBackupManagerPage() {
 
   return (
     <div className="page-shell">
-      <div className="card p-4">
+      <div className="p-4">
         <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
           <div>
             <h3 className="mb-1">Backup Manager</h3>
             <p className="text-secondary mb-0">System + organization backups, restore manager, scheduler, and logs.</p>
           </div>
           <div className="d-flex gap-2">
+            {PROVIDER_TABS.map((provider) => (
+              <button
+                key={provider.key}
+                type="button"
+                className={`btn btn-sm ${providerTab === provider.key ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => { setProviderTab(provider.key); setTab("system"); }}
+              >
+                {provider.label}
+              </button>
+            ))}
             <button type="button" className="btn btn-outline-light btn-sm" onClick={() => loadDashboard(true)} disabled={refreshing}>{refreshing ? "Refreshing..." : "Refresh"}</button>
+            <button type="button" className="btn btn-outline-light btn-sm" onClick={liveDbDownload}>Live DB Download</button>
             <Link to="/saas-admin" className="btn btn-outline-light btn-sm">Back to Overview</Link>
           </div>
         </div>
@@ -265,9 +351,12 @@ export default function SaasAdminSystemBackupManagerPage() {
         <div className="row g-3 mt-2">
           {topStats.map((card) => (
             <div className="col-12 col-md-6 col-xl-3" key={card.label}>
-              <div className="card p-3 h-100">
-                <div className="small text-secondary">{card.label}</div>
-                <div className="mt-1"><Badge value={card.value} /></div>
+              <div className={`card p-3 h-100 stat-card ${card.active ? "border-primary" : ""}`}>
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${card.icon}`} aria-hidden="true" />
+                </div>
+                <h6 className="mb-1">{card.label}</h6>
+                <div className="stat-value" style={{ fontSize: "0.95rem", lineHeight: "1.35" }}>{card.value || "-"}</div>
               </div>
             </div>
           ))}
@@ -287,117 +376,196 @@ export default function SaasAdminSystemBackupManagerPage() {
         </div>
 
         {tab === "system" ? (
-          <div className="card p-3 mt-3">
-            <h5 className="mb-3">System Backup</h5>
-            <div className="row g-3">
-              <div className="col-12 col-md-6">
-                <label className="form-label">Google OAuth Client ID</label>
-                <input className="form-control" value={form.google_client_id} onChange={onChange("google_client_id")} />
-              </div>
-              <div className="col-12 col-md-6">
-                <label className="form-label">Google OAuth Client Secret</label>
-                <input type="password" className="form-control" value={form.google_client_secret} onChange={onChange("google_client_secret")} placeholder={dashboard?.settings?.has_google_client_secret ? "Leave blank to keep existing" : "Paste secret"} />
-              </div>
-              <div className="col-12 col-md-6">
-                <label className="form-label">Google Drive Folder ID</label>
-                <input className="form-control" value={form.google_drive_folder_id} onChange={onChange("google_drive_folder_id")} placeholder="Optional root folder id" />
-              </div>
-              <div className="col-12 col-md-6">
-                <label className="form-label">Enable Backup Manager</label>
-                <div className="form-check form-switch mt-2">
-                  <input className="form-check-input" type="checkbox" checked={!!form.is_active} onChange={onChange("is_active")} />
-                  <label className="form-check-label">{form.is_active ? "Active" : "Inactive"}</label>
+          providerTab === "google_drive" ? (
+            <div className="card p-3 mt-3">
+              <h5 className="mb-3">System Backup (Google Drive)</h5>
+              <div className="row g-3">
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Google OAuth Client ID</label>
+                  <input className="form-control" value={form.google_client_id} onChange={onChange("google_client_id")} />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Google OAuth Client Secret</label>
+                  <input type="password" className="form-control" value={form.google_client_secret} onChange={onChange("google_client_secret")} placeholder={dashboard?.settings?.has_google_client_secret ? "Leave blank to keep existing" : "Paste secret"} />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Google Drive Folder ID</label>
+                  <input className="form-control" value={form.google_drive_folder_id} onChange={onChange("google_drive_folder_id")} placeholder="Optional root folder id" />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label">Enable Backup Manager</label>
+                  <div className="form-check form-switch mt-2">
+                    <input className="form-check-input" type="checkbox" checked={!!form.is_active} onChange={onChange("is_active")} />
+                    <label className="form-check-label">{form.is_active ? "Active" : "Inactive"}</label>
+                  </div>
                 </div>
               </div>
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                <button type="button" className="btn btn-primary btn-sm" onClick={saveSettings} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={connectGoogleDrive}>Connect Google Drive</button>
+                <button type="button" className="btn btn-outline-danger btn-sm" onClick={disconnectGoogleDrive} disabled={!dashboard?.settings?.google_connected}>Disconnect</button>
+                <button type="button" className="btn btn-success btn-sm" onClick={runSystemBackup} disabled={dashboard?.settings?.backup_running}>Run Backup</button>
+              </div>
+              <div className="small text-secondary mt-2">Flow: pg_dump {"->"} zip project {"->"} upload to Google Drive {"->"} delete local temp files on success only.</div>
             </div>
-            <div className="d-flex flex-wrap gap-2 mt-3">
-              <button type="button" className="btn btn-primary btn-sm" onClick={saveSettings} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={connectGoogleDrive}>Connect Google Drive</button>
-              <button type="button" className="btn btn-outline-danger btn-sm" onClick={disconnectGoogleDrive} disabled={!dashboard?.settings?.google_connected}>Disconnect</button>
-              <button type="button" className="btn btn-success btn-sm" onClick={runSystemBackup} disabled={dashboard?.settings?.backup_running}>Run Backup</button>
-            </div>
-            <div className="small text-secondary mt-2">Flow: pg_dump {"->"} zip project {"->"} upload to Google Drive {"->"} delete local temp files on success only.</div>
-          </div>
-        ) : null}
+          ) : (
+            <div className="card p-3 mt-3">
+              <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div>
+                  <h5 className="mb-1">Blackblaze Backup Manager</h5>
+                  <div className="small text-secondary">Database backup every 4 hours and SaaS files backup daily at 9:00 PM (local). 7-day retention cleanup is automatic.</div>
+                </div>
+                <div>
+                  <span className={`badge ${blackblazeOnline ? "bg-success" : "bg-danger"}`}>
+                    Blackblaze {blackblazeOnline ? "Online" : "Offline"}
+                  </span>
+                </div>
+              </div>
 
-        {tab === "org" ? (
-          <div className="card p-3 mt-3">
-            <h5 className="mb-3">Organization Backup</h5>
-            <div className="row g-3 align-items-end">
-              <div className="col-12 col-md-6">
-                <label className="form-label">Select Organization</label>
-                <select className="form-select" value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}>
-                  {(organizations || []).map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-                </select>
-              </div>
-              <div className="col-12 col-md-6 d-flex flex-wrap gap-2">
-                <button type="button" className="btn btn-primary btn-sm" onClick={runOrgBackup} disabled={!selectedOrgId}>Backup Selected Organization</button>
-                <button type="button" className="btn btn-outline-light btn-sm" onClick={runAllOrgBackups}>Backup All Organizations</button>
-              </div>
-            </div>
-            <div className="small text-secondary mt-2">Temp file {"->"} Google Drive <code>/SaaSBackups/org_{"{org_id}"}/</code> {"->"} local temp delete. Server permanent storage not used.</div>
-            <div className="table-responsive mt-3">
-              <table className="table table-dark table-striped table-hover align-middle">
-                <thead><tr><th>Org</th><th>Status</th><th>Records</th><th>Models</th><th>Drive File</th><th>Created</th><th>Completed</th><th>Message</th></tr></thead>
-                <tbody>
-                  {(orgLogs || []).length ? orgLogs.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.org_name}</td>
-                      <td><Badge value={row.status} /></td>
-                      <td>{row.records_exported}</td>
-                      <td>{row.model_count}</td>
-                      <td>{row.drive_file_name || "-"}</td>
-                      <td>{row.created_at || "-"}</td>
-                      <td>{row.completed_at || "-"}</td>
-                      <td className="small">{row.error_message || row.message || "-"}</td>
-                    </tr>
-                  )) : <tr><td colSpan="8">No organization backups yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : null}
+              <div className="row g-3 mt-1">
+                <div className="col-12 col-xl-6">
+                  <div className="card p-3 h-100">
+                    <h6 className="mb-3">Database Backup Schedule</h6>
+                    <div className="row g-2">
+                      <div className="col-12">
+                        <div className="form-check form-switch">
+                          <input className="form-check-input" type="checkbox" checked={!!bbForm.db_enabled} onChange={onBbChange("db_enabled")} />
+                          <label className="form-check-label">Enable Database Backup</label>
+                        </div>
+                      </div>
+                      <div className="col-6">
+                        <label className="form-label">Interval (Hours)</label>
+                        <input type="number" min="1" max="24" className="form-control" value={bbForm.db_interval_hours} onChange={onBbChange("db_interval_hours")} />
+                      </div>
+                      <div className="col-6">
+                        <label className="form-label">Retention (Days)</label>
+                        <input type="number" min="1" max="30" className="form-control" value={bbForm.db_retention_days} onChange={onBbChange("db_retention_days")} />
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2 mt-3">
+                      <button type="button" className="btn btn-success btn-sm" onClick={() => runBlackblazeBackup("db")} disabled={!blackblazeOnline || bbRunningType === "db"}>{bbRunningType === "db" ? "Running..." : "Run DB Backup"}</button>
+                    </div>
+                    <div className="small text-secondary mt-2">Last DB Backup: {dashboard?.blackblaze?.last_db_backup_at || "-"}</div>
+                  </div>
+                </div>
 
-        {tab === "restore" ? (
-          <div className="card p-3 mt-3">
-            <h5 className="mb-3">Restore Manager</h5>
-            <div className="row g-3 align-items-end">
-              <div className="col-12 col-md-4">
-                <label className="form-label">Select Organization</label>
-                <select className="form-select" value={restoreOrgId} onChange={(e) => setRestoreOrgId(e.target.value)}>
-                  {(organizations || []).map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-                </select>
+                <div className="col-12 col-xl-6">
+                  <div className="card p-3 h-100">
+                    <h6 className="mb-3">SaaS Files Backup Schedule</h6>
+                    <div className="row g-2">
+                      <div className="col-12">
+                        <div className="form-check form-switch">
+                          <input className="form-check-input" type="checkbox" checked={!!bbForm.script_enabled} onChange={onBbChange("script_enabled")} />
+                          <label className="form-check-label">Enable Script Files Backup</label>
+                        </div>
+                      </div>
+                      <div className="col-4">
+                        <label className="form-label">Hour (Local)</label>
+                        <input type="number" min="0" max="23" className="form-control" value={bbForm.script_daily_hour_local} onChange={onBbChange("script_daily_hour_local")} />
+                      </div>
+                      <div className="col-4">
+                        <label className="form-label">Minute</label>
+                        <input type="number" min="0" max="59" className="form-control" value={bbForm.script_daily_minute_local} onChange={onBbChange("script_daily_minute_local")} />
+                      </div>
+                      <div className="col-4">
+                        <label className="form-label">Retention (Days)</label>
+                        <input type="number" min="1" max="30" className="form-control" value={bbForm.script_retention_days} onChange={onBbChange("script_retention_days")} />
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2 mt-3">
+                      <button type="button" className="btn btn-success btn-sm" onClick={() => runBlackblazeBackup("script")} disabled={!blackblazeOnline || bbRunningType === "script"}>{bbRunningType === "script" ? "Running..." : "Run Files Backup"}</button>
+                    </div>
+                    <div className="small text-secondary mt-2">Last Files Backup: {dashboard?.blackblaze?.last_script_backup_at || "-"}</div>
+                  </div>
+                </div>
               </div>
-              <div className="col-12 col-md-8">
-                <label className="form-label">Available Backups (Google Drive)</label>
-                <select className="form-select" value={selectedBackupFile} onChange={(e) => setSelectedBackupFile(e.target.value)}>
-                  {(availableBackups || []).map((f) => <option key={f.id} value={f.id}>{f.name} ({f.created_at || "-"})</option>)}
-                </select>
+
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                <button type="button" className="btn btn-primary btn-sm" onClick={saveBlackblazeSettings} disabled={bbSaving}>{bbSaving ? "Saving..." : "Save Blackblaze Settings"}</button>
+              </div>
+              {dashboard?.blackblaze?.last_error_message ? (
+                <div className="small text-danger mt-2">{dashboard.blackblaze.last_error_message}</div>
+              ) : null}
+
+              <div className="row g-3 mt-2">
+                {[
+                  { key: "db", title: "Database Backups (Last 7 Days)" },
+                  { key: "script", title: "SaaS Files Backups (Last 7 Days)" },
+                ].map((block) => (
+                  <div className="col-12 col-xl-6" key={block.key}>
+                    <h6 className="mb-2">{block.title}</h6>
+                    <div className="table-responsive">
+                      <table className="table table-dark table-striped table-hover align-middle">
+                        <thead>
+                          <tr>
+                            <th>Day</th>
+                            <th>Backups</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {last7Days.map((day) => {
+                            const key = `${block.key}_${day}`;
+                            const rows = (bbGrouped?.[block.key] && bbGrouped[block.key][day]) || [];
+                            const open = !!bbExpanded[key];
+                            return (
+                              <Fragment key={key}>
+                                <tr>
+                                  <td>{day}</td>
+                                  <td>{rows.length}</td>
+                                  <td>
+                                    <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setBbExpanded((prev) => ({ ...prev, [key]: !open }))}>
+                                      {open ? "Hide" : "View"}
+                                    </button>
+                                  </td>
+                                </tr>
+                                {open ? (
+                                  <tr>
+                                    <td colSpan="3">
+                                      {rows.length ? (
+                                        <div className="table-responsive">
+                                          <table className="table table-sm table-dark mb-0">
+                                            <thead>
+                                              <tr>
+                                                <th>Created At</th>
+                                                <th>Status</th>
+                                                <th>Size</th>
+                                                <th>Download</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {rows.map((row) => (
+                                                <tr key={row.id}>
+                                                  <td>{row.created_at || "-"}</td>
+                                                  <td><Badge value={row.status} /></td>
+                                                  <td>{formatSize(row.size_bytes)}</td>
+                                                  <td>
+                                                    {row.status === "completed" && row.download_url ? (
+                                                      <a className="btn btn-outline-success btn-sm" href={row.download_url}>Download</a>
+                                                    ) : "-"}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        <div className="small text-secondary">No backups for this day.</div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="d-flex flex-wrap gap-2 mt-3">
-              <button type="button" className="btn btn-primary btn-sm" onClick={runRestore} disabled={!restoreOrgId || !selectedBackupFile}>Restore Selected Backup</button>
-            </div>
-            <div className="small text-warning mt-2">Enterprise safe mode: downloads to temp file, stages in temp restore DB, validates schema/org/records, then restores with no-overwrite policy inside transaction.</div>
-            <div className="table-responsive mt-3">
-              <table className="table table-dark table-striped table-hover align-middle">
-                <thead><tr><th>Org</th><th>Status</th><th>Backup File</th><th>Restored</th><th>Started</th><th>Completed</th><th>Result</th></tr></thead>
-                <tbody>
-                  {(restoreLogs || []).length ? restoreLogs.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.org_name}</td>
-                      <td><Badge value={row.status} /></td>
-                      <td>{row.backup_file_name || "-"}</td>
-                      <td>{row.restored_records}</td>
-                      <td>{row.started_at || "-"}</td>
-                      <td>{row.completed_at || "-"}</td>
-                      <td className="small">{row.errors || row.message || "-"}</td>
-                    </tr>
-                  )) : <tr><td colSpan="7">No restore jobs yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )
         ) : null}
 
         {tab === "scheduler" ? (
@@ -466,6 +634,42 @@ export default function SaasAdminSystemBackupManagerPage() {
               </table>
             </div>
             <div className="small text-warning mt-2">Restore logs keep temp file paths only when failures happen (for investigation). Success flow removes local temp files immediately.</div>
+
+            <h6 className="mb-2 mt-4">Blackblaze Backup Logs (Last 7 Days)</h6>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped table-hover align-middle">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>File</th>
+                    <th>Size</th>
+                    <th>Created</th>
+                    <th>Completed</th>
+                    <th>Download</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blackblazeLogRows.length ? blackblazeLogRows.map((row) => (
+                    <tr key={`${row.id}_${row.created_at}`}>
+                      <td>{row.backup_type}</td>
+                      <td><Badge value={row.status} /></td>
+                      <td>{row.file_name || "-"}</td>
+                      <td>{formatSize(row.size_bytes)}</td>
+                      <td>{row.created_at || "-"}</td>
+                      <td>{row.completed_at || "-"}</td>
+                      <td>
+                        {row.status === "completed" && row.download_url ? (
+                          <a className="btn btn-outline-success btn-sm" href={row.download_url}>Download</a>
+                        ) : "-"}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan="7">No Blackblaze backup logs yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
       </div>

@@ -1,10 +1,15 @@
 import uuid
 import json
+import os
+import threading
+import zipfile
+import tempfile
+import hashlib
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
-from django.http import JsonResponse, HttpResponseForbidden, FileResponse, Http404
+from django.http import JsonResponse, HttpResponseForbidden, FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
@@ -12,8 +17,15 @@ from core.models import Organization, Subscription
 from apps.backend.products.models import Product
 from .permissions import is_org_admin, IsSaaSAdmin, IsOrgAdmin, IsFeatureEnabled
 from .services import request_backup, log_backup_event
-from .tasks import restore_backup_task
-from .models import BackupRecord, OrgDownloadActivity
+from .tasks import restore_backup_task, generate_backup_task, run_org_google_backup_task
+from .models import BackupRecord, OrgDownloadActivity, OrgGoogleDriveBackupSettings
+from .google_drive_service import (
+    OrgGoogleBackupError,
+    serialize_org_google_settings,
+    build_google_oauth_authorize_url,
+    exchange_google_oauth_code,
+    run_org_google_backup,
+)
 from .serializers import OrgDownloadActivitySerializer, BackupRecordSerializer, BackupRequestResponseSerializer
 from dashboard.views import get_active_org
 from rest_framework.views import APIView
@@ -42,6 +54,22 @@ def _is_subscription_active(organization, product):
     if not sub or not sub.plan or not sub.plan.product:
         return False
     return sub.plan.product_id == product.id
+
+
+def _dispatch_generate_backup(backup):
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    if broker_url.startswith("memory://"):
+        threading.Thread(target=generate_backup_task, args=(str(backup.id),), daemon=True).start()
+        return
+    generate_backup_task.delay(str(backup.id))
+
+
+def _dispatch_restore_backup(backup, user_id):
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    if broker_url.startswith("memory://"):
+        threading.Thread(target=restore_backup_task, args=(str(backup.id), user_id), daemon=True).start()
+        return None
+    return restore_backup_task.delay(str(backup.id), user_id)
 
 
 @require_http_methods(["POST"])
@@ -107,6 +135,7 @@ def backup_request(request):
         ip_address=request.META.get("REMOTE_ADDR"),
         user_agent=request.META.get("HTTP_USER_AGENT", ""),
     )
+    _dispatch_generate_backup(backup)
 
     return JsonResponse(
         {
@@ -319,11 +348,138 @@ def backup_restore(request, backup_id):
         actor_type="user",
     )
 
-    if hasattr(restore_backup_task, "delay"):
-        async_result = restore_backup_task.delay(str(backup.id), request.user.id)
+    async_result = _dispatch_restore_backup(backup, request.user.id)
+    if async_result is not None:
         return JsonResponse({"detail": "restore_queued", "task_id": async_result.id}, status=202)
-    restore_backup_task(str(backup.id), request.user.id)
-    return JsonResponse({"detail": "restore_completed"})
+    return JsonResponse({"detail": "restore_queued"}, status=202)
+
+
+@require_http_methods(["POST"])
+def backup_restore_upload(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_active_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    upload = request.FILES.get("backup_file") or request.FILES.get("file")
+    if not upload:
+        return JsonResponse({"detail": "backup_file_required"}, status=400)
+
+    # Stage upload file locally to validate manifest + checksum
+    local_fd, local_path = tempfile.mkstemp(prefix=f"backup_restore_{org.id}_", suffix=".zip", dir="/tmp")
+    os.close(local_fd)
+    hasher = hashlib.sha256()
+    size_bytes = 0
+    try:
+        with open(local_path, "wb") as handle:
+            for chunk in upload.chunks():
+                handle.write(chunk)
+                hasher.update(chunk)
+                size_bytes += len(chunk)
+        checksum_sha256 = hasher.hexdigest()
+
+        manifest = {}
+        with zipfile.ZipFile(local_path, "r") as zf:
+            if "manifest.json" in (zf.namelist() or []):
+                with zf.open("manifest.json", "r") as mf:
+                    manifest = json.loads(mf.read().decode("utf-8"))
+            else:
+                return JsonResponse({"detail": "manifest_missing"}, status=400)
+
+        manifest_org_id = manifest.get("organization_id")
+        if str(manifest_org_id) != str(org.id):
+            return JsonResponse({"detail": "organization_mismatch"}, status=400)
+
+        product = None
+        manifest_product_id = manifest.get("product_id")
+        if manifest_product_id:
+            product = Product.objects.filter(id=manifest_product_id, is_active=True).first()
+        if not product:
+            product_slug = str(request.POST.get("product_slug") or "").strip()
+            product_id = request.POST.get("product_id")
+            if product_id:
+                product = Product.objects.filter(id=product_id, is_active=True).first()
+            elif product_slug:
+                product = Product.objects.filter(slug=product_slug, is_active=True).first()
+        if not product:
+            return JsonResponse({"detail": "product_required"}, status=400)
+
+        if not _is_subscription_active(org, product):
+            return JsonResponse({"detail": "subscription_required"}, status=403)
+
+        backup = request_backup(
+            organization=org,
+            product=product,
+            user=request.user,
+            request_id=uuid.uuid4(),
+            trace_id=request.headers.get("X-Request-Id", "") or request.headers.get("X-Trace-Id", ""),
+            ip_address=request.META.get("REMOTE_ADDR"),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+
+        created_at = timezone.now()
+        storage_key = (
+            f"backups/org_{org.id}/product_{product.id}/uploads/"
+            f"restore_upload_{created_at.strftime('%Y%m%dT%H%M%S')}_{backup.id}.zip"
+        )
+        with open(local_path, "rb") as in_handle:
+            default_storage.save(storage_key, in_handle)
+
+        backup.status = "completed"
+        backup.storage_path = storage_key
+        backup.checksum_sha256 = checksum_sha256
+        backup.size_bytes = int(size_bytes or 0)
+        backup.completed_at = timezone.now()
+        backup.expires_at = timezone.now() + timezone.timedelta(
+            hours=getattr(settings, "BACKUP_ZIP_TTL_HOURS", 24)
+        )
+        backup.download_url = ""
+        backup.download_url_expires_at = backup.expires_at
+        backup.save(
+            update_fields=[
+                "status",
+                "storage_path",
+                "checksum_sha256",
+                "size_bytes",
+                "completed_at",
+                "expires_at",
+                "download_url",
+                "download_url_expires_at",
+            ]
+        )
+
+        log_backup_event(
+            organization=backup.organization,
+            product=backup.product,
+            user=request.user,
+            action="restore_requested",
+            status="ok",
+            backup_id=backup.id,
+            actor_type="user",
+            event_meta={"source": "upload"},
+        )
+
+        async_result = _dispatch_restore_backup(backup, request.user.id)
+        if async_result is not None:
+            return JsonResponse(
+                {"detail": "restore_queued", "task_id": async_result.id, "backup_id": str(backup.id)},
+                status=202,
+            )
+        return JsonResponse({"detail": "restore_queued", "backup_id": str(backup.id)}, status=202)
+    except zipfile.BadZipFile:
+        return JsonResponse({"detail": "invalid_zip"}, status=400)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_manifest"}, status=400)
+    finally:
+        try:
+            if local_path and os.path.exists(local_path):
+                os.remove(local_path)
+        except OSError:
+            pass
 
 
 class OrgAdminBackupPagination(PageNumberPagination):
@@ -392,6 +548,7 @@ class OrgAdminBackupAccessView(APIView):
             ip_address=request.META.get("REMOTE_ADDR"),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
+        _dispatch_generate_backup(backup)
 
         qs = BackupRecord.objects.filter(organization=org).select_related("product").order_by("-requested_at")
         backups = qs[:5]
@@ -429,3 +586,142 @@ class SaasAdminDownloadListView(APIView):
         page = paginator.paginate_queryset(qs, request, view=self)
         serializer = OrgDownloadActivitySerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+@require_http_methods(["GET", "PUT"])
+def org_google_backup_settings(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_active_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = OrgGoogleDriveBackupSettings.for_org(org)
+    if request.method == "GET":
+        return JsonResponse(serialize_org_google_settings(settings_obj))
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    settings_obj.is_active = bool(payload.get("is_active", settings_obj.is_active))
+    settings_obj.product_slug = str(payload.get("product_slug", settings_obj.product_slug) or "").strip() or "business-autopilot-erp"
+    settings_obj.google_drive_folder_id = str(payload.get("google_drive_folder_id", settings_obj.google_drive_folder_id) or "").strip()
+    settings_obj.scheduler_enabled = bool(payload.get("scheduler_enabled", settings_obj.scheduler_enabled))
+    frequency = str(payload.get("schedule_frequency", settings_obj.schedule_frequency) or "daily").strip().lower()
+    if frequency not in ("daily", "weekly"):
+        return JsonResponse({"detail": "invalid_schedule_frequency"}, status=400)
+    settings_obj.schedule_frequency = frequency
+    try:
+        settings_obj.schedule_weekday = max(0, min(6, int(payload.get("schedule_weekday", settings_obj.schedule_weekday))))
+        settings_obj.schedule_hour_utc = max(0, min(23, int(payload.get("schedule_hour_utc", settings_obj.schedule_hour_utc))))
+        settings_obj.schedule_minute_utc = max(0, min(59, int(payload.get("schedule_minute_utc", settings_obj.schedule_minute_utc))))
+        settings_obj.keep_last_backups = max(1, min(30, int(payload.get("keep_last_backups", settings_obj.keep_last_backups))))
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "invalid_schedule_values"}, status=400)
+
+    settings_obj.save()
+    return JsonResponse(serialize_org_google_settings(settings_obj))
+
+
+@require_http_methods(["GET"])
+def org_google_backup_auth_start(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+    org = get_active_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = OrgGoogleDriveBackupSettings.for_org(org)
+    callback_url = request.build_absolute_uri("/api/backup/google-drive/callback")
+    try:
+        auth_url = build_google_oauth_authorize_url(settings_obj, callback_url)
+    except OrgGoogleBackupError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+    return JsonResponse({"auth_url": auth_url})
+
+
+@require_http_methods(["GET"])
+def org_google_backup_auth_callback(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+    org = get_active_org(request)
+    if not org:
+        return HttpResponse("Organization not found.", status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = OrgGoogleDriveBackupSettings.for_org(org)
+    code = (request.GET.get("code") or "").strip()
+    oauth_state = (request.GET.get("state") or "").strip()
+    oauth_error = (request.GET.get("error") or "").strip()
+    callback_url = request.build_absolute_uri("/api/backup/google-drive/callback")
+    if oauth_error:
+        return HttpResponse(f"<h3>Google Drive connection failed</h3><p>{oauth_error}</p>")
+    try:
+        exchange_google_oauth_code(settings_obj, code=code, state=oauth_state, callback_url=callback_url)
+        return HttpResponse(
+            "<html><body style='font-family:sans-serif'><h3>Google Drive connected.</h3>"
+            "<p>You can close this tab and return to Work Zilla.</p>"
+            "<script>if(window.opener){window.opener.location.reload();}</script>"
+            "</body></html>"
+        )
+    except OrgGoogleBackupError as exc:
+        return HttpResponse(f"<h3>Google Drive connection failed</h3><p>{exc}</p>", status=400)
+
+
+@require_http_methods(["POST"])
+def org_google_backup_disconnect(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+    org = get_active_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = OrgGoogleDriveBackupSettings.for_org(org)
+    settings_obj.google_access_token = ""
+    settings_obj.google_refresh_token = ""
+    settings_obj.google_token_expiry = None
+    settings_obj.oauth_state = ""
+    settings_obj.oauth_state_created_at = None
+    settings_obj.save(
+        update_fields=[
+            "google_access_token",
+            "google_refresh_token",
+            "google_token_expiry",
+            "oauth_state",
+            "oauth_state_created_at",
+            "updated_at",
+        ]
+    )
+    return JsonResponse({"ok": True, "settings": serialize_org_google_settings(settings_obj)})
+
+
+@require_http_methods(["POST"])
+def org_google_backup_run(request):
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden("Access denied.")
+    org = get_active_org(request)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=400)
+    if not is_org_admin(request.user, org.id):
+        return HttpResponseForbidden("Access denied.")
+
+    settings_obj = OrgGoogleDriveBackupSettings.for_org(org)
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    if broker_url.startswith("memory://"):
+        try:
+            result = run_org_google_backup(settings_obj, requested_by=request.user, trigger="manual")
+            return JsonResponse({"queued": True, "result": result})
+        except OrgGoogleBackupError as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+    run_org_google_backup_task.delay(org.id, request.user.id, "manual")
+    return JsonResponse({"queued": True})

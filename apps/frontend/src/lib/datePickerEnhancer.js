@@ -1,6 +1,27 @@
 let observer = null;
 let retryTimer = null;
 
+function setInputValueAndDispatch(input, nextValue) {
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  const normalizedNext = String(nextValue || "");
+  const previousValue = String(input.value || "");
+  const prototype = Object.getPrototypeOf(input);
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  if (descriptor && typeof descriptor.set === "function") {
+    descriptor.set.call(input, normalizedNext);
+  } else {
+    input.value = normalizedNext;
+  }
+  const tracker = input._valueTracker;
+  if (tracker && typeof tracker.setValue === "function") {
+    tracker.setValue(previousValue);
+  }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function toIsoDate(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     return "";
@@ -98,11 +119,7 @@ function enhanceDateInput(input) {
     monthSelectorType: "dropdown",
     onValueUpdate: (selectedDates, dateStr) => {
       const nextValue = normalizePickerDateValue(selectedDates, dateStr);
-      if (input.value !== nextValue) {
-        input.value = nextValue;
-      }
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      setInputValueAndDispatch(input, nextValue);
     },
   };
   if (input.min) {
@@ -136,11 +153,7 @@ function enhanceTimeInput(input) {
     minuteIncrement: 1,
     onValueUpdate: (selectedDates, dateStr) => {
       const nextValue = normalizePickerTimeValue(selectedDates, dateStr);
-      if (input.value !== nextValue) {
-        input.value = nextValue;
-      }
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      setInputValueAndDispatch(input, nextValue);
     },
   };
   input.__wzFlatpickrInstance = window.flatpickr(input, config);

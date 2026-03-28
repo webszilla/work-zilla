@@ -69,7 +69,7 @@
                       <tr>
                         <td>{{ sub.product_name|default:branding.display_name }}</td>
                         {% if show_account_billing_sections %}
-                          <td>{{ sub.plan.name }}</td>
+                          <td>{{ sub.display_plan_name|default:sub.plan.name }}</td>
                           <td>
                             {% if sub.status == "active" %}
                               <span class="badge bg-success">Active</span>
@@ -267,7 +267,7 @@
                         <tr>
                           <td>{{ sub.product_name|default:branding.display_name }}</td>
                           {% if show_account_billing_sections %}
-                            <td>{{ sub.plan.name }}</td>
+                            <td>{{ sub.display_plan_name|default:sub.plan.name }}</td>
                             <td><span class="badge bg-secondary">Expired</span></td>
                             <td>{{ sub.billing_cycle|title }}</td>
                             <td>

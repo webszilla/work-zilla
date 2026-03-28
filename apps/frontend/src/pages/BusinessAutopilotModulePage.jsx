@@ -6,6 +6,7 @@ import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOp
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { showUploadAlert } from "../lib/uploadAlert.js";
+import { getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
 import {
   clampBusinessAutopilotText,
   getBusinessAutopilotMaxLength,
@@ -111,7 +112,7 @@ const MODULE_CONTENT = {
     subtitle: "Manage leads, deals, and customer follow-ups.",
     stats: [
       { label: "Open Leads", value: "24" },
-      { label: "Pipeline Value", value: "INR 8.4L" },
+      { label: "Pipeline Value", value: "8.4L" },
       { label: "Follow-ups Today", value: "11" }
     ],
     sections: [
@@ -145,7 +146,7 @@ const MODULE_CONTENT = {
     subtitle: "Control billing, expenses, GST, and accounting reports.",
     stats: [
       { label: "Invoices This Month", value: "126" },
-      { label: "Receivables", value: "INR 3.2L" },
+      { label: "Receivables", value: "3.2L" },
       { label: "GST Status", value: "Ready" }
     ],
     sections: [
@@ -202,6 +203,21 @@ const MODULE_CONTENT = {
 };
 
 const CRM_MEETING_REMINDER_CHANNEL_OPTIONS = ["App Alert", "Email", "SMS", "WhatsApp"];
+const CRM_LEAD_SOURCE_OPTIONS = [
+  "Advertisement",
+  "Social Media",
+  "Cold Call",
+  "Employee Referral",
+  "External Referral",
+  "Partner",
+  "Public Relations",
+  "Sales Email Alias",
+  "Seminar Partner",
+  "Internal Seminar",
+  "Trade Show",
+  "Web Research",
+  "Others",
+];
 const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
   { value: "5", label: "5 Mins" },
   { value: "10", label: "10 Mins" },
@@ -216,7 +232,7 @@ const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
   { value: "1440", label: "24 Hrs" },
 ];
 const CRM_FOLLOWUP_RELATED_TO_TYPES = ["Lead", "CRM Contact", "Client"];
-const CRM_FOLLOWUP_STATUS_TABS = ["pending", "missed", "completed"];
+const CRM_FOLLOWUP_STATUS_TABS = ["ongoing", "pending", "missed", "completed"];
 const CRM_FOLLOWUP_AUTO_DELETE_DAYS = 90;
 
 const CRM_SECTION_CONFIG = {
@@ -238,6 +254,7 @@ const CRM_SECTION_CONFIG = {
       { key: "company", label: "Company", placeholder: "Company / Business name" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
+      { key: "leadSource", label: "Lead Source", type: "select", options: CRM_LEAD_SOURCE_OPTIONS, defaultValue: "" },
       { key: "assignType", label: "Assign To", type: "select", options: ["Users", "Team"], defaultValue: "Users" },
       { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
       { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
@@ -293,9 +310,9 @@ const CRM_SECTION_CONFIG = {
     ],
     fields: [
       { key: "dealName", label: "Deal Name", placeholder: "ERP rollout annual contract" },
-      { key: "company", label: "Company", placeholder: "Customer company" },
+      { key: "company", label: "Company", placeholder: "Client or Company" },
       { key: "stage", label: "Stage", type: "select", options: ["Discovery", "Proposal", "Negotiation"], defaultValue: "Discovery" },
-      { key: "amount", label: "Amount", placeholder: "INR amount" },
+      { key: "amount", label: "Amount", placeholder: "Amount" },
       { key: "status", label: "Status", type: "select", options: ["Open", "Won", "Lost"], defaultValue: "Open" }
     ]
   },
@@ -307,7 +324,7 @@ const CRM_SECTION_CONFIG = {
       { key: "subject", label: "Subject" },
       { key: "relatedTo", label: "Related To" },
       { key: "dueDate", label: "Due Date" },
-      { key: "owner", label: "Owner" },
+      { key: "owner", label: "Employee" },
       { key: "status", label: "Status" }
     ],
     fields: [
@@ -315,7 +332,7 @@ const CRM_SECTION_CONFIG = {
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
       { key: "dueDate", label: "Due Date", type: "date" },
       { key: "owner", label: "Employee", placeholder: "Search employee" },
-      { key: "status", label: "Status", type: "select", options: ["Pending", "Completed", "Missed"], defaultValue: "Pending" }
+      { key: "status", label: "Status", type: "select", options: ["Ongoing", "Pending", "Completed"], defaultValue: "Pending" }
     ]
   },
   activities: {
@@ -609,7 +626,7 @@ const HR_TAB_CONFIG = {
     fields: [
       { key: "employee", label: "Employee", placeholder: "Enter employee name" },
       { key: "month", label: "Month", placeholder: "YYYY-MM" },
-      { key: "salary", label: "Net Salary", placeholder: "INR amount" }
+      { key: "salary", label: "Net Salary", placeholder: "Amount" }
     ]
   },
   salaryStructures: {
@@ -646,8 +663,8 @@ const DEFAULT_HR_DATA = {
     { id: "l2", employee: "Kiran", leaveType: "Casual", status: "Approved" }
   ],
   payroll: [
-    { id: "pr1", employee: "Guru", month: "2026-02", salary: "INR 85,000" },
-    { id: "pr2", employee: "Nithya", month: "2026-02", salary: "INR 42,000" }
+    { id: "pr1", employee: "Guru", month: "2026-02", salary: "85000" },
+    { id: "pr2", employee: "Nithya", month: "2026-02", salary: "42000" }
   ],
   salaryStructures: [],
   payslips: [],
@@ -947,7 +964,7 @@ function parseNumber(value) {
 }
 
 function formatInr(amount) {
-  return `INR ${parseNumber(amount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return formatCurrencyAmount(amount, getOrgCurrency());
 }
 
 function gstTemplateTotalPercent(row) {
@@ -1169,7 +1186,8 @@ function buildEmptyValues(fields) {
     if (field.type === "multiselect") {
       acc[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
     } else if (field.type === "select") {
-      acc[field.key] = "";
+      const normalizedKey = String(field.key || "").trim().toLowerCase();
+      acc[field.key] = normalizedKey === "phonecountrycode" ? "+91" : "";
     } else {
       acc[field.key] = field.defaultValue ?? "";
     }
@@ -1383,7 +1401,7 @@ function createEmptyPayrollOrganizationProfile() {
   return {
     organizationName: "",
     country: "India",
-    currency: "INR",
+    currency: getOrgCurrency(),
     timezone: "UTC",
   };
 }
@@ -1515,6 +1533,22 @@ function formatIsoDateForDisplay(value) {
     return isoValue || "-";
   }
   return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function formatDateLikeCellValue(columnKey, value, fallback = "-") {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+  const normalizedKey = String(columnKey || "").trim().toLowerCase();
+  if (!normalizedKey.includes("date")) {
+    return rawValue;
+  }
+  const normalizedDate = normalizeMeetingDateValue(rawValue);
+  if (!normalizedDate) {
+    return rawValue;
+  }
+  return formatIsoDateForDisplay(normalizedDate);
 }
 
 function payrollEmployeeKey(row = {}) {
@@ -2238,7 +2272,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   const canManagePayroll = Boolean(workspace.permissions?.can_manage_payroll);
   const canViewSalaryHistory = Boolean(workspace.permissions?.can_view_salary_history);
   const canEditSalaryHistory = Boolean(canManagePayroll && canViewSalaryHistory);
-  const payrollCurrency = String(workspace.organizationProfile?.currency || "INR").trim().toUpperCase() || "INR";
+  const payrollCurrency = String(workspace.organizationProfile?.currency || getOrgCurrency()).trim().toUpperCase() || getOrgCurrency();
 
   const employeeOptions = useMemo(() => {
     const map = new Map();
@@ -2522,6 +2556,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   async function saveOrganizationProfile(event) {
     event.preventDefault();
     if (!canManagePayroll) return;
+    applyOrgCurrency(organizationProfileForm.currency || getOrgCurrency());
     await persistWorkspace(
       {
         ...workspace,
@@ -2529,7 +2564,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
           ...organizationProfileForm,
           organizationName: String(organizationProfileForm.organizationName || "").trim(),
           country: String(organizationProfileForm.country || "India").trim() || "India",
-          currency: String(organizationProfileForm.currency || "INR").trim().toUpperCase() || "INR",
+          currency: String(organizationProfileForm.currency || getOrgCurrency()).trim().toUpperCase() || getOrgCurrency(),
           timezone: String(organizationProfileForm.timezone || "UTC").trim() || "UTC",
         },
       },
@@ -3650,27 +3685,22 @@ function normalizeMeetingDateValue(value) {
   }
   const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) {
-    return raw;
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+    return "";
   }
-  const dmyOrMdyMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (dmyOrMdyMatch) {
-    let first = Number(dmyOrMdyMatch[1]);
-    let second = Number(dmyOrMdyMatch[2]);
-    const year = Number(dmyOrMdyMatch[3]);
-    if (!Number.isFinite(first) || !Number.isFinite(second) || !Number.isFinite(year)) {
-      return "";
-    }
-    if (first > 12) {
-      const day = first;
-      const month = second;
-      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-        return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      }
-      return "";
-    }
-    const month = first;
-    const day = second;
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+  const dmyMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
       return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
     return "";
@@ -3683,6 +3713,102 @@ function normalizeMeetingDateValue(value) {
     return `${yyyy}-${mm}-${dd}`;
   }
   return "";
+}
+
+function syncDateTimeFieldValuesFromForm(form, fields, values) {
+  if (!(form instanceof HTMLFormElement) || !Array.isArray(fields)) {
+    return { values, changed: false };
+  }
+  const nextValues = { ...(values || {}) };
+  let changed = false;
+  fields.forEach((field) => {
+    if (!field || (field.type !== "date" && field.type !== "time")) {
+      return;
+    }
+    const fieldKey = String(field.key || "").trim();
+    if (!fieldKey) {
+      return;
+    }
+    const input = form.querySelector(`input[name="${fieldKey}"]`);
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    const picker = input.__wzFlatpickrInstance;
+    const rawValue = String(picker?.altInput?.value ?? input.value ?? nextValues[fieldKey] ?? "").trim();
+    const normalizedValue = field.type === "date"
+      ? normalizeMeetingDateValue(rawValue)
+      : normalizeMeetingTimeValue(rawValue);
+    if (String(nextValues[fieldKey] || "") !== normalizedValue) {
+      nextValues[fieldKey] = normalizedValue;
+      changed = true;
+    }
+  });
+  return { values: nextValues, changed };
+}
+
+function clearFlatpickrDisplayValues(root = document) {
+  if (!root || typeof root.querySelectorAll !== "function") {
+    return;
+  }
+  root.querySelectorAll("input[type='date'], input[type='time']").forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    const picker = input.__wzFlatpickrInstance;
+    if (!picker) {
+      return;
+    }
+    const rawValue = String(input.value || "").trim();
+    if (rawValue) {
+      return;
+    }
+    picker.clear(false);
+    if (picker.altInput) {
+      picker.altInput.value = "";
+    }
+  });
+}
+
+function syncFlatpickrValuesFromState(root, fields, values) {
+  if (!root || typeof root.querySelectorAll !== "function" || !Array.isArray(fields)) {
+    return;
+  }
+  fields.forEach((field) => {
+    if (!field || (field.type !== "date" && field.type !== "time")) {
+      return;
+    }
+    const fieldKey = String(field.key || "").trim();
+    if (!fieldKey) {
+      return;
+    }
+    const input = root.querySelector(`input[name="${fieldKey}"]`);
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    const picker = input.__wzFlatpickrInstance;
+    if (!picker) {
+      return;
+    }
+    const rawValue = String(values?.[fieldKey] || "").trim();
+    if (!rawValue) {
+      picker.clear(false);
+      if (picker.altInput) {
+        picker.altInput.value = "";
+      }
+      return;
+    }
+    if (field.type === "date") {
+      const normalizedDate = normalizeMeetingDateValue(rawValue);
+      if (normalizedDate) {
+        picker.setDate(normalizedDate, false, "Y-m-d");
+      }
+      return;
+    }
+    const normalizedTime = normalizeMeetingTimeValue(rawValue);
+    if (normalizedTime) {
+      picker.setDate(normalizedTime, false, "H:i");
+    }
+  });
 }
 
 function getTodayIsoDate() {
@@ -3737,6 +3863,21 @@ function getFollowUpCompletedDate(row) {
       || (String(row.status || "").trim().toLowerCase() === "completed" ? row.dueDate : "")
     )
   );
+}
+
+function getFollowUpEffectiveStatus(row) {
+  const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+  if (normalizedStatus === "completed") {
+    return "completed";
+  }
+  const dueDate = normalizeMeetingDateValue(String(row?.dueDate || "").trim());
+  if (dueDate && dueDate < getTodayIsoDate()) {
+    return "missed";
+  }
+  if (normalizedStatus === "ongoing" || normalizedStatus === "pending") {
+    return normalizedStatus;
+  }
+  return "pending";
 }
 
 function computeWorkedDuration(inTime, outTime) {
@@ -4013,7 +4154,7 @@ function SearchablePaginatedTableCard({
         return String(value);
       }
     }
-    return String(value);
+    return String(formatDateLikeCellValue(column?.key, value, ""));
   }
 
   function exportAsExcelCsv() {
@@ -4413,6 +4554,7 @@ function CrmOnePageModule() {
   const [teamMemberSearch, setTeamMemberSearch] = useState("");
   const [teamMemberSearchOpen, setTeamMemberSearchOpen] = useState(false);
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
+  const [dealCompanySearchOpen, setDealCompanySearchOpen] = useState(false);
   const [activityClientSearchOpen, setActivityClientSearchOpen] = useState(false);
   const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
   const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
@@ -4584,7 +4726,7 @@ function CrmOnePageModule() {
     }).length;
     return [
       { label: "Open Leads", value: String(openLeads), icon: "bi-person-plus" },
-      { label: "Pipeline Value", value: `INR ${pipelineValue.toLocaleString("en-IN")}`, icon: "bi-graph-up-arrow" },
+      { label: "Pipeline Value", value: formatCurrencyAmount(pipelineValue, getOrgCurrency()), icon: "bi-graph-up-arrow" },
       { label: "Follow-ups Today", value: String(followupsToday), icon: "bi-telephone-forward" },
     ];
   }, [moduleData]);
@@ -4728,6 +4870,9 @@ function CrmOnePageModule() {
       setFollowUpOwnerSearch("");
       setFollowUpOwnerSearchOpen(false);
     }
+    window.requestAnimationFrame(() => {
+      clearFlatpickrDisplayValues(sectionFormRef.current || document);
+    });
   }
 
   function onEdit(sectionKey, row) {
@@ -4756,6 +4901,9 @@ function CrmOnePageModule() {
         const timeValue = rowValue ?? field.defaultValue ?? "";
         const formattedTime = formatTimeToAmPm(timeValue);
         nextValues[field.key] = formattedTime === "-" ? "" : formattedTime;
+      } else if (field.type === "date") {
+        const normalizedDate = normalizeMeetingDateValue(rowValue ?? field.defaultValue ?? "");
+        nextValues[field.key] = normalizedDate || "";
       } else {
         nextValues[field.key] = rowValue ?? field.defaultValue ?? "";
       }
@@ -4824,6 +4972,8 @@ function CrmOnePageModule() {
       setFollowUpOwnerSearchOpen(false);
     }
     window.requestAnimationFrame(() => {
+      const sectionRoot = sectionFormRef.current || document;
+      syncFlatpickrValuesFromState(sectionRoot, CRM_SECTION_CONFIG[sectionKey].fields, nextValues);
       sectionFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
@@ -4858,33 +5008,16 @@ function CrmOnePageModule() {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
-    let effectiveValues = values;
-    if (sectionKey === "meetings" && event.currentTarget instanceof HTMLFormElement) {
-      const dateInput = event.currentTarget.querySelector('input[name="meetingDate"]');
-      const timeInput = event.currentTarget.querySelector('input[name="meetingTime"]');
-      const dateAltInput = dateInput?.__wzFlatpickrInstance?.altInput;
-      const timeAltInput = timeInput?.__wzFlatpickrInstance?.altInput;
-      const normalizedMeetingDate = normalizeMeetingDateValue(
-        (dateAltInput?.value ?? dateInput?.value ?? "").trim()
-      );
-      const normalizedMeetingTime = normalizeMeetingTimeValue(
-        (timeAltInput?.value ?? timeInput?.value ?? "").trim()
-      );
-      effectiveValues = {
-        ...values,
-        meetingDate: normalizedMeetingDate,
-        meetingTime: normalizedMeetingTime,
-      };
-      if (effectiveValues.meetingDate !== values.meetingDate || effectiveValues.meetingTime !== values.meetingTime) {
-        setForms((prev) => ({
-          ...prev,
-          meetings: {
-            ...prev.meetings,
-            meetingDate: effectiveValues.meetingDate,
-            meetingTime: effectiveValues.meetingTime,
-          },
-        }));
-      }
+    const syncedValuesResult = syncDateTimeFieldValuesFromForm(event.currentTarget, config.fields, values);
+    const effectiveValues = syncedValuesResult.values;
+    if (syncedValuesResult.changed) {
+      setForms((prev) => ({
+        ...prev,
+        [sectionKey]: {
+          ...prev[sectionKey],
+          ...effectiveValues,
+        },
+      }));
     }
     const invalidEmailFields = config.fields.filter((field) => {
       if (!isCrmFieldRequired(sectionKey, field, effectiveValues)) {
@@ -4904,10 +5037,10 @@ function CrmOnePageModule() {
       if (!isCrmFieldRequired(sectionKey, field, effectiveValues)) {
         return false;
       }
-      if (sectionKey === "meetings" && field.key === "meetingDate") {
+      if (field.type === "date") {
         return !normalizeMeetingDateValue(effectiveValues[field.key]);
       }
-      if (sectionKey === "meetings" && field.key === "meetingTime") {
+      if (field.type === "time") {
         return !normalizeMeetingTimeValue(effectiveValues[field.key]);
       }
       if (field.type === "multiselect") {
@@ -4940,6 +5073,42 @@ function CrmOnePageModule() {
       }));
       return;
     }
+    if (sectionKey === "meetings") {
+      const meetingDate = normalizeMeetingDateValue(effectiveValues.meetingDate);
+      const meetingTime = normalizeMeetingTimeValue(effectiveValues.meetingTime);
+      const todayDate = getTodayIsoDate();
+      if (meetingDate && meetingDate < todayDate) {
+        setSectionFieldErrors((prev) => ({
+          ...prev,
+          [sectionKey]: {
+            ...(prev[sectionKey] || {}),
+            meetingDate: true,
+          },
+        }));
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          [sectionKey]: "Meeting Date cannot be in the past.",
+        }));
+        return;
+      }
+      if (meetingDate === todayDate && meetingTime) {
+        const currentTime = getCurrentTimeHm();
+        if (meetingTime < currentTime) {
+          setSectionFieldErrors((prev) => ({
+            ...prev,
+            [sectionKey]: {
+              ...(prev[sectionKey] || {}),
+              meetingTime: true,
+            },
+          }));
+          setSectionFormErrors((prev) => ({
+            ...prev,
+            [sectionKey]: "Meeting Time cannot be in the past for today's date.",
+          }));
+          return;
+        }
+      }
+    }
     setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
     setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
     const editingId = editingIds[sectionKey];
@@ -4947,6 +5116,10 @@ function CrmOnePageModule() {
     config.fields.forEach((field) => {
       if (field.type === "multiselect") {
         payload[field.key] = Array.isArray(effectiveValues[field.key]) ? effectiveValues[field.key].map((v) => String(v).trim()).filter(Boolean) : [];
+      } else if (field.type === "date") {
+        payload[field.key] = normalizeMeetingDateValue(effectiveValues[field.key]);
+      } else if (field.type === "time") {
+        payload[field.key] = normalizeMeetingTimeValue(effectiveValues[field.key]);
       } else {
         payload[field.key] = String(effectiveValues[field.key] || "").trim();
       }
@@ -5503,6 +5676,26 @@ function CrmOnePageModule() {
     return meetingDate < getTodayIsoDate();
   }
 
+  function getMeetingCalendarPillClass(row) {
+    if (isMeetingOverdue(row)) {
+      return "crm-meeting-pill-overdue";
+    }
+    const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+    if (normalizedStatus === "completed") {
+      return "crm-meeting-pill-completed";
+    }
+    if (normalizedStatus === "rescheduled") {
+      return "crm-meeting-pill-rescheduled";
+    }
+    if (normalizedStatus === "cancelled") {
+      return "crm-meeting-pill-cancelled";
+    }
+    if (normalizedStatus === "missed") {
+      return "crm-meeting-pill-missed";
+    }
+    return "crm-meeting-pill-scheduled";
+  }
+
   function openMeetingPopup(row) {
     setMeetingPopup(row);
   }
@@ -5620,7 +5813,7 @@ function CrmOnePageModule() {
               if (followUpStatusTab === "all") {
                 return true;
               }
-              return String(row.status || "").trim().toLowerCase() === followUpStatusTab;
+              return getFollowUpEffectiveStatus(row) === followUpStatusTab;
             })
           : rows;
         const leadTabCounts = sectionKey === "leads"
@@ -5643,7 +5836,7 @@ function CrmOnePageModule() {
           ? followUpStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
                 ? rows.length
-                : rows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+                : rows.filter((row) => getFollowUpEffectiveStatus(row) === tab.key).length;
               return acc;
             }, {})
           : {};
@@ -5651,6 +5844,7 @@ function CrmOnePageModule() {
         const editingId = editingIds[sectionKey] || "";
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
+        const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
         const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads"
@@ -5660,6 +5854,15 @@ function CrmOnePageModule() {
               }
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
               return haystack.includes(leadCompanyQuery);
+            }).slice(0, 6)
+          : [];
+        const dealCrmContactMatches = sectionKey === "deals"
+          ? (moduleData.contacts || []).filter((contact) => {
+              if (!dealCompanyQuery) {
+                return true;
+              }
+              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              return haystack.includes(dealCompanyQuery);
             }).slice(0, 6)
           : [];
         const followUpRelatedToQuery = sectionKey === "followUps" ? String(followUpRelatedToSearch || formValues.relatedTo || "").trim().toLowerCase() : "";
@@ -5704,7 +5907,17 @@ function CrmOnePageModule() {
               return haystack.includes(leadCompanyQuery);
             }).slice(0, 6)
           : [];
+        const dealCustomerMatches = sectionKey === "deals"
+          ? sharedCustomerOptions.filter((customer) => {
+              if (!dealCompanyQuery) {
+                return true;
+              }
+              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+              return haystack.includes(dealCompanyQuery);
+            }).slice(0, 6)
+          : [];
         const showLeadCompanySuggestions = sectionKey === "leads" && leadCompanySearchOpen;
+        const showDealCompanySuggestions = sectionKey === "deals" && dealCompanySearchOpen;
         const meetingCrmContactMatches = sectionKey === "meetings"
           ? (moduleData.contacts || []).filter((contact) => {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
@@ -6155,6 +6368,8 @@ function CrmOnePageModule() {
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "phone"
                                       ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "leadSource"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "assignType"
                                       ? "col-12 col-md-6 col-xl-1"
                                       : field.key === "assignedUser" || field.key === "assignedTeam"
@@ -6340,6 +6555,78 @@ function CrmOnePageModule() {
                                         <div className="crm-inline-suggestions">
                                           <div className="crm-inline-suggestions__item">
                                             <span className="crm-inline-suggestions__item-main">No company results found</span>
+                                          </div>
+                                        </div>
+                                      )
+                                    ) : null}
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "deals" && field.key === "company") {
+                                return (
+                                  <div className="crm-inline-suggestions-wrap">
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
+                                      onFocus={() => setDealCompanySearchOpen(true)}
+                                      onClick={() => setDealCompanySearchOpen(true)}
+                                      onBlur={() => window.setTimeout(() => setDealCompanySearchOpen(false), 120)}
+                                      onChange={(event) => {
+                                        setField(sectionKey, field.key, event.target.value);
+                                        setDealCompanySearchOpen(true);
+                                      }}
+                                    />
+                                    {showDealCompanySuggestions ? (
+                                      (dealCrmContactMatches.length || dealCustomerMatches.length) ? (
+                                        <div className="crm-inline-suggestions">
+                                          {dealCrmContactMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                              {dealCrmContactMatches.map((contact) => (
+                                                <button
+                                                  key={`deal-crm-contact-${contact.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                    setDealCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                          {dealCustomerMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Clients</div>
+                                              {dealCustomerMatches.map((customer) => (
+                                                <button
+                                                  key={`deal-customer-${customer.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(customer.companyName || customer.clientName || customer.name || "").trim());
+                                                    setDealCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__item">
+                                            <span className="crm-inline-suggestions__item-main">No client or company results found</span>
                                           </div>
                                         </div>
                                       )
@@ -6559,9 +6846,7 @@ function CrmOnePageModule() {
                                           </button>
                                           <span>{selectedFollowUpOwner}</span>
                                         </span>
-                                      ) : (
-                                        <div className="small text-secondary">No owner selected yet.</div>
-                                      )}
+                                      ) : null}
                                     </div>
                                   </div>
                                 );
@@ -7164,7 +7449,7 @@ function CrmOnePageModule() {
                                       ? "email"
                                       : undefined
                                   }
-                                  className="form-control"
+                                  className={`form-control ${sectionKey === "meetings" && field.key === "relatedTo" ? "crm-meeting-relatedto-input" : ""}`}
                                   placeholder={field.placeholder}
                                   value={formValues[field.key] || ""}
                                   required={isCrmFieldRequired(sectionKey, field, formValues)}
@@ -7261,8 +7546,8 @@ function CrmOnePageModule() {
               withoutOuterCard={sectionKey !== "teams"}
               searchPlaceholder={`Search ${config.label.toLowerCase()}`}
               noRowsText={`No ${config.label.toLowerCase()} yet.`}
-              enableExport
-              enableImport
+              enableExport={sectionKey !== "meetings"}
+              enableImport={sectionKey !== "meetings"}
               exportFileName={`crm-${config.label.toLowerCase().replace(/\s+/g, "-")}`}
               onImportRows={(importedRows) => importRows(sectionKey, importedRows)}
               headerBottom={sectionKey === "leads" ? (
@@ -7329,7 +7614,7 @@ function CrmOnePageModule() {
                 if (column.key === "reminderSummary") {
                   return row.reminderSummary || buildCrmMeetingReminderSummary(row.reminderChannel, row.reminderDays, row.reminderMinutes);
                 }
-                return row[column.key] || "";
+                return formatDateLikeCellValue(column.key, row[column.key], "");
               }}
 	              renderCells={(row) =>
 	                config.columns.map((column) => {
@@ -7356,7 +7641,7 @@ function CrmOnePageModule() {
 	                        </button>
                       );
                     }
-                    return row[column.key] || "-";
+                    return formatDateLikeCellValue(column.key, row[column.key], "-");
                   }
                   if (sectionKey === "teams" && column.key === "employeeCount") {
                     const members = parseTeamMemberList(row?.members);
@@ -7377,7 +7662,11 @@ function CrmOnePageModule() {
                   if (sectionKey === "meetings" && column.key === "meetingTime") {
                     return formatTimeToAmPm(row[column.key]);
                   }
-	                  return row[column.key] || "-";
+                  if (sectionKey === "followUps" && column.key === "status") {
+                    const effectiveStatus = getFollowUpEffectiveStatus(row);
+                    return `${effectiveStatus[0].toUpperCase()}${effectiveStatus.slice(1)}`;
+                  }
+	                  return formatDateLikeCellValue(column.key, row[column.key], "-");
 	                })
               }
               renderActions={(row) => (
@@ -7399,6 +7688,15 @@ function CrmOnePageModule() {
                   <div>
                     <h6 className="mb-1">Meeting Schedule Calendar</h6>
                     <div className="small text-secondary">Click a meeting label to view reminder and schedule details.</div>
+                    <div className="small text-secondary mt-1 d-flex flex-wrap align-items-center gap-2">
+                      <span className="fw-semibold">Status:</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-scheduled" /> Scheduled</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-completed" /> Completed</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-rescheduled" /> Rescheduled</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-cancelled" /> Cancelled</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-missed" /> Missed</span>
+                      <span className="crm-meeting-legend-item"><span className="crm-meeting-legend-dot crm-meeting-pill-overdue" /> Overdue</span>
+                    </div>
                   </div>
                   <div className="d-flex align-items-center gap-2">
                     <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeCalendarMonth(-1)}>
@@ -7428,7 +7726,7 @@ function CrmOnePageModule() {
                           <button
                             key={meeting.id}
                             type="button"
-                            className={`btn btn-sm text-start ${isMeetingOverdue(meeting) ? "crm-meeting-pill-overdue" : "btn-success"}`}
+                            className={`btn btn-sm text-start ${getMeetingCalendarPillClass(meeting)}`}
                             style={{
                               fontSize: "0.7rem",
                               lineHeight: 1.2,
@@ -7481,7 +7779,7 @@ function CrmOnePageModule() {
             <div className="row g-3 small">
               <div className="col-6">
                 <div className="text-secondary">Date</div>
-                <div className="fw-semibold">{meetingPopup.meetingDate || "-"}</div>
+                <div className="fw-semibold">{formatDateLikeCellValue("meetingDate", meetingPopup.meetingDate, "-")}</div>
               </div>
               <div className="col-6">
                 <div className="text-secondary">Time</div>
@@ -7924,6 +8222,9 @@ function ProjectManagementModule() {
     setProjectFormNotice("");
     setFormValues(buildEmptyValues(config.fields));
     setShowProjectClientSuggestions(false);
+    window.requestAnimationFrame(() => {
+      clearFlatpickrDisplayValues(document);
+    });
   }
 
   function onDeleteRow(rowId) {
@@ -7960,14 +8261,27 @@ function ProjectManagementModule() {
 
   async function onSubmit(event) {
     event.preventDefault();
+    const syncedValuesResult = syncDateTimeFieldValuesFromForm(event.currentTarget, config.fields, formValues);
+    const effectiveValues = syncedValuesResult.values;
+    if (syncedValuesResult.changed) {
+      setFormValues((prev) => ({ ...prev, ...effectiveValues }));
+    }
     const visibleFields = config.fields.filter((field) => {
       const condition = field.conditionalOn;
       if (!condition) {
         return true;
       }
-      return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+      return String(effectiveValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const missingFields = visibleFields.filter((field) => !String(formValues[field.key] || "").trim());
+    const missingFields = visibleFields.filter((field) => {
+      if (field.type === "date") {
+        return !normalizeMeetingDateValue(effectiveValues[field.key]);
+      }
+      if (field.type === "time") {
+        return !normalizeMeetingTimeValue(effectiveValues[field.key]);
+      }
+      return !String(effectiveValues[field.key] || "").trim();
+    });
     if (missingFields.length) {
       setProjectFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
@@ -7993,7 +8307,13 @@ function ProjectManagementModule() {
     }
     const payload = {};
     config.fields.forEach((field) => {
-      payload[field.key] = String(formValues[field.key]).trim();
+      if (field.type === "date") {
+        payload[field.key] = normalizeMeetingDateValue(effectiveValues[field.key]);
+      } else if (field.type === "time") {
+        payload[field.key] = normalizeMeetingTimeValue(effectiveValues[field.key]);
+      } else {
+        payload[field.key] = String(effectiveValues[field.key]).trim();
+      }
     });
     if (activeTab === "attendance" && payload.status !== "Permission") {
       payload.permissionHours = "";
@@ -8503,7 +8823,7 @@ function ProjectManagementModule() {
               <span style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</span>,
             ];
           }
-          return config.columns.map((column) => row[column.key] || "-");
+          return config.columns.map((column) => formatDateLikeCellValue(column.key, row[column.key], "-"));
         }}
         renderActions={(row) => (
           <div className="d-inline-flex gap-2">
@@ -9098,7 +9418,7 @@ function ProjectDetailPage() {
             noRowsText="No expenses added yet."
             searchBy={(row) => [row.date, row.title, row.category, row.payee, row.notes, row.amount].join(" ")}
             renderCells={(row) => [
-              row.date || "-",
+              formatDateLikeCellValue("date", row.date, "-"),
               <span className="fw-semibold">{row.title || "-"}</span>,
               row.category || "-",
               row.payee || "-",
@@ -10083,6 +10403,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       next.temporarySameAsPermanent = false;
     }
     setFormValues(next);
+    window.requestAnimationFrame(() => {
+      clearFlatpickrDisplayValues(document);
+    });
   }
 
   function onDeleteRow(rowOrId) {
@@ -10141,21 +10464,37 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
 
   async function onSubmit(event) {
     event.preventDefault();
+    const syncedValuesResult = syncDateTimeFieldValuesFromForm(event.currentTarget, config.fields, formValues);
+    const effectiveValues = syncedValuesResult.values;
+    if (syncedValuesResult.changed) {
+      setFormValues((prev) => ({ ...prev, ...effectiveValues }));
+    }
     const visibleFields = config.fields.filter((field) => {
       const condition = field.conditionalOn;
       if (!condition) {
         if (
           activeTab === "employees"
-          && formValues.temporarySameAsPermanent
+          && effectiveValues.temporarySameAsPermanent
           && field.key.startsWith("temporary")
         ) {
           return false;
         }
         return true;
       }
-      return String(formValues[condition.key] || "").trim() === String(condition.value || "").trim();
+      return String(effectiveValues[condition.key] || "").trim() === String(condition.value || "").trim();
     });
-    const missingFields = visibleFields.filter((field) => !field.optional && !String(formValues[field.key] || "").trim());
+    const missingFields = visibleFields.filter((field) => {
+      if (field.optional) {
+        return false;
+      }
+      if (field.type === "date") {
+        return !normalizeMeetingDateValue(effectiveValues[field.key]);
+      }
+      if (field.type === "time") {
+        return !normalizeMeetingTimeValue(effectiveValues[field.key]);
+      }
+      return !String(effectiveValues[field.key] || "").trim();
+    });
     if (missingFields.length) {
       const fieldErrorMap = {};
       missingFields.forEach((field) => {
@@ -10169,13 +10508,19 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     setHrFieldErrors({});
     const payload = {};
     config.fields.forEach((field) => {
-      payload[field.key] = String(formValues[field.key]).trim();
+      if (field.type === "date") {
+        payload[field.key] = normalizeMeetingDateValue(effectiveValues[field.key]);
+      } else if (field.type === "time") {
+        payload[field.key] = normalizeMeetingTimeValue(effectiveValues[field.key]);
+      } else {
+        payload[field.key] = String(effectiveValues[field.key]).trim();
+      }
     });
     if (activeTab === "employees") {
       const matchedUser = hrUserLookupByName.get(String(payload.name || "").trim().toLowerCase());
-      payload.sourceUserId = String(formValues.sourceUserId || matchedUser?.id || "");
-      payload.sourceUserEmail = String(formValues.sourceUserEmail || matchedUser?.email || "");
-      payload.temporarySameAsPermanent = Boolean(formValues.temporarySameAsPermanent);
+      payload.sourceUserId = String(effectiveValues.sourceUserId || matchedUser?.id || "");
+      payload.sourceUserEmail = String(effectiveValues.sourceUserEmail || matchedUser?.email || "");
+      payload.temporarySameAsPermanent = Boolean(effectiveValues.temporarySameAsPermanent);
       if (payload.temporarySameAsPermanent) {
         Object.assign(payload, syncTemporaryAddressFromPermanent(payload));
       }
@@ -10739,7 +11084,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               }
               return row.entryMode ? `${status || "-"}${row.entryMode ? ` (${row.entryMode})` : ""}` : (status || "-");
             }
-            return row[column.key] || "-";
+            return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={(row) => (
             <div className="d-inline-flex gap-2 flex-nowrap">
@@ -11171,6 +11516,9 @@ function CategoryCrudModule({
   function onCancelEdit() {
     setEditingId("");
     setFormValues(buildEmptyValues(config.fields));
+    window.requestAnimationFrame(() => {
+      clearFlatpickrDisplayValues(document);
+    });
   }
 
   function onDeleteRow(rowOrId) {
@@ -11200,7 +11548,20 @@ function CategoryCrudModule({
 
   function onSubmit(event) {
     event.preventDefault();
-    const missingFields = config.fields.filter((field) => !String(formValues[field.key] || "").trim());
+    const syncedValuesResult = syncDateTimeFieldValuesFromForm(event.currentTarget, config.fields, formValues);
+    const effectiveValues = syncedValuesResult.values;
+    if (syncedValuesResult.changed) {
+      setFormValues((prev) => ({ ...prev, ...effectiveValues }));
+    }
+    const missingFields = config.fields.filter((field) => {
+      if (field.type === "date") {
+        return !normalizeMeetingDateValue(effectiveValues[field.key]);
+      }
+      if (field.type === "time") {
+        return !normalizeMeetingTimeValue(effectiveValues[field.key]);
+      }
+      return !String(effectiveValues[field.key] || "").trim();
+    });
     if (missingFields.length) {
       setCategoryNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
@@ -11208,7 +11569,13 @@ function CategoryCrudModule({
     setCategoryNotice("");
     const payload = {};
     config.fields.forEach((field) => {
-      payload[field.key] = String(formValues[field.key]).trim();
+      if (field.type === "date") {
+        payload[field.key] = normalizeMeetingDateValue(effectiveValues[field.key]);
+      } else if (field.type === "time") {
+        payload[field.key] = normalizeMeetingTimeValue(effectiveValues[field.key]);
+      } else {
+        payload[field.key] = String(effectiveValues[field.key]).trim();
+      }
     });
     if (isInventoryItemsTab) {
       const mainCategory = String(payload.mainCategory || "").trim();
@@ -11428,7 +11795,7 @@ function CategoryCrudModule({
                       searchPlaceholder={`Search ${cfg.label.toLowerCase()}`}
                       noRowsText={`No ${cfg.label.toLowerCase()} added yet.`}
                       searchBy={(row) => cfg.columns.map((column) => row[column.key] || "").join(" ")}
-                      renderCells={(row) => cfg.columns.map((column) => row[column.key] || "-")}
+                      renderCells={(row) => cfg.columns.map((column) => formatDateLikeCellValue(column.key, row[column.key], "-"))}
                       renderActions={(row) => (
                         <div className="d-inline-flex gap-2">
                           <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onCategoryEditRow(tabKey, row)}>
@@ -11467,7 +11834,7 @@ function CategoryCrudModule({
               const [, subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
               return row.subCategory || subCategory || "-";
             }
-            return row[column.key] || "-";
+            return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={(row) => (
             <div className="d-inline-flex gap-2">
@@ -11749,7 +12116,7 @@ function CategoryCrudModule({
               const [, subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
               return row.subCategory || subCategory || "-";
             }
-            return row[column.key] || "-";
+            return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={(row) => (
             <div className="d-inline-flex gap-2">
@@ -11775,7 +12142,7 @@ function CategoryCrudModule({
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
           noRowsText={`No ${config.label.toLowerCase()} added yet.`}
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-          renderCells={(row) => config.columns.map((column) => row[column.key] || "-")}
+          renderCells={(row) => config.columns.map((column) => formatDateLikeCellValue(column.key, row[column.key], "-"))}
           renderActions={(row) => (
             <div className="d-inline-flex gap-2">
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
@@ -11928,7 +12295,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       return DEFAULT_STOCKS_DATA;
     }
   });
-  const [orgBillingCurrency, setOrgBillingCurrency] = useState("INR");
+  const [orgBillingCurrency, setOrgBillingCurrency] = useState(() => getOrgCurrency());
   const [subscriptionCategories, setSubscriptionCategories] = useState([]);
   const [subscriptionSubCategories, setSubscriptionSubCategories] = useState([]);
   const [subscriptionCustomers, setSubscriptionCustomers] = useState([]);
@@ -12133,8 +12500,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           setOrgBillingCountry(country);
         }
         if (currency) {
-          setOrgBillingCurrency(currency);
-          setSubscriptionForm((prev) => (!editingSubscriptionId && !String(prev.id || "").trim() ? { ...prev, currency } : prev));
+          const nextCurrency = applyOrgCurrency(currency);
+          setOrgBillingCurrency(nextCurrency);
+          setSubscriptionForm((prev) => (!editingSubscriptionId && !String(prev.id || "").trim() ? { ...prev, currency: nextCurrency } : prev));
         }
       } catch {
         // keep default India when billing profile is unavailable
@@ -14027,8 +14395,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           return [
             <span className="fw-semibold">{row.docNo || "-"}</span>,
             row.customerName || "-",
-            row.issueDate || "-",
-            row.dueDate || "-",
+            formatDateLikeCellValue("issueDate", row.issueDate, "-"),
+            formatDateLikeCellValue("dueDate", row.dueDate, "-"),
             formatInr(totals.grandTotal),
             resolveGstTemplateName(row.gstTemplateId),
             ...(kind === "invoice" ? [
@@ -15226,7 +15594,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     className="form-control"
                     value={subscriptionForm.currency || defaultCurrency}
                     onChange={(event) => updateSubscriptionFormField("currency", event.target.value)}
-                    placeholder="INR"
+                    placeholder={defaultCurrency}
                   />
                 </div>
                 <div className="col-12 col-md-3">
@@ -15309,8 +15677,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <span className="fw-semibold">{row.subscriptionTitle || "-"}</span>,
                 row.customerName || "-",
                 `${String(row.currency || defaultCurrency).trim() || defaultCurrency} ${String(row.amount || "0").trim()}`,
-                row.startDate || "-",
-                row.endDate || "-",
+                formatDateLikeCellValue("startDate", row.startDate, "-"),
+                formatDateLikeCellValue("endDate", row.endDate, "-"),
                 row.status || "Active"
               ]}
               renderActions={(row) => (
@@ -15744,6 +16112,7 @@ function applyBusinessAutopilotCharacterLimit(target) {
 function BusinessAutopilotFormLimitScope({ children }) {
   return (
     <div
+      data-wz-skip-global-limit="true"
       onFocusCapture={(event) => applyBusinessAutopilotCharacterLimit(event.target)}
       onInputCapture={(event) => applyBusinessAutopilotCharacterLimit(event.target)}
     >

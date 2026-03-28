@@ -5,6 +5,7 @@ import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import TablePagination from "../components/TablePagination.jsx";
 import { setOrgTimezone as applyOrgTimezone } from "../lib/datetime.js";
 import { TIMEZONE_OPTIONS, getBrowserTimezone } from "../lib/timezones.js";
+import { getCurrencyCodeOptions, getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
 import { createOrgTicket } from "../api/orgTickets.js";
 import { showUploadAlert } from "../lib/uploadAlert.js";
 
@@ -48,7 +49,6 @@ const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
 const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const PROFILE_PHOTO_MAX_BYTES = 500 * 1024;
-const COMPANY_PROFILE_CURRENCIES = ["INR", "USD", "EUR", "AED", "SGD", "GBP", "AUD", "CAD"];
 const PROFILE_EMPLOYEE_DETAILS_FIELDS = [
   ["Department", "department"],
   ["Employee Role", "designation"],
@@ -311,6 +311,7 @@ export default function ProfilePage() {
   const [phoneCountry, setPhoneCountry] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [orgTimezone, setOrgTimezone] = useState("UTC");
+  const [orgCurrency, setOrgCurrency] = useState(() => getOrgCurrency());
   const [themePrimary, setThemePrimary] = useState("#e11d48");
   const [themeSecondary, setThemeSecondary] = useState("#f59e0b");
   const [themeDefaults, setThemeDefaults] = useState({ primary: "#e11d48", secondary: "#f59e0b" });
@@ -346,6 +347,25 @@ export default function ProfilePage() {
   const [backupProductSlug, setBackupProductSlug] = useState("");
   const [backupActionLoading, setBackupActionLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState("");
+  const [backupRefreshTick, setBackupRefreshTick] = useState(0);
+  const [backupRestoreFile, setBackupRestoreFile] = useState(null);
+  const [backupRestoreLoading, setBackupRestoreLoading] = useState(false);
+  const [googleBackupLoading, setGoogleBackupLoading] = useState(false);
+  const [googleBackupSaving, setGoogleBackupSaving] = useState(false);
+  const [googleBackupSettings, setGoogleBackupSettings] = useState({
+    google_connected: false,
+    product_slug: "business-autopilot-erp",
+    google_drive_folder_id: "",
+    scheduler_enabled: false,
+    schedule_frequency: "daily",
+    schedule_weekday: 0,
+    schedule_hour_utc: 2,
+    schedule_minute_utc: 0,
+    keep_last_backups: 7,
+    last_backup_status: "",
+    last_backup_at: "",
+    last_error_message: "",
+  });
   const [whatsappApiConfig, setWhatsappApiConfig] = useState(buildDefaultWhatsappApiConfig());
   const [whatsappApiNotice, setWhatsappApiNotice] = useState("");
   const [whatsappEventRules, setWhatsappEventRules] = useState([]);
@@ -365,6 +385,7 @@ export default function ProfilePage() {
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [photoUploadState, setPhotoUploadState] = useState({ loading: false, error: "", success: "" });
   const [passwordResetModalOpen, setPasswordResetModalOpen] = useState(false);
+  const currencyCodeOptions = useMemo(() => getCurrencyCodeOptions(), []);
   const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
   const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
   const currentProductSlug = globalSlug
@@ -430,6 +451,8 @@ export default function ProfilePage() {
         const timezone = data.org_timezone || "UTC";
         setOrgTimezone(timezone);
         applyOrgTimezone(timezone);
+        const loadedCurrency = String(data.org_currency || "").trim().toUpperCase() || getOrgCurrency();
+        setOrgCurrency(applyOrgCurrency(loadedCurrency));
         const defaults = {
           primary: normalizeHexColor(data.theme_defaults?.primary, "#e11d48"),
           secondary: normalizeHexColor(data.theme_defaults?.secondary, "#f59e0b"),
@@ -488,6 +511,10 @@ export default function ProfilePage() {
             ? String(data.profile.phone).trim().split(/\s+/).slice(1).join(" ")
             : (data?.profile?.phone || ""),
         });
+        const billingCurrency = String(data?.profile?.currency || "").trim().toUpperCase();
+        if (billingCurrency) {
+          setOrgCurrency(applyOrgCurrency(billingCurrency));
+        }
       } catch (error) {
         if (!active) {
           return;
@@ -576,7 +603,41 @@ export default function ProfilePage() {
     return () => {
       active = false;
     };
-  }, [backupProductSlug]);
+  }, [backupProductSlug, backupRefreshTick]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadGoogleBackupSettings() {
+      if (profileTopTab !== "backup" || !data?.org?.id) {
+        return;
+      }
+      setGoogleBackupLoading(true);
+      try {
+        const response = await apiFetch("/api/backup/google-drive/settings");
+        if (!active) {
+          return;
+        }
+        setGoogleBackupSettings((prev) => ({
+          ...prev,
+          ...response,
+        }));
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setBackupError(error?.message || "Unable to load Google Drive backup settings.");
+      } finally {
+        if (active) {
+          setGoogleBackupLoading(false);
+        }
+      }
+    }
+
+    loadGoogleBackupSettings();
+    return () => {
+      active = false;
+    };
+  }, [profileTopTab, data?.org?.id]);
 
   useEffect(() => {
     try {
@@ -623,12 +684,14 @@ export default function ProfilePage() {
           phone_country: phoneCountry,
           phone_number: phoneNumber,
           org_timezone: orgTimezone,
+          org_currency: orgCurrency,
           theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
           theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
           sidebar_menu_style: toServerSidebarMenuStyle(sidebarMenuStyle),
         })
       });
       applyOrgTimezone(orgTimezone || "UTC");
+      applyOrgCurrency(orgCurrency || "INR");
       if (typeof window !== "undefined") {
         if (normalizeSidebarMenuStyle(sidebarMenuStyle) === "icons") {
           window.localStorage.setItem(
@@ -674,12 +737,14 @@ export default function ProfilePage() {
           phone_country: phoneCountry,
           phone_number: phoneNumber,
           org_timezone: orgTimezone,
+          org_currency: orgCurrency,
           theme_primary: normalizeHexColor(themePrimary, themeDefaults.primary),
           theme_secondary: normalizeHexColor(themeSecondary, themeDefaults.secondary),
           sidebar_menu_style: toServerSidebarMenuStyle(sidebarMenuStyle),
         })
       });
       applyOrgTimezone(orgTimezone || "UTC");
+      applyOrgCurrency(orgCurrency || "INR");
       if (typeof window !== "undefined") {
         if (normalizeSidebarMenuStyle(sidebarMenuStyle) === "icons") {
           window.localStorage.setItem(
@@ -931,6 +996,8 @@ export default function ProfilePage() {
       setCompanyProfileForm(nextProfile);
       setOrgTimezone(nextProfile.timezone || "UTC");
       applyOrgTimezone(nextProfile.timezone || "UTC");
+      const nextCurrency = String(nextProfile.currency || "INR").trim().toUpperCase() || "INR";
+      setOrgCurrency(applyOrgCurrency(nextCurrency));
       setState((prev) => ({
         ...prev,
         data: prev.data
@@ -941,6 +1008,7 @@ export default function ProfilePage() {
                 name: nextProfile.company_name || prev.data.org?.name || "",
               },
               org_timezone: nextProfile.timezone || prev.data.org_timezone || "UTC",
+              org_currency: nextCurrency,
             }
           : prev.data,
       }));
@@ -967,9 +1035,114 @@ export default function ProfilePage() {
         })
       });
       setBackupNotice("Backup request queued. It will appear here once ready.");
+      setBackupRefreshTick((prev) => prev + 1);
       setBackupActionLoading(false);
     } catch (error) {
       setBackupError(error?.message || "Unable to request backup.");
+      setBackupActionLoading(false);
+    }
+  }
+
+  async function handleRestoreUpload() {
+    if (!backupRestoreFile) {
+      setBackupError("Please choose a backup zip file.");
+      return;
+    }
+    setBackupNotice("");
+    setBackupError("");
+    setBackupRestoreLoading(true);
+    try {
+      const formData = new FormData();
+      formData.set("backup_file", backupRestoreFile);
+      formData.set("product_slug", backupProductSlug);
+      await apiFetch("/api/backup/restore-upload", {
+        method: "POST",
+        body: formData,
+      });
+      setBackupNotice("Restore queued from uploaded backup. Data and media import will run in background.");
+      setBackupRestoreFile(null);
+      setBackupRefreshTick((prev) => prev + 1);
+    } catch (error) {
+      setBackupError(error?.message || "Unable to restore uploaded backup.");
+    } finally {
+      setBackupRestoreLoading(false);
+    }
+  }
+
+  async function handleGoogleBackupSettingsSave() {
+    setBackupNotice("");
+    setBackupError("");
+    setGoogleBackupSaving(true);
+    try {
+      const response = await apiFetch("/api/backup/google-drive/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          is_active: !!googleBackupSettings.is_active,
+          product_slug: googleBackupSettings.product_slug || backupProductSlug || "business-autopilot-erp",
+          google_drive_folder_id: googleBackupSettings.google_drive_folder_id || "",
+          scheduler_enabled: !!googleBackupSettings.scheduler_enabled,
+          schedule_frequency: googleBackupSettings.schedule_frequency || "daily",
+          schedule_weekday: Number(googleBackupSettings.schedule_weekday || 0),
+          schedule_hour_utc: Number(googleBackupSettings.schedule_hour_utc || 0),
+          schedule_minute_utc: Number(googleBackupSettings.schedule_minute_utc || 0),
+          keep_last_backups: Number(googleBackupSettings.keep_last_backups || 7),
+        }),
+      });
+      setGoogleBackupSettings((prev) => ({ ...prev, ...response }));
+      setBackupNotice("Google Drive backup settings saved.");
+    } catch (error) {
+      setBackupError(error?.message || "Unable to save Google Drive backup settings.");
+    } finally {
+      setGoogleBackupSaving(false);
+    }
+  }
+
+  async function handleGoogleDriveConnect() {
+    setBackupNotice("");
+    setBackupError("");
+    try {
+      const data = await apiFetch("/api/backup/google-drive/auth-start");
+      if (data?.auth_url) {
+        window.open(data.auth_url, "_blank", "width=560,height=700");
+      } else {
+        setBackupError("Unable to start Google Drive OAuth.");
+      }
+    } catch (error) {
+      setBackupError(error?.message || "Unable to start Google Drive OAuth.");
+    }
+  }
+
+  async function handleGoogleDriveDisconnect() {
+    setBackupNotice("");
+    setBackupError("");
+    try {
+      const response = await apiFetch("/api/backup/google-drive/disconnect", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (response?.settings) {
+        setGoogleBackupSettings((prev) => ({ ...prev, ...response.settings }));
+      }
+      setBackupNotice("Google Drive disconnected.");
+    } catch (error) {
+      setBackupError(error?.message || "Unable to disconnect Google Drive.");
+    }
+  }
+
+  async function handleGoogleBackupRunNow() {
+    setBackupNotice("");
+    setBackupError("");
+    setBackupActionLoading(true);
+    try {
+      await apiFetch("/api/backup/google-drive/run", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      setBackupNotice("Google Drive backup queued.");
+      setBackupRefreshTick((prev) => prev + 1);
+    } catch (error) {
+      setBackupError(error?.message || "Unable to queue Google Drive backup.");
+    } finally {
       setBackupActionLoading(false);
     }
   }
@@ -1617,7 +1790,7 @@ export default function ProfilePage() {
 
             <form className="mt-3" onSubmit={handleEmailSubmit}>
               <div className="row g-2 align-items-end">
-                <div className={`col-12 ${showTimezone ? "col-xl-4" : "col-xl-6"}`}>
+                <div className={`col-12 ${showTimezone ? "col-xl-3" : "col-xl-6"}`}>
                   <label className="form-label">Email</label>
                   <input
                     type="email"
@@ -1627,7 +1800,7 @@ export default function ProfilePage() {
                     required
                   />
                 </div>
-                <div className={`col-12 ${showTimezone ? "col-xl-4" : "col-xl-6"}`}>
+                <div className={`col-12 ${showTimezone ? "col-xl-3" : "col-xl-6"}`}>
                   <label className="form-label">Mobile Number</label>
                   <div className="input-group">
                     <PhoneCountryCodePicker
@@ -1647,7 +1820,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
                 {showTimezone ? (
-                  <div className="col-12 col-xl-4">
+                  <div className="col-12 col-xl-3">
                     <label className="form-label">Organization Timezone</label>
                     <select
                       className="form-select"
@@ -1657,6 +1830,25 @@ export default function ProfilePage() {
                       {tzList.map((tz) => (
                         <option key={tz.value} value={tz.value}>
                           {tz.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {showTimezone ? (
+                  <div className="col-12 col-xl-3">
+                    <label className="form-label">Organization Currency</label>
+                    <select
+                      className="form-select"
+                      value={orgCurrency || "INR"}
+                      onChange={(event) => {
+                        const nextCurrency = applyOrgCurrency(event.target.value);
+                        setOrgCurrency(nextCurrency);
+                      }}
+                    >
+                      {currencyCodeOptions.map((currencyCode) => (
+                        <option key={`profile-currency-${currencyCode}`} value={currencyCode}>
+                          {currencyCode}
                         </option>
                       ))}
                     </select>
@@ -1772,7 +1964,7 @@ export default function ProfilePage() {
                     value={companyProfileForm.currency || "INR"}
                     onChange={(event) => setCompanyProfileForm((prev) => ({ ...prev, currency: event.target.value }))}
                   >
-                    {COMPANY_PROFILE_CURRENCIES.map((currency) => (
+                    {currencyCodeOptions.map((currency) => (
                       <option key={`company-currency-${currency}`} value={currency}>{currency}</option>
                     ))}
                   </select>
@@ -2498,7 +2690,7 @@ export default function ProfilePage() {
       <div className="mt-3">
         <h5>Downloads & Backups</h5>
         <p className="text-secondary">
-          Generate a downloadable backup of your organization&apos;s data.
+          Download `data/` + `media/` backups, restore from uploaded backup zip, and configure Google Drive auto backup.
         </p>
         <div className="mb-2">
           <a className="btn btn-outline-light btn-sm" href="/app/backup-history">
@@ -2537,6 +2729,201 @@ export default function ProfilePage() {
               {backupActionLoading ? "Generating..." : "Generate Backup"}
             </button>
           </div>
+          <div className="col-12 col-md-4">
+            <label className="form-label">Restore Backup Zip</label>
+            <input
+              type="file"
+              className="form-control"
+              accept=".zip,application/zip"
+              onChange={(event) => setBackupRestoreFile(event.target.files?.[0] || null)}
+            />
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm mt-2"
+              onClick={handleRestoreUpload}
+              disabled={backupRestoreLoading || !backupRestoreFile}
+            >
+              {backupRestoreLoading ? "Restoring..." : "Upload & Restore"}
+            </button>
+          </div>
+        </div>
+
+        <div className="card p-3 mt-3">
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <h6 className="mb-0">Google Drive Backup</h6>
+            {googleBackupLoading ? <span className="badge bg-secondary">Loading</span> : null}
+            <span className={`badge ${googleBackupSettings.google_connected ? "bg-success" : "bg-secondary"}`}>
+              {googleBackupSettings.google_connected ? "Connected" : "Not Connected"}
+            </span>
+          </div>
+          <div className="row g-3">
+            <div className="col-12 col-md-3">
+              <label className="form-label">Product</label>
+              <select
+                className="form-select"
+                value={googleBackupSettings.product_slug || ""}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, product_slug: event.target.value }))
+                }
+              >
+                {backupProducts.length ? (
+                  backupProducts.map((product) => (
+                    <option key={product.slug} value={product.slug}>
+                      {product.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No Products</option>
+                )}
+              </select>
+            </div>
+            <div className="col-12 col-md-3">
+              <label className="form-label">Drive Parent Folder ID</label>
+              <input
+                type="text"
+                className="form-control"
+                value={googleBackupSettings.google_drive_folder_id || ""}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, google_drive_folder_id: event.target.value }))
+                }
+                placeholder="Optional Root Folder Id"
+              />
+            </div>
+            <div className="col-12 col-md-2">
+              <label className="form-label">Frequency</label>
+              <select
+                className="form-select"
+                value={googleBackupSettings.schedule_frequency || "daily"}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, schedule_frequency: event.target.value }))
+                }
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </div>
+            <div className="col-12 col-md-2">
+              <label className="form-label">Weekday</label>
+              <select
+                className="form-select"
+                value={googleBackupSettings.schedule_weekday ?? 0}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, schedule_weekday: event.target.value }))
+                }
+              >
+                <option value={0}>Mon</option>
+                <option value={1}>Tue</option>
+                <option value={2}>Wed</option>
+                <option value={3}>Thu</option>
+                <option value={4}>Fri</option>
+                <option value={5}>Sat</option>
+                <option value={6}>Sun</option>
+              </select>
+            </div>
+            <div className="col-12 col-md-2">
+              <label className="form-label">Hour (UTC)</label>
+              <input
+                type="number"
+                min="0"
+                max="23"
+                className="form-control"
+                value={googleBackupSettings.schedule_hour_utc ?? 2}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, schedule_hour_utc: event.target.value }))
+                }
+              />
+            </div>
+            <div className="col-12 col-md-2">
+              <label className="form-label">Minute (UTC)</label>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                className="form-control"
+                value={googleBackupSettings.schedule_minute_utc ?? 0}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, schedule_minute_utc: event.target.value }))
+                }
+              />
+            </div>
+            <div className="col-12 col-md-2">
+              <label className="form-label">Keep Last</label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                className="form-control"
+                value={googleBackupSettings.keep_last_backups ?? 7}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, keep_last_backups: event.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <div className="d-flex flex-wrap gap-3 mt-2">
+            <label className="form-check d-flex align-items-center gap-2 mb-0">
+              <input
+                className="form-check-input mt-0"
+                type="checkbox"
+                checked={!!googleBackupSettings.is_active}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, is_active: event.target.checked }))
+                }
+              />
+              <span className="small">Google Backup Active</span>
+            </label>
+            <label className="form-check d-flex align-items-center gap-2 mb-0">
+              <input
+                className="form-check-input mt-0"
+                type="checkbox"
+                checked={!!googleBackupSettings.scheduler_enabled}
+                onChange={(event) =>
+                  setGoogleBackupSettings((prev) => ({ ...prev, scheduler_enabled: event.target.checked }))
+                }
+              />
+              <span className="small">Auto Backup Scheduler</span>
+            </label>
+          </div>
+          <div className="d-flex flex-wrap gap-2 mt-3">
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm"
+              onClick={handleGoogleDriveConnect}
+              disabled={googleBackupSettings.google_connected}
+            >
+              Connect Google Drive
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              onClick={handleGoogleDriveDisconnect}
+              disabled={!googleBackupSettings.google_connected}
+            >
+              Disconnect
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm"
+              onClick={handleGoogleBackupSettingsSave}
+              disabled={googleBackupSaving}
+            >
+              {googleBackupSaving ? "Saving..." : "Save Settings"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleGoogleBackupRunNow}
+              disabled={!googleBackupSettings.google_connected || backupActionLoading}
+            >
+              Run Google Backup Now
+            </button>
+          </div>
+          <div className="small text-secondary mt-2">
+            Last backup: {googleBackupSettings.last_backup_at || "-"} | Status: {googleBackupSettings.last_backup_status || "-"}
+          </div>
+          {googleBackupSettings.last_error_message ? (
+            <div className="small text-danger mt-1">{googleBackupSettings.last_error_message}</div>
+          ) : null}
         </div>
 
         <div className="table-responsive mt-3">

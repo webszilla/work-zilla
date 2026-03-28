@@ -4,17 +4,23 @@ import threading
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.db.utils import OperationalError, ProgrammingError
+from django.core.files.storage import default_storage
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse, Http404, FileResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.models import UserProfile
 from core.models import Organization
+from apps.backend.core_platform import storage as storage_utils
 from .models import (
     SystemBackupLog,
     SystemBackupManagerSettings,
     OrganizationBackupLog,
     OrganizationRestoreLog,
+    GlobalMediaStorageSettings,
+    BlackblazeBackupSettings,
+    BlackblazeBackupArtifact,
 )
 from .org_backup_manager import (
     BackupManagerError as OrgBackupManagerError,
@@ -28,8 +34,23 @@ from .system_backup_manager import (
     build_google_oauth_authorize_url,
     exchange_google_oauth_code,
     queue_system_backup,
+    _tmp_path,
+    _generate_pg_dump,
+    _delete_temp_file,
 )
-from .tasks import run_system_backup_job, run_org_backup_job, run_org_restore_job, run_org_backup_all_job
+from .blackblaze_backup_manager import (
+    run_blackblaze_backup,
+    grouped_artifacts_last_days,
+    trigger_due_blackblaze_backups,
+)
+from .tasks import (
+    run_system_backup_job,
+    run_org_backup_job,
+    run_org_restore_job,
+    run_org_backup_all_job,
+    run_blackblaze_backup_job,
+    run_blackblaze_scheduler_tick,
+)
 
 
 def _is_saas_admin_user(user):
@@ -160,6 +181,46 @@ def _serialize_settings(obj: SystemBackupManagerSettings):
     }
 
 
+def _serialize_blackblaze_settings():
+    media_settings = GlobalMediaStorageSettings.get_solo()
+    try:
+        bb_settings = BlackblazeBackupSettings.get_solo()
+    except (ProgrammingError, OperationalError):
+        return {
+            "is_active": False,
+            "status": "offline",
+            "db_enabled": False,
+            "db_interval_hours": 4,
+            "db_retention_days": 7,
+            "script_enabled": False,
+            "script_daily_hour_local": 21,
+            "script_daily_minute_local": 0,
+            "script_retention_days": 7,
+            "last_db_backup_at": "",
+            "last_script_backup_at": "",
+            "last_error_message": "blackblaze_tables_not_migrated",
+            "storage_mode": media_settings.storage_mode,
+            "endpoint_url": media_settings.endpoint_url or "",
+        }
+    is_blackblaze = media_settings.storage_mode == "object" and media_settings.is_object_configured()
+    return {
+        "is_active": bool(bb_settings.is_active),
+        "status": "online" if is_blackblaze else "offline",
+        "db_enabled": bool(bb_settings.db_enabled),
+        "db_interval_hours": int(bb_settings.db_interval_hours or 4),
+        "db_retention_days": int(bb_settings.db_retention_days or 7),
+        "script_enabled": bool(bb_settings.script_enabled),
+        "script_daily_hour_local": int(bb_settings.script_daily_hour_local or 21),
+        "script_daily_minute_local": int(bb_settings.script_daily_minute_local or 0),
+        "script_retention_days": int(bb_settings.script_retention_days or 7),
+        "last_db_backup_at": _format_datetime(bb_settings.last_db_backup_at),
+        "last_script_backup_at": _format_datetime(bb_settings.last_script_backup_at),
+        "last_error_message": bb_settings.last_error_message or "",
+        "storage_mode": media_settings.storage_mode,
+        "endpoint_url": media_settings.endpoint_url or "",
+    }
+
+
 @login_required
 @require_http_methods(["GET"])
 def system_backup_manager_dashboard(request):
@@ -170,8 +231,15 @@ def system_backup_manager_dashboard(request):
     orgs = list(Organization.objects.order_by("name").values("id", "name"))
     latest_org_backup = OrganizationBackupLog.objects.select_related("organization").first()
     latest_restore = OrganizationRestoreLog.objects.select_related("organization").first()
+    try:
+        bb_grouped = grouped_artifacts_last_days(7)
+    except (ProgrammingError, OperationalError):
+        bb_grouped = {"db": {}, "script": {}}
     return JsonResponse({
         "settings": _serialize_settings(settings_obj),
+        "provider_tabs": ["google_drive", "blackblaze"],
+        "blackblaze": _serialize_blackblaze_settings(),
+        "blackblaze_grouped": bb_grouped,
         "organizations": orgs,
         "org_backup_summary": {
             "last_backup_date": _format_datetime(latest_org_backup.completed_at or latest_org_backup.created_at) if latest_org_backup else "",
@@ -182,6 +250,30 @@ def system_backup_manager_dashboard(request):
             "last_restore_status": latest_restore.status if latest_restore else "never",
         },
     })
+
+
+@login_required
+@require_http_methods(["GET"])
+def system_backup_manager_live_db_download(request):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+
+    sql_path = _tmp_path("workzilla_live_pg_", ".sql")
+    try:
+        _generate_pg_dump(sql_path)
+        with open(sql_path, "rb") as handle:
+            payload = handle.read()
+    except Exception as exc:
+        return JsonResponse({"detail": str(exc) or "live_db_dump_failed"}, status=400)
+    finally:
+        _delete_temp_file(sql_path)
+
+    stamp = timezone.localtime(timezone.now()).strftime("%Y%m%d_%H%M%S")
+    response = HttpResponse(payload, content_type="application/sql")
+    response["Content-Disposition"] = f'attachment; filename="live_db_backup_{stamp}.sql"'
+    response["Content-Length"] = str(len(payload))
+    return response
 
 
 @login_required
@@ -468,3 +560,121 @@ def system_backup_google_disconnect(request):
         "updated_at",
     ])
     return JsonResponse({"ok": True, "settings": _serialize_settings(settings_obj)})
+
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+def blackblaze_backup_settings(request):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+
+    try:
+        bb_settings = BlackblazeBackupSettings.get_solo()
+    except (ProgrammingError, OperationalError):
+        return JsonResponse({"detail": "blackblaze_tables_not_migrated"}, status=503)
+    if request.method == "GET":
+        return JsonResponse(_serialize_blackblaze_settings())
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    bb_settings.is_active = bool(payload.get("is_active", bb_settings.is_active))
+    bb_settings.db_enabled = bool(payload.get("db_enabled", bb_settings.db_enabled))
+    bb_settings.script_enabled = bool(payload.get("script_enabled", bb_settings.script_enabled))
+    try:
+        bb_settings.db_interval_hours = max(1, min(24, int(payload.get("db_interval_hours", bb_settings.db_interval_hours))))
+        bb_settings.db_retention_days = max(1, min(30, int(payload.get("db_retention_days", bb_settings.db_retention_days))))
+        bb_settings.script_daily_hour_local = max(0, min(23, int(payload.get("script_daily_hour_local", bb_settings.script_daily_hour_local))))
+        bb_settings.script_daily_minute_local = max(0, min(59, int(payload.get("script_daily_minute_local", bb_settings.script_daily_minute_local))))
+        bb_settings.script_retention_days = max(1, min(30, int(payload.get("script_retention_days", bb_settings.script_retention_days))))
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "invalid_schedule_values"}, status=400)
+    # Saving schedule/settings should not keep showing an old runtime backup error.
+    # Runtime errors (example: pg_dump missing) will be set again only when a backup job runs.
+    bb_settings.last_error_message = ""
+    bb_settings.save()
+    return JsonResponse(_serialize_blackblaze_settings())
+
+
+@login_required
+@require_http_methods(["POST"])
+def blackblaze_backup_run(request):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    backup_type = str(payload.get("backup_type") or "").strip().lower()
+    if backup_type not in ("db", "script"):
+        return JsonResponse({"detail": "backup_type_required"}, status=400)
+
+    try:
+        BlackblazeBackupSettings.get_solo()
+    except (ProgrammingError, OperationalError):
+        return JsonResponse({"detail": "blackblaze_tables_not_migrated"}, status=503)
+
+    try:
+        broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+        if broker_url.startswith("memory://"):
+            artifact = run_blackblaze_backup(backup_type)
+            return JsonResponse({"queued": True, "artifact_id": str(artifact.id)})
+        task = run_blackblaze_backup_job.delay(backup_type)
+        return JsonResponse({"queued": True, "task_id": str(task.id)})
+    except Exception as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def blackblaze_backup_files(request):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+    try:
+        BlackblazeBackupSettings.get_solo()
+    except (ProgrammingError, OperationalError):
+        return JsonResponse({"grouped": {"db": {}, "script": {}}, "detail": "blackblaze_tables_not_migrated"}, status=200)
+    days = request.GET.get("days") or 7
+    try:
+        days = max(1, min(30, int(days)))
+    except (TypeError, ValueError):
+        days = 7
+    return JsonResponse({"grouped": grouped_artifacts_last_days(days)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def blackblaze_backup_download(request, artifact_id):
+    error = _require_saas_admin(request)
+    if error:
+        return error
+
+    try:
+        artifact = BlackblazeBackupArtifact.objects.filter(id=artifact_id, status="completed").first()
+    except (ProgrammingError, OperationalError):
+        return JsonResponse({"detail": "blackblaze_tables_not_migrated"}, status=503)
+    if not artifact or not artifact.storage_path:
+        raise Http404
+
+    media_settings = GlobalMediaStorageSettings.get_solo()
+    storage = None
+    if media_settings.storage_mode == "object" and media_settings.is_object_configured():
+        storage = storage_utils._build_object_storage(media_settings)
+        if storage:
+            storage.location = ""
+    if storage is None:
+        storage = default_storage
+    try:
+        file_handle = storage.open(artifact.storage_path, "rb")
+    except Exception:
+        raise Http404
+
+    response = FileResponse(file_handle, content_type="application/octet-stream")
+    response["Content-Disposition"] = f'attachment; filename="{artifact.file_name or "backup.bin"}"'
+    return response

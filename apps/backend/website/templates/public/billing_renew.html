@@ -20,7 +20,7 @@
           </div>
           <div class="plan-summary__row">
             <span>Plan</span>
-            <strong>{{ selected_plan.name }}</strong>
+            <strong>{{ selected_plan_name|default:selected_plan.name }}</strong>
           </div>
           <div class="plan-summary__row">
             <span>Billing Cycle</span>
@@ -34,7 +34,7 @@
 
         <h3 class="section-title mt-4">Add-on Users</h3>
         <p class="text-secondary">Adjust add-on seats if needed. Amount recalculates on submission.</p>
-        <form class="mt-3" method="post" action="/my-account/billing/renew/confirm/">
+        <form class="mt-3" method="post" action="/my-account/billing/renew/confirm/" enctype="multipart/form-data">
           {% csrf_token %}
           {% if has_pending_renewal %}
             <div class="alert alert-warning">
@@ -44,19 +44,41 @@
           <div class="form-grid">
             <div class="form-field">
               <label>Add-on Users</label>
-              <input type="number" name="addon_count" min="0" value="{{ addon_count|default:0 }}">
+              <input
+                id="renew-addon-count"
+                type="number"
+                name="addon_count"
+                min="0"
+                step="1"
+                value="{{ addon_count|default:0 }}"
+              >
             </div>
             <div class="form-field">
               <label>Base Price</label>
-              <input type="text" value="{{ selected_currency|upper }} {{ base_price }}" readonly>
+              <input
+                id="renew-base-price-display"
+                type="text"
+                value="{{ selected_currency|upper }} {{ base_price|floatformat:2 }}"
+                readonly
+              >
             </div>
             <div class="form-field">
               <label>Add-on Price (per user)</label>
-              <input type="text" value="{{ selected_currency|upper }} {{ addon_price }}" readonly>
+              <input
+                id="renew-addon-price-display"
+                type="text"
+                value="{{ selected_currency|upper }} {{ addon_price|floatformat:2 }}"
+                readonly
+              >
             </div>
             <div class="form-field">
               <label>Estimated Total</label>
-              <input type="text" value="{{ selected_currency|upper }} {{ total_price }}" readonly>
+              <input
+                id="renew-total-price-display"
+                type="text"
+                value="{{ selected_currency|upper }} {{ total_price|floatformat:2 }}"
+                readonly
+              >
             </div>
           </div>
 
@@ -69,6 +91,16 @@
             <div class="form-field">
               <label>Paid Date (optional)</label>
               <input type="date" name="paid_on">
+            </div>
+            <div class="form-field form-field--full">
+              <label>Upload Payment Proof *</label>
+              <input
+                type="file"
+                name="receipt"
+                accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                required
+              >
+              <small class="text-secondary">Allowed: JPG, JPEG, PNG, PDF. Max size: 1MB.</small>
             </div>
             <div class="form-field form-field--full">
               <label>Notes (optional)</label>
@@ -89,4 +121,26 @@
       </div>
   </div>
 </section>
+<script>
+  (function () {
+    const addonInput = document.getElementById("renew-addon-count");
+    const totalDisplay = document.getElementById("renew-total-price-display");
+    if (!addonInput || !totalDisplay) {
+      return;
+    }
+    const currency = "{{ selected_currency|upper|escapejs }}";
+    const basePrice = Number("{{ base_price|default:0 }}") || 0;
+    const addonPrice = Number("{{ addon_price|default:0 }}") || 0;
+
+    const formatAmount = (amount) => `${currency} ${Number(amount).toFixed(2)}`;
+    const recalcTotal = () => {
+      const addonCount = Math.max(0, parseInt(addonInput.value || "0", 10) || 0);
+      totalDisplay.value = formatAmount(basePrice + addonCount * addonPrice);
+    };
+
+    addonInput.addEventListener("input", recalcTotal);
+    addonInput.addEventListener("change", recalcTotal);
+    recalcTotal();
+  })();
+</script>
 {% endblock %}

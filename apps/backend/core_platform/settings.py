@@ -252,7 +252,15 @@ CELERY_BEAT_SCHEDULE = {
     "saas-admin-system-backup-scheduler-tick": {
         "task": "saas_admin.system_backup_scheduler_tick",
         "schedule": 900.0,  # every 15 minutes
-    }
+    },
+    "saas-admin-blackblaze-backup-scheduler-tick": {
+        "task": "saas_admin.blackblaze_backup_scheduler_tick",
+        "schedule": 900.0,  # every 15 minutes
+    },
+    "org-google-backup-scheduler-tick": {
+        "task": "apps.backend.backups.tasks.run_due_org_google_backups_task",
+        "schedule": 900.0,  # every 15 minutes
+    },
 }
 BACKUP_INCLUDE_PREFIXES = os.environ.get(
     "BACKUP_INCLUDE_PREFIXES",

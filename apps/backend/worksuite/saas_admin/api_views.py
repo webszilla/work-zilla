@@ -1218,12 +1218,49 @@ def _serialize_deleted_account_entry(row):
 
 
 def _normalize_product_slugs(slug):
-    product_slug = "storage" if slug in ("storage", "online-storage") else slug
-    catalog_slug = "monitor" if product_slug == "work-suite" else product_slug
+    raw_slug = str(slug or "").strip().lower()
+    if raw_slug in ("storage", "online-storage"):
+        product_candidates = ["storage", "online-storage"]
+        catalog_candidates = ["storage", "online-storage"]
+    elif raw_slug in ("business-autopilot", "business-autopilot-erp"):
+        # Support both legacy and renamed slugs.
+        product_candidates = ["business-autopilot", "business-autopilot-erp"]
+        catalog_candidates = ["business-autopilot", "business-autopilot-erp"]
+    elif raw_slug in ("work-suite", "worksuite", "monitor"):
+        product_candidates = ["monitor", "work-suite", "worksuite"]
+        catalog_candidates = ["monitor", "work-suite", "worksuite"]
+    else:
+        product_candidates = [raw_slug]
+        catalog_candidates = [raw_slug]
+
+    product_slug = raw_slug
+    catalog_slug = raw_slug
+
+    existing_product_slugs = set(Product.objects.filter(slug__in=product_candidates).values_list("slug", flat=True))
+    if existing_product_slugs:
+        for candidate in product_candidates:
+            if candidate in existing_product_slugs:
+                product_slug = candidate
+                break
+    elif product_candidates:
+        product_slug = product_candidates[0]
+
+    existing_catalog_slugs = set(CatalogProduct.objects.filter(slug__in=catalog_candidates).values_list("slug", flat=True))
+    if existing_catalog_slugs:
+        for candidate in catalog_candidates:
+            if candidate in existing_catalog_slugs:
+                catalog_slug = candidate
+                break
+    elif catalog_candidates:
+        catalog_slug = catalog_candidates[0]
+
     return product_slug, catalog_slug
 
 
 def _plans_queryset_for_catalog_slug(catalog_slug):
+    catalog_slug = str(catalog_slug or "").strip().lower()
+    if catalog_slug in {"business-autopilot", "business-autopilot-erp"}:
+        return Plan.objects.filter(product__slug__in=["business-autopilot", "business-autopilot-erp"])
     if catalog_slug == "monitor":
         monitor_plans = Plan.objects.filter(product__slug="monitor")
         return monitor_plans if monitor_plans.exists() else Plan.objects.filter(product__isnull=True)
@@ -2602,7 +2639,7 @@ def _parse_bool(value):
 
 def _normalize_business_autopilot_plan_rules(plan):
     product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
-    if product_slug != "business-autopilot-erp":
+    if product_slug not in {"business-autopilot-erp", "business-autopilot"}:
         return
     plan_name = str(getattr(plan, "name", "") or "").strip().lower()
     features = dict(getattr(plan, "features", {}) or {})
@@ -2719,8 +2756,7 @@ def plans_list(request):
 
     if request.method == "GET":
         product_slug = (request.GET.get("product") or "").strip()
-        if product_slug == "work-suite":
-            product_slug = "monitor"
+        _, product_slug = _normalize_product_slugs(product_slug)
         plans = Plan.objects.all()
         if product_slug:
             plans = _plans_queryset_for_catalog_slug(product_slug)

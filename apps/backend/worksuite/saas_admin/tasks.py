@@ -12,6 +12,7 @@ from core.models import Organization
 from .models import GlobalMediaStorageSettings, MediaStoragePullJob
 from .org_backup_manager import run_org_backup_pipeline, run_org_restore_pipeline, queue_org_backup
 from .system_backup_manager import run_system_backup_pipeline, trigger_due_scheduled_backup
+from .blackblaze_backup_manager import run_blackblaze_backup, trigger_due_blackblaze_backups
 
 
 def _iter_local_media_files(local_root):
@@ -188,3 +189,24 @@ def run_org_backup_all_job(requested_by_user_id=None):
             if len(errors) < 20:
                 errors.append(f"{org.id}: {exc}")
     return {"queued": queued, "skipped": skipped, "errors": errors}
+
+
+@shared_task(name="saas_admin.blackblaze_backup_run")
+def run_blackblaze_backup_job(backup_type):
+    artifact = run_blackblaze_backup(str(backup_type or "").strip().lower())
+    return {"artifact_id": str(artifact.id), "backup_type": artifact.backup_type}
+
+
+@shared_task(name="saas_admin.blackblaze_backup_scheduler_tick")
+def run_blackblaze_scheduler_tick():
+    due = trigger_due_blackblaze_backups()
+    if not due.get("queued"):
+        return due
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "") or ""
+    backup_types = due.get("types") or []
+    for backup_type in backup_types:
+        if broker_url.startswith("memory://"):
+            threading.Thread(target=run_blackblaze_backup_job, args=(backup_type,), daemon=True).start()
+        else:
+            run_blackblaze_backup_job.delay(backup_type)
+    return {"queued": True, "types": backup_types}

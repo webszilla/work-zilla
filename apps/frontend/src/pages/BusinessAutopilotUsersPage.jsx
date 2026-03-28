@@ -53,7 +53,7 @@ const ROLE_ACCESS_SECTIONS = [
   { key: "crm", label: "CRM" },
   { key: "hr", label: "HR" },
   { key: "projects", label: "Projects" },
-  { key: "accounts", label: "Accounts / ERP" },
+  { key: "accounts", label: "Accounts" },
   { key: "subscriptions", label: "Subscriptions" },
   { key: "ticketing", label: "Ticketing" },
   { key: "stocks", label: "Inventory" },

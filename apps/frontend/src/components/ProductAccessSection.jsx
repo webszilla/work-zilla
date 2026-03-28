@@ -71,7 +71,7 @@ export default function ProductAccessSection({
       name: "Business Autopilot",
       icon: "bi-building-gear",
       description: "Modular ERP suite for CRM, HR, projects, accounts, ticketing, and stocks.",
-      features: ["CRM", "HR", "Projects", "Accounts / ERP", "Ticketing", "Stocks"]
+      features: ["CRM", "HR", "Projects", "Accounts", "Ticketing", "Stocks"]
     },
     "whatsapp-automation": {
       name: "Whatsapp Automation",

@@ -1004,6 +1004,9 @@ function AppShell({ state, productPrefix, productSlug }) {
 
   const navBase = basePath;
   const navPath = (path) => {
+    if (String(path || "").startsWith("/saas-admin")) {
+      return path;
+    }
     if (!navBase) {
       return path;
     }
@@ -1390,7 +1393,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               isDealer
                 ? <Navigate to={withBase("/dealer-dashboard")} replace />
                 : isSaasAdmin
-                ? <Navigate to={withBase("/saas-admin")} replace />
+                ? <Navigate to="/saas-admin" replace />
                 : productSlug === "storage"
                 ? <StorageDashboardPage subscriptions={state.subscriptions} />
                 : productSlug === "ai-chatbot"
@@ -2265,9 +2268,19 @@ export default function App() {
       el.setCustomValidity("");
     };
 
+    const shouldSkipGlobalLimit = (el) => {
+      if (!el || !(el instanceof Element)) {
+        return true;
+      }
+      if (el.hasAttribute("data-no-global-limit")) {
+        return true;
+      }
+      return Boolean(el.closest("[data-wz-skip-global-limit='true']"));
+    };
+
     const applyGlobalTextLimit = (event) => {
       const el = event?.target;
-      if (!el || !(el instanceof Element) || el.hasAttribute("data-no-global-limit")) {
+      if (shouldSkipGlobalLimit(el)) {
         return;
       }
       const setOverflowState = (inputEl, limit, valueLength) => {
@@ -2316,7 +2329,7 @@ export default function App() {
     const onBlur = (event) => {
       const el = event?.target;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        if (!el.hasAttribute("data-no-global-limit")) {
+        if (!shouldSkipGlobalLimit(el)) {
           applyGlobalTextLimit({ target: el });
           setValidationMessage(el);
         }
@@ -2331,7 +2344,7 @@ export default function App() {
       const controls = form.querySelectorAll("input, textarea");
       controls.forEach((el) => {
         if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          if (!el.hasAttribute("data-no-global-limit")) {
+          if (!shouldSkipGlobalLimit(el)) {
             applyGlobalTextLimit({ target: el });
           }
         }

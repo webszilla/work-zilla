@@ -10,11 +10,13 @@ import { loadRemoteSharedUiCss } from "./lib/sharedUi.js";
 import { bindGlobalEmailRealtimeValidation } from "./lib/emailRealtimeValidation.js";
 import { bindGlobalRequiredFieldValidation } from "./lib/requiredFieldValidation.js";
 import { bindGlobalDatePickerEnhancer } from "./lib/datePickerEnhancer.js";
+import { bindGlobalSelectPlaceholderShortener } from "./lib/selectPlaceholderShortener.js";
 
 loadRemoteSharedUiCss();
 bindGlobalEmailRealtimeValidation();
 bindGlobalRequiredFieldValidation();
 bindGlobalDatePickerEnhancer();
+bindGlobalSelectPlaceholderShortener();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

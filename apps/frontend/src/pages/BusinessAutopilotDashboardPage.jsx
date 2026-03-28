@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import ProductAccessSection from "../components/ProductAccessSection.jsx";
+import { formatCurrencyAmount, getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
 
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
@@ -219,6 +220,7 @@ export default function BusinessAutopilotDashboardPage({
   subscriptions = [],
   isOrgAdmin = false,
 }) {
+  const [orgCurrency, setOrgCurrency] = useState(() => getOrgCurrency());
   const [products, setProducts] = useState([]);
   const [accountsWorkspace, setAccountsWorkspace] = useState({});
   const [selectedComparisonYear, setSelectedComparisonYear] = useState(new Date().getFullYear());
@@ -237,6 +239,33 @@ export default function BusinessAutopilotDashboardPage({
   });
   const entries = Array.isArray(modules) ? modules : [];
   const allModules = Array.isArray(catalog) && catalog.length ? catalog : entries;
+
+  useEffect(() => {
+    let active = true;
+    async function loadOrgCurrency() {
+      try {
+        const data = await apiFetch("/api/dashboard/billing-profile");
+        if (!active) {
+          return;
+        }
+        const nextCurrency = applyOrgCurrency(String(data?.profile?.currency || "INR").trim().toUpperCase() || "INR");
+        setOrgCurrency(nextCurrency);
+      } catch {
+        if (active) {
+          setOrgCurrency(getOrgCurrency());
+        }
+      }
+    }
+    loadOrgCurrency();
+    const syncCurrency = () => setOrgCurrency(getOrgCurrency());
+    window.addEventListener("storage", syncCurrency);
+    window.addEventListener("focus", syncCurrency);
+    return () => {
+      active = false;
+      window.removeEventListener("storage", syncCurrency);
+      window.removeEventListener("focus", syncCurrency);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -413,8 +442,7 @@ export default function BusinessAutopilotDashboardPage({
     return `${productBasePath}${path.startsWith("/") ? path : `/${path}`}`;
   };
 
-  const formatCurrency = (value) =>
-    `INR ${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatCurrency = (value) => formatCurrencyAmount(value, orgCurrency);
 
   const statCards = [
     { key: "myAttendance", label: "My Attendance", value: String(quickStats.myAttendance || 0), icon: "bi-calendar-check", href: withProductBase("/hrm#attendance") },
@@ -543,6 +571,7 @@ export default function BusinessAutopilotDashboardPage({
                   previousYear={comparisonData.previousYear}
                   currentSeries={comparisonData.salesCurrent}
                   previousSeries={comparisonData.salesPrevious}
+                  yPrefix={`${orgCurrency} `}
                 />
               </div>
               <div className="col-12 col-lg-6">
@@ -553,6 +582,7 @@ export default function BusinessAutopilotDashboardPage({
                   previousYear={comparisonData.previousYear}
                   currentSeries={comparisonData.expensesCurrent}
                   previousSeries={comparisonData.expensesPrevious}
+                  yPrefix={`${orgCurrency} `}
                 />
               </div>
             </div>

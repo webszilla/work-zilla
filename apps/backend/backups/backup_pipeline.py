@@ -72,9 +72,9 @@ def _compute_sha256(file_path: str) -> str:
 def generate_backup_package(backup: BackupRecord):
     workdir = temp_workdir(backup.id)
     data_dir = os.path.join(workdir, "data")
-    files_dir = os.path.join(workdir, "files")
+    media_dir = os.path.join(workdir, "media")
     os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(files_dir, exist_ok=True)
+    os.makedirs(media_dir, exist_ok=True)
 
     try:
         mark_backup_started(backup)
@@ -106,7 +106,7 @@ def generate_backup_package(backup: BackupRecord):
             for storage_key in _iter_storage_files(prefix):
                 if not should_include_path(storage_key, include_prefixes, exclude_prefixes):
                     continue
-                _copy_file_to_dir(storage_key, files_dir)
+                _copy_file_to_dir(storage_key, media_dir)
                 file_list.append(storage_key)
 
         manifest = _build_manifest(backup, data_sections, file_list)

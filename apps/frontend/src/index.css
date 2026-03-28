@@ -696,6 +696,19 @@ html[data-theme="light"] .media-library .media-library-folders .list-group-item.
   color:#e2e8f0;
 }
 
+.app-shell :is(input.form-control, textarea.form-control, select.form-select) {
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  font-variant-caps: normal;
+}
+
+.app-shell select.form-select {
+  width: 100%;
+  max-width: 100%;
+  padding-right: 2.2rem;
+  text-overflow: clip;
+}
+
 /* Global form sizing: keep form inputs and actions visually aligned. */
 .app-shell form :is(
   .form-control,
@@ -737,6 +750,18 @@ html[data-theme="light"] .media-library .media-library-folders .list-group-item.
 .form-control::placeholder{
   color:#94a3b8;
 }
+
+/* Global text style: Labels and placeholders in Title Case across pages. */
+.app-shell .form-label,
+.app-shell label {
+  text-transform: capitalize;
+}
+
+.app-shell .form-control::placeholder,
+.app-shell input::placeholder,
+.app-shell textarea::placeholder {
+  text-transform: capitalize;
+}
 .form-control:focus,
 .form-select:focus{
   background:#0f172a;
@@ -761,6 +786,13 @@ textarea.is-invalid,
 input.is-invalid {
   border-color: #ef4444 !important;
   box-shadow: 0 0 0 0.12rem rgba(239, 68, 68, 0.14);
+}
+
+/* Prevent Bootstrap invalid icon spacing from clipping placeholder/value text. */
+.form-control.is-invalid,
+.was-validated .form-control:invalid {
+  padding-right: 0.75rem !important;
+  background-image: none !important;
 }
 
 .form-control.is-invalid:focus,
@@ -1250,6 +1282,61 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   background: #f59e0b !important;
   border-color: #f59e0b !important;
   color: #111827 !important;
+}
+
+.crm-meeting-pill-scheduled{
+  background:#16a34a !important;
+  border-color:#16a34a !important;
+  color:#ffffff !important;
+}
+
+.crm-meeting-pill-completed{
+  background:#f1f2f2 !important;
+  border-color:#9ca3af !important;
+  color:#111827 !important;
+}
+
+.crm-meeting-pill-rescheduled{
+  background:#0ea5e9 !important;
+  border-color:#0ea5e9 !important;
+  color:#ffffff !important;
+}
+
+.crm-meeting-pill-cancelled{
+  background:#6b7280 !important;
+  border-color:#6b7280 !important;
+  color:#ffffff !important;
+}
+
+.crm-meeting-pill-missed{
+  background:#ef4444 !important;
+  border-color:#ef4444 !important;
+  color:#ffffff !important;
+}
+
+.crm-meeting-legend-item{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+
+.crm-meeting-legend-dot{
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  border:1px solid transparent;
+  display:inline-block;
+}
+
+.crm-meeting-relatedto-input{
+  font-size:0.94rem;
+  letter-spacing:0;
+}
+
+.crm-meeting-relatedto-input::placeholder{
+  font-size:0.84rem;
+  letter-spacing:0;
+  text-overflow:clip;
 }
 
 html[data-theme="light"] .crm-meeting-calendar-cell{

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils.text import slugify
 import uuid
 
 from core.models import Organization
@@ -23,6 +24,20 @@ class Product(models.Model):
 
     class Meta:
         ordering = ("sort_order", "name")
+
+    def _build_unique_slug(self):
+        base = slugify(self.name or "")[:110] or "product"
+        candidate = base
+        index = 2
+        while Product.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+            suffix = f"-{index}"
+            candidate = f"{base[: max(1, 120 - len(suffix))]}{suffix}"
+            index += 1
+        return candidate
+
+    def save(self, *args, **kwargs):
+        self.slug = self._build_unique_slug()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -422,3 +437,63 @@ class MediaStoragePullJob(models.Model):
 
     def __str__(self):
         return f"Media Pull {self.id} ({self.status})"
+
+
+class BlackblazeBackupSettings(models.Model):
+    provider = models.CharField(max_length=40, default="blackblaze", unique=True)
+    is_active = models.BooleanField(default=False)
+    db_enabled = models.BooleanField(default=True)
+    db_interval_hours = models.PositiveSmallIntegerField(default=4)
+    db_retention_days = models.PositiveSmallIntegerField(default=7)
+    script_enabled = models.BooleanField(default=True)
+    script_daily_hour_local = models.PositiveSmallIntegerField(default=21)  # 9 PM local
+    script_daily_minute_local = models.PositiveSmallIntegerField(default=0)
+    script_retention_days = models.PositiveSmallIntegerField(default=7)
+    last_db_backup_at = models.DateTimeField(null=True, blank=True)
+    last_script_backup_at = models.DateTimeField(null=True, blank=True)
+    last_error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Blackblaze Backup Settings"
+        verbose_name_plural = "Blackblaze Backup Settings"
+
+    @classmethod
+    def get_solo(cls):
+        obj = cls.objects.filter(provider="blackblaze").first()
+        if obj:
+            return obj
+        return cls.objects.create(provider="blackblaze")
+
+
+class BlackblazeBackupArtifact(models.Model):
+    BACKUP_TYPE_CHOICES = (
+        ("db", "Database"),
+        ("script", "SaaS Files"),
+    )
+    STATUS_CHOICES = (
+        ("running", "Running"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("expired", "Expired"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    backup_type = models.CharField(max_length=20, choices=BACKUP_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="running")
+    storage_path = models.TextField(blank=True, default="")
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    size_bytes = models.BigIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default="")
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["backup_type", "created_at"], name="bb_art_type_created_idx"),
+            models.Index(fields=["status", "created_at"], name="bb_art_status_created_idx"),
+        ]

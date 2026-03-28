@@ -27,7 +27,7 @@ const ERP_MODULE_OPTIONS = [
   { slug: "crm", label: "CRM" },
   { slug: "hrm", label: "HR Management" },
   { slug: "projects", label: "Project Management" },
-  { slug: "accounts", label: "Accounts / ERP" },
+  { slug: "accounts", label: "Accounts" },
   { slug: "subscriptions", label: "Subscriptions" },
   { slug: "ticketing", label: "Ticketing System" },
   { slug: "stocks", label: "Inventory" },

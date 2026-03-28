@@ -164,6 +164,7 @@ def _ticket_product_label(slug):
         "storage": "Online Storage",
         "ai-chatbot": "AI Chatbot",
         "imposition-software": "Print Marks",
+        "business-autopilot": "Business Autopilot",
         "business-autopilot-erp": "Business Autopilot",
         "whatsapp-automation": "Whatsapp Automation",
         "digital-card": "Digital Card",
@@ -689,7 +690,7 @@ def _dashboard_path_for_product(value):
         return "/app/work-suite/"
     if slug == "imposition-software":
         return "/app/imposition/"
-    if slug == "business-autopilot-erp":
+    if slug in {"business-autopilot-erp", "business-autopilot"}:
         return "/app/business-autopilot/"
     return f"/app/{slug}/"
 
@@ -713,9 +714,21 @@ def _display_product_name(product=None, slug=None):
         return "AI Chatbot"
     if normalized_slug == "imposition-software":
         return "Print Marks"
-    if normalized_slug == "business-autopilot-erp":
+    if normalized_slug in {"business-autopilot-erp", "business-autopilot"}:
         return "Business Autopilot"
     return "Work Suite"
+
+
+def _display_plan_name(plan=None, fallback="-"):
+    raw_name = str(getattr(plan, "name", "") or "").strip()
+    if not raw_name:
+        return fallback
+    # Legacy ERP suffix is hidden in customer-facing views ("Pro ERP" -> "Pro")
+    if raw_name.lower().endswith(" erp"):
+        normalized = raw_name[:-4].strip()
+        if normalized:
+            return normalized
+    return raw_name
 
 
 def _storage_is_free_plan(plan):
@@ -1270,8 +1283,32 @@ def _addon_price(plan, currency, billing):
     currency = (currency or "inr").lower()
     billing = (billing or "monthly").lower()
     if currency == "usd":
-        return plan.addon_usd_monthly_price if billing == "monthly" else plan.addon_usd_yearly_price
-    return plan.addon_monthly_price if billing == "monthly" else plan.addon_yearly_price
+        direct_value = plan.addon_usd_monthly_price if billing == "monthly" else plan.addon_usd_yearly_price
+    else:
+        direct_value = plan.addon_monthly_price if billing == "monthly" else plan.addon_yearly_price
+    if direct_value not in (None, ""):
+        try:
+            parsed = float(direct_value)
+        except (TypeError, ValueError):
+            parsed = 0.0
+        if parsed > 0:
+            return parsed
+
+    # Pricing page for Business Autopilot uses limits.user_price_*.
+    limits = getattr(plan, "limits", None) or {}
+    if currency == "usd":
+        key = "user_price_usdt_month" if billing == "monthly" else "user_price_usdt_year"
+        fallback = limits.get(key)
+        if fallback in (None, ""):
+            alt_key = "user_price_usd_month" if billing == "monthly" else "user_price_usd_year"
+            fallback = limits.get(alt_key)
+    else:
+        key = "user_price_inr_month" if billing == "monthly" else "user_price_inr_year"
+        fallback = limits.get(key)
+    try:
+        return float(fallback or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _active_subscription_for_product(org, product_slug):
@@ -1801,6 +1838,7 @@ def billing_renew_view(request):
 
     context.update({
         "selected_plan": plan,
+        "selected_plan_name": _display_plan_name(plan),
         "selected_product_slug": product_slug,
         "selected_currency": currency,
         "selected_billing": billing,
@@ -1850,6 +1888,7 @@ def billing_renew_confirm(request):
     utr_number = (request.POST.get("utr_number") or "").strip()
     paid_on = request.POST.get("paid_on") or None
     notes = (request.POST.get("notes") or "").strip()
+    receipt = request.FILES.get("receipt")
 
     org = _resolve_org_for_user(request.user)
     profile = UserProfile.objects.filter(user=request.user).first()
@@ -1881,6 +1920,25 @@ def billing_renew_confirm(request):
             )
             messages.info(request, "A renewal request is already pending approval.")
             return redirect("/my-account/")
+
+    if not receipt:
+        messages.error(request, "Please upload payment proof.")
+        return redirect("/my-account/billing/renew/")
+    if receipt.size and receipt.size > (1 * 1024 * 1024):
+        messages.error(request, "Payment proof must be 1MB or smaller.")
+        return redirect("/my-account/billing/renew/")
+    allowed_ext = {".jpg", ".jpeg", ".png", ".pdf"}
+    filename = str(receipt.name or "")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in allowed_ext:
+        messages.error(request, "Allowed file types: JPG, JPEG, PNG, PDF.")
+        return redirect("/my-account/billing/renew/")
+    content_type = (getattr(receipt, "content_type", "") or "").lower()
+    allowed_content_types = {"image/jpeg", "image/png", "application/pdf"}
+    if content_type and content_type not in allowed_content_types:
+        messages.error(request, "Invalid file type. Allowed: JPG, JPEG, PNG, PDF.")
+        return redirect("/my-account/billing/renew/")
+
     amount = float(_plan_price(plan, currency, billing) or 0)
     addon_price = float(_addon_price(plan, currency, billing) or 0)
     amount = amount + (addon_price * addon_count)
@@ -1904,6 +1962,7 @@ def billing_renew_confirm(request):
             status="pending",
             reference_no=utr_number,
             paid_on=paid_on,
+            receipt=receipt,
             notes=notes,
         )
 
@@ -2272,7 +2331,7 @@ def account_view(request):
             pending_renewal_rows.append({
                 "product_name": _display_product_name(product=product, slug=slug),
                 "product_slug": slug,
-                "plan_name": transfer.plan.name if transfer.plan else "-",
+                "plan_name": _display_plan_name(transfer.plan),
                 "billing_cycle": transfer.billing_cycle,
                 "status": transfer.status,
                 "created_at": transfer.created_at,
@@ -2293,7 +2352,7 @@ def account_view(request):
             pending_payment_rows.append({
                 "product_name": _display_product_name(product=product, slug=product.slug if product else "monitor"),
                 "product_slug": product.slug if product else "monitor",
-                "plan_name": transfer.plan.name if transfer.plan else "-",
+                "plan_name": _display_plan_name(transfer.plan),
                 "billing_cycle": transfer.billing_cycle,
                 "status": transfer.status,
                 "created_at": transfer.created_at,
@@ -2323,7 +2382,8 @@ def account_view(request):
         slug = getattr(sub, "product_slug", None) or "monitor"
         base_transfer = base_by_slug.get(slug)
         addon_transfer = addon_by_slug.get(slug)
-        sub.info_plan_name = sub.plan.name if sub.plan else "-"
+        sub.display_plan_name = _display_plan_name(sub.plan)
+        sub.info_plan_name = sub.display_plan_name
         sub.info_billing_cycle = sub.billing_cycle
         sub.info_status = sub.status
         sub.info_start_date = getattr(sub, "start_date", None)
