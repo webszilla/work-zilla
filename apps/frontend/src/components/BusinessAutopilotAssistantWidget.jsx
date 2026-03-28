@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { formatDateLikeValue } from "../lib/datetime.js";
 import AiAvatar from "./chat/AiAvatar.jsx";
 import { getAiEmotionEmoji, getAiEmotionFromText } from "./chat/aiAvatarConfig.js";
 
@@ -458,7 +459,7 @@ export default function BusinessAutopilotAssistantWidget({
             </div>
           </div>
           <div className="ba-assistant__date-strip">
-            {isViewingToday ? "Today chat" : `Viewing ${historyDate} history`}
+            {isViewingToday ? "Today chat" : `Viewing ${formatDateLikeValue(historyDate, historyDate)} history`}
           </div>
           <div className="ba-assistant__chips">
             {quickQuestions.map((item) => (

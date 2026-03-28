@@ -324,16 +324,16 @@ const CRM_SECTION_CONFIG = {
     icon: "bi-clock-history",
     columns: [
       { key: "activityType", label: "Activity Type" },
-      { key: "relatedTo", label: "Related To" },
+      { key: "relatedTo", label: "Client Name" },
       { key: "date", label: "Date" },
-      { key: "owner", label: "Owner" },
+      { key: "owner", label: "Assigned Users" },
       { key: "notes", label: "Notes" }
     ],
     fields: [
       { key: "activityType", label: "Activity Type", placeholder: "Call / Meeting / Demo / Email" },
-      { key: "relatedTo", label: "Related To", placeholder: "Lead / Deal / Contact" },
-      { key: "date", label: "Date", placeholder: "YYYY-MM-DD" },
-      { key: "owner", label: "Owner", placeholder: "User name" },
+      { key: "relatedTo", label: "Client Name", placeholder: "Search client / company" },
+      { key: "date", label: "Date", type: "date" },
+      { key: "owner", label: "Assigned Users", type: "multiselect", defaultValue: [] },
       { key: "notes", label: "Notes", placeholder: "Short activity notes" }
     ]
   },
@@ -361,7 +361,7 @@ const CRM_SECTION_CONFIG = {
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: [] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
       { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: [] },
-      { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled"], defaultValue: "" }
+      { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled", "Missed"], defaultValue: "" }
     ]
   }
 };
@@ -1168,6 +1168,8 @@ function buildEmptyValues(fields) {
   return fields.reduce((acc, field) => {
     if (field.type === "multiselect") {
       acc[field.key] = Array.isArray(field.defaultValue) ? [...field.defaultValue] : [];
+    } else if (field.type === "select") {
+      acc[field.key] = "";
     } else {
       acc[field.key] = field.defaultValue ?? "";
     }
@@ -3684,7 +3686,11 @@ function normalizeMeetingDateValue(value) {
 }
 
 function getTodayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getCurrentTimeHm() {
@@ -4205,11 +4211,11 @@ function SearchablePaginatedTableCard({
           ) : null}
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsExcelCsv}>
             <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
-            Export
+            Export CSV
           </button>
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsPdf}>
             <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
-            Export
+            Export PDF
           </button>
         </>
       ) : null}
@@ -4407,6 +4413,7 @@ function CrmOnePageModule() {
   const [teamMemberSearch, setTeamMemberSearch] = useState("");
   const [teamMemberSearchOpen, setTeamMemberSearchOpen] = useState(false);
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
+  const [activityClientSearchOpen, setActivityClientSearchOpen] = useState(false);
   const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
   const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
   const [meetingReminderDaySearch, setMeetingReminderDaySearch] = useState("");
@@ -4415,6 +4422,8 @@ function CrmOnePageModule() {
   const [meetingReminderMinuteSearchOpen, setMeetingReminderMinuteSearchOpen] = useState(false);
   const [meetingEmployeeSearch, setMeetingEmployeeSearch] = useState("");
   const [meetingEmployeeSearchOpen, setMeetingEmployeeSearchOpen] = useState(false);
+  const [activityEmployeeSearch, setActivityEmployeeSearch] = useState("");
+  const [activityEmployeeSearchOpen, setActivityEmployeeSearchOpen] = useState(false);
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
   const [leadAssignedUserSearch, setLeadAssignedUserSearch] = useState("");
   const [leadAssignedUserSearchOpen, setLeadAssignedUserSearchOpen] = useState(false);
@@ -4529,6 +4538,14 @@ function CrmOnePageModule() {
       setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "activities") {
+      setActivityClientSearchOpen(false);
+      setActivityEmployeeSearch("");
+      setActivityEmployeeSearchOpen(false);
     }
   }, [activeSection]);
 
@@ -4699,6 +4716,11 @@ function CrmOnePageModule() {
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
+    if (sectionKey === "activities") {
+      setActivityClientSearchOpen(false);
+      setActivityEmployeeSearch("");
+      setActivityEmployeeSearchOpen(false);
+    }
     if (sectionKey === "followUps") {
       setFollowUpRelatedToType(CRM_FOLLOWUP_RELATED_TO_TYPES[0]);
       setFollowUpRelatedToSearch("");
@@ -4762,6 +4784,11 @@ function CrmOnePageModule() {
       setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
+    }
+    if (sectionKey === "activities") {
+      setActivityClientSearchOpen(false);
+      setActivityEmployeeSearch("");
+      setActivityEmployeeSearchOpen(false);
     }
     if (sectionKey === "followUps") {
       const normalizedRelatedTo = String(normalizedRow.relatedTo || "").trim();
@@ -4831,32 +4858,66 @@ function CrmOnePageModule() {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
+    let effectiveValues = values;
+    if (sectionKey === "meetings" && event.currentTarget instanceof HTMLFormElement) {
+      const dateInput = event.currentTarget.querySelector('input[name="meetingDate"]');
+      const timeInput = event.currentTarget.querySelector('input[name="meetingTime"]');
+      const dateAltInput = dateInput?.__wzFlatpickrInstance?.altInput;
+      const timeAltInput = timeInput?.__wzFlatpickrInstance?.altInput;
+      const normalizedMeetingDate = normalizeMeetingDateValue(
+        (dateAltInput?.value ?? dateInput?.value ?? "").trim()
+      );
+      const normalizedMeetingTime = normalizeMeetingTimeValue(
+        (timeAltInput?.value ?? timeInput?.value ?? "").trim()
+      );
+      effectiveValues = {
+        ...values,
+        meetingDate: normalizedMeetingDate,
+        meetingTime: normalizedMeetingTime,
+      };
+      if (effectiveValues.meetingDate !== values.meetingDate || effectiveValues.meetingTime !== values.meetingTime) {
+        setForms((prev) => ({
+          ...prev,
+          meetings: {
+            ...prev.meetings,
+            meetingDate: effectiveValues.meetingDate,
+            meetingTime: effectiveValues.meetingTime,
+          },
+        }));
+      }
+    }
     const invalidEmailFields = config.fields.filter((field) => {
-      if (!isCrmFieldRequired(sectionKey, field, values)) {
+      if (!isCrmFieldRequired(sectionKey, field, effectiveValues)) {
         return false;
       }
       const hasEmailFieldKey = String(field?.key || "").toLowerCase().includes("email");
       if (!hasEmailFieldKey) {
         return false;
       }
-      const fieldValue = String(values[field.key] || "").trim();
+      const fieldValue = String(effectiveValues[field.key] || "").trim();
       if (!fieldValue) {
         return false;
       }
       return !EMAIL_ADDRESS_RE.test(fieldValue);
     });
     const missingFields = config.fields.filter((field) => {
-      if (!isCrmFieldRequired(sectionKey, field, values)) {
+      if (!isCrmFieldRequired(sectionKey, field, effectiveValues)) {
         return false;
       }
       if (sectionKey === "meetings" && field.key === "meetingDate") {
-        return !normalizeMeetingDateValue(values[field.key]);
+        return !normalizeMeetingDateValue(effectiveValues[field.key]);
+      }
+      if (sectionKey === "meetings" && field.key === "meetingTime") {
+        return !normalizeMeetingTimeValue(effectiveValues[field.key]);
       }
       if (field.type === "multiselect") {
-        return !Array.isArray(values[field.key]) || values[field.key].length === 0;
+        return !Array.isArray(effectiveValues[field.key]) || effectiveValues[field.key].length === 0;
       }
-      return !String(values[field.key] || "").trim();
+      return !String(effectiveValues[field.key] || "").trim();
     });
+    if (sectionKey === "teams" && !selectedTeamDepartments.length) {
+      missingFields.push({ key: "departmentFilters", label: "Select Department" });
+    }
     if (missingFields.length || invalidEmailFields.length) {
       const missingFieldMap = {};
       missingFields.forEach((field) => {
@@ -4885,9 +4946,9 @@ function CrmOnePageModule() {
     let payload = {};
     config.fields.forEach((field) => {
       if (field.type === "multiselect") {
-        payload[field.key] = Array.isArray(values[field.key]) ? values[field.key].map((v) => String(v).trim()).filter(Boolean) : [];
+        payload[field.key] = Array.isArray(effectiveValues[field.key]) ? effectiveValues[field.key].map((v) => String(v).trim()).filter(Boolean) : [];
       } else {
-        payload[field.key] = String(values[field.key] || "").trim();
+        payload[field.key] = String(effectiveValues[field.key] || "").trim();
       }
     });
     if (sectionKey === "leads") {
@@ -4919,6 +4980,15 @@ function CrmOnePageModule() {
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
       payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
+    }
+    if (sectionKey === "activities") {
+      const activityOwners = Array.isArray(payload.owner)
+        ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
+        : String(payload.owner || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      payload.owner = activityOwners.join(", ");
     }
     if (sectionKey === "followUps") {
       const normalizedStatus = String(payload.status || "").trim().toLowerCase();
@@ -4986,6 +5056,7 @@ function CrmOnePageModule() {
     setSectionFieldErrors((prev) => {
       const teamErrors = { ...(prev.teams || {}) };
       delete teamErrors.members;
+      delete teamErrors.departmentFilters;
       return { ...prev, teams: teamErrors };
     });
   }
@@ -5077,6 +5148,31 @@ function CrmOnePageModule() {
         ...prev,
         meetings: {
           ...prev.meetings,
+          owner: nextOwners,
+        },
+      };
+    });
+  }
+
+  function toggleActivityEmployee(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setForms((prev) => {
+      const currentOwners = Array.isArray(prev.activities?.owner)
+        ? prev.activities.owner
+        : String(prev.activities?.owner || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      const nextOwners = currentOwners.includes(normalizedValue)
+        ? currentOwners.filter((item) => item !== normalizedValue)
+        : [...currentOwners, normalizedValue];
+      return {
+        ...prev,
+        activities: {
+          ...prev.activities,
           owner: nextOwners,
         },
       };
@@ -5379,7 +5475,7 @@ function CrmOnePageModule() {
     for (let i = 0; i < 42; i += 1) {
       const current = new Date(gridStart);
       current.setDate(gridStart.getDate() + i);
-      const isoDate = current.toISOString().slice(0, 10);
+      const isoDate = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
       cells.push({
         isoDate,
         day: current.getDate(),
@@ -5399,12 +5495,34 @@ function CrmOnePageModule() {
     setCalendarMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   }
 
+  function isMeetingOverdue(row) {
+    const status = String(row?.status || "").trim().toLowerCase();
+    const meetingDate = String(row?.meetingDate || "").trim();
+    if (status !== "scheduled") return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)) return false;
+    return meetingDate < getTodayIsoDate();
+  }
+
   function openMeetingPopup(row) {
     setMeetingPopup(row);
   }
 
   function closeMeetingPopup() {
     setMeetingPopup(null);
+  }
+
+  function updateMeetingStatus(meetingId, nextStatus) {
+    const status = String(nextStatus || "").trim();
+    if (!meetingId || !status) return;
+    setModuleData((prev) => ({
+      ...prev,
+      meetings: (prev.meetings || []).map((row) => (
+        String(row.id) === String(meetingId) ? { ...row, status } : row
+      )),
+    }));
+    setMeetingPopup((prev) => (
+      prev && String(prev.id) === String(meetingId) ? { ...prev, status } : prev
+    ));
   }
 
   function openTeamMembersPopup(row) {
@@ -5477,6 +5595,7 @@ function CrmOnePageModule() {
           { key: "completed", label: "Completed" },
           { key: "rescheduled", label: "Rescheduled" },
           { key: "cancelled", label: "Cancelled" },
+          { key: "missed", label: "Missed" },
         ];
         const followUpStatusTabs = [
           { key: "all", label: "All" },
@@ -5533,6 +5652,7 @@ function CrmOnePageModule() {
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
+        const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads"
           ? (moduleData.contacts || []).filter((contact) => {
               if (!leadCompanyQuery) {
@@ -5603,6 +5723,24 @@ function CrmOnePageModule() {
               return haystack.includes(meetingCompanyQuery);
             }).slice(0, 6)
           : [];
+        const activityContactMatches = sectionKey === "activities"
+          ? (moduleData.contacts || []).filter((contact) => {
+              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              if (!activityClientQuery) {
+                return true;
+              }
+              return haystack.includes(activityClientQuery);
+            }).slice(0, 6)
+          : [];
+        const activityCustomerMatches = sectionKey === "activities"
+          ? sharedCustomerOptions.filter((customer) => {
+              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+              if (!activityClientQuery) {
+                return true;
+              }
+              return haystack.includes(activityClientQuery);
+            }).slice(0, 6)
+          : [];
         const selectedLeadAssignedUsers = sectionKey === "leads"
           ? (
               Array.isArray(formValues.assignedUser)
@@ -5630,6 +5768,22 @@ function CrmOnePageModule() {
         const filteredMeetingEmployees = sectionKey === "meetings"
           ? crmDirectoryOptions.filter((item) => {
               const normalizedSearch = String(meetingEmployeeSearch || "").trim().toLowerCase();
+              if (!normalizedSearch) {
+                return true;
+              }
+              return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
+            })
+          : [];
+        const selectedActivityEmployees = sectionKey === "activities"
+          ? (
+              Array.isArray(formValues.owner)
+                ? formValues.owner
+                : String(formValues.owner || "").split(",")
+            ).map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        const filteredActivityEmployees = sectionKey === "activities"
+          ? crmDirectoryOptions.filter((item) => {
+              const normalizedSearch = String(activityEmployeeSearch || "").trim().toLowerCase();
               if (!normalizedSearch) {
                 return true;
               }
@@ -5764,11 +5918,13 @@ function CrmOnePageModule() {
                     </div>
 
                     <div>
-                      <label className="form-label small text-secondary mb-2">Select Department</label>
+                      <label className={`form-label small mb-2 ${sectionFieldErrors[sectionKey]?.departmentFilters ? "text-danger" : "text-secondary"}`}>
+                        Select Department
+                      </label>
                       <div className="crm-inline-suggestions-wrap">
                         <input
                           type="search"
-                          className="form-control"
+                          className={`form-control ${sectionFieldErrors[sectionKey]?.departmentFilters ? "is-invalid" : ""}`}
                           autoComplete="off"
                           placeholder="Search department or employee role"
                           value={teamCategorySearch}
@@ -6009,14 +6165,16 @@ function CrmOnePageModule() {
                                   )
                                 : sectionKey === "activities"
                                 ? (
-                                    field.key === "activityType" || field.key === "relatedTo"
+                                    field.key === "activityType"
                                       ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "relatedTo"
+                                      ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "date"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "owner"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "notes"
                                       ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "notes"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : "col-12 col-md-6 col-xl-4"
                                   )
                                 : sectionKey === "contacts"
@@ -6408,6 +6566,146 @@ function CrmOnePageModule() {
                                   </div>
                                 );
                               }
+                              if (sectionKey === "activities" && field.key === "relatedTo") {
+                                return (
+                                  <div className="crm-inline-suggestions-wrap">
+                                    <input
+                                      type="text"
+                                      className="form-control"
+                                      autoComplete="off"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
+                                      onFocus={() => setActivityClientSearchOpen(true)}
+                                      onClick={() => setActivityClientSearchOpen(true)}
+                                      onBlur={() => window.setTimeout(() => setActivityClientSearchOpen(false), 120)}
+                                      onChange={(event) => {
+                                        setField(sectionKey, field.key, event.target.value);
+                                        setActivityClientSearchOpen(true);
+                                      }}
+                                    />
+                                    {activityClientSearchOpen && (activityContactMatches.length || activityCustomerMatches.length) ? (
+                                      <div className="crm-inline-suggestions">
+                                        {activityContactMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
+                                            {activityContactMatches.map((contact) => (
+                                              <button
+                                                key={`activity-crm-contact-${contact.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                  setActivityClientSearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                        {activityCustomerMatches.length ? (
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Clients</div>
+                                            {activityCustomerMatches.map((customer) => (
+                                              <button
+                                                key={`activity-customer-${customer.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => {
+                                                  setField(sectionKey, field.key, String(customer.companyName || customer.clientName || customer.name || "").trim());
+                                                  setActivityClientSearchOpen(false);
+                                                }}
+                                              >
+                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              }
+                              if (sectionKey === "activities" && field.key === "owner") {
+                                return (
+                                  <div className="d-flex flex-column gap-2">
+                                    <div className="crm-inline-suggestions-wrap">
+                                      <input
+                                        type="search"
+                                        className="form-control"
+                                        autoComplete="off"
+                                        placeholder="Search users"
+                                        value={activityEmployeeSearch}
+                                        onFocus={() => setActivityEmployeeSearchOpen(true)}
+                                        onClick={() => setActivityEmployeeSearchOpen(true)}
+                                        onBlur={() => window.setTimeout(() => setActivityEmployeeSearchOpen(false), 120)}
+                                        onChange={(event) => {
+                                          setActivityEmployeeSearch(event.target.value);
+                                          setActivityEmployeeSearchOpen(true);
+                                        }}
+                                      />
+                                      {activityEmployeeSearchOpen ? (
+                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Users</div>
+                                            {filteredActivityEmployees.length ? filteredActivityEmployees.map((employee) => (
+                                              <button
+                                                key={`activity-employee-${employee.id}`}
+                                                type="button"
+                                                className="crm-inline-suggestions__item"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => toggleActivityEmployee(employee.name)}
+                                              >
+                                                <span className="d-flex align-items-start gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="form-check-input mt-1"
+                                                    checked={selectedActivityEmployees.includes(employee.name)}
+                                                    readOnly
+                                                  />
+                                                  <span>
+                                                    <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
+                                                    <span className="crm-inline-suggestions__item-sub">
+                                                      {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
+                                                    </span>
+                                                  </span>
+                                                </span>
+                                              </button>
+                                            )) : (
+                                              <div className="crm-inline-suggestions__item">
+                                                <span className="crm-inline-suggestions__item-main">No users found</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="d-flex flex-wrap gap-2">
+                                      {selectedActivityEmployees.length ? selectedActivityEmployees.map((employeeName) => (
+                                        <span
+                                          key={`activity-selected-employee-${employeeName}`}
+                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                                            aria-label={`Remove ${employeeName}`}
+                                            onClick={() => toggleActivityEmployee(employeeName)}
+                                          >
+                                            &times;
+                                          </button>
+                                          <span>{employeeName}</span>
+                                        </span>
+                                      )) : null}
+                                    </div>
+                                  </div>
+                                );
+                              }
                               if (sectionKey === "meetings" && field.key === "companyOrClientName") {
                                 return (
                                   <div className="crm-inline-suggestions-wrap">
@@ -6543,9 +6841,7 @@ function CrmOnePageModule() {
                                           </button>
                                           <span>{employeeName}</span>
                                         </span>
-                                      )) : (
-                                        <div className="small text-secondary">No employees selected yet.</div>
-                                      )}
+                                      )) : null}
                                     </div>
                                   </div>
                                 );
@@ -6558,7 +6854,7 @@ function CrmOnePageModule() {
                                         type="search"
                                         className="form-control"
                                         autoComplete="off"
-                                        placeholder="Search reminder channel"
+                                        placeholder="Reminder channel"
                                         value={meetingReminderChannelSearch}
                                         onFocus={() => setMeetingReminderChannelSearchOpen(true)}
                           onClick={() => setMeetingReminderChannelSearchOpen(true)}
@@ -6615,9 +6911,7 @@ function CrmOnePageModule() {
                                           </button>
                                           <span>{option}</span>
                                         </span>
-                                      )) : (
-                                        <div className="small text-secondary">No reminder channel selected yet.</div>
-                                      )}
+                                      )) : null}
                                     </div>
                                   </div>
                                 );
@@ -6630,7 +6924,7 @@ function CrmOnePageModule() {
                                         type="search"
                                         className="form-control"
                                         autoComplete="off"
-                                        placeholder="Search remind before days"
+                                        placeholder="Remind before days"
                                         value={meetingReminderDaySearch}
                                         onFocus={() => setMeetingReminderDaySearchOpen(true)}
                                         onClick={() => setMeetingReminderDaySearchOpen(true)}
@@ -6692,9 +6986,7 @@ function CrmOnePageModule() {
                                             <span>{optionLabel}</span>
                                           </span>
                                         );
-                                      }) : (
-                                        <div className="small text-secondary">No reminder day selected yet.</div>
-                                      )}
+                                      }) : null}
                                     </div>
                                   </div>
                                 );
@@ -6707,7 +6999,7 @@ function CrmOnePageModule() {
                                         type="search"
                                         className="form-control"
                                         autoComplete="off"
-                                        placeholder="Search reminder minutes"
+                                        placeholder="Reminder minutes"
                                         value={meetingReminderMinuteSearch}
                                         onFocus={() => setMeetingReminderMinuteSearchOpen(true)}
                                         onClick={() => setMeetingReminderMinuteSearchOpen(true)}
@@ -6767,9 +7059,7 @@ function CrmOnePageModule() {
                                             <span>{optionLabel}</span>
                                           </span>
                                         );
-                                      }) : (
-                                        <div className="small text-secondary">No reminder minute selected yet.</div>
-                                      )}
+                                      }) : null}
                                     </div>
                                   </div>
                                 );
@@ -6829,14 +7119,17 @@ function CrmOnePageModule() {
                                 );
                               }
                               if (field.type === "select") {
+                                const emptyOptionLabel = sectionKey === "meetings" && field.key === "meetingMode"
+                                  ? "Select Mode"
+                                  : `Select ${field.label}`;
                                 return (
                                   <select
                                     className="form-select"
-                                    value={formValues[field.key] || field.defaultValue || ""}
+                                    value={formValues[field.key] || ""}
                                     required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                   >
-                                    <option value="">Select {field.label}</option>
+                                    <option value="">{emptyOptionLabel}</option>
                                     {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
                                       <option key={option} value={option}>{option}</option>
                                     ))}
@@ -6844,11 +7137,16 @@ function CrmOnePageModule() {
                                 );
                               }
                               if (field.type === "date" || field.type === "time") {
+                                const minValue = sectionKey === "meetings" && field.key === "meetingDate"
+                                  ? getTodayIsoDate()
+                                  : undefined;
                                 return (
                                   <input
                                     type={field.type}
-                                    className="form-control"
+                                    name={field.key}
+                                    className={`form-control ${sectionFieldErrors[sectionKey]?.[field.key] ? "is-invalid" : ""}`}
                                     value={formValues[field.key] || ""}
+                                    min={minValue}
                                     required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                   />
@@ -7130,7 +7428,7 @@ function CrmOnePageModule() {
                           <button
                             key={meeting.id}
                             type="button"
-                            className="btn btn-success btn-sm text-start"
+                            className={`btn btn-sm text-start ${isMeetingOverdue(meeting) ? "crm-meeting-pill-overdue" : "btn-success"}`}
                             style={{
                               fontSize: "0.7rem",
                               lineHeight: 1.2,
@@ -7203,7 +7501,18 @@ function CrmOnePageModule() {
               </div>
               <div className="col-6">
                 <div className="text-secondary">Status</div>
-                <div className="fw-semibold">{meetingPopup.status || "-"}</div>
+                <select
+                  className="form-select form-select-sm mt-1"
+                  value={meetingPopup.status || ""}
+                  onChange={(event) => updateMeetingStatus(meetingPopup.id, event.target.value)}
+                >
+                  <option value="">Select Status</option>
+                  {["Scheduled", "Completed", "Rescheduled", "Cancelled", "Missed"].map((statusOption) => (
+                    <option key={`meeting-popup-status-${statusOption}`} value={statusOption}>
+                      {statusOption}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -8026,7 +8335,7 @@ function ProjectManagementModule() {
                     {field.type === "select" ? (
                       <select
                         className="form-select"
-                        value={formValues[field.key] || field.defaultValue || ""}
+                        value={formValues[field.key] || ""}
                         required={isRequiredField}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
                       >
@@ -9606,10 +9915,11 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         ) : activeTab === "employees" && field.key.endsWith("Country") ? (
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
-            value={formValues[field.key] || field.defaultValue || "India"}
+            value={formValues[field.key] || ""}
             required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
+            <option value="">Select Country</option>
             {COUNTRY_OPTIONS.map((country) => (
               <option key={`hr-${field.key}-${country}`} value={country}>{country}</option>
             ))}
@@ -9648,7 +9958,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         ) : activeTab === "employees" && field.type === "phoneNumber" ? null : field.type === "select" ? (
           <select
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
-            value={formValues[field.key] || field.defaultValue || ""}
+            value={formValues[field.key] || ""}
             required={isRequiredField}
             onChange={(event) => onChangeField(field.key, event.target.value)}
           >
@@ -11302,7 +11612,7 @@ function CategoryCrudModule({
                 ) : isTicketingTicketsTab && field.key === "status" ? (
                   <select
                     className="form-select"
-                    value={formValues[field.key] || field.defaultValue || ""}
+                    value={formValues[field.key] || ""}
                     onChange={(event) => onChangeField(field.key, event.target.value)}
                   >
                     <option value="">Select Status</option>

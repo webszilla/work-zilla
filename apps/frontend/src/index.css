@@ -145,6 +145,41 @@ input[type="file"]::-webkit-file-upload-button{
   cursor: pointer;
 }
 
+.app-shell input[type="time"],
+.wz-admin-shell input[type="time"]{
+  accent-color: var(--color-primary, #4f46e5);
+}
+
+.app-shell input[type="time"]::-webkit-datetime-edit-hour-field:focus,
+.app-shell input[type="time"]::-webkit-datetime-edit-minute-field:focus,
+.app-shell input[type="time"]::-webkit-datetime-edit-ampm-field:focus,
+.wz-admin-shell input[type="time"]::-webkit-datetime-edit-hour-field:focus,
+.wz-admin-shell input[type="time"]::-webkit-datetime-edit-minute-field:focus,
+.wz-admin-shell input[type="time"]::-webkit-datetime-edit-ampm-field:focus{
+  background-color: var(--color-primary, #4f46e5);
+  color: #ffffff;
+  border-radius: 4px;
+}
+
+.flatpickr-calendar .flatpickr-time input:hover,
+.flatpickr-calendar .flatpickr-time .flatpickr-am-pm:hover{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.12);
+}
+
+.flatpickr-calendar .flatpickr-time input:focus,
+.flatpickr-calendar .flatpickr-time .flatpickr-am-pm:focus{
+  background: var(--color-primary, #4f46e5);
+  color: #ffffff;
+}
+
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowUp:after{
+  border-bottom-color: var(--color-primary, #4f46e5);
+}
+
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowDown:after{
+  border-top-color: var(--color-primary, #4f46e5);
+}
+
 /* Keep primary form action buttons aligned to the right across products. */
 .app-shell form button[type="submit"].btn-primary:not(.w-100):not(.flex-fill),
 .app-shell form button[type="submit"].btn-success:not(.w-100):not(.flex-fill),
@@ -207,7 +242,7 @@ html[data-theme="light"] .app-btn-secondary:focus{
 }
 .app-shell.sidebar-collapsed .sidebar{
   width:72px;
-  padding:24px 6px;
+  padding:18px 6px;
 }
 .app-shell.sidebar-collapsed .brand{
   font-size:16px;
@@ -735,6 +770,12 @@ input.is-invalid:focus {
   border-color: #ef4444 !important;
   box-shadow: 0 0 0 0.2rem rgba(239, 68, 68, 0.22) !important;
 }
+
+input.is-invalid + input.flatpickr-input.form-control,
+input.form-control.is-invalid + input.flatpickr-input {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 0.12rem rgba(239, 68, 68, 0.14) !important;
+}
 .datalist-readable-input,
 .datalist-readable-input:focus{
   color-scheme: auto;
@@ -1203,6 +1244,12 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
 .crm-meeting-calendar-cell--out-month{
   background:rgba(var(--color-primary-rgb, 97, 23, 124), 0.03);
   opacity:0.7;
+}
+
+.crm-meeting-pill-overdue{
+  background: #f59e0b !important;
+  border-color: #f59e0b !important;
+  color: #111827 !important;
 }
 
 html[data-theme="light"] .crm-meeting-calendar-cell{

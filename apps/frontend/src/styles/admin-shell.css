@@ -471,6 +471,7 @@ html[data-theme="light"] .wz-route-surface--saas-admin {
 
 .wz-admin-shell.sidebar-collapsed .wz-sidebar {
   width: var(--wz-sidebar-collapsed-width);
+  padding: 18px 6px;
 }
 
 .wz-admin-shell.sidebar-collapsed .wz-brand-copy,

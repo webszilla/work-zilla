@@ -329,15 +329,15 @@ const reactPages = [
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "storage" },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "imposition-software" },
   { label: "Files", path: "/files", icon: "bi-cloud", productOnly: "storage" },
-  { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "storage" },
+  { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "storage" },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "storage", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "imposition-software", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "digital-automation" },
-  { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
-  { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "business-autopilot-erp" },
-  { label: "Ticket & Inbox", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "whatsapp-automation" },
+  { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
+  { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "business-autopilot-erp" },
+  { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "whatsapp-automation" },
   { label: "Inbox", path: "/inbox", icon: "bi-chat-dots", productOnly: "ai-chatbot", allowAgent: true },
   { label: "Widgets", path: "/widgets", icon: "bi-code-slash", productOnly: "ai-chatbot", adminOnly: true },
   { label: "Leads", path: "/leads", icon: "bi-person-lines-fill", productOnly: "ai-chatbot", adminOnly: true },
@@ -378,7 +378,7 @@ const reactPages = [
 
 const saasAdminPages = [
   { key: "overview", label: "Overview", path: "/saas-admin", icon: "bi-grid-1x2" },
-  { key: "inbox", label: "Ticket & Inbox", path: "/saas-admin/inbox", icon: "bi-inbox" },
+  { key: "inbox", label: "Inbox & Ticket", path: "/saas-admin/inbox", icon: "bi-inbox" },
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
@@ -1030,6 +1030,9 @@ function AppShell({ state, productPrefix, productSlug }) {
   };
 
   function handleSidebarNavClick() {
+    if (sidebarMenuStyle === "icons") {
+      return;
+    }
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
     }

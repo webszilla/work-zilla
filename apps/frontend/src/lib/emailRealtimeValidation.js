@@ -61,9 +61,6 @@ function validateEmailInput(input, { showRequired = false } = {}) {
   const rawValue = String(input.value || "");
   const value = rawValue.trim();
   if (!value) {
-    if (showRequired && input.required) {
-      return setEmailError(input, "Email is required.");
-    }
     return setEmailError(input, "");
   }
   if (!EMAIL_REGEX.test(value)) {

@@ -2,6 +2,74 @@ const LISTENER_KEY = "__wzRequiredFieldValidation";
 const FORM_ALERT_SELECTOR = "[data-wz-form-required-alert]";
 const FORM_ALERT_TEXT = "Please fill mandatory fields.";
 
+function normalizeIsoDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const dmy = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!dmy) return "";
+  const day = Number(dmy[1]);
+  const month = Number(dmy[2]);
+  const year = Number(dmy[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) {
+    return "";
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeIsoTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const hm = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (hm) {
+    const hours = Number(hm[1]);
+    const minutes = Number(hm[2]);
+    if (Number.isFinite(hours) && Number.isFinite(minutes) && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    }
+  }
+  const ampm = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!ampm) return "";
+  let hours = Number(ampm[1]);
+  const minutes = Number(ampm[2]);
+  const suffix = String(ampm[3] || "").toUpperCase();
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+    return "";
+  }
+  if (suffix === "PM" && hours < 12) hours += 12;
+  if (suffix === "AM" && hours === 12) hours = 0;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function getFlatpickrSyncedValue(control) {
+  if (!(control instanceof HTMLInputElement)) {
+    return String(control?.value || "").trim();
+  }
+  const picker = control.__wzFlatpickrInstance;
+  if (!picker) {
+    return String(control.value || "").trim();
+  }
+  const inputType = String(control.type || "").toLowerCase();
+  const altValue = String(picker.altInput?.value || "").trim();
+  const rawValue = String(control.value || "").trim();
+  if (inputType === "date") {
+    const normalized = normalizeIsoDate(rawValue) || normalizeIsoDate(altValue);
+    if (normalized && control.value !== normalized) {
+      control.value = normalized;
+    }
+    return normalized;
+  }
+  if (inputType === "time") {
+    const normalized = normalizeIsoTime(rawValue) || normalizeIsoTime(altValue);
+    if (normalized && control.value !== normalized) {
+      control.value = normalized;
+    }
+    return normalized;
+  }
+  return rawValue || altValue;
+}
+
 function isSupportedControl(node) {
   return (
     node instanceof HTMLInputElement
@@ -34,6 +102,7 @@ function isMarkedRequired(control) {
 
 function shouldValidate(control) {
   if (!isSupportedControl(control)) return false;
+  if (String(control.getAttribute("data-wz-required-ignore") || "").trim().toLowerCase() === "true") return false;
   if (!isMarkedRequired(control)) return false;
   if (control.disabled || control.readOnly) return false;
   if (isHiddenControl(control)) return false;
@@ -66,6 +135,17 @@ function setValidationState(control, invalid) {
   });
 }
 
+function hasNearbySelectedChip(control) {
+  let container = control.parentElement;
+  for (let i = 0; i < 5 && container; i += 1) {
+    if (container.querySelector(".wz-selected-chip")) {
+      return true;
+    }
+    container = container.parentElement;
+  }
+  return false;
+}
+
 function validateRequiredControl(control, { force = false } = {}) {
   if (!shouldValidate(control)) {
     if (isSupportedControl(control)) {
@@ -76,8 +156,11 @@ function validateRequiredControl(control, { force = false } = {}) {
   if (!force && !control.classList.contains("is-invalid")) {
     return true;
   }
-  const value = "value" in control ? String(control.value || "").trim() : "";
+  const value = "value" in control ? getFlatpickrSyncedValue(control) : "";
   let valid = value.length > 0;
+  if (!valid && control instanceof HTMLInputElement && control.type === "search") {
+    valid = hasNearbySelectedChip(control);
+  }
   if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) {
     valid = control.checked;
   }

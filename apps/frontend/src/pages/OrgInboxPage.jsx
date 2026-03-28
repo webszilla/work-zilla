@@ -130,7 +130,6 @@ function createEmptyComposeForm() {
   return {
     title: "",
     message: "",
-    channel: "email",
     sentToType: "all_members",
     departmentNames: [],
     employeeRoleNames: [],
@@ -208,7 +207,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
   }, [location.pathname, productSlug]);
   const isWhatsappAutomationProduct = currentProductSlug === "whatsapp-automation";
 
-  const [activeTab, setActiveTab] = useState("tickets");
+  const [activeTab, setActiveTab] = useState("inbox");
 
   const [inboxState, setInboxState] = useState(emptyState);
   const [selectedInboxId, setSelectedInboxId] = useState(null);
@@ -477,7 +476,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
 
   useEffect(() => {
     if (!isWhatsappAutomationProduct && (activeTab === "feedback" || activeTab === "enquiry")) {
-      setActiveTab("tickets");
+      setActiveTab("inbox");
     }
   }, [isWhatsappAutomationProduct, activeTab]);
 
@@ -666,8 +665,17 @@ export default function OrgInboxPage({ productSlug = "" }) {
     event.preventDefault();
     const title = String(composeForm.title || "").trim();
     const message = String(composeForm.message || "");
-    if (!title || !htmlToPlainText(message)) {
+    const plainMessage = htmlToPlainText(message);
+    if (!title || !plainMessage) {
       setComposeState({ sending: false, error: "Subject and message are required.", success: "" });
+      return;
+    }
+    if (plainMessage.length > 350) {
+      setComposeState({
+        sending: false,
+        error: `Email message body supports maximum 350 characters. Remove ${plainMessage.length - 350} extra characters.`,
+        success: "",
+      });
       return;
     }
     if (composeForm.sentToType === "department" && !composeForm.departmentNames.length && !composeForm.employeeRoleNames.length) {
@@ -689,7 +697,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
       const formData = buildInboxComposeFormData({
         title,
         message,
-        channel: composeForm.channel || "email",
+        channel: "email",
         productSlug: currentProductSlug,
         sentToType: composeForm.sentToType,
         departmentNames: composeForm.departmentNames,
@@ -712,10 +720,33 @@ export default function OrgInboxPage({ productSlug = "" }) {
   async function handleCreateTicket(event) {
     event.preventDefault();
     const requesterName = String(createTicketForm.name || "").trim();
+    const category = String(createTicketForm.category || "").trim().toLowerCase();
     const subject = String(createTicketForm.subject || "").trim();
+    const productSlugValue = String(createTicketForm.productSlug || currentProductSlug || "").trim();
+    const priority = String(createTicketForm.priority || "").trim().toLowerCase();
     const message = String(createTicketForm.message || "");
-    if (!requesterName || !subject || !htmlToPlainText(message)) {
-      setCreateTicketState({ saving: false, error: "Name, subject and message are required.", success: "" });
+    const plainMessage = htmlToPlainText(message);
+    const missingFields = [];
+    if (!requesterName) missingFields.push("Name");
+    if (!category) missingFields.push("Type");
+    if (!subject) missingFields.push("Subject");
+    if (!productSlugValue) missingFields.push("Product");
+    if (!priority) missingFields.push("Priority");
+    if (!plainMessage) missingFields.push("Message");
+    if (missingFields.length) {
+      setCreateTicketState({
+        saving: false,
+        error: `${missingFields.join(", ")} ${missingFields.length === 1 ? "is" : "are"} required.`,
+        success: "",
+      });
+      return;
+    }
+    if (plainMessage.length > 350) {
+      setCreateTicketState({
+        saving: false,
+        error: `Message supports maximum 350 characters. Remove ${plainMessage.length - 350} extra characters.`,
+        success: "",
+      });
       return;
     }
     const fileError = validateImageFiles(createTicketForm.files);
@@ -735,11 +766,11 @@ export default function OrgInboxPage({ productSlug = "" }) {
     setCreateTicketState({ saving: true, error: "", success: "" });
     try {
       const formData = buildTicketFormData({
-        category: createTicketForm.category,
+        category,
         subject,
-        priority: createTicketForm.priority || "medium",
-        message: `<p><strong>Name:</strong> ${requesterName}</p><p><strong>Priority:</strong> ${titleCase(createTicketForm.priority || "medium")}</p>${message}`,
-        productSlug: createTicketForm.productSlug || currentProductSlug,
+        priority,
+        message: `<p><strong>Name:</strong> ${requesterName}</p><p><strong>Priority:</strong> ${titleCase(priority || "medium")}</p>${message}`,
+        productSlug: productSlugValue,
         attachments: createTicketForm.files,
       });
       await createOrgTicket(formData);
@@ -852,19 +883,19 @@ export default function OrgInboxPage({ productSlug = "" }) {
         <div className="d-flex align-items-center gap-2 flex-wrap">
           <button
             type="button"
-            className={`btn btn-sm ${activeTab === "tickets" ? "btn-primary" : "btn-outline-light"}`}
-            onClick={() => setActiveTab("tickets")}
-          >
-            Ticket
-            <span className="ms-1 badge bg-dark">{ticketUnreadCount}</span>
-          </button>
-          <button
-            type="button"
             className={`btn btn-sm ${activeTab === "inbox" ? "btn-primary" : "btn-outline-light"}`}
             onClick={() => setActiveTab("inbox")}
           >
             Inbox
             <span className="ms-1 badge bg-dark">{inboxUnreadCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === "tickets" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setActiveTab("tickets")}
+          >
+            Ticket
+            <span className="ms-1 badge bg-dark">{ticketUnreadCount}</span>
           </button>
           {isWhatsappAutomationProduct ? (
             <>
@@ -969,6 +1000,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           value={createTicketForm.name}
                           onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, name: event.target.value }))}
                           placeholder="Enter your name"
+                          required
                         />
                       </div>
                       <div className="col-12 col-md-6">
@@ -977,6 +1009,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           className="form-select"
                           value={createTicketForm.category}
                           onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, category: event.target.value }))}
+                          required
                         >
                           <option value="support">Support</option>
                           <option value="sales">Sales</option>
@@ -990,6 +1023,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           value={createTicketForm.subject}
                           onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, subject: event.target.value }))}
                           placeholder="Enter ticket subject"
+                          required
                         />
                       </div>
                       <div className="col-12 col-md-6">
@@ -1008,6 +1042,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                               };
                             })
                           }
+                          required
                         >
                           {ticketProductOptions.map((item) => (
                             <option key={item.slug} value={item.slug}>
@@ -1036,6 +1071,7 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           className="form-select"
                           value={createTicketForm.priority || "medium"}
                           onChange={(event) => setCreateTicketForm((prev) => ({ ...prev, priority: event.target.value }))}
+                          required
                         >
                           <option value="low">Low</option>
                           <option value="medium">Medium</option>
@@ -1073,7 +1109,8 @@ export default function OrgInboxPage({ productSlug = "" }) {
                       value={createTicketForm.message}
                       onChange={(value) => setCreateTicketForm((prev) => ({ ...prev, message: value }))}
                       placeholder="Describe your issue"
-                      minHeight={460}
+                      minHeight={260}
+                      maxChars={350}
                     />
                   </div>
                 </div>
@@ -1428,24 +1465,6 @@ export default function OrgInboxPage({ productSlug = "" }) {
                         />
                       </div>
                       <div className="col-12 col-md-6">
-                        <label className="form-label small text-secondary mb-1">Channel</label>
-                        <select
-                          className="form-select"
-                          value={composeForm.channel}
-                          onChange={(event) =>
-                            setComposeForm((prev) => ({
-                              ...prev,
-                              channel: event.target.value,
-                              attachments: event.target.value === "email" ? prev.attachments : [],
-                            }))
-                          }
-                        >
-                          <option value="email">Email</option>
-                          <option value="system">System</option>
-                          <option value="whatsapp">WhatsApp</option>
-                        </select>
-                      </div>
-                      <div className="col-12 col-md-6">
                         <label className="form-label small text-secondary mb-1">Sent To</label>
                         <select
                           className="form-select"
@@ -1627,44 +1646,42 @@ export default function OrgInboxPage({ productSlug = "" }) {
                           </div>
                         </div>
                       ) : null}
-                      {composeForm.channel === "email" ? (
-                        <div className="col-12">
-                          <label className="form-label small text-secondary mb-1">Attachments</label>
-                          <input
-                            type="file"
-                            className="form-control"
-                            accept={INBOX_ATTACHMENT_ACCEPT}
-                            multiple
-                            onChange={(event) => {
-                              const files = Array.from(event.target.files || []);
-                              setComposeForm((prev) => ({ ...prev, attachments: files }));
-                            }}
-                          />
-                          <div className="small text-secondary mt-1">Up to 10 files, max 10MB each. Image, PDF, Excel, Word and ZIP allowed.</div>
-                          {composeForm.attachments.length ? (
-                            <div className="d-flex flex-wrap gap-2 mt-2">
-                              {composeForm.attachments.map((file) => (
-                                <button
-                                  key={`${file.name}-${file.size}`}
-                                  type="button"
-                                  className="btn btn-outline-secondary btn-sm rounded-pill"
-                                  onClick={() =>
-                                    setComposeForm((prev) => ({
-                                      ...prev,
-                                      attachments: prev.attachments.filter(
-                                        (item) => !(item.name === file.name && item.size === file.size && item.lastModified === file.lastModified)
-                                      ),
-                                    }))
-                                  }
-                                >
-                                  <span className="me-1">-</span>
-                                  {file.name} ({formatFileSize(file.size)})
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      <div className="col-12">
+                        <label className="form-label small text-secondary mb-1">Attachments</label>
+                        <input
+                          type="file"
+                          className="form-control"
+                          accept={INBOX_ATTACHMENT_ACCEPT}
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []);
+                            setComposeForm((prev) => ({ ...prev, attachments: files }));
+                          }}
+                        />
+                        <div className="small text-secondary mt-1">Up to 10 files, max 10MB each. Image, PDF, Excel, Word and ZIP allowed.</div>
+                        {composeForm.attachments.length ? (
+                          <div className="d-flex flex-wrap gap-2 mt-2">
+                            {composeForm.attachments.map((file) => (
+                              <button
+                                key={`${file.name}-${file.size}`}
+                                type="button"
+                                className="btn btn-outline-secondary btn-sm rounded-pill"
+                                onClick={() =>
+                                  setComposeForm((prev) => ({
+                                    ...prev,
+                                    attachments: prev.attachments.filter(
+                                      (item) => !(item.name === file.name && item.size === file.size && item.lastModified === file.lastModified)
+                                    ),
+                                  }))
+                                }
+                              >
+                                <span className="me-1">-</span>
+                                {file.name} ({formatFileSize(file.size)})
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="col-12">
                         <div className="d-flex gap-2">
                           <button type="submit" className="btn btn-primary btn-sm" disabled={composeState.sending}>
@@ -1689,26 +1706,18 @@ export default function OrgInboxPage({ productSlug = "" }) {
                     </div>
                   </div>
                   <div className="col-12 col-lg-8">
-                    <label className="form-label small text-secondary mb-1">
-                      {composeForm.channel === "email" ? "Email Message Body" : "Message"}
-                    </label>
-                    {composeForm.channel === "email" ? (
-                      <TinyHtmlEditor
-                        label=""
-                        value={composeForm.message}
-                        onChange={(value) => setComposeForm((prev) => ({ ...prev, message: value }))}
-                        placeholder="Write email message with HTML formatting"
-                        minHeight={280}
-                      />
-                    ) : (
-                      <textarea
-                        className="form-control"
-                        rows={10}
-                        placeholder="Write message for selected members..."
-                        value={composeForm.message}
-                        onChange={(event) => setComposeForm((prev) => ({ ...prev, message: event.target.value }))}
-                      />
-                    )}
+                    <label className="form-label small text-secondary mb-1">Email Message Body</label>
+                    <TinyHtmlEditor
+                      label=""
+                      value={composeForm.message}
+                      onChange={(value) => setComposeForm((prev) => ({ ...prev, message: value }))}
+                      placeholder="Write email message with HTML formatting"
+                      minHeight={280}
+                      maxChars={350}
+                    />
+                    <div className="small text-secondary mt-1">
+                      {`${Math.min(htmlToPlainText(composeForm.message || "").length, 350)}/350 characters`}
+                    </div>
                   </div>
                 </div>
                 {composeState.error ? <div className="alert alert-danger py-2 mb-0">{composeState.error}</div> : null}

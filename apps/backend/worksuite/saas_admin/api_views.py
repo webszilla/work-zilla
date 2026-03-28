@@ -119,6 +119,16 @@ def _require_saas_admin(request):
     return None
 
 
+def _product_display_name(slug, name):
+    normalized_slug = str(slug or "").strip().lower()
+    normalized_name = str(name or "").strip()
+    if normalized_slug in {"monitor", "work-suite", "worksuite"}:
+        return "Work Suite"
+    if normalized_name.lower() == "monitor":
+        return "Work Suite"
+    return normalized_name or "Product"
+
+
 def _iso_now():
     return timezone.now().replace(microsecond=0).isoformat()
 
@@ -1864,7 +1874,7 @@ def organizations_list(request):
     for ent in entitlements:
         entitlements_by_org[ent.organization_id].append({
             "slug": ent.product.slug,
-            "name": ent.product.name,
+            "name": _product_display_name(ent.product.slug, ent.product.name),
             "status": ent.status,
         })
     subscriptions = (
@@ -1887,7 +1897,7 @@ def organizations_list(request):
         if sub and monitor_product and not has_monitor_entitlement:
             product_rows = product_rows + [{
                 "slug": monitor_product.slug,
-                "name": monitor_product.name,
+                "name": _product_display_name(monitor_product.slug, monitor_product.name),
                 "status": "active",
             }]
         row["products"] = [item["slug"] for item in product_rows]
@@ -1898,7 +1908,12 @@ def organizations_list(request):
         for plan in Plan.objects.all().order_by("name")
     ]
     products_payload = [
-        {"id": product.id, "name": product.name, "slug": product.slug, "status": product.status}
+        {
+            "id": product.id,
+            "name": _product_display_name(product.slug, product.name),
+            "slug": product.slug,
+            "status": product.status,
+        }
         for product in Product.objects.all().order_by("sort_order", "name")
     ]
 
