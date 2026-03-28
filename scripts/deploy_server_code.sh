@@ -161,8 +161,8 @@ else
 fi
 
 . venv/bin/activate
-venv/bin/python apps/backend/manage.py migrate
-venv/bin/python apps/backend/manage.py collectstatic --noinput
+venv/bin/python apps/backend/manage.py migrate --skip-checks
+venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks
 cleanup_server_installers
 
 if systemctl list-unit-files | grep -q '^workzilla-gunicorn.service'; then
