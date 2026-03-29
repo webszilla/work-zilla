@@ -1482,6 +1482,7 @@ export default function SaasAdminProductPage() {
             employee_limit: plan.employee_limit ?? 0,
             allow_addons: Boolean(plan.allow_addons),
             allow_app_usage: Boolean(plan.allow_app_usage),
+            allow_gaming_ott_usage: Boolean(plan.allow_gaming_ott_usage),
             allow_hr_view: Boolean(plan.allow_hr_view),
             role_based_access: Boolean(features.role_based_access ?? true),
             erp_enabled_modules: Array.isArray(features.erp_enabled_modules)
@@ -1501,9 +1502,44 @@ export default function SaasAdminProductPage() {
             employee_limit: 0,
             allow_addons: true,
             allow_app_usage: false,
+            allow_gaming_ott_usage: false,
             allow_hr_view: false,
             role_based_access: true,
             erp_enabled_modules: getDefaultErpModulesForPlanName(""),
+          })
+      : isMonitorProduct
+      ? (plan
+        ? {
+            name: plan.name || "",
+            monthly_price: plan.monthly_price ?? "",
+            yearly_price: plan.yearly_price ?? "",
+            usd_monthly_price: plan.usd_monthly_price ?? "",
+            usd_yearly_price: plan.usd_yearly_price ?? "",
+            addon_monthly_price: plan.addon_monthly_price ?? "",
+            addon_yearly_price: plan.addon_yearly_price ?? "",
+            addon_usd_monthly_price: plan.addon_usd_monthly_price ?? "",
+            addon_usd_yearly_price: plan.addon_usd_yearly_price ?? "",
+            allow_addons: Boolean(plan.allow_addons),
+            allow_live_activity: plan.allow_live_activity !== false,
+            allow_app_usage: Boolean(plan.allow_app_usage),
+            allow_gaming_ott_usage: Boolean(plan.allow_gaming_ott_usage),
+            allow_hr_view: Boolean(plan.allow_hr_view),
+          }
+        : {
+            name: "",
+            monthly_price: "",
+            yearly_price: "",
+            usd_monthly_price: "",
+            usd_yearly_price: "",
+            addon_monthly_price: "",
+            addon_yearly_price: "",
+            addon_usd_monthly_price: "",
+            addon_usd_yearly_price: "",
+            allow_addons: true,
+            allow_live_activity: true,
+            allow_app_usage: false,
+            allow_gaming_ott_usage: false,
+            allow_hr_view: false,
           })
       : (plan
         ? {
@@ -1863,6 +1899,13 @@ export default function SaasAdminProductPage() {
         ...(isBusinessAutopilotProduct ? {
           employee_limit: planModal.form.employee_limit,
           allow_app_usage: Boolean(planModal.form.allow_app_usage),
+          allow_gaming_ott_usage: Boolean(planModal.form.allow_gaming_ott_usage),
+          allow_hr_view: Boolean(planModal.form.allow_hr_view),
+        } : {}),
+        ...(isMonitorProduct ? {
+          allow_live_activity: Boolean(planModal.form.allow_live_activity),
+          allow_app_usage: Boolean(planModal.form.allow_app_usage),
+          allow_gaming_ott_usage: Boolean(planModal.form.allow_gaming_ott_usage),
           allow_hr_view: Boolean(planModal.form.allow_hr_view),
         } : {}),
         limits,
@@ -5679,6 +5722,74 @@ export default function SaasAdminProductPage() {
                 </select>
                 {getFieldError("allow_addons")}
               </div>
+              ) : null}
+              {isMonitorProduct ? (
+                <>
+                  <div className="modal-form-field">
+                    <label className="form-label">Live Activity Report</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.allow_live_activity ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, allow_live_activity: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">App Usage Tracking</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.allow_app_usage ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, allow_app_usage: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">HR View</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.allow_hr_view ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, allow_hr_view: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">OTT/Gaming Usage</label>
+                    <select
+                      className="form-select"
+                      value={planModal.form.allow_gaming_ott_usage ? "true" : "false"}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, allow_gaming_ott_usage: event.target.value === "true" }
+                        }))
+                      }
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                </>
               ) : null}
               {isWhatsappAutomationProduct ? (
                 <div className="modal-form-field">

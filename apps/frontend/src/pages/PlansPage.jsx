@@ -226,18 +226,9 @@ function getMonitorPlanFeatures(plan) {
   const limits = plan?.limits || {};
   const flags = plan?.flags || {};
   const features = plan?.features || {};
-  const planName = String(plan?.name || "").trim().toLowerCase();
-  const legacyMatrix = {
-    free: { live: true, app: true, hr: true, ott: true },
-    basic: { live: true, app: false, hr: true, ott: false },
-    plus: { live: true, app: true, hr: false, ott: false },
-    professional: { live: true, app: true, hr: true, ott: true },
-  };
-  const legacy = legacyMatrix[planName] || {};
-  const resolveFlag = (flagKey, featureKey, fallbackKey, defaultValue) => {
+  const resolveFlag = (flagKey, featureKey, defaultValue) => {
     if (typeof flags[flagKey] === "boolean") return flags[flagKey];
     if (typeof features[featureKey] === "boolean") return features[featureKey];
-    if (typeof legacy[fallbackKey] === "boolean") return legacy[fallbackKey];
     return defaultValue;
   };
   const employeeLimit = limits.employee_limit;
@@ -248,10 +239,10 @@ function getMonitorPlanFeatures(plan) {
     { text: `Employee limit: ${employeeLabel}` },
     { text: `Retention: ${limits.retention_days ?? "-"} days` },
     { text: `Screenshot interval: ${limits.screenshot_min_minutes ?? "-"} mins` },
-    { text: "Live activity report", ok: resolveFlag("allow_live_activity", "allow_live_activity", "live", true) },
-    { text: "App usage tracking", ok: resolveFlag("allow_app_usage", "allow_app_usage", "app", false) },
-    { text: "HR view", ok: resolveFlag("allow_hr_view", "allow_hr_view", "hr", false) },
-    { text: "OTT/Gaming usage", ok: resolveFlag("allow_gaming_ott_usage", "allow_gaming_ott_usage", "ott", false) },
+    { text: "Live activity report", ok: resolveFlag("allow_live_activity", "allow_live_activity", true) },
+    { text: "App usage tracking", ok: resolveFlag("allow_app_usage", "allow_app_usage", false) },
+    { text: "HR view", ok: resolveFlag("allow_hr_view", "allow_hr_view", false) },
+    { text: "OTT/Gaming usage", ok: resolveFlag("allow_gaming_ott_usage", "allow_gaming_ott_usage", false) },
   ];
 }
 

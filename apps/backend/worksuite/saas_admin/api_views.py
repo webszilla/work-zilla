@@ -1616,12 +1616,13 @@ def overview(request):
         entitlements_by_org[ent.organization_id].append(ent)
 
     product_payload = []
+    canonical_products = {}
     for product in saas_products:
         if str(product.status or "").strip().lower() != "active":
             continue
         items = entitlements_by_product.get(product.id, [])
         active_count = sum(1 for ent in items if ent.status == "active")
-        product_payload.append({
+        row = {
             "id": product.id,
             "name": product.name,
             "slug": product.slug,
@@ -1631,7 +1632,24 @@ def overview(request):
             "features": _parse_features(product.features),
             "active_orgs": active_count,
             "total_orgs": len(items),
-        })
+        }
+        canonical_slug = (product.slug or "").strip().lower()
+        if canonical_slug in {"monitor", "work-suite", "worksuite"}:
+            canonical_slug = "work-suite"
+            row["name"] = "Work Suite"
+            row["slug"] = "work-suite"
+        existing = canonical_products.get(canonical_slug)
+        if not existing:
+            canonical_products[canonical_slug] = row
+        else:
+            existing["active_orgs"] = max(int(existing.get("active_orgs") or 0), int(row.get("active_orgs") or 0))
+            existing["total_orgs"] = max(int(existing.get("total_orgs") or 0), int(row.get("total_orgs") or 0))
+            existing["id"] = min(int(existing.get("id") or 0), int(row.get("id") or 0)) if existing.get("id") and row.get("id") else existing.get("id") or row.get("id")
+            if not existing.get("description") and row.get("description"):
+                existing["description"] = row["description"]
+            if not existing.get("icon") and row.get("icon"):
+                existing["icon"] = row["icon"]
+    product_payload = list(canonical_products.values())
 
     org_payload = []
     for org in orgs:
@@ -2642,6 +2660,10 @@ def organization_detail(request, org_id):
 
 def _plan_payload(plan):
     product = plan.product
+    plan_features = plan.features if isinstance(plan.features, dict) else {}
+    allow_live_activity = plan_features.get("allow_live_activity")
+    if not isinstance(allow_live_activity, bool):
+        allow_live_activity = True
     return {
         "id": plan.id,
         "name": plan.name,
@@ -2663,9 +2685,11 @@ def _plan_payload(plan):
         "website_page_limit": plan.website_page_limit,
         "allow_addons": plan.allow_addons,
         "allow_app_usage": plan.allow_app_usage,
+        "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
         "allow_hr_view": plan.allow_hr_view,
+        "allow_live_activity": allow_live_activity,
         "limits": plan.limits or {},
-        "features": plan.features or {},
+        "features": plan_features,
     }
 
 
@@ -2776,12 +2800,20 @@ def _update_plan_from_payload(plan, data):
         plan.allow_addons = _parse_bool(data.get("allow_addons"))
     if "allow_app_usage" in data:
         plan.allow_app_usage = _parse_bool(data.get("allow_app_usage"))
+    if "allow_gaming_ott_usage" in data:
+        plan.allow_gaming_ott_usage = _parse_bool(data.get("allow_gaming_ott_usage"))
     if "allow_hr_view" in data:
         plan.allow_hr_view = _parse_bool(data.get("allow_hr_view"))
     if "limits" in data and isinstance(data.get("limits"), dict):
         plan.limits = data.get("limits") or {}
-    if "features" in data and isinstance(data.get("features"), dict):
-        plan.features = data.get("features") or {}
+    features_value = data.get("features")
+    features = dict(plan.features or {})
+    if isinstance(features_value, dict):
+        features = features_value
+    if "allow_live_activity" in data:
+        features["allow_live_activity"] = _parse_bool(data.get("allow_live_activity"))
+    if isinstance(features, dict):
+        plan.features = features
     _normalize_business_autopilot_plan_rules(plan)
     if errors:
         raise ValueError(errors)

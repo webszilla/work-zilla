@@ -434,38 +434,16 @@ def public_plans(request):
                 "price_usdt_year": plan.addon_usd_yearly_price or 0,
             }]
         if normalized_slug == "monitor":
-            monitor_flag_overrides = {
-                "free": {
-                    "allow_app_usage": True,
-                    "allow_hr_view": True,
-                    "allow_gaming_ott_usage": True,
-                },
-                "basic": {
-                    "allow_app_usage": False,
-                    "allow_hr_view": False,
-                    "allow_gaming_ott_usage": False,
-                },
-                "plus": {
-                    "allow_app_usage": True,
-                    "allow_hr_view": False,
-                    "allow_gaming_ott_usage": False,
-                },
-                "professional": {
-                    "allow_app_usage": True,
-                    "allow_hr_view": True,
-                    "allow_gaming_ott_usage": True,
-                },
-            }
+            allow_live_activity = features.get("allow_live_activity")
+            if not isinstance(allow_live_activity, bool):
+                allow_live_activity = True
             response_flags = {
                 "allow_addons": plan.allow_addons,
                 "allow_app_usage": plan.allow_app_usage,
                 "allow_gaming_ott_usage": plan.allow_gaming_ott_usage,
                 "allow_hr_view": plan.allow_hr_view,
+                "allow_live_activity": allow_live_activity,
             }
-            plan_key = (plan.name or "").strip().lower()
-            override = monitor_flag_overrides.get(plan_key)
-            if override:
-                response_flags.update(override)
             response_plans[-1]["flags"] = response_flags
             response_plans[-1]["features"] = features
         if normalized_slug == "ai-chatbot":
