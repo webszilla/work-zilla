@@ -38,9 +38,13 @@ const DEFAULT_USER_META = {
   used_users: 0,
   remaining_users: null,
   addon_count: 0,
+  base_included_users: 0,
+  extra_included_users: 0,
   allow_addons: false,
-  has_unlimited_users: true,
-  can_add_users: true,
+  has_unlimited_users: false,
+  can_add_users: false,
+  has_subscription: false,
+  limit_message: "",
 };
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
@@ -574,30 +578,49 @@ function formatDetailValue(key, value) {
 
 function normalizeUserMeta(meta, userRows = []) {
   const source = (meta && typeof meta === "object" && !Array.isArray(meta)) ? meta : {};
-  const fallbackUsedUsers = (Array.isArray(userRows) ? userRows : []).filter((row) => row?.is_active).length;
+  const fallbackTotalUsers = Array.isArray(userRows) ? userRows.length : 0;
   const employeeLimitRaw = Number(source.employee_limit);
   const hasFiniteLimit = Number.isFinite(employeeLimitRaw) && employeeLimitRaw > 0;
   const usedUsersRaw = Number(source.used_users);
-  const usedUsers = Number.isFinite(usedUsersRaw) ? Math.max(0, usedUsersRaw) : fallbackUsedUsers;
   const employeeLimit = hasFiniteLimit ? Math.max(0, employeeLimitRaw) : 0;
-  const hasUnlimitedUsers = !hasFiniteLimit;
+  const usedUsers = Number.isFinite(usedUsersRaw)
+    ? Math.max(0, usedUsersRaw)
+    : (hasFiniteLimit ? Math.min(fallbackTotalUsers, employeeLimit) : fallbackTotalUsers);
+  const hasUnlimitedUsers = Boolean(source.has_unlimited_users) && !hasFiniteLimit;
   const remainingUsers = hasUnlimitedUsers ? null : Math.max(0, employeeLimit - usedUsers);
   const addonCountRaw = Number(source.addon_count);
+  const addonCount = Number.isFinite(addonCountRaw) ? Math.max(0, addonCountRaw) : 0;
+  const baseIncludedUsersRaw = Number(source.base_included_users);
+  const extraIncludedUsersRaw = Number(source.extra_included_users);
+  const baseIncludedUsers = Number.isFinite(baseIncludedUsersRaw)
+    ? Math.max(0, baseIncludedUsersRaw)
+    : Math.max(0, employeeLimit - addonCount);
+  const extraIncludedUsers = Number.isFinite(extraIncludedUsersRaw)
+    ? Math.max(0, extraIncludedUsersRaw)
+    : Math.max(0, employeeLimit - baseIncludedUsers);
+  const canAddUsers = typeof source.can_add_users === "boolean"
+    ? source.can_add_users
+    : (hasUnlimitedUsers || usedUsers < employeeLimit);
 
   return {
     employee_limit: employeeLimit,
     used_users: usedUsers,
     remaining_users: remainingUsers,
-    addon_count: Number.isFinite(addonCountRaw) ? Math.max(0, addonCountRaw) : 0,
+    addon_count: addonCount,
+    base_included_users: baseIncludedUsers,
+    extra_included_users: extraIncludedUsers,
     allow_addons: Boolean(source.allow_addons),
     has_unlimited_users: hasUnlimitedUsers,
-    can_add_users: hasUnlimitedUsers || usedUsers < employeeLimit,
+    can_add_users: Boolean(canAddUsers),
+    has_subscription: Boolean(source.has_subscription),
+    limit_message: String(source.limit_message || ""),
   };
 }
 
 export default function BusinessAutopilotUsersPage() {
   const [activeTopTab, setActiveTopTab] = useState("users");
   const [userSearch, setUserSearch] = useState("");
+  const [userListTab, setUserListTab] = useState("all");
   const [userPage, setUserPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -626,6 +649,8 @@ export default function BusinessAutopilotUsersPage() {
   const [editForm, setEditForm] = useState(defaultEditForm);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingMembershipId, setDeletingMembershipId] = useState("");
+  const [togglingMembershipId, setTogglingMembershipId] = useState("");
+  const [verifyingMembershipId, setVerifyingMembershipId] = useState("");
   const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
@@ -825,7 +850,11 @@ export default function BusinessAutopilotUsersPage() {
       setNotice("User updated successfully.");
       cancelEdit();
     } catch (error) {
-      setNotice(error?.message || "Unable to update user.");
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        setNotice(error?.message || "Unable to update user.");
+      }
     } finally {
       setSavingEdit(false);
     }
@@ -858,6 +887,61 @@ export default function BusinessAutopilotUsersPage() {
       setNotice(error?.message || "Unable to delete user.");
     } finally {
       setDeletingMembershipId("");
+    }
+  }
+
+  async function showAddonRequiredPopup(message) {
+    await openAlertDialog(
+      String(message || userMeta.limit_message || "User limit reached. Add-on users required to continue."),
+      { title: "Add-on Users Required", confirmText: "OK" }
+    );
+  }
+
+  async function handleToggleUserStatus(user, nextEnabled) {
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || togglingMembershipId) {
+      return;
+    }
+    if (user?.is_locked) {
+      await showAddonRequiredPopup();
+      return;
+    }
+    const confirmMessage = nextEnabled
+      ? "Do you want to activate this user?"
+      : "Do you want to deactivate this user?";
+    const confirmed = await openConfirmDialog(confirmMessage, {
+      title: "Confirm User Status",
+      confirmText: "Yes",
+      cancelText: "No",
+    });
+    if (!confirmed) {
+      return;
+    }
+    setTogglingMembershipId(membershipId);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/toggle-status`, {
+        method: "POST",
+        body: JSON.stringify({ enabled: Boolean(nextEnabled) }),
+      });
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
+      writeBusinessAutopilotUserDirectory(nextUsers);
+      setEmployeeRoles(data.employee_roles || []);
+      setDepartments(data.departments || []);
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
+      setNotice(String(data?.message || (nextEnabled ? "User activated." : "User deactivated.")));
+    } catch (error) {
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        setNotice(error?.message || "Unable to update user status.");
+      }
+    } finally {
+      setTogglingMembershipId("");
     }
   }
 
@@ -902,6 +986,46 @@ export default function BusinessAutopilotUsersPage() {
       setNotice(error?.message || "Unable to send credentials email.");
     } finally {
       setSendingCredentialMembershipId("");
+    }
+  }
+
+  async function handleVerifyUserEmail(user) {
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || verifyingMembershipId) {
+      return;
+    }
+    if (Boolean(user?.email_verified)) {
+      setNotice("User email is already verified.");
+      return;
+    }
+    const confirmed = await openConfirmDialog(
+      `Verify email for ${String(user?.email || "this user")} now?`,
+      { title: "Confirm Email Verification", confirmText: "Verify", cancelText: "Cancel" }
+    );
+    if (!confirmed) {
+      return;
+    }
+    setVerifyingMembershipId(membershipId);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/verify-email`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      const nextUsers = data.users || [];
+      setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
+      writeBusinessAutopilotUserDirectory(nextUsers);
+      setEmployeeRoles(data.employee_roles || []);
+      setDepartments(data.departments || []);
+      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+      setHrEmployees(syncedHrEmployees);
+      writeSharedHrEmployees(syncedHrEmployees);
+      setNotice(String(data?.message || "User email verified successfully."));
+    } catch (error) {
+      setNotice(error?.message || "Unable to verify user email.");
+    } finally {
+      setVerifyingMembershipId("");
     }
   }
 
@@ -972,6 +1096,10 @@ export default function BusinessAutopilotUsersPage() {
   async function handleCreate(event) {
     event.preventDefault();
     if (!canManageUsers || saving) {
+      return;
+    }
+    if (!userMeta.can_add_users) {
+      await showAddonRequiredPopup();
       return;
     }
     if (!String(form.phone_number_input || "").trim()) {
@@ -1047,7 +1175,11 @@ export default function BusinessAutopilotUsersPage() {
         setNotice("User created successfully.");
       }
     } catch (error) {
-      setNotice(error?.message || "Unable to create user.");
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        setNotice(error?.message || "Unable to create user.");
+      }
     } finally {
       setSaving(false);
     }
@@ -1317,6 +1449,31 @@ export default function BusinessAutopilotUsersPage() {
         .includes(q)
     );
   }, [users, userSearch]);
+  const pendingEmailVerificationUsers = useMemo(
+    () => users.filter((user) => !Boolean(user?.email_verified)),
+    [users]
+  );
+  const filteredPendingEmailVerificationUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) {
+      return pendingEmailVerificationUsers;
+    }
+    return pendingEmailVerificationUsers.filter((user) =>
+      [
+        user.name,
+        user.first_name,
+        user.last_name,
+        user.email,
+        user.department,
+        user.employee_role,
+        "pending",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [pendingEmailVerificationUsers, userSearch]);
 
   const filteredEmployeeRoles = useMemo(() => {
     const q = employeeRoleSearch.trim().toLowerCase();
@@ -1363,7 +1520,10 @@ export default function BusinessAutopilotUsersPage() {
     return Array.from(unique.values());
   }, [employeeRoles]);
   const isEditingUser = Boolean(editForm.membership_id);
-  const availableUsersLabel = userMeta.has_unlimited_users ? "Unlimited" : String(userMeta.employee_limit || 0);
+  const createUserFormDisabled = !isEditingUser && !userMeta.can_add_users;
+  const availableUsersLabel = userMeta.has_unlimited_users
+    ? "Unlimited"
+    : `${Math.max(0, Number(userMeta.employee_limit) || 0)} (Base ${Math.max(0, Number(userMeta.base_included_users) || 0)} + Extra ${Math.max(0, Number(userMeta.extra_included_users) || 0)})`;
   const usedUsersLabel = String(userMeta.used_users || 0);
   const createPasswordStrength = useMemo(() => {
     const score = evaluatePasswordStrength(form.password);
@@ -2406,8 +2566,13 @@ export default function BusinessAutopilotUsersPage() {
               </div>
 
               <div className="card p-3">
-                <h6 className="mb-3">Create User</h6>
-                <form ref={userFormRef} className="d-flex flex-column gap-3" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
+                <h6 className="mb-3">
+                  {createUserFormDisabled
+                    ? "Create User (Need to Buy Addon Users)"
+                    : "Create User"}
+                </h6>
+                <form ref={userFormRef} className="d-flex flex-column gap-3 wz-users-create-form" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
+                  <fieldset disabled={createUserFormDisabled} className="m-0 p-0 border-0 d-flex flex-column gap-3 wz-users-create-fieldset">
                   <div className="row g-2">
                     <div className="col-12 col-md-6 col-xl-2">
                       <input
@@ -2512,6 +2677,7 @@ export default function BusinessAutopilotUsersPage() {
                           options={DIAL_COUNTRY_PICKER_OPTIONS}
                           style={{ maxWidth: "120px" }}
                           ariaLabel="User phone country code"
+                          disabled={createUserFormDisabled}
                         />
                         <input
                           type="tel"
@@ -2578,7 +2744,12 @@ export default function BusinessAutopilotUsersPage() {
                     </div>
                     <div className="col-12 col-md-6 col-xl-4">
                       <div className="d-grid d-xl-flex gap-2 wz-form-actions">
-                        <button type="submit" className="btn btn-primary flex-fill" disabled={isEditingUser ? savingEdit : saving} title={isEditingUser ? "Update User" : "Create User"}>
+                        <button
+                          type="submit"
+                          className="btn btn-primary flex-fill"
+                          disabled={createUserFormDisabled || (isEditingUser ? savingEdit : saving)}
+                          title={isEditingUser ? "Update User" : "Create User"}
+                        >
                           {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}
                         </button>
                         {isEditingUser ? (
@@ -2599,6 +2770,7 @@ export default function BusinessAutopilotUsersPage() {
                       </div>
                     </div>
                   </div>
+                  </fieldset>
                 </form>
               </div>
             </>
@@ -2608,79 +2780,162 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           )}
 
-          <div>
+          <div className="wz-users-list-section">
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-2 wz-users-tabs-row">
+              <button
+                type="button"
+                className={`btn btn-sm ${userListTab === "all" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setUserListTab("all")}
+              >
+                All Users
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${userListTab === "email_verification" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setUserListTab("email_verification")}
+              >
+                Email Verification
+              </button>
+            </div>
+            {userListTab === "all" ? (
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <div className="d-flex flex-wrap align-items-center gap-2">
-                <h6 className="mb-0">User List (Available User {availableUsersLabel} - Used {usedUsersLabel})</h6>
+                <h6 className="mb-0">User List (Available User Limit {availableUsersLabel} - Used {usedUsersLabel})</h6>
+              </div>
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
                 <button
                   type="button"
-                  className="btn btn-sm btn-outline-success"
+                  className="btn btn-sm btn-primary"
                   onClick={() => {
                     window.location.href = "/app/business-autopilot/billing";
                   }}
                 >
-                  Add on users
+                  Add Users
                 </button>
-              </div>
-              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
-                <span className="badge bg-secondary">{filteredUsers.length} items</span>
                 <div className="table-search">
                   <i className="bi bi-search" aria-hidden="true" />
                   <input type="search" className="form-control form-control-sm" placeholder="Search users" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0">Pending Email Verification Users ({filteredPendingEmailVerificationUsers.length})</h6>
+                <div className="table-search">
+                  <i className="bi bi-search" aria-hidden="true" />
+                  <input type="search" className="form-control form-control-sm" placeholder="Search users" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
+                </div>
+              </div>
+            )}
             <div className="table-responsive">
-              <table className="table table-dark table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>First Name</th>
-                    <th>Last Name</th>
-                    <th>Official Email</th>
-                    <th>Department</th>
-                    <th>Employee Role</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={7}>Loading users...</td></tr>
-                  ) : paginatedUsers.length ? (
-                    paginatedUsers.map((user) => (
-                      <tr key={user.membership_id || user.id}>
-                        <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
-                        <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
-                        <td>{user.email || "-"}</td>
-                        <td>{user.department || "-"}</td>
-                        <td>{user.employee_role || "-"}</td>
-                        <td>{user.is_active ? "Active" : "Inactive"}</td>
-                        <td>
-                          <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openViewUser(user)}>View</button>
+              {userListTab === "all" ? (
+                <table className="table table-dark table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>First Name</th>
+                      <th>Last Name</th>
+                      <th>Official Email</th>
+                      <th>Department</th>
+                      <th>Employee Role</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={7}>Loading users...</td></tr>
+                    ) : paginatedUsers.length ? (
+                      paginatedUsers.map((user) => (
+                        <tr key={user.membership_id || user.id}>
+                          <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
+                          <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
+                          <td>{user.email || "-"}</td>
+                          <td>{user.department || "-"}</td>
+                          <td>{user.employee_role || "-"}</td>
+                          <td>{user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive")}</td>
+                          <td>
+                            <div className="d-inline-flex gap-2">
+                              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openViewUser(user)}>View</button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-success"
+                                onClick={() => handleResendCredentials(user)}
+                                disabled={!user.membership_id || sendingCredentialMembershipId === String(user.membership_id)}
+                              >
+                                {sendingCredentialMembershipId === String(user.membership_id) ? "Emailing..." : "Email"}
+                              </button>
+                              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openEdit(user)}>Edit</button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${
+                                  user.is_locked
+                                    ? "btn-outline-secondary"
+                                    : (user.is_active ? "btn-outline-success" : "btn-outline-primary")
+                                }`}
+                                onClick={() => handleToggleUserStatus(user, !user.is_active)}
+                                disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
+                              >
+                                {togglingMembershipId === String(user.membership_id)
+                                  ? "Updating..."
+                                  : (user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive"))}
+                              </button>
+                              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
+                                {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={7}>No users found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="table table-dark table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>First Name</th>
+                      <th>Last Name</th>
+                      <th>Official Email</th>
+                      <th>Department</th>
+                      <th>Employee Role</th>
+                      <th>Email Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={7}>Loading users...</td></tr>
+                    ) : filteredPendingEmailVerificationUsers.length ? (
+                      filteredPendingEmailVerificationUsers.map((user) => (
+                        <tr key={`pending-${user.membership_id || user.id}`}>
+                          <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
+                          <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
+                          <td>{user.email || "-"}</td>
+                          <td>{user.department || "-"}</td>
+                          <td>{user.employee_role || "-"}</td>
+                          <td>Pending</td>
+                          <td>
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline-success"
-                              onClick={() => handleResendCredentials(user)}
-                              disabled={!user.membership_id || sendingCredentialMembershipId === String(user.membership_id)}
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleVerifyUserEmail(user)}
+                              disabled={!user.membership_id || verifyingMembershipId === String(user.membership_id)}
                             >
-                              {sendingCredentialMembershipId === String(user.membership_id) ? "Emailing..." : "Email"}
+                              {verifyingMembershipId === String(user.membership_id) ? "Verifying..." : "Verify"}
                             </button>
-                            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openEdit(user)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
-                              {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr><td colSpan={7}>No users found.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={7}>No pending email verification users.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
-            {!loading ? (
+            {!loading && userListTab === "all" ? (
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
                 <div className="small text-secondary">
                   Showing {userStartIndex} to {userEndIndex} of {filteredUsers.length} entries

@@ -7221,6 +7221,8 @@ def profile_summary(request):
             "first_name": user.first_name or "",
             "last_name": user.last_name or "",
             "email": user.email or "",
+            "email_verified": bool(user.email_verified),
+            "email_verification_sent_at": user.email_verification_sent_at.isoformat() if user.email_verification_sent_at else "",
             "profile_photo_url": profile_photo_url,
         },
         "profile": {
@@ -7489,6 +7491,20 @@ def profile_update_email(request):
         "public_server_ip": saved_public_server_ip,
         "public_server_domain": saved_public_server_domain,
         "email_verified": user.email_verified,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def profile_resend_verification(request):
+    user = request.user
+    if not str(user.email or "").strip():
+        return _json_error("Email is required.", status=400)
+    send_email_verification(user, request=request, force=True)
+    return JsonResponse({
+        "sent": True,
+        "email_verified": bool(user.email_verified),
+        "message": "Verification email sent.",
     })
 
 

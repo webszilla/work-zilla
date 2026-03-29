@@ -364,26 +364,31 @@ export default function SaasAdminPage() {
   function dedupeProducts(list) {
     const byKey = new Map();
     list.forEach((product) => {
-      const rawKey = product?.slug || product?.name;
+      const slugValue = String(product?.slug || "").trim().toLowerCase();
+      const normalizedSlug = ["monitor", "worksuite", "work-suite"].includes(slugValue) ? "work-suite" : slugValue;
+      const rawKey = normalizedSlug || product?.slug || product?.name;
       const key = rawKey ? String(rawKey).trim().toLowerCase() : "";
       if (!key) {
         return;
       }
+      const candidate = ["monitor", "worksuite", "work-suite"].includes(slugValue)
+        ? { ...product, slug: "work-suite", name: "Work Suite" }
+        : product;
       const existing = byKey.get(key);
       if (!existing) {
-        byKey.set(key, product);
+        byKey.set(key, candidate);
         return;
       }
       const existingDesc = String(existing.description || existing.short_description || "").trim();
-      const currentDesc = String(product.description || product.short_description || "").trim();
+      const currentDesc = String(candidate.description || candidate.short_description || "").trim();
       if (!existingDesc && currentDesc) {
-        byKey.set(key, product);
+        byKey.set(key, candidate);
         return;
       }
       const existingIcon = String(existing.icon || "").trim();
-      const currentIcon = String(product.icon || "").trim();
+      const currentIcon = String(candidate.icon || "").trim();
       if (!existingIcon && currentIcon) {
-        byKey.set(key, product);
+        byKey.set(key, candidate);
       }
     });
     const values = Array.from(byKey.values());

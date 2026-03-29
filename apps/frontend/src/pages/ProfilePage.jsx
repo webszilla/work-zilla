@@ -49,6 +49,8 @@ const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
 const PROFILE_TICKET_MAX_ATTACHMENTS = 5;
 const PROFILE_TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const PROFILE_PHOTO_MAX_BYTES = 500 * 1024;
+const PROFILE_VERIFY_ALERT_MESSAGE =
+  "Please check your inbox or spam folder. If you do not receive the email, contact your org admin.";
 const PROFILE_EMPLOYEE_DETAILS_FIELDS = [
   ["Department", "department"],
   ["Employee Role", "designation"],
@@ -308,6 +310,7 @@ export default function ProfilePage() {
   const [tableSearchQuery, setTableSearchQuery] = useState("");
   const [usersModal, setUsersModal] = useState({ open: false, users: [] });
   const [email, setEmail] = useState("");
+  const [emailVerified, setEmailVerified] = useState(true);
   const [phoneCountry, setPhoneCountry] = useState("+91");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [orgTimezone, setOrgTimezone] = useState("UTC");
@@ -385,6 +388,11 @@ export default function ProfilePage() {
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [photoUploadState, setPhotoUploadState] = useState({ loading: false, error: "", success: "" });
   const [passwordResetModalOpen, setPasswordResetModalOpen] = useState(false);
+  const [emailVerificationModal, setEmailVerificationModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+  });
   const currencyCodeOptions = useMemo(() => getCurrencyCodeOptions(), []);
   const rawPath = typeof window !== "undefined" ? window.location.pathname : "";
   const globalSlug = typeof window !== "undefined" ? window.__WZ_PRODUCT_SLUG__ : "";
@@ -400,6 +408,34 @@ export default function ProfilePage() {
       : rawPath.includes("/work-suite") || rawPath.includes("/worksuite") || rawPath.includes("/monitor")
       ? "worksuite"
       : "");
+  const data = state.data || {};
+  const user = data.user || {};
+  const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
+  const isOrgAdminProfile = normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin";
+  const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
+  const isBusinessAutopilotOrgAdmin =
+    currentProductSlug === "business-autopilot-erp" &&
+    (normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin");
+  const recentActions = data.recent_actions || [];
+  const profilePhoneDisplay = `${phoneCountry || ""} ${phoneNumber || ""}`.trim();
+  const profilePhotoFallback = getProfilePhotoFallbackLabel(user);
+  const referral = data.referral || {};
+  const referralEarnings = Array.isArray(referral.earnings) ? referral.earnings : [];
+  const tzList = TIMEZONE_OPTIONS.some((item) => item.value === orgTimezone)
+    ? TIMEZONE_OPTIONS
+    : [{ value: orgTimezone || "UTC", label: `${orgTimezone || "UTC"}` }, ...TIMEZONE_OPTIONS];
+  const showTimezone = Boolean(data.org?.id);
+  const pagination = data.pagination || {};
+  const currentPage = pagination.page || adminPage;
+  const pageSize = pagination.page_size || 50;
+  const totalItems =
+    typeof pagination.total_items === "number"
+      ? pagination.total_items
+      : recentActions.length;
+  const startEntry = totalItems ? (currentPage - 1) * pageSize + 1 : 0;
+  const endEntry = totalItems
+    ? Math.min(currentPage * pageSize, totalItems)
+    : 0;
 
   useEffect(() => {
     const overrideTheme = readThemeOverride();
@@ -445,6 +481,7 @@ export default function ProfilePage() {
         }
         setState({ loading: false, error: "", data });
         setEmail(data.user?.email || "");
+        setEmailVerified(Boolean(data.user?.email_verified));
         setPhoneCountry(data.phone_country || "+91");
         setPhoneNumber(data.phone_number || "");
         setProfilePhotoUrl(data.user?.profile_photo_url || "");
@@ -677,7 +714,7 @@ export default function ProfilePage() {
     event.preventDefault();
     setNotice("");
     try {
-      await apiFetch("/api/dashboard/profile/email", {
+      const response = await apiFetch("/api/dashboard/profile/email", {
         method: "POST",
         body: JSON.stringify({
           email,
@@ -716,6 +753,15 @@ export default function ProfilePage() {
             detail: { style: normalizeSidebarMenuStyle(sidebarMenuStyle) }
           })
         );
+      }
+      const nextEmailVerified = Boolean(response?.email_verified);
+      setEmailVerified(nextEmailVerified);
+      if (!nextEmailVerified) {
+        setEmailVerificationModal({
+          open: true,
+          title: "Email Verification Required",
+          message: PROFILE_VERIFY_ALERT_MESSAGE,
+        });
       }
       setNotice("Profile and UI theme updated successfully.");
     } catch (error) {
@@ -1205,35 +1251,6 @@ export default function ProfilePage() {
       setSecuritySaving(false);
     }
   }
-
-  const data = state.data || {};
-  const user = data.user || {};
-  const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
-  const isOrgAdminProfile = normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin";
-  const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
-  const isBusinessAutopilotOrgAdmin =
-    currentProductSlug === "business-autopilot-erp" &&
-    (normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin");
-  const recentActions = data.recent_actions || [];
-  const profilePhoneDisplay = `${phoneCountry || ""} ${phoneNumber || ""}`.trim();
-  const profilePhotoFallback = getProfilePhotoFallbackLabel(user);
-  const referral = data.referral || {};
-  const referralEarnings = Array.isArray(referral.earnings) ? referral.earnings : [];
-  const tzList = TIMEZONE_OPTIONS.some((item) => item.value === orgTimezone)
-    ? TIMEZONE_OPTIONS
-    : [{ value: orgTimezone || "UTC", label: `${orgTimezone || "UTC"}` }, ...TIMEZONE_OPTIONS];
-  const showTimezone = Boolean(data.org?.id);
-  const pagination = data.pagination || {};
-  const currentPage = pagination.page || adminPage;
-  const pageSize = pagination.page_size || 50;
-  const totalItems =
-    typeof pagination.total_items === "number"
-      ? pagination.total_items
-      : recentActions.length;
-  const startEntry = totalItems ? (currentPage - 1) * pageSize + 1 : 0;
-  const endEntry = totalItems
-    ? Math.min(currentPage * pageSize, totalItems)
-    : 0;
   const orgAdminAssigneeOptions = useMemo(() => {
     const options = [
       user.username,
@@ -1447,6 +1464,30 @@ export default function ProfilePage() {
     }
     if (viewWhatsappRule?.id === rowId) {
       setViewWhatsappRule(null);
+    }
+  }
+
+  async function handleResendEmailVerification() {
+    try {
+      const response = await apiFetch("/api/dashboard/profile/email/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (response?.email_verified) {
+        setEmailVerified(true);
+        setNotice("Email is already verified.");
+        return;
+      }
+      setEmailVerificationModal({
+        open: true,
+        title: "Verification Email Sent",
+        message: PROFILE_VERIFY_ALERT_MESSAGE,
+      });
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to send verification email.",
+      }));
     }
   }
 
@@ -1857,6 +1898,15 @@ export default function ProfilePage() {
               </div>
               <div className="d-flex flex-wrap gap-2 mt-3">
                 <button className="btn btn-primary btn-sm">Update Details</button>
+                {!emailVerified ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-warning btn-sm"
+                    onClick={handleResendEmailVerification}
+                  >
+                    Verify Email
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-outline-primary btn-sm"
@@ -1921,6 +1971,35 @@ export default function ProfilePage() {
                 <button className="btn btn-warning btn-sm" type="submit">Update Password</button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {emailVerificationModal.open ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setEmailVerificationModal({ open: false, title: "", message: "" })}>
+          <div className="modal-panel" style={{ width: "min(520px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">{emailVerificationModal.title || "Email Verification Required"}</h5>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                onClick={() => setEmailVerificationModal({ open: false, title: "", message: "" })}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="small text-secondary mb-3">{emailVerificationModal.message || PROFILE_VERIFY_ALERT_MESSAGE}</div>
+            <div className="d-flex justify-content-end">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setEmailVerificationModal({ open: false, title: "", message: "" })}
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -47,6 +47,7 @@ urlpatterns = [
     path("profile/security", api_views.profile_security, name="api_profile_security"),
     path("profile/login-activity", api_views.profile_login_activity, name="api_profile_login_activity"),
     path("profile/email", api_views.profile_update_email, name="api_profile_update_email"),
+    path("profile/email/resend-verification", api_views.profile_resend_verification, name="api_profile_resend_verification"),
     path("profile/photo", api_views.profile_update_photo, name="api_profile_update_photo"),
     path("profile/password", api_views.profile_update_password, name="api_profile_update_password"),
     path("inbox", api_views.org_inbox_list, name="api_org_inbox_list"),

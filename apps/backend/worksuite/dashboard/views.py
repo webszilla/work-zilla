@@ -339,8 +339,8 @@ def get_effective_employee_limit(plan):
             except (TypeError, ValueError):
                 parsed = 0
             if parsed > 0:
-                return parsed
-        return 2
+                return max(parsed, 3)
+        return 3
     return base_limit
 
 

@@ -22,6 +22,7 @@ from apps.backend.common_auth.models import User
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription
 from core.email_utils import send_templated_email
+from core.notification_emails import mark_email_verified
 
 from .models import (
     Module,
@@ -65,6 +66,7 @@ ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
+BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES = {"business-autopilot-erp", "business-autopilot"}
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
 PUBLIC_LOGIN_URL = "https://getworkzilla.com/auth/login/"
@@ -394,6 +396,39 @@ def _is_free_plan(plan):
     return all(price <= 0 for price in prices)
 
 
+def _is_business_autopilot_free_plan(plan):
+    if not plan:
+        return False
+    product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
+    if product_slug not in BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES:
+        return False
+    if _is_free_plan(plan):
+        return True
+    plan_name = str(getattr(plan, "name", "") or "").strip().lower()
+    if "free" in plan_name:
+        return True
+    limits = getattr(plan, "limits", {}) or {}
+    plan_tier = str(limits.get("plan_tier") or limits.get("tier") or "").strip().lower()
+    return plan_tier == "free"
+
+
+def _get_effective_employee_limit(plan):
+    if not plan:
+        return 0
+    try:
+        base_limit = int(getattr(plan, "employee_limit", 0) or 0)
+    except (TypeError, ValueError):
+        base_limit = 0
+    if _is_business_autopilot_free_plan(plan):
+        # Business Autopilot free trial: base 1 + extra 2 => total 3 users.
+        return 3
+    product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
+    if product_slug in BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES:
+        # Business Autopilot paid plans: base 1 user; additional users require paid add-ons.
+        return 1
+    return base_limit
+
+
 def _trial_tier_module_slugs(trial_tier):
     tier = str(trial_tier or "").strip().lower()
     if tier in {"pro", "all", "full"}:
@@ -413,7 +448,7 @@ def _get_active_erp_subscription(org):
     now = timezone.now()
     rows = (
         OrgSubscription.objects
-        .filter(organization=org, plan__product__slug="business-autopilot-erp")
+        .filter(organization=org, plan__product__slug__in=BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES)
         .select_related("plan", "plan__product")
         .order_by("-start_date", "-id")
     )
@@ -500,6 +535,7 @@ def _serialize_org_users(org):
             "last_name": str(getattr(member.user, "last_name", "") or "").strip(),
             "employeeId": _format_employee_code(member.user_id),
             "email": member.user.email or "",
+            "email_verified": bool(getattr(member.user, "email_verified", False)),
             "phone_number": str(
                 getattr(getattr(member.user, "userprofile", None), "phone_number", "") or ""
             ).strip(),
@@ -537,21 +573,74 @@ def _safe_serialize_departments(org):
         return []
 
 
+def _list_org_user_memberships(org):
+    return list(
+        OrganizationUser.objects
+        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
+        .select_related("user")
+        .order_by("id")
+    )
+
+
+def _compute_org_user_lock_ids(employee_limit, memberships=None):
+    rows = memberships if isinstance(memberships, list) else []
+    safe_limit = max(0, int(employee_limit or 0))
+    unlocked_ids = [row.id for row in rows[:safe_limit]]
+    locked_ids = [row.id for row in rows[safe_limit:]]
+    return {
+        "unlocked_ids": set(unlocked_ids),
+        "locked_ids": set(locked_ids),
+        "total_users": len(rows),
+    }
+
+
+def _attach_locked_state(users, locked_ids):
+    safe_locked_ids = set(locked_ids or [])
+    normalized = []
+    for row in (users or []):
+        membership_id = row.get("membership_id")
+        is_locked = membership_id in safe_locked_ids
+        next_row = dict(row)
+        next_row["is_locked"] = is_locked
+        if is_locked:
+            next_row["is_active"] = False
+        normalized.append(next_row)
+    return normalized
+
+
 def _build_org_user_meta(org, users=None):
     active_sub = _get_active_erp_subscription(org)
-    base_limit = 0
-    addon_count = 0
-    allow_addons = False
-    if active_sub and active_sub.plan:
-        base_limit = int(active_sub.plan.employee_limit or 0)
-        addon_count = int(active_sub.addon_count or 0)
-        allow_addons = bool(active_sub.plan.allow_addons)
+    has_subscription = bool(active_sub and active_sub.plan)
+    addon_count = int(active_sub.addon_count or 0) if has_subscription else 0
+    allow_addons = bool(active_sub.plan.allow_addons) if has_subscription else False
 
-    employee_limit = 0 if base_limit == 0 else max(0, base_limit + max(0, addon_count))
-    user_rows = users if isinstance(users, list) else _safe_serialize_org_users(org)
-    used_users = sum(1 for row in user_rows if bool(row.get("is_active")))
-    has_unlimited_users = employee_limit == 0
-    remaining_users = None if has_unlimited_users else max(0, employee_limit - used_users)
+    if has_subscription:
+        base_limit = _get_effective_employee_limit(active_sub.plan)
+        # For paid/tiered plans, minimum 1 user is included by default.
+        if base_limit <= 0 and not _is_free_plan(active_sub.plan):
+            base_limit = 1
+    else:
+        base_limit = 0
+
+    employee_limit = max(0, base_limit + max(0, addon_count))
+    memberships = _list_org_user_memberships(org)
+    lock_state = _compute_org_user_lock_ids(employee_limit, memberships=memberships)
+    total_users = lock_state["total_users"]
+    used_users = min(total_users, employee_limit)
+    remaining_users = max(0, employee_limit - lock_state["total_users"])
+    can_add_users = bool(has_subscription and total_users < employee_limit)
+    limit_message = ""
+    if not has_subscription:
+        limit_message = "Free trial ended. Upgrade your plan to add users."
+    elif not can_add_users:
+        limit_message = "User limit reached. Add-on users required to add or enable more users."
+
+    if has_subscription and _is_business_autopilot_free_plan(active_sub.plan):
+        base_included_users = 1
+        extra_included_users = max(0, employee_limit - base_included_users)
+    else:
+        base_included_users = max(0, employee_limit - max(0, addon_count))
+        extra_included_users = max(0, employee_limit - base_included_users)
 
     return {
         "employee_limit": employee_limit,
@@ -559,9 +648,35 @@ def _build_org_user_meta(org, users=None):
         "remaining_users": remaining_users,
         "addon_count": max(0, addon_count),
         "allow_addons": allow_addons,
-        "has_unlimited_users": has_unlimited_users,
-        "can_add_users": has_unlimited_users or used_users < employee_limit,
+        "has_unlimited_users": False,
+        "can_add_users": can_add_users,
+        "has_subscription": has_subscription,
+        "limit_message": limit_message,
+        "base_included_users": base_included_users,
+        "extra_included_users": extra_included_users,
     }
+
+
+def _sync_org_users_to_plan_limit(org, requested_by=None):
+    memberships = _list_org_user_memberships(org)
+    if not memberships:
+        return {"auto_disabled_ids": [], "auto_enabled_ids": []}
+
+    meta = _build_org_user_meta(org, users=None)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=memberships)
+    locked_ids = lock_state["locked_ids"]
+    auto_disabled = []
+    auto_enabled = []
+
+    # Extra users are lock-managed by plan limit and must stay inactive.
+    for row in memberships:
+        if row.id in locked_ids and row.is_active:
+            row.is_active = False
+            row.save(update_fields=["is_active", "updated_at"])
+            _revoke_business_autopilot_access(row.user)
+            auto_disabled.append(row.id)
+
+    return {"auto_disabled_ids": auto_disabled, "auto_enabled_ids": auto_enabled}
 
 
 def _decimal_to_string(value, default="0.00"):
@@ -1324,6 +1439,18 @@ def org_users(request):
     if request.method == "POST":
         if not can_manage_users:
             return JsonResponse({"detail": "forbidden"}, status=403)
+        _sync_org_users_to_plan_limit(org, requested_by=request.user)
+        current_users = _safe_serialize_org_users(org)
+        current_meta = _build_org_user_meta(org, users=current_users)
+        if not current_meta.get("can_add_users"):
+            return JsonResponse(
+                {
+                    "detail": "employee_limit_reached",
+                    "message": current_meta.get("limit_message") or "User limit reached. Add-on users required.",
+                    "meta": current_meta,
+                },
+                status=403,
+            )
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
@@ -1442,6 +1569,7 @@ def org_users(request):
                 },
             )
             _grant_business_autopilot_access(user, request.user, role)
+            _sync_org_users_to_plan_limit(org, requested_by=request.user)
 
         is_existing_user_added = bool(existing_user) and not newly_created_user
         if newly_created_user or is_existing_user_added:
@@ -1475,8 +1603,11 @@ def org_users(request):
                 "status": "sent" if mail_sent else "failed",
             }
 
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
     users = _safe_serialize_org_users(org)
     user_meta = _build_org_user_meta(org, users=users)
+    lock_state = _compute_org_user_lock_ids(user_meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    users = _attach_locked_state(users, lock_state["locked_ids"])
     return JsonResponse(
         {
             "authenticated": True,
@@ -1516,7 +1647,11 @@ def org_user_detail(request, membership_id: int):
     if request.method == "DELETE":
         _revoke_business_autopilot_access(membership.user)
         membership.delete()
+        _sync_org_users_to_plan_limit(org, requested_by=request.user)
         users = _safe_serialize_org_users(org)
+        meta = _build_org_user_meta(org, users=users)
+        lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+        users = _attach_locked_state(users, lock_state["locked_ids"])
         return JsonResponse(
             {
                 "authenticated": True,
@@ -1524,7 +1659,7 @@ def org_user_detail(request, membership_id: int):
                 "employee_roles": _safe_serialize_employee_roles(org),
                 "departments": _safe_serialize_departments(org),
                 "can_manage_users": can_manage_users,
-                "meta": _build_org_user_meta(org, users=users),
+                "meta": meta,
             }
         )
 
@@ -1614,6 +1749,23 @@ def org_user_detail(request, membership_id: int):
         membership.role = role
         membership.department = department
         membership.employee_role = employee_role
+        if isinstance(is_active, bool) and is_active and not membership.is_active:
+            _sync_org_users_to_plan_limit(org, requested_by=request.user)
+            preview_meta = _build_org_user_meta(org, users=None)
+            preview_lock_state = _compute_org_user_lock_ids(
+                preview_meta.get("employee_limit"),
+                memberships=_list_org_user_memberships(org),
+            )
+            if membership.id in preview_lock_state["locked_ids"]:
+                return JsonResponse(
+                    {
+                        "detail": "employee_limit_reached",
+                        "message": preview_meta.get("limit_message") or "User limit reached. Add-on users required.",
+                        "meta": preview_meta,
+                    },
+                    status=403,
+                )
+
         if isinstance(is_active, bool):
             membership.is_active = is_active
         membership.save(update_fields=["role", "department", "employee_role", "is_active", "updated_at"])
@@ -1622,7 +1774,11 @@ def org_user_detail(request, membership_id: int):
         else:
             _revoke_business_autopilot_access(membership.user)
 
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
     users = _safe_serialize_org_users(org)
+    meta = _build_org_user_meta(org, users=users)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    users = _attach_locked_state(users, lock_state["locked_ids"])
     return JsonResponse(
         {
             "authenticated": True,
@@ -1630,7 +1786,77 @@ def org_user_detail(request, membership_id: int):
             "employee_roles": _safe_serialize_employee_roles(org),
             "departments": _safe_serialize_departments(org),
             "can_manage_users": can_manage_users,
-            "meta": _build_org_user_meta(org, users=users),
+            "meta": meta,
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def org_user_toggle_status(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
+
+    can_manage_users = _can_manage_users(request.user)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        return JsonResponse({"detail": "enabled_required"}, status=400)
+
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    if enabled and not membership.is_active:
+        preview_meta = _build_org_user_meta(org, users=None)
+        preview_lock_state = _compute_org_user_lock_ids(
+            preview_meta.get("employee_limit"),
+            memberships=_list_org_user_memberships(org),
+        )
+        if membership.id in preview_lock_state["locked_ids"]:
+            return JsonResponse(
+                {
+                    "detail": "employee_limit_reached",
+                    "message": preview_meta.get("limit_message") or "User limit reached. Add-on users required.",
+                    "meta": preview_meta,
+                },
+                status=403,
+            )
+
+    membership.is_active = enabled
+    membership.save(update_fields=["is_active", "updated_at"])
+    if enabled:
+        _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
+    else:
+        _revoke_business_autopilot_access(membership.user)
+
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    users = _safe_serialize_org_users(org)
+    meta = _build_org_user_meta(org, users=users)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    users = _attach_locked_state(users, lock_state["locked_ids"])
+    message = "User activated." if enabled else "User deactivated."
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "users": users,
+            "employee_roles": _safe_serialize_employee_roles(org),
+            "departments": _safe_serialize_departments(org),
+            "can_manage_users": can_manage_users,
+            "meta": meta,
+            "message": message,
         }
     )
 
@@ -1687,6 +1913,55 @@ def org_user_resend_credentials(request, membership_id: int):
             "credentials": credentials,
             "email_sent": bool(mail_sent),
             "status": "sent" if mail_sent else "failed",
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def org_user_verify_email(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
+
+    can_manage_users = _can_manage_users(request.user)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+
+    user = membership.user
+    email = str(user.email or "").strip()
+    if not email:
+        return JsonResponse({"detail": "email_required"}, status=400)
+
+    if not bool(getattr(user, "email_verified", False)):
+        mark_email_verified(user)
+        user.email_verification_sent_at = None
+        user.save(update_fields=["email_verification_sent_at"])
+
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    users = _safe_serialize_org_users(org)
+    meta = _build_org_user_meta(org, users=users)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    users = _attach_locked_state(users, lock_state["locked_ids"])
+
+    if membership.is_active and not (membership.id in lock_state["locked_ids"]):
+        _grant_business_autopilot_access(user, request.user, membership.role or "org_user")
+
+    return JsonResponse(
+        {
+            "authenticated": True,
+            "users": users,
+            "employee_roles": _safe_serialize_employee_roles(org),
+            "departments": _safe_serialize_departments(org),
+            "can_manage_users": can_manage_users,
+            "meta": meta,
+            "message": "User email verified successfully.",
         }
     )
 

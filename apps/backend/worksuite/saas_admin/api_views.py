@@ -2713,10 +2713,10 @@ def _normalize_business_autopilot_plan_rules(plan):
         or plan_name == "free"
     )
     if trial_like:
-        plan.employee_limit = 2
+        plan.employee_limit = 3
         plan.allow_addons = False
-        limits["included_users"] = 2
-        limits["user_limit"] = 2
+        limits["included_users"] = 3
+        limits["user_limit"] = 3
     else:
         plan.employee_limit = 0
         plan.allow_addons = True
