@@ -679,6 +679,8 @@ def _normalize_saas_slug_to_public(value):
         return "worksuite"
     if slug == "online-storage":
         return "storage"
+    if slug in {"business-autopilot", "business-autopilot-erp"}:
+        return "business-autopilot"
     if slug in {"imposition", "imposition software"}:
         return "imposition-software"
     return slug

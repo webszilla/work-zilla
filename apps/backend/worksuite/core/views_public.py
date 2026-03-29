@@ -28,10 +28,19 @@ def _is_business_autopilot_alias(slug):
     normalized = (slug or "").strip().lower()
     return normalized in {"business-autopilot", "business-autopilot-erp"}
 
+
+def _canonical_public_slug(slug):
+    normalized = (slug or "").strip().lower()
+    if _is_business_autopilot_alias(normalized):
+        return "business-autopilot"
+    return normalized
+
 def _public_product_slug(value):
     slug = (value or "").strip().lower()
     if slug == "monitor":
         return "worksuite"
+    if _is_business_autopilot_alias(slug):
+        return "business-autopilot"
     return slug
 
 def _public_product_name(value, slug):
@@ -52,6 +61,8 @@ def _normalize_saas_admin_public_slug(value):
         return "worksuite"
     if slug == "online-storage":
         return "storage"
+    if _is_business_autopilot_alias(slug):
+        return "business-autopilot"
     return slug
 
 
@@ -190,10 +201,10 @@ def public_products(request):
             normalized_saas_rows.insert(wa_idx + 1, da_slug)
 
         public_order_map = {
-            slug: index
+            _canonical_public_slug(slug): index
             for index, slug in enumerate(normalized_saas_rows, start=1)
         }
-        allowed_public_slugs = set(normalized_saas_rows)
+        allowed_public_slugs = {_canonical_public_slug(slug) for slug in normalized_saas_rows}
     except (OperationalError, ProgrammingError):
         public_order_map = {}
         allowed_public_slugs = set()
@@ -202,12 +213,12 @@ def public_products(request):
         products = [
             product
             for product in products
-            if _public_product_slug(product.slug) in allowed_public_slugs
+            if _canonical_public_slug(_public_product_slug(product.slug)) in allowed_public_slugs
         ]
 
     products.sort(
         key=lambda product: (
-            public_order_map.get(_public_product_slug(product.slug), 10_000),
+            public_order_map.get(_canonical_public_slug(_public_product_slug(product.slug)), 10_000),
             product.sort_order or 0,
             (product.name or "").lower(),
         )
@@ -471,7 +482,7 @@ def public_plans(request):
                     "price_usdt_month": 0,
                     "price_usdt_year": 0,
                 }]
-    response_product_slug = product.slug if product else normalized_slug
+    response_product_slug = _public_product_slug(product.slug) if product else _public_product_slug(normalized_slug)
     response_product_name = _public_product_name(product.name if product else "Online Storage", response_product_slug)
     return JsonResponse({
         "product": {"slug": response_product_slug, "name": response_product_name},
