@@ -208,15 +208,15 @@ function getErpPlanFeatures(plan) {
   const rows = [
     { text: "CRM Module", ok: hasModule("crm", defaults.crm) },
     { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
+    { text: "Subscriptions Management", ok: hasModule("subscriptions", defaults.subscriptions) },
+    { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
+    { text: "Vendor Management", ok: true },
     { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
     { text: "Project Management", ok: hasModule("projects", defaults.projects) },
     { text: "Accounts", ok: hasAccountsModule },
-    { text: "Subscriptions Module", ok: hasModule("subscriptions", defaults.subscriptions) },
-    { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
     { text: "Invoice & Billing", ok: hasAccountsModule && boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
     { text: "GST Ready (India)", ok: hasAccountsModule && boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
     { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
-    { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
     { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
     { text: "Priority Support", ok: allowPrioritySupport && boolFrom(["priority_support"], defaults.priority) },
   ];
