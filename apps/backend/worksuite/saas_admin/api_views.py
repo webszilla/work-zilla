@@ -112,7 +112,7 @@ def _is_saas_admin_user(user):
         return True
     profile = UserProfile.objects.filter(user=user).first()
     role = str(getattr(profile, "role", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return bool(profile and role in ("superadmin", "super_admin"))
+    return bool(profile and role in ("superadmin", "super_admin", "saas_admin", "saasadmin"))
 
 
 def _require_saas_admin(request):
