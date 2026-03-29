@@ -22,6 +22,9 @@ if [ "$DEPLOY_MODE" = "rsync" ]; then
     --exclude 'venv/' \
     --exclude '.venv/' \
     --exclude 'env/' \
+    --exclude 'apps/backend/.env' \
+    --exclude 'apps/frontend/.env' \
+    --exclude 'apps/frontend/.env.*' \
     --exclude '*.sqlite3' \
     --exclude '*.sqlite3-journal' \
     --exclude '*.sqlite3-wal' \
@@ -34,6 +37,9 @@ if [ "$DEPLOY_MODE" = "rsync" ]; then
     --exclude 'node_modules/' \
     --exclude 'dist/' \
     --exclude '.build/' \
+    --exclude 'apps/desktop_app/dist/' \
+    --exclude 'apps/bootstrap_installer/dist/' \
+    --exclude 'apps/desktop_app/mac_helper/.build/' \
     --exclude 'build/' \
     ./ "${SERVER_HOST}:${SERVER_PROJECT_PATH}/"
 fi
@@ -134,12 +140,14 @@ run_preflight_cleanup
 cd "$SERVER_PROJECT_PATH"
 
 cleanup_server_installers() {
-  find "${SERVER_PROJECT_PATH}/apps/bootstrap_installer/dist" -maxdepth 1 -type f \
-    \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.pkg' \) -delete 2>/dev/null || true
-  find "${SERVER_PROJECT_PATH}/apps/desktop_app/dist" -maxdepth 1 -type f \
-    \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.pkg' \) -delete 2>/dev/null || true
+  rm -rf "${SERVER_PROJECT_PATH}/apps/bootstrap_installer/dist"/* 2>/dev/null || true
+  rm -rf "${SERVER_PROJECT_PATH}/apps/desktop_app/dist"/* 2>/dev/null || true
+  rm -rf "${SERVER_PROJECT_PATH}/apps/desktop_app/mac_helper/.build"/* 2>/dev/null || true
+  mkdir -p "${SERVER_PROJECT_PATH}/apps/bootstrap_installer/dist" \
+           "${SERVER_PROJECT_PATH}/apps/desktop_app/dist" \
+           "${SERVER_PROJECT_PATH}/apps/desktop_app/mac_helper/.build"
   find "${SERVER_PROJECT_PATH}/apps/backend/static/downloads" -maxdepth 1 -type f \
-    \( -name 'Work Zilla * Setup *.exe' -o -name 'Work Zilla *-*.dmg' -o -name 'Work Zilla *-*.zip' -o -name 'Work Zilla *-*.pkg' \) -delete 2>/dev/null || true
+    ! -name 'bootstrap-products.json' ! -name 'README.md' -delete 2>/dev/null || true
 }
 
 cleanup_server_installers
