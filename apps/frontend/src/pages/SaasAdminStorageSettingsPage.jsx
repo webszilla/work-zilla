@@ -85,7 +85,7 @@ export default function SaasAdminStorageSettingsPage() {
         base_path: state.base_path
       };
       const data = await apiFetch("/api/saas-admin/settings/media-storage", {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify(payload)
       });
       setState((prev) => ({

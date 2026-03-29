@@ -4843,7 +4843,7 @@ def ses_settings(request):
 
 
 @login_required
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["GET", "PUT", "POST"])
 def media_storage_settings(request):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
