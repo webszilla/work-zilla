@@ -53,7 +53,6 @@ const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   flag: option.flag,
 }));
 const SYSTEM_ROLE_OPTIONS = [
-  { key: "system:company_admin", label: "Company Admin" },
   { key: "system:org_user", label: "Org User" },
   { key: "system:hr_view", label: "HR View" },
 ];
