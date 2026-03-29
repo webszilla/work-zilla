@@ -537,6 +537,33 @@ def _safe_serialize_departments(org):
         return []
 
 
+def _build_org_user_meta(org, users=None):
+    active_sub = _get_active_erp_subscription(org)
+    base_limit = 0
+    addon_count = 0
+    allow_addons = False
+    if active_sub and active_sub.plan:
+        base_limit = int(active_sub.plan.employee_limit or 0)
+        addon_count = int(active_sub.addon_count or 0)
+        allow_addons = bool(active_sub.plan.allow_addons)
+
+    employee_limit = 0 if base_limit == 0 else max(0, base_limit + max(0, addon_count))
+    user_rows = users if isinstance(users, list) else _safe_serialize_org_users(org)
+    used_users = sum(1 for row in user_rows if bool(row.get("is_active")))
+    has_unlimited_users = employee_limit == 0
+    remaining_users = None if has_unlimited_users else max(0, employee_limit - used_users)
+
+    return {
+        "employee_limit": employee_limit,
+        "used_users": used_users,
+        "remaining_users": remaining_users,
+        "addon_count": max(0, addon_count),
+        "allow_addons": allow_addons,
+        "has_unlimited_users": has_unlimited_users,
+        "can_add_users": has_unlimited_users or used_users < employee_limit,
+    }
+
+
 def _decimal_to_string(value, default="0.00"):
     try:
       amount = Decimal(str(value if value is not None else default))
@@ -1279,11 +1306,11 @@ def org_enabled_modules(request):
 @require_http_methods(["GET", "POST"])
 def org_users(request):
     if not request.user.is_authenticated:
-        return JsonResponse({"authenticated": False, "users": []}, status=401)
+        return JsonResponse({"authenticated": False, "users": [], "meta": {}}, status=401)
 
     org = _resolve_org(request.user)
     if not org:
-        return JsonResponse({"authenticated": True, "organization": None, "users": []})
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
     can_manage_users = _can_manage_users(request.user)
 
@@ -1449,6 +1476,7 @@ def org_users(request):
             }
 
     users = _safe_serialize_org_users(org)
+    user_meta = _build_org_user_meta(org, users=users)
     return JsonResponse(
         {
             "authenticated": True,
@@ -1461,6 +1489,7 @@ def org_users(request):
             "employee_roles": _safe_serialize_employee_roles(org),
             "departments": _safe_serialize_departments(org),
             "can_manage_users": can_manage_users,
+            "meta": user_meta,
             "created_user_credentials": created_user_credentials,
             "credential_delivery": credential_delivery,
         }
@@ -1474,7 +1503,7 @@ def org_user_detail(request, membership_id: int):
 
     org = _resolve_org(request.user)
     if not org:
-        return JsonResponse({"authenticated": True, "organization": None, "users": []})
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
     can_manage_users = _can_manage_users(request.user)
     if not can_manage_users:
@@ -1487,13 +1516,15 @@ def org_user_detail(request, membership_id: int):
     if request.method == "DELETE":
         _revoke_business_autopilot_access(membership.user)
         membership.delete()
+        users = _safe_serialize_org_users(org)
         return JsonResponse(
             {
                 "authenticated": True,
-                "users": _safe_serialize_org_users(org),
+                "users": users,
                 "employee_roles": _safe_serialize_employee_roles(org),
                 "departments": _safe_serialize_departments(org),
                 "can_manage_users": can_manage_users,
+                "meta": _build_org_user_meta(org, users=users),
             }
         )
 
@@ -1591,13 +1622,15 @@ def org_user_detail(request, membership_id: int):
         else:
             _revoke_business_autopilot_access(membership.user)
 
+    users = _safe_serialize_org_users(org)
     return JsonResponse(
         {
             "authenticated": True,
-            "users": _safe_serialize_org_users(org),
+            "users": users,
             "employee_roles": _safe_serialize_employee_roles(org),
             "departments": _safe_serialize_departments(org),
             "can_manage_users": can_manage_users,
+            "meta": _build_org_user_meta(org, users=users),
         }
     )
 

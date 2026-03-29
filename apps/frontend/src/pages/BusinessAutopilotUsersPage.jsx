@@ -33,6 +33,16 @@ const defaultEditForm = {
   is_active: true
 };
 
+const DEFAULT_USER_META = {
+  employee_limit: 0,
+  used_users: 0,
+  remaining_users: null,
+  addon_count: 0,
+  allow_addons: false,
+  has_unlimited_users: true,
+  can_add_users: true,
+};
+
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
@@ -563,6 +573,29 @@ function formatDetailValue(key, value) {
   return normalized || "-";
 }
 
+function normalizeUserMeta(meta, userRows = []) {
+  const source = (meta && typeof meta === "object" && !Array.isArray(meta)) ? meta : {};
+  const fallbackUsedUsers = (Array.isArray(userRows) ? userRows : []).filter((row) => row?.is_active).length;
+  const employeeLimitRaw = Number(source.employee_limit);
+  const hasFiniteLimit = Number.isFinite(employeeLimitRaw) && employeeLimitRaw > 0;
+  const usedUsersRaw = Number(source.used_users);
+  const usedUsers = Number.isFinite(usedUsersRaw) ? Math.max(0, usedUsersRaw) : fallbackUsedUsers;
+  const employeeLimit = hasFiniteLimit ? Math.max(0, employeeLimitRaw) : 0;
+  const hasUnlimitedUsers = !hasFiniteLimit;
+  const remainingUsers = hasUnlimitedUsers ? null : Math.max(0, employeeLimit - usedUsers);
+  const addonCountRaw = Number(source.addon_count);
+
+  return {
+    employee_limit: employeeLimit,
+    used_users: usedUsers,
+    remaining_users: remainingUsers,
+    addon_count: Number.isFinite(addonCountRaw) ? Math.max(0, addonCountRaw) : 0,
+    allow_addons: Boolean(source.allow_addons),
+    has_unlimited_users: hasUnlimitedUsers,
+    can_add_users: hasUnlimitedUsers || usedUsers < employeeLimit,
+  };
+}
+
 export default function BusinessAutopilotUsersPage() {
   const [activeTopTab, setActiveTopTab] = useState("users");
   const [userSearch, setUserSearch] = useState("");
@@ -571,6 +604,7 @@ export default function BusinessAutopilotUsersPage() {
   const [saving, setSaving] = useState(false);
   const [canManageUsers, setCanManageUsers] = useState(false);
   const [users, setUsers] = useState([]);
+  const [userMeta, setUserMeta] = useState(DEFAULT_USER_META);
   const [employeeRoles, setEmployeeRoles] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [newEmployeeRole, setNewEmployeeRole] = useState("");
@@ -683,6 +717,7 @@ export default function BusinessAutopilotUsersPage() {
       const data = await apiFetch("/api/business-autopilot/users");
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
       writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
@@ -693,6 +728,7 @@ export default function BusinessAutopilotUsersPage() {
     } catch (error) {
       setNotice(error?.message || "Unable to load users.");
       setUsers([]);
+      setUserMeta(DEFAULT_USER_META);
       writeBusinessAutopilotUserDirectory([]);
       setEmployeeRoles([]);
       setDepartments([]);
@@ -780,6 +816,7 @@ export default function BusinessAutopilotUsersPage() {
       });
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
       writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
@@ -807,6 +844,7 @@ export default function BusinessAutopilotUsersPage() {
       });
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
       writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
@@ -983,6 +1021,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       const nextUsers = data.users || [];
       setUsers(nextUsers);
+      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
       writeBusinessAutopilotUserDirectory(nextUsers);
       setEmployeeRoles(data.employee_roles || []);
       setDepartments(data.departments || []);
@@ -1325,6 +1364,8 @@ export default function BusinessAutopilotUsersPage() {
     return Array.from(unique.values());
   }, [employeeRoles]);
   const isEditingUser = Boolean(editForm.membership_id);
+  const availableUsersLabel = userMeta.has_unlimited_users ? "Unlimited" : String(userMeta.employee_limit || 0);
+  const usedUsersLabel = String(userMeta.used_users || 0);
   const createPasswordStrength = useMemo(() => {
     const score = evaluatePasswordStrength(form.password);
     return {
@@ -2570,7 +2611,18 @@ export default function BusinessAutopilotUsersPage() {
 
           <div>
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-              <h6 className="mb-0">User List</h6>
+              <div className="d-flex flex-wrap align-items-center gap-2">
+                <h6 className="mb-0">User List (Available User {availableUsersLabel} - Used {usedUsersLabel})</h6>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-success"
+                  onClick={() => {
+                    window.location.href = "/app/business-autopilot/billing";
+                  }}
+                >
+                  Add on users
+                </button>
+              </div>
               <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
                 <span className="badge bg-secondary">{filteredUsers.length} items</span>
                 <div className="table-search">
