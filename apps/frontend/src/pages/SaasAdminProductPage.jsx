@@ -2989,16 +2989,7 @@ export default function SaasAdminProductPage() {
                           <th>Support</th>
                           <th>Popular</th>
                         </>
-                      ) : isAiChatbotProduct ? (
-                        <>
-                          <th>Widgets</th>
-                          <th>Agents</th>
-                          <th>Conversations/mo</th>
-                          <th>Chat history (days)</th>
-                          <th>AI replies/mo</th>
-                          <th>Add-ons</th>
-                        </>
-                      ) : isWhatsappAutomationProduct ? (
+                      ) : isAiChatbotProduct ? null : isWhatsappAutomationProduct ? (
                         <>
                           <th>Keyword Lists</th>
                           <th>Add-ons</th>
@@ -3044,16 +3035,7 @@ export default function SaasAdminProductPage() {
                               <td>{plan.features?.support || "-"}</td>
                               <td>{plan.features?.is_popular ? "Yes" : "No"}</td>
                             </>
-                          ) : isAiChatbotProduct ? (
-                            <>
-                              <td>{plan.limits?.widgets ?? "-"}</td>
-                              <td>{plan.limits?.included_agents ?? "-"}</td>
-                              <td>{plan.limits?.conversations_per_month ?? "-"}</td>
-                              <td>{plan.limits?.chat_history_days ?? "-"}</td>
-                              <td>{plan.limits?.ai_replies_per_month ?? "-"}</td>
-                              <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
-                            </>
-                          ) : isWhatsappAutomationProduct ? (
+                          ) : isAiChatbotProduct ? null : isWhatsappAutomationProduct ? (
                             <>
                               <td>{plan.features?.wa_keyword_rules_limit ?? "-"}</td>
                               <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
@@ -3089,7 +3071,7 @@ export default function SaasAdminProductPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 10 : isWhatsappAutomationProduct ? 6 : isBusinessAutopilotProduct ? 7 : 5}>No plans found.</td>
+                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 4 : isWhatsappAutomationProduct ? 6 : isBusinessAutopilotProduct ? 7 : 5}>No plans found.</td>
                       </tr>
                     )}
                   </tbody>
