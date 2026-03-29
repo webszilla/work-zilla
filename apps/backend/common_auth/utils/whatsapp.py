@@ -15,7 +15,7 @@ DEFAULT_TIMEOUT_SECONDS = 15
 
 def _db_whatsapp_cloud_settings():
     try:
-        from apps.backend.worksuite.saas_admin.models import WhatsAppCloudSettings
+        from saas_admin.models import WhatsAppCloudSettings
         return WhatsAppCloudSettings.objects.filter(provider="meta_whatsapp_cloud").first()
     except Exception:
         # Covers import/migration timing and optional availability.

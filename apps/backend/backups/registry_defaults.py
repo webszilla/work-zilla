@@ -8,7 +8,7 @@ from django.core.files.storage import default_storage
 from django.db import models
 
 from apps.backend.products.models import Product
-from apps.backend.worksuite.core.models import Organization
+from core.models import Organization
 
 from .registry import register_backup_exporter, register_backup_restorer
 

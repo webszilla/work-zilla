@@ -98,7 +98,6 @@ INSTALLED_APPS = [
     "apps.backend.modules.whatsapp_automation.apps.WhatsappAutomationConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",
-    "apps.backend.worksuite.apps.MonitorConfig",
     "saas_admin.apps.SaasAdminConfig",
 ]
 

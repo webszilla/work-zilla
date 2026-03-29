@@ -7,7 +7,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from apps.backend.products.models import Product
-from apps.backend.worksuite.saas_admin.models import SystemBackupManagerSettings
+from saas_admin.models import SystemBackupManagerSettings
 
 from .backup_pipeline import generate_backup_package
 from .models import OrgGoogleDriveBackupSettings
