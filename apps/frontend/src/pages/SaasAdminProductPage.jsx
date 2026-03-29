@@ -3040,7 +3040,7 @@ export default function SaasAdminProductPage() {
                       ) : isBusinessAutopilotProduct ? (
                         <>
                           <th>Employees</th>
-                          <th>Add-ons</th>
+                          <th>Add-on Users</th>
                           <th>App Usage</th>
                         </>
                       ) : (
@@ -5633,7 +5633,9 @@ export default function SaasAdminProductPage() {
                 {getFieldError("usd_yearly_price")}
               </div>
               <div className="modal-form-field">
-                <label className="form-label">Addon Monthly (INR)</label>
+                <label className="form-label">
+                  {isBusinessAutopilotProduct ? "Add-on User Monthly (INR)" : "Addon Monthly (INR)"}
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -5644,7 +5646,9 @@ export default function SaasAdminProductPage() {
                 {getFieldError("addon_monthly_price")}
               </div>
               <div className="modal-form-field">
-                <label className="form-label">Addon Yearly (INR)</label>
+                <label className="form-label">
+                  {isBusinessAutopilotProduct ? "Add-on User Yearly (INR)" : "Addon Yearly (INR)"}
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -5655,7 +5659,9 @@ export default function SaasAdminProductPage() {
                 {getFieldError("addon_yearly_price")}
               </div>
               <div className="modal-form-field">
-                <label className="form-label">Addon Monthly (USD)</label>
+                <label className="form-label">
+                  {isBusinessAutopilotProduct ? "Add-on User Monthly (USD)" : "Addon Monthly (USD)"}
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -5666,7 +5672,9 @@ export default function SaasAdminProductPage() {
                 {getFieldError("addon_usd_monthly_price")}
               </div>
               <div className="modal-form-field">
-                <label className="form-label">Addon Yearly (USD)</label>
+                <label className="form-label">
+                  {isBusinessAutopilotProduct ? "Add-on User Yearly (USD)" : "Addon Yearly (USD)"}
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -5706,7 +5714,9 @@ export default function SaasAdminProductPage() {
               ) : null}
               {!isDigitalAutomationProduct ? (
               <div className="modal-form-field">
-                <label className="form-label">Allow Add-ons</label>
+                <label className="form-label">
+                  {isBusinessAutopilotProduct ? "Allow Add-on Users" : "Allow Add-ons"}
+                </label>
                 <select
                   className="form-select"
                   value={planModal.form.allow_addons ? "true" : "false"}
