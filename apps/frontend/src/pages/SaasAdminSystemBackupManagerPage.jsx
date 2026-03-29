@@ -215,7 +215,7 @@ export default function SaasAdminSystemBackupManagerPage() {
     setSuccess("");
     try {
       await apiFetch("/api/saas-admin/system-backup-manager/blackblaze/settings", {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({
           ...bbForm,
           is_active: Boolean(bbForm.db_enabled || bbForm.script_enabled),

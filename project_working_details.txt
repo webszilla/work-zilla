@@ -4,6 +4,9 @@ LOCAL USERNAME NOTE (MULTI-DEVICE):
 - Home laptop username: `apple` -> /Users/apple/Desktop/webszilla/saas/work-zilla
 - Office desktop username: `guru` -> /Users/guru/Desktop/webszilla/saas/work-zilla
 - Prefer `~/Desktop/webszilla/saas/work-zilla` in local commands so same workflow works on both devices.
+LAPTOP QUICK PATH (APPLE MAC):
+- `cd /Users/apple/Desktop/webszilla/saas/work-zilla`
+- (portable) `cd ~/Desktop/webszilla/saas/work-zilla`
 SERVER: Hetzner (89.167.16.104)
 SERVER PROJECT PATH: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 
@@ -62,6 +65,36 @@ CURRENT DATABASE MODE (IMPORTANT)
 - Ongoing deploy rule:
   - Deploy code only; never sync DB files.
   - Run migrations on production PostgreSQL only.
+
+DB-RELATED TASK EXECUTION STANDARD (MANDATORY)
+- Goal:
+  - `DB file move/copy` செய்யக்கூடாது.
+  - ஆனால் `DB-related feature/bug fixes` code + migration மூலமாக local, GitHub, live server எல்லாம் same state-ல் இருக்க வேண்டும்.
+- For any DB-related task (model/field/default/constraint/serializer/query fix):
+  1) Local code change complete.
+  2) Create migration when schema change exists:
+     - `cd apps/backend`
+     - `python3 manage.py makemigrations`
+     - `python3 manage.py migrate`
+  3) Verify local API/UI behavior.
+  4) Commit + push to GitHub immediately (same task window; do not postpone).
+  5) Deploy same commit to live server immediately.
+  6) On live server run:
+     - `venv/bin/python apps/backend/manage.py migrate --skip-checks`
+     - `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
+     - restart gunicorn.
+  7) Confirm live endpoint/UI after deploy and note result.
+- Never do these in DB tasks:
+  - Do not rsync/copy `*.sqlite3`, `*.sql`, `*.dump`, `*.bak` to server.
+  - Do not replace production DB from local backup.
+- If Git pull is unavailable on server:
+  - Use rsync code deploy fallback with DB excludes.
+  - Still run live migration + collectstatic + restart in same execution.
+- Completion rule:
+  - A DB-related task is considered incomplete unless:
+    - GitHub updated
+    - Live migration executed
+    - Live verification done
 
 CURRENT CLEAN STRUCTURE EXPECTATION
 - No external installer staging folders outside repo.
@@ -129,6 +162,21 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - git pull origin main
+
+2A) SSH KEY (HOME LAPTOP - REQUIRED)
+- Preferred working key on home laptop:
+  - Private key: `~/.ssh/workzilla_root`
+  - Public key: `~/.ssh/workzilla_root.pub`
+- One-time load in terminal session:
+  - `eval "$(ssh-agent -s)"`
+  - `ssh-add ~/.ssh/workzilla_root`
+- Test connection:
+  - `ssh -i ~/.ssh/workzilla_root root@89.167.16.104`
+- Use this key explicitly for deploy/sync commands:
+  - `rsync ... -e "ssh -i ~/.ssh/workzilla_root" ...`
+  - `ssh -i ~/.ssh/workzilla_root root@89.167.16.104 "<command>"`
+- Note:
+  - If `id_ed25519` gives `Permission denied`, switch to `workzilla_root` key immediately.
 
 2.5) Static refresh after every code deploy (mandatory)
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com

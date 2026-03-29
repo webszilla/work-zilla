@@ -1007,6 +1007,7 @@ export default function SaasAdminProductPage() {
   const product = data.product || {};
   const resolvedSlug = product?.slug || slug;
   const isAiChatbotProduct = resolvedSlug === "ai-chatbot";
+  const isMonitorProduct = resolvedSlug === "monitor" || resolvedSlug === "work-suite" || resolvedSlug === "worksuite";
   const isStorageProduct = resolvedSlug === "storage" || resolvedSlug === "online-storage";
   const isBusinessAutopilotProduct = resolvedSlug === "business-autopilot-erp" || resolvedSlug === "business-autopilot";
   const isWhatsappAutomationProduct = resolvedSlug === "whatsapp-automation";
@@ -1479,8 +1480,6 @@ export default function SaasAdminProductPage() {
             addon_usd_monthly_price: plan.addon_usd_monthly_price ?? "",
             addon_usd_yearly_price: plan.addon_usd_yearly_price ?? "",
             employee_limit: plan.employee_limit ?? 0,
-            retention_days: plan.retention_days ?? 30,
-            screenshot_min_minutes: plan.screenshot_min_minutes ?? 5,
             allow_addons: Boolean(plan.allow_addons),
             allow_app_usage: Boolean(plan.allow_app_usage),
             allow_hr_view: Boolean(plan.allow_hr_view),
@@ -1500,8 +1499,6 @@ export default function SaasAdminProductPage() {
             addon_usd_monthly_price: "",
             addon_usd_yearly_price: "",
             employee_limit: 0,
-            retention_days: 30,
-            screenshot_min_minutes: 5,
             allow_addons: true,
             allow_app_usage: false,
             allow_hr_view: false,
@@ -1780,8 +1777,6 @@ export default function SaasAdminProductPage() {
         ? [
             "name",
             "employee_limit",
-            "retention_days",
-            "screenshot_min_minutes",
             "monthly_price",
             "yearly_price",
             "usd_monthly_price",
@@ -1867,8 +1862,6 @@ export default function SaasAdminProductPage() {
         allow_addons: Boolean(planModal.form.allow_addons),
         ...(isBusinessAutopilotProduct ? {
           employee_limit: planModal.form.employee_limit,
-          retention_days: planModal.form.retention_days,
-          screenshot_min_minutes: planModal.form.screenshot_min_minutes,
           allow_app_usage: Boolean(planModal.form.allow_app_usage),
           allow_hr_view: Boolean(planModal.form.allow_hr_view),
         } : {}),
@@ -5660,7 +5653,7 @@ export default function SaasAdminProductPage() {
               </div>
               </>
               ) : null}
-              {isBusinessAutopilotProduct ? (
+              {isMonitorProduct ? (
                 <>
                   <div className="modal-form-field">
                     <label className="form-label">Retention Days</label>

@@ -23,6 +23,11 @@ def _normalize_product_slug(value):
         return "storage"
     return slug
 
+
+def _is_business_autopilot_alias(slug):
+    normalized = (slug or "").strip().lower()
+    return normalized in {"business-autopilot", "business-autopilot-erp"}
+
 def _public_product_slug(value):
     slug = (value or "").strip().lower()
     if slug == "monitor":
@@ -77,6 +82,8 @@ def _org_used_free_trial(org, product_slug):
     )
     if product_slug == "monitor":
         subs = subs.filter(models.Q(plan__product__slug="monitor") | models.Q(plan__product__isnull=True))
+    elif _is_business_autopilot_alias(product_slug):
+        subs = subs.filter(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
     else:
         subs = subs.filter(plan__product__slug=product_slug)
     for sub in subs:
@@ -89,6 +96,8 @@ def _org_used_free_trial(org, product_slug):
     )
     if product_slug == "monitor":
         history_rows = history_rows.filter(models.Q(plan__product__slug="monitor") | models.Q(plan__product__isnull=True))
+    elif _is_business_autopilot_alias(product_slug):
+        history_rows = history_rows.filter(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
     else:
         history_rows = history_rows.filter(plan__product__slug=product_slug)
     for row in history_rows:
@@ -222,6 +231,17 @@ def public_plans(request):
         return JsonResponse({"detail": "product_required"}, status=400)
     normalized_slug = _normalize_product_slug(product_slug)
     product = Product.objects.filter(slug=normalized_slug, is_active=True).first()
+    if not product and _is_business_autopilot_alias(normalized_slug):
+        product = (
+            Product.objects
+            .filter(slug__in=["business-autopilot", "business-autopilot-erp"], is_active=True)
+            .order_by(models.Case(
+                models.When(slug=normalized_slug, then=models.Value(0)),
+                default=models.Value(1),
+                output_field=models.IntegerField(),
+            ))
+            .first()
+        )
     if not product and normalized_slug not in ("storage",):
         return JsonResponse({"detail": "product_not_found"}, status=404)
     if product_slug in ("storage", "online-storage"):
@@ -239,7 +259,10 @@ def public_plans(request):
                 .order_by("price", "monthly_price", "yearly_price", "name")
             )
     else:
-        plans = Plan.objects.filter(product=product)
+        if _is_business_autopilot_alias(normalized_slug):
+            plans = Plan.objects.filter(product__slug__in=["business-autopilot", "business-autopilot-erp"])
+        else:
+            plans = Plan.objects.filter(product=product)
         if normalized_slug == "monitor":
             explicit_monitor = Plan.objects.filter(product=product)
             plans = explicit_monitor if explicit_monitor.exists() else Plan.objects.filter(product__isnull=True)

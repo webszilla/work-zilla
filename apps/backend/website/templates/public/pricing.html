@@ -146,6 +146,11 @@
       return `${symbol}${number}`;
     }
 
+    function isBusinessAutopilotSlug(slug) {
+      const normalized = String(slug || "").trim().toLowerCase();
+      return normalized === "business-autopilot-erp" || normalized === "business-autopilot";
+    }
+
     function updatePrices() {
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
         const priceTarget = card.querySelector("[data-price]");
@@ -158,7 +163,7 @@
         const planName = String(plan.name || "").toLowerCase();
         const isTrialLike = planName.includes("trial") || Boolean((plan.features || {}).is_trial);
         const isFree = planName === "free" || isTrialLike;
-        const isBusinessAutopilot = pricingState.product === "business-autopilot-erp";
+        const isBusinessAutopilot = isBusinessAutopilotSlug(pricingState.product);
         const isWhatsAppAutomation = pricingState.product === "whatsapp-automation";
         const isImposition = pricingState.product === "imposition-software";
         const value = pricingState.billing === "yearly"
@@ -216,7 +221,7 @@
 
     function formatProductPlanTitle(value, productSlug) {
       const title = formatPlanTitle(value);
-      if (productSlug === "business-autopilot-erp") {
+      if (isBusinessAutopilotSlug(productSlug)) {
         return title.replace(/\s+ERP$/i, "");
       }
       return title;
@@ -851,7 +856,7 @@
         const isMonitor = normalizedSlug === "monitor";
         const isChatbot = normalizedSlug === "ai-chatbot";
         const isStorage = isStorageProduct;
-        const isBusinessAutopilot = normalizedSlug === "business-autopilot-erp";
+        const isBusinessAutopilot = isBusinessAutopilotSlug(normalizedSlug);
         const isWhatsAppAutomation = normalizedSlug === "whatsapp-automation";
         const isDigitalAutomation = normalizedSlug === "digital-automation";
         const isImposition = normalizedSlug === "imposition-software";
@@ -919,7 +924,7 @@
               ? escapeHtml(aiChatbotPlanDescription(plan.name))
                 : normalizedSlug === "storage"
                 ? escapeHtml(storagePlanDescription(plan.name))
-                : normalizedSlug === "business-autopilot-erp"
+                : isBusinessAutopilotSlug(normalizedSlug)
                   ? escapeHtml(erpPlanDescription(plan.name))
                   : normalizedSlug === "whatsapp-automation"
                     ? escapeHtml(whatsappAutomationPlanDescription(plan.name))
@@ -1085,7 +1090,7 @@
         if (addonSection) addonSection.style.display = "none";
         if (trialNote) trialNote.style.display = "none";
         if (footerCta) footerCta.style.display = "none";
-      } else if (productSlug === "business-autopilot-erp") {
+      } else if (isBusinessAutopilotSlug(productSlug)) {
         setTextContentById("pricing-hero-title", "Business Autopilot Pricing", heroTitle?.dataset.default);
         setTextContentById("pricing-hero-subtitle", "Platform pricing with optional per-user expansion for finance, operations, and team workflows.", heroSubtitle?.dataset.default);
         setTextContentById("pricing-header-title", "Business Autopilot Plans", headerTitle?.dataset.default);
@@ -1326,12 +1331,28 @@
     function getInitialProductSlug(products) {
       const params = new URLSearchParams(window.location.search);
       const querySlug = (params.get("product") || "").trim();
-      if (querySlug && products.some((item) => item.slug === querySlug)) {
-        return querySlug;
+      const resolveAlias = (raw) => {
+        const normalized = String(raw || "").trim().toLowerCase();
+        if (!normalized) return "";
+        if (products.some((item) => item.slug === normalized)) {
+          return normalized;
+        }
+        if (normalized === "business-autopilot" && products.some((item) => item.slug === "business-autopilot-erp")) {
+          return "business-autopilot-erp";
+        }
+        if (normalized === "business-autopilot-erp" && products.some((item) => item.slug === "business-autopilot")) {
+          return "business-autopilot";
+        }
+        return "";
+      };
+      if (querySlug) {
+        const mapped = resolveAlias(querySlug);
+        if (mapped) return mapped;
       }
       const hashSlug = (window.location.hash || "").replace("#", "").trim();
-      if (hashSlug && products.some((item) => item.slug === hashSlug)) {
-        return hashSlug;
+      if (hashSlug) {
+        const mapped = resolveAlias(hashSlug);
+        if (mapped) return mapped;
       }
       return "";
     }

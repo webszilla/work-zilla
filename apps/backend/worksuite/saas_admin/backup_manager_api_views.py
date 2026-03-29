@@ -564,7 +564,7 @@ def system_backup_google_disconnect(request):
 
 
 @login_required
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["GET", "PUT", "POST"])
 def blackblaze_backup_settings(request):
     error = _require_saas_admin(request)
     if error:
