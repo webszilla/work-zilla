@@ -52,6 +52,7 @@ urlpatterns = [
     path("products/<slug:slug>", api_views.product_detail, name="saas_admin_product_detail"),
     path("organizations", api_views.organizations_list, name="saas_admin_orgs"),
     path("organizations/<int:org_id>", api_views.organization_detail, name="saas_admin_org_detail"),
+    path("organizations/<int:org_id>/email-manual-verify", api_views.organization_email_manual_verify, name="saas_admin_org_email_manual_verify"),
     path("organizations/<int:org_id>/restore", api_views.organization_restore, name="saas_admin_org_restore"),
     path("organizations/<int:org_id>/permanent-delete", api_views.organization_permanent_delete, name="saas_admin_org_permanent_delete"),
     path("deleted-accounts/<int:account_id>", api_views.deleted_account_detail, name="saas_admin_deleted_account_detail"),

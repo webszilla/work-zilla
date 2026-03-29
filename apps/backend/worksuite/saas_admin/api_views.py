@@ -51,6 +51,7 @@ from core.models import (
 from core.subscription_utils import is_subscription_active, normalize_subscription_end_date, revert_transfer_subscription
 from core.referral_utils import record_referral_earning, record_dealer_org_referral_earning, record_dealer_referral_flat_earning
 from core.email_utils import send_templated_email
+from core.notification_emails import mark_email_verified
 from .models import (
     MonitorOrgProductEntitlement,
     Product,
@@ -110,7 +111,8 @@ def _is_saas_admin_user(user):
     if user.is_staff:
         return True
     profile = UserProfile.objects.filter(user=user).first()
-    return bool(profile and profile.role in ("superadmin", "super_admin"))
+    role = str(getattr(profile, "role", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return bool(profile and role in ("superadmin", "super_admin"))
 
 
 def _require_saas_admin(request):
@@ -1176,6 +1178,10 @@ def _serialize_org(org, subscription=None):
         "created_at": _format_datetime(org.created_at),
         "owner_name": owner_name,
         "owner_email": owner.email if owner else "",
+        "owner_id": owner.id if owner else None,
+        "owner_email_verified": bool(owner.email_verified) if owner else False,
+        "owner_email_verified_at": _format_datetime(owner.email_verified_at) if owner else "",
+        "owner_email_verification_sent_at": _format_datetime(owner.email_verification_sent_at) if owner else "",
         "subscription": _serialize_subscription(subscription),
     }
 
@@ -2138,6 +2144,32 @@ def dealer_detail(request, dealer_id):
         },
         "org_referrals": org_payload,
         "dealer_referrals": dealer_payload,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def organization_email_manual_verify(request, org_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id, is_deleted=False)
+    owner = org.owner
+    if not owner:
+        return JsonResponse({"error": "owner_not_found"}, status=404)
+    if not owner.email:
+        return JsonResponse({"error": "owner_email_missing"}, status=400)
+    if owner.email_verified:
+        return JsonResponse({"status": "already_verified"})
+
+    mark_email_verified(owner)
+    owner.email_verification_sent_at = None
+    owner.save(update_fields=["email_verification_sent_at"])
+    return JsonResponse({
+        "status": "verified",
+        "organization_id": org.id,
+        "owner_id": owner.id,
+        "owner_email": owner.email,
     })
 
 

@@ -37,6 +37,9 @@ export default function SaasAdminOrganizationsPage() {
   const [dealerSearchTerm, setDealerSearchTerm] = useState("");
   const [dealerQuery, setDealerQuery] = useState("");
   const [dealerPage, setDealerPage] = useState(1);
+  const [pendingSearchTerm, setPendingSearchTerm] = useState("");
+  const [pendingQuery, setPendingQuery] = useState("");
+  const [pendingPage, setPendingPage] = useState(1);
   const [inactiveTab, setInactiveTab] = useState("org");
   const [inactiveSearchTerm, setInactiveSearchTerm] = useState("");
   const [inactiveQuery, setInactiveQuery] = useState("");
@@ -109,6 +112,14 @@ export default function SaasAdminOrganizationsPage() {
     }, 300);
     return () => clearTimeout(handle);
   }, [dealerSearchTerm]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setPendingQuery(pendingSearchTerm.trim());
+      setPendingPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [pendingSearchTerm]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -209,6 +220,32 @@ export default function SaasAdminOrganizationsPage() {
   const dealerTotalItems = filteredDealers.length;
   const dealerStartEntry = dealerTotalItems ? (dealerPage - 1) * PAGE_SIZE + 1 : 0;
   const dealerEndEntry = dealerTotalItems ? Math.min(dealerPage * PAGE_SIZE, dealerTotalItems) : 0;
+
+  const pendingVerificationOrgs = useMemo(() => {
+    const base = organizations.filter(
+      (org) => org.owner_email && !org.owner_email_verified
+    );
+    if (!pendingQuery) {
+      return base;
+    }
+    const term = pendingQuery.toLowerCase();
+    return base.filter((org) =>
+      [
+        org.name,
+        org.owner_name,
+        org.owner_email,
+        org.owner_email_verification_sent_at
+      ].some((value) => String(value || "").toLowerCase().includes(term))
+    );
+  }, [organizations, pendingQuery]);
+  const pendingTotalPages = Math.max(Math.ceil(pendingVerificationOrgs.length / PAGE_SIZE), 1);
+  const pendingPagedOrgs = useMemo(
+    () => pendingVerificationOrgs.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE),
+    [pendingVerificationOrgs, pendingPage]
+  );
+  const pendingTotalItems = pendingVerificationOrgs.length;
+  const pendingStartEntry = pendingTotalItems ? (pendingPage - 1) * PAGE_SIZE + 1 : 0;
+  const pendingEndEntry = pendingTotalItems ? Math.min(pendingPage * PAGE_SIZE, pendingTotalItems) : 0;
 
   const inactiveOrgs = useMemo(() => {
     return organizations.filter((org) => {
@@ -344,6 +381,12 @@ export default function SaasAdminOrganizationsPage() {
       setDealerPage(dealerTotalPages);
     }
   }, [dealerPage, dealerTotalPages]);
+
+  useEffect(() => {
+    if (pendingPage > pendingTotalPages) {
+      setPendingPage(pendingTotalPages);
+    }
+  }, [pendingPage, pendingTotalPages]);
 
   useEffect(() => {
     if (inactivePage > inactiveTotalPages) {
@@ -483,6 +526,29 @@ export default function SaasAdminOrganizationsPage() {
     }
   }
 
+  async function handleManualEmailApproval(org) {
+    const confirmed = await confirm({
+      title: "Manual Email Approval",
+      message: `Approve email verification for ${org.owner_email || "this user"}?`,
+      confirmText: "Approve Email",
+      confirmVariant: "primary"
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiFetch(`/api/saas-admin/organizations/${org.id}/email-manual-verify`, {
+        method: "POST"
+      });
+      await refreshOrganizations();
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error?.message || "Unable to approve email verification."
+      }));
+    }
+  }
+
   if (state.loading) {
     return (
       <div className="card p-4 text-center">
@@ -513,6 +579,13 @@ export default function SaasAdminOrganizationsPage() {
             onClick={() => setActiveTab("dealer")}
           >
             Dealer Accounts
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === "pending-email" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setActiveTab("pending-email")}
+          >
+            Email Verification
           </button>
         </div>
 
@@ -627,7 +700,7 @@ export default function SaasAdminOrganizationsPage() {
               />
             </div>
           </>
-        ) : (
+        ) : activeTab === "dealer" ? (
           <>
             <div className="table-controls">
               <div className="table-length">Show {PAGE_SIZE} entries</div>
@@ -710,6 +783,82 @@ export default function SaasAdminOrganizationsPage() {
                 page={dealerPage}
                 totalPages={dealerTotalPages}
                 onPageChange={setDealerPage}
+                showPageLinks
+                showPageLabel={false}
+                maxPageLinks={7}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="table-controls">
+              <div className="table-length">Show {PAGE_SIZE} entries</div>
+              <label className="table-search" htmlFor="saas-pending-email-search">
+                <span>Search:</span>
+                <input
+                  id="saas-pending-email-search"
+                  type="text"
+                  value={pendingSearchTerm}
+                  onChange={(event) => setPendingSearchTerm(event.target.value)}
+                  placeholder="Search pending emails"
+                />
+              </label>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Organization</th>
+                    <th>Admin User Name</th>
+                    <th>Email ID</th>
+                    <th>Verification Sent At</th>
+                    <th className="table-actions">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingPagedOrgs.length ? (
+                    pendingPagedOrgs.map((org) => (
+                      <tr key={`pending-email-${org.id}`}>
+                        <td>{org.name}</td>
+                        <td>{formatValue(org.owner_name)}</td>
+                        <td>{formatValue(org.owner_email)}</td>
+                        <td>{formatValue(org.owner_email_verification_sent_at)}</td>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-success btn-sm"
+                              onClick={() => handleManualEmailApproval(org)}
+                            >
+                              Approve Email
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="5">No email verification pending accounts found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-footer">
+              <div className="table-info">
+                Showing {pendingStartEntry} to {pendingEndEntry} of {pendingTotalItems} entries
+              </div>
+              <TablePagination
+                page={pendingPage}
+                totalPages={pendingTotalPages}
+                onPageChange={setPendingPage}
                 showPageLinks
                 showPageLabel={false}
                 maxPageLinks={7}
