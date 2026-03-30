@@ -400,3 +400,217 @@ class Payslip(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} - {self.slip_number}"
+
+
+class CrmLead(models.Model):
+    STAGE_CHOICES = (
+        ("New", "New"),
+        ("Qualified", "Qualified"),
+        ("Proposal", "Proposal"),
+    )
+    STATUS_CHOICES = (
+        ("Open", "Open"),
+        ("Closed", "Closed"),
+        ("Converted", "Converted"),
+    )
+    ASSIGN_TYPE_CHOICES = (
+        ("Users", "Users"),
+        ("Team", "Team"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_leads",
+    )
+    lead_name = models.CharField(max_length=180)
+    company = models.CharField(max_length=180, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    lead_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    lead_source = models.CharField(max_length=120, blank=True, default="")
+    assign_type = models.CharField(max_length=20, choices=ASSIGN_TYPE_CHOICES, default="Users")
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_assigned_leads",
+    )
+    assigned_user_ids = models.JSONField(default=list, blank=True)
+    assigned_team = models.CharField(max_length=180, blank=True, default="")
+    stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="New")
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="Open")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_created_leads",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_updated_leads",
+    )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_deleted_leads",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"Lead({self.organization_id} - {self.lead_name})"
+
+
+class CrmDeal(models.Model):
+    STAGE_CHOICES = (
+        ("Qualified", "Qualified"),
+        ("Proposal", "Proposal"),
+        ("Won", "Won"),
+        ("Lost", "Lost"),
+    )
+    STATUS_CHOICES = (
+        ("Open", "Open"),
+        ("Won", "Won"),
+        ("Lost", "Lost"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_deals",
+    )
+    lead = models.ForeignKey(
+        CrmLead,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="deals",
+    )
+    deal_name = models.CharField(max_length=180)
+    company = models.CharField(max_length=180, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    deal_value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="Qualified")
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="Open")
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_assigned_deals",
+    )
+    assigned_user_ids = models.JSONField(default=list, blank=True)
+    assigned_team = models.CharField(max_length=180, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_created_deals",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_updated_deals",
+    )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_deleted_deals",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"Deal({self.organization_id} - {self.deal_name})"
+
+
+class CrmSalesOrder(models.Model):
+    STATUS_CHOICES = (
+        ("Pending", "Pending"),
+        ("Completed", "Completed"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_sales_orders",
+    )
+    deal = models.OneToOneField(
+        CrmDeal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sales_order",
+    )
+    order_id = models.CharField(max_length=30)
+    customer_name = models.CharField(max_length=180)
+    company = models.CharField(max_length=180, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    products = models.JSONField(default=list, blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    price = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    tax = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_sales_orders",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_created_sales_orders",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_updated_sales_orders",
+    )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_deleted_sales_orders",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        unique_together = ("organization", "order_id")
+
+    def __str__(self):
+        return f"SalesOrder({self.organization_id} - {self.order_id})"

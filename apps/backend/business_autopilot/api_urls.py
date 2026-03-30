@@ -4,6 +4,13 @@ from . import api_views
 
 
 urlpatterns = [
+    path("leads", api_views.crm_leads, name="business_autopilot_crm_leads"),
+    path("convert-to-deal/<int:lead_id>", api_views.crm_convert_to_deal, name="business_autopilot_crm_convert_to_deal"),
+    path("deals", api_views.crm_deals, name="business_autopilot_crm_deals"),
+    path("deals/<int:deal_id>", api_views.crm_deals, name="business_autopilot_crm_deal_detail"),
+    path("convert-to-sales-order/<int:deal_id>", api_views.crm_convert_to_sales_order, name="business_autopilot_crm_convert_to_sales_order"),
+    path("sales-orders", api_views.crm_sales_orders, name="business_autopilot_crm_sales_orders"),
+    path("sales-orders/<int:order_id>", api_views.crm_sales_orders, name="business_autopilot_crm_sales_order_detail"),
     path("modules", api_views.org_enabled_modules, name="business_autopilot_modules"),
     path("users", api_views.org_users, name="business_autopilot_users"),
     path("users/<int:membership_id>", api_views.org_user_detail, name="business_autopilot_user_detail"),

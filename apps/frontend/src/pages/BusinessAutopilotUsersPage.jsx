@@ -51,6 +51,7 @@ const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
+const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: option.value,
   label: option.label,
@@ -433,6 +434,33 @@ function readSharedHrEmployees() {
   }
 }
 
+function normalizeCrmContactRecord(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    name: String(row?.name || row?.clientName || "").trim(),
+    company: String(row?.company || row?.companyName || row?.name || "").trim(),
+    email: String(row?.email || "").trim(),
+    phoneCountryCode: String(row?.phoneCountryCode || "+91").trim() || "+91",
+    phone: String(row?.phone || row?.mobile || row?.contactNumber || "").trim(),
+  };
+}
+
+function readSharedCrmContacts() {
+  try {
+    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    const contacts = Array.isArray(parsed?.contacts) ? parsed.contacts : [];
+    return contacts
+      .map((row) => normalizeCrmContactRecord(row))
+      .filter((row) => row.name || row.company || row.email || row.phone);
+  } catch {
+    return [];
+  }
+}
+
 function writeBusinessAutopilotUserDirectory(users) {
   if (typeof window === "undefined") {
     return;
@@ -662,6 +690,7 @@ export default function BusinessAutopilotUsersPage() {
   const [vendorSearch, setVendorSearch] = useState("");
   const [vendorPage, setVendorPage] = useState(1);
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
+  const [crmContacts, setCrmContacts] = useState(() => readSharedCrmContacts());
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
@@ -673,6 +702,7 @@ export default function BusinessAutopilotUsersPage() {
     copyNotice: "",
   });
   const [clientForm, setClientForm] = useState(() => createEmptySharedPartyForm());
+  const [clientCompanySearchOpen, setClientCompanySearchOpen] = useState(false);
   const [editingClientId, setEditingClientId] = useState("");
   const [vendorForm, setVendorForm] = useState(() => createEmptySharedPartyForm());
   const [editingVendorId, setEditingVendorId] = useState("");
@@ -1550,6 +1580,22 @@ export default function BusinessAutopilotUsersPage() {
   }, [createPasswordStrength.score, form.password, isEditingUser]);
 
   useEffect(() => {
+    const refreshCrmContacts = () => setCrmContacts(readSharedCrmContacts());
+    window.addEventListener("storage", refreshCrmContacts);
+    window.addEventListener("focus", refreshCrmContacts);
+    return () => {
+      window.removeEventListener("storage", refreshCrmContacts);
+      window.removeEventListener("focus", refreshCrmContacts);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTopTab === "clients") {
+      setCrmContacts(readSharedCrmContacts());
+    }
+  }, [activeTopTab]);
+
+  useEffect(() => {
     if (roleAccessRoleOptions.some((item) => item.key === selectedRoleAccessKey)) {
       return;
     }
@@ -1584,6 +1630,23 @@ export default function BusinessAutopilotUsersPage() {
       ].filter(Boolean).join(" ").toLowerCase().includes(q)
     );
   }, [clientSearch, sharedCustomers]);
+  const crmClientMatches = useMemo(() => {
+    const q = String(clientForm.companyName || "").trim().toLowerCase();
+    return crmContacts
+      .filter((row) => {
+        if (!q) {
+          return true;
+        }
+        const haystack = [
+          row.company,
+          row.name,
+          row.email,
+          row.phone,
+        ].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(q);
+      })
+      .slice(0, 8);
+  }, [clientForm.companyName, crmContacts]);
   const totalClientPages = Math.max(1, Math.ceil(filteredClients.length / pageSize));
   const normalizedClientPage = Math.min(clientPage, totalClientPages);
   const paginatedClients = filteredClients.slice((normalizedClientPage - 1) * pageSize, normalizedClientPage * pageSize);
@@ -1662,6 +1725,7 @@ export default function BusinessAutopilotUsersPage() {
   function resetClientForm() {
     setEditingClientId("");
     setClientForm(createEmptySharedPartyForm());
+    setClientCompanySearchOpen(false);
   }
 
   function resetVendorForm() {
@@ -1750,7 +1814,25 @@ export default function BusinessAutopilotUsersPage() {
       additionalPhones: Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : [],
       additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
     });
+    setClientCompanySearchOpen(false);
     setActiveTopTab("clients");
+  }
+
+  function selectCrmContactForClient(row) {
+    const normalized = normalizeCrmContactRecord(row);
+    setClientForm((prev) => {
+      const companyName = normalized.company || normalized.name || prev.companyName || "";
+      return {
+        ...prev,
+        companyName,
+        name: companyName,
+        clientName: normalized.name || prev.clientName || "",
+        phoneCountryCode: normalized.phoneCountryCode || prev.phoneCountryCode || "+91",
+        phone: normalized.phone || prev.phone || "",
+        email: normalized.email || prev.email || "",
+      };
+    });
+    setClientCompanySearchOpen(false);
   }
 
   async function deleteClient(clientId) {
@@ -3179,7 +3261,47 @@ export default function BusinessAutopilotUsersPage() {
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
-                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("companyName")} value={clientForm.companyName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, companyName: limitedInput("companyName", event.target.value), name: limitedInput("companyName", event.target.value) }))} placeholder="Company name" />
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      className="form-control"
+                      maxLength={getBusinessAutopilotMaxLength("companyName")}
+                      value={clientForm.companyName || ""}
+                      onFocus={() => setClientCompanySearchOpen(true)}
+                      onClick={() => setClientCompanySearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setClientCompanySearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = limitedInput("companyName", event.target.value);
+                        setClientForm((prev) => ({ ...prev, companyName: nextValue, name: nextValue }));
+                        setClientCompanySearchOpen(true);
+                      }}
+                      placeholder="Company name"
+                    />
+                    {clientCompanySearchOpen ? (
+                      <div className="crm-inline-suggestions">
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">CRM Clients</div>
+                          {crmClientMatches.length ? crmClientMatches.map((row, index) => (
+                            <button
+                              key={`users-client-crm-match-${row.id || row.email || row.phone || index}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => selectCrmContactForClient(row)}
+                            >
+                              <span className="crm-inline-suggestions__item-main">{row.company || row.name || "-"}</span>
+                              <span className="crm-inline-suggestions__item-sub">
+                                {[row.name, row.email, row.phone ? `${row.phoneCountryCode || "+91"} ${row.phone}` : ""].filter(Boolean).join(" | ") || "-"}
+                              </span>
+                            </button>
+                          )) : (
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No clients found</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Client Name</label>
@@ -3359,32 +3481,33 @@ export default function BusinessAutopilotUsersPage() {
             </form>
           </div>
 
-          <div>
-            <h6 className="mb-3">Client List</h6>
-            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mb-2">
-              <span className="badge bg-secondary">{filteredClients.length} clients</span>
-              <input
-                ref={clientImportInputRef}
-                type="file"
-                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
-                className="d-none"
-                onChange={onClientImportFileChange}
-              />
-              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canManageUsers}>
-                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
-                Import
-              </button>
-              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsExcelCsv}>
-                <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
-                Export
-              </button>
-              <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsPdf}>
-                <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
-                Export
-              </button>
-              <div className="table-search">
-                <i className="bi bi-search" aria-hidden="true" />
-                <input type="search" className="form-control form-control-sm" placeholder="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} />
+          <div style={{ paddingTop: "25px" }}>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <h6 className="mb-0">Client List</h6>
+              <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+                <input
+                  ref={clientImportInputRef}
+                  type="file"
+                  accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                  className="d-none"
+                  onChange={onClientImportFileChange}
+                />
+                <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canManageUsers}>
+                  <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                  Import
+                </button>
+                <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsExcelCsv}>
+                  <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                  Export
+                </button>
+                <button type="button" className="btn btn-sm btn-outline-success" onClick={exportClientsAsPdf}>
+                  <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
+                  Export
+                </button>
+                <div className="table-search">
+                  <i className="bi bi-search" aria-hidden="true" />
+                  <input type="search" className="form-control form-control-sm" placeholder="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} />
+                </div>
               </div>
             </div>
             <div className="table-responsive">

@@ -30,6 +30,9 @@ from .models import (
     OrganizationUser,
     OrganizationEmployeeRole,
     OrganizationDepartment,
+    CrmDeal,
+    CrmLead,
+    CrmSalesOrder,
     AccountsWorkspace,
     EmployeeSalaryHistory,
     PayrollEntry,
@@ -3419,3 +3422,394 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         ),
     }
     return render(request, "business_autopilot/accounts/document_print.html", context)
+
+
+def _crm_is_admin(user: User, org: Organization):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    profile_role = str(getattr(profile, "role", "") or "").strip().lower()
+    if profile_role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+        return True
+    membership = _get_org_membership(user, org)
+    membership_role = str(getattr(membership, "role", "") or "").strip().lower() if membership else ""
+    return membership_role == "company_admin"
+
+
+def _crm_to_decimal(value):
+    try:
+        return Decimal(str(value or "0").strip() or "0")
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _crm_order_id(org: Organization):
+    next_id = (CrmSalesOrder.objects.filter(organization=org).count() or 0) + 1
+    return f"SO-{timezone.now().strftime('%Y%m')}-{next_id:05d}"
+
+
+def _crm_clean_user_id_list(value):
+    raw = value if isinstance(value, list) else []
+    user_ids = []
+    for item in raw:
+        parsed = _coerce_positive_int(item)
+        if parsed:
+            user_ids.append(parsed)
+    return list(dict.fromkeys(user_ids))
+
+
+def _crm_can_access_row(user: User, org: Organization, row):
+    if _crm_is_admin(user, org):
+        return True
+    user_ids = set(_crm_clean_user_id_list(getattr(row, "assigned_user_ids", [])))
+    assigned_user_id = getattr(row, "assigned_user_id", None)
+    if assigned_user_id:
+        user_ids.add(int(assigned_user_id))
+    created_by_id = getattr(row, "created_by_id", None)
+    if created_by_id:
+        user_ids.add(int(created_by_id))
+    return int(user.id) in user_ids
+
+
+def _serialize_crm_lead(row: CrmLead):
+    return {
+        "id": row.id,
+        "lead_name": row.lead_name,
+        "company": row.company,
+        "phone": row.phone,
+        "lead_amount": float(row.lead_amount or 0),
+        "lead_source": row.lead_source,
+        "assign_type": row.assign_type,
+        "assigned_user_id": row.assigned_user_id,
+        "assigned_user_name": row.assigned_user.get_full_name() or row.assigned_user.email if row.assigned_user_id else "",
+        "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
+        "assigned_team": row.assigned_team,
+        "stage": row.stage,
+        "status": row.status,
+        "is_deleted": bool(row.is_deleted),
+        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "created_by_id": row.created_by_id,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _serialize_crm_deal(row: CrmDeal):
+    return {
+        "id": row.id,
+        "lead_id": row.lead_id,
+        "deal_name": row.deal_name,
+        "company": row.company,
+        "phone": row.phone,
+        "deal_value": float(row.deal_value or 0),
+        "stage": row.stage,
+        "status": row.status,
+        "assigned_user_id": row.assigned_user_id,
+        "assigned_user_name": row.assigned_user.get_full_name() or row.assigned_user.email if row.assigned_user_id else "",
+        "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
+        "assigned_team": row.assigned_team,
+        "is_deleted": bool(row.is_deleted),
+        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "created_by_id": row.created_by_id,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _serialize_crm_sales_order(row: CrmSalesOrder):
+    return {
+        "id": row.id,
+        "deal_id": row.deal_id,
+        "order_id": row.order_id,
+        "customer_name": row.customer_name,
+        "company": row.company,
+        "phone": row.phone,
+        "amount": float(row.amount or 0),
+        "products": row.products if isinstance(row.products, list) else [],
+        "quantity": int(row.quantity or 0),
+        "price": float(row.price or 0),
+        "tax": float(row.tax or 0),
+        "total_amount": float(row.total_amount or 0),
+        "status": row.status,
+        "assigned_user_id": row.assigned_user_id,
+        "is_deleted": bool(row.is_deleted),
+        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+@require_http_methods(["GET", "POST"])
+def crm_leads(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        lead_name = str(payload.get("lead_name") or payload.get("name") or "").strip()
+        if not lead_name:
+            return JsonResponse({"detail": "lead_name_required"}, status=400)
+        assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
+        assigned_user = None
+        if assigned_user_id:
+            assigned_user = User.objects.filter(id=assigned_user_id).first()
+        row = CrmLead.objects.create(
+            organization=org,
+            lead_name=lead_name[:180],
+            company=str(payload.get("company") or "").strip()[:180],
+            phone=str(payload.get("phone") or "").strip()[:40],
+            lead_amount=_crm_to_decimal(payload.get("lead_amount")),
+            lead_source=str(payload.get("lead_source") or "").strip()[:120],
+            assign_type="Team" if str(payload.get("assign_type") or "").strip().lower() == "team" else "Users",
+            assigned_user=assigned_user,
+            assigned_user_ids=_crm_clean_user_id_list(payload.get("assigned_user_ids")),
+            assigned_team=str(payload.get("assigned_team") or "").strip()[:180],
+            stage=str(payload.get("stage") or "New").strip()[:30] or "New",
+            status=str(payload.get("status") or "Open").strip()[:30] or "Open",
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        return JsonResponse({"lead": _serialize_crm_lead(row)}, status=201)
+
+    rows = [
+        row
+        for row in CrmLead.objects.filter(organization=org).select_related("assigned_user", "created_by").order_by("-created_at")
+        if _crm_can_access_row(request.user, org, row)
+    ]
+    pipeline_value = sum((_crm_to_decimal(row.lead_amount) for row in rows if not row.is_deleted), Decimal("0"))
+    return JsonResponse(
+        {
+            "leads": [_serialize_crm_lead(row) for row in rows],
+            "pipeline_value": float(pipeline_value),
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def crm_convert_to_deal(request, lead_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    lead = CrmLead.objects.filter(organization=org, id=lead_id, is_deleted=False).first()
+    if not lead:
+        return JsonResponse({"detail": "lead_not_found"}, status=404)
+    if not _crm_can_access_row(request.user, org, lead):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    existing_deal = CrmDeal.objects.filter(organization=org, lead=lead, is_deleted=False).first()
+    if existing_deal:
+        return JsonResponse({"deal": _serialize_crm_deal(existing_deal), "already_converted": True})
+    with transaction.atomic():
+        deal = CrmDeal.objects.create(
+            organization=org,
+            lead=lead,
+            deal_name=f"{lead.lead_name} Opportunity",
+            company=lead.company,
+            phone=lead.phone,
+            deal_value=_crm_to_decimal(lead.lead_amount),
+            stage="Qualified",
+            status="Open",
+            assigned_user=lead.assigned_user,
+            assigned_user_ids=_crm_clean_user_id_list(lead.assigned_user_ids),
+            assigned_team=lead.assigned_team,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        lead.status = "Converted"
+        lead.stage = "Qualified"
+        lead.updated_by = request.user
+        lead.save(update_fields=["status", "stage", "updated_by", "updated_at"])
+    return JsonResponse({"deal": _serialize_crm_deal(deal), "lead": _serialize_crm_lead(lead)})
+
+
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+def crm_deals(request, deal_id: int = None):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    if request.method == "GET" and not deal_id:
+        rows = [
+            row
+            for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead").order_by("-created_at")
+            if _crm_can_access_row(request.user, org, row)
+        ]
+        pipeline_value = sum((_crm_to_decimal(row.deal_value) for row in rows if not row.is_deleted), Decimal("0"))
+        return JsonResponse({"deals": [_serialize_crm_deal(row) for row in rows], "pipeline_value": float(pipeline_value)})
+
+    if request.method == "POST" and not deal_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        deal_name = str(payload.get("deal_name") or "").strip()
+        if not deal_name:
+            return JsonResponse({"detail": "deal_name_required"}, status=400)
+        lead = None
+        lead_id = _coerce_positive_int(payload.get("lead_id"))
+        if lead_id:
+            lead = CrmLead.objects.filter(organization=org, id=lead_id).first()
+        assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
+        assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+        row = CrmDeal.objects.create(
+            organization=org,
+            lead=lead,
+            deal_name=deal_name[:180],
+            company=str(payload.get("company") or "").strip()[:180],
+            phone=str(payload.get("phone") or "").strip()[:40],
+            deal_value=_crm_to_decimal(payload.get("deal_value")),
+            stage=str(payload.get("stage") or "Qualified").strip()[:30] or "Qualified",
+            status=str(payload.get("status") or "Open").strip()[:30] or "Open",
+            assigned_user=assigned_user,
+            assigned_user_ids=_crm_clean_user_id_list(payload.get("assigned_user_ids")),
+            assigned_team=str(payload.get("assigned_team") or "").strip()[:180],
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        return JsonResponse({"deal": _serialize_crm_deal(row)}, status=201)
+
+    row = CrmDeal.objects.filter(organization=org, id=deal_id).first() if deal_id else None
+    if not row:
+        return JsonResponse({"detail": "deal_not_found"}, status=404)
+    if not _crm_can_access_row(request.user, org, row):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if request.method == "PATCH":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if "stage" in payload:
+            stage = str(payload.get("stage") or "").strip()
+            if stage in {"Qualified", "Proposal", "Won", "Lost"}:
+                row.stage = stage
+        if "status" in payload:
+            status = str(payload.get("status") or "").strip()
+            if status in {"Open", "Won", "Lost"}:
+                row.status = status
+        if "deal_value" in payload:
+            row.deal_value = _crm_to_decimal(payload.get("deal_value"))
+        row.updated_by = request.user
+        row.save(update_fields=["stage", "status", "deal_value", "updated_by", "updated_at"])
+        return JsonResponse({"deal": _serialize_crm_deal(row)})
+
+    if request.method == "DELETE":
+        if not _crm_is_admin(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
+        row.is_deleted = True
+        row.deleted_at = timezone.now()
+        row.deleted_by = request.user
+        row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_at"])
+        return JsonResponse({"deleted": True})
+
+    return JsonResponse({"detail": "invalid_method"}, status=405)
+
+
+@require_http_methods(["GET", "POST", "DELETE"])
+def crm_sales_orders(request, order_id: int = None):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    if request.method == "GET" and not order_id:
+        rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal").order_by("-created_at")
+        visible_rows = [row for row in rows if _crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id]
+        return JsonResponse({"sales_orders": [_serialize_crm_sales_order(row) for row in visible_rows]})
+
+    if request.method == "DELETE":
+        if not _crm_is_admin(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
+        row = CrmSalesOrder.objects.filter(organization=org, id=order_id).first()
+        if not row:
+            return JsonResponse({"detail": "sales_order_not_found"}, status=404)
+        row.is_deleted = True
+        row.deleted_at = timezone.now()
+        row.deleted_by = request.user
+        row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_at"])
+        return JsonResponse({"deleted": True})
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+    customer_name = str(payload.get("customer_name") or "").strip()
+    if not customer_name:
+        return JsonResponse({"detail": "customer_name_required"}, status=400)
+    quantity = _coerce_positive_int(payload.get("quantity")) or 1
+    price = _crm_to_decimal(payload.get("price"))
+    tax = _crm_to_decimal(payload.get("tax"))
+    amount = _crm_to_decimal(payload.get("amount"))
+    total_amount = amount if amount > 0 else (price * Decimal(quantity)) + tax
+    assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
+    assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else request.user
+    row = CrmSalesOrder.objects.create(
+        organization=org,
+        order_id=_crm_order_id(org),
+        customer_name=customer_name[:180],
+        company=str(payload.get("company") or "").strip()[:180],
+        phone=str(payload.get("phone") or "").strip()[:40],
+        amount=amount,
+        products=payload.get("products") if isinstance(payload.get("products"), list) else [],
+        quantity=quantity,
+        price=price,
+        tax=tax,
+        total_amount=total_amount,
+        status=str(payload.get("status") or "Pending").strip()[:20] or "Pending",
+        assigned_user=assigned_user,
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    return JsonResponse({"sales_order": _serialize_crm_sales_order(row)}, status=201)
+
+
+@require_http_methods(["POST"])
+def crm_convert_to_sales_order(request, deal_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    deal = CrmDeal.objects.filter(organization=org, id=deal_id, is_deleted=False).first()
+    if not deal:
+        return JsonResponse({"detail": "deal_not_found"}, status=404)
+    if not _crm_can_access_row(request.user, org, deal):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    if str(deal.stage or "").strip().lower() != "won" and str(deal.status or "").strip().lower() != "won":
+        return JsonResponse({"detail": "deal_not_won"}, status=400)
+    existing = CrmSalesOrder.objects.filter(organization=org, deal=deal, is_deleted=False).first()
+    if existing:
+        return JsonResponse({"sales_order": _serialize_crm_sales_order(existing), "already_converted": True})
+    with transaction.atomic():
+        amount = _crm_to_decimal(deal.deal_value)
+        customer_name = str(deal.lead.lead_name if deal.lead_id else deal.deal_name).strip()[:180]
+        row = CrmSalesOrder.objects.create(
+            organization=org,
+            deal=deal,
+            order_id=_crm_order_id(org),
+            customer_name=customer_name or "Customer",
+            company=str(deal.company or "").strip()[:180],
+            phone=str(deal.phone or "").strip()[:40],
+            amount=amount,
+            quantity=1,
+            price=amount,
+            tax=Decimal("0"),
+            total_amount=amount,
+            status="Pending",
+            assigned_user=deal.assigned_user,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+    return JsonResponse({"sales_order": _serialize_crm_sales_order(row)})

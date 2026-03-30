@@ -2200,12 +2200,18 @@ export default function App() {
       .toLowerCase();
 
     const hasAny = (text, keywords) => keywords.some((key) => text.includes(key));
+    const hasWord = (text, word) => {
+      if (!word) return false;
+      const escaped = String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(String(text || ""));
+    };
+    const hasPanField = (text) => hasWord(text, "pan") || text.includes("permanent account number");
 
     const inferLimit = (el, fallback) => {
       const text = semanticText(el);
       if (hasAny(text, ["otp", "pin"])) return 8;
       if (hasAny(text, ["gstin"])) return 15;
-      if (hasAny(text, ["pan"])) return 10;
+      if (hasPanField(text)) return 10;
       if (hasAny(text, ["postal", "pincode", "zip"])) return 10;
       if (hasAny(text, ["phone", "mobile", "whatsapp"])) return 15;
       if (hasAny(text, ["slug"])) return 40;
@@ -2234,7 +2240,7 @@ export default function App() {
         next = next.replace(/[^\d]/g, "");
       } else if (hasAny(text, ["gstin"])) {
         next = next.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      } else if (hasAny(text, ["pan"])) {
+      } else if (hasPanField(text)) {
         next = next.toUpperCase().replace(/[^A-Z0-9]/g, "");
       } else if (hasAny(text, ["slug"])) {
         next = next.toLowerCase().replace(/[^a-z0-9-]/g, "");

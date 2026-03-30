@@ -66,6 +66,18 @@ CURRENT DATABASE MODE (IMPORTANT)
   - Deploy code only; never sync DB files.
   - Run migrations on production PostgreSQL only.
 
+PRODUCTION DB RUNTIME NOTES (2026-03-30)
+- Live PostgreSQL runtime currently maps to:
+  - `DB_NAME=webszilla_db`
+  - `DB_USER=webszilla_admin2026`
+  - `DB_HOST=127.0.0.1`
+  - `DB_PORT=5432`
+- If `apps/backend/.env` contains old values (`webszilla_saas` / `webszilla_saas_admin`), migrations fail with auth errors.
+- Validate DB auth before migrate:
+  - `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
+- If password mismatch, reset role password (no data move):
+  - `sudo -u postgres psql -d postgres -c "ALTER ROLE <db_user> WITH PASSWORD '<new_password>';"`
+
 DB-RELATED TASK EXECUTION STANDARD (MANDATORY)
 - Goal:
   - `DB file move/copy` செய்யக்கூடாது.
@@ -163,6 +175,12 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
 - git pull origin main
 
+2B) If server path has no `.git` (important fallback)
+- If `git pull` shows `fatal: not a git repository`, use rsync code fallback immediately:
+  - `rsync -az --exclude='.git/' --exclude='env/' --exclude='**/node_modules/' --exclude='**/__pycache__/' --exclude='*.sqlite3' --exclude='*.sqlite3-journal' --exclude='*.sqlite3-wal' --exclude='*.sqlite3-shm' <local_project>/ -e "ssh -i ~/.ssh/workzilla_root" root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/`
+- After rsync fallback, continue normal steps:
+  - `migrate` -> `collectstatic` -> gunicorn restart -> live verify.
+
 2A) SSH KEY (HOME LAPTOP - REQUIRED)
 - Preferred working key on home laptop:
   - Private key: `~/.ssh/workzilla_root`
@@ -200,6 +218,31 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
   - Never keep old installer binaries after successful upload.
   - Keep only generated installers temporarily during build/publish window.
 - Server:
+
+CRM CONVERSION FLOW NOTES (LOCAL IMPLEMENTATION - 2026-03-30)
+- New Business Autopilot CRM backend models added:
+  - `CrmLead`
+  - `CrmDeal`
+  - `CrmSalesOrder`
+- Migration:
+  - `apps/backend/business_autopilot/migrations/0016_crmlead_crmdeal_crmsalesorder.py`
+- New API endpoints under `/api/business-autopilot/`:
+  - `GET/POST leads`
+  - `POST convert-to-deal/<lead_id>`
+  - `GET/POST deals`
+  - `PATCH/DELETE deals/<deal_id>`
+  - `POST convert-to-sales-order/<deal_id>`
+  - `GET/POST sales-orders`
+  - `DELETE sales-orders/<order_id>`
+- Core logic:
+  - Lead can be converted to Deal.
+  - Only won deal (stage/status = Won) can be converted to Sales Order.
+  - Sales order auto-populates from deal/lead (customer/company/phone/amount/assigned user).
+  - Soft-delete fields included in all three CRM models.
+- Permission baseline:
+  - Assigned user / creator visibility for CRM rows.
+  - Admin can delete.
+  - Non-admin cannot delete deals/orders.
   - Installer binaries must not remain in:
     - `apps/bootstrap_installer/dist`
     - `apps/desktop_app/dist`
@@ -219,6 +262,14 @@ Ultra-short restart:
 
 Alternative stack restart (if infra requires):
 - docker restart openpanel
+
+3A) Gunicorn restart reliability note
+- In some SSH sessions, `pkill -f ...` may return SSH exit `255` even when service is still running.
+- If one-line restart is unstable, do step-by-step:
+  1. `pkill -f "core_platform.wsgi:application" || true`
+  2. `nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >/tmp/workzilla_gunicorn.log 2>&1 </dev/null &`
+  3. `pgrep -af "core_platform.wsgi:application"`
+  4. `curl -I https://getworkzilla.com/` (expect HTTP 200)
 
 SERVER DEPLOY EXECUTION RULE (WHEN ASKED)
 - ssh root@89.167.16.104
