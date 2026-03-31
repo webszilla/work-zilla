@@ -5,6 +5,29 @@ const ORG_TIMEZONE_KEY = "wz_org_timezone";
 const FALLBACK_TIMEZONE = "UTC";
 const ORG_TIMEZONE_PATCH_FLAG = "__wzOrgTimezoneDateLocalePatched__";
 
+function safeLocalStorageGet(key, fallback = "") {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_error) {
+    // Ignore storage write failures in restricted browser modes.
+  }
+}
+
 function isValidTimezone(value) {
   const tz = String(value || "").trim();
   if (!tz) {
@@ -26,7 +49,7 @@ function readStoredTimezone() {
   if (typeof window === "undefined") {
     return FALLBACK_TIMEZONE;
   }
-  const stored = window.localStorage.getItem(ORG_TIMEZONE_KEY);
+  const stored = safeLocalStorageGet(ORG_TIMEZONE_KEY, FALLBACK_TIMEZONE);
   return normalizeTimezone(stored);
 }
 
@@ -35,7 +58,7 @@ let orgTimezone = readStoredTimezone();
 export function setOrgTimezone(value) {
   orgTimezone = normalizeTimezone(value);
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(ORG_TIMEZONE_KEY, orgTimezone);
+    safeLocalStorageSet(ORG_TIMEZONE_KEY, orgTimezone);
   }
   return orgTimezone;
 }
@@ -44,7 +67,7 @@ export function getOrgTimezone() {
   if (typeof window === "undefined") {
     return orgTimezone;
   }
-  return setOrgTimezone(window.localStorage.getItem(ORG_TIMEZONE_KEY) || orgTimezone);
+  return setOrgTimezone(safeLocalStorageGet(ORG_TIMEZONE_KEY, orgTimezone) || orgTimezone);
 }
 
 function withOrgTimezoneLocaleArgs(argsLike) {

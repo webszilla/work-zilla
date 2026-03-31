@@ -121,6 +121,29 @@ const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
 const BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 
+function safeLocalStorageGet(key, fallback = "") {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures (private mode / blocked storage).
+  }
+}
+
 function normalizeSidebarMenuStyle(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "compact" || normalized === "icons") {
@@ -134,7 +157,7 @@ function readBusinessAutopilotRoleAccessMap() {
     return {};
   }
   try {
-    const raw = window.localStorage.getItem(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY);
+    const raw = safeLocalStorageGet(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY, "");
     const parsed = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -147,7 +170,7 @@ function readBusinessAutopilotUserDirectory() {
     return [];
   }
   try {
-    const raw = window.localStorage.getItem(BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY);
+    const raw = safeLocalStorageGet(BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY, "");
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -421,7 +444,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (typeof window === "undefined") {
       return "dark";
     }
-    const stored = window.localStorage.getItem("wz_theme");
+    const stored = safeLocalStorageGet("wz_theme", "");
     return stored === "light" ? "light" : "dark";
   });
   const isSuperuser = Boolean(state.user?.is_superuser);
@@ -448,7 +471,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const themeSecondary = state.themeSecondary;
   const sidebarMenuStyle = (() => {
     if (typeof window !== "undefined") {
-      const raw = window.localStorage.getItem(THEME_OVERRIDE_KEY);
+      const raw = safeLocalStorageGet(THEME_OVERRIDE_KEY, "");
       if (raw && raw !== "default") {
         try {
           const parsed = JSON.parse(raw);
@@ -615,10 +638,10 @@ function AppShell({ state, productPrefix, productSlug }) {
       document.documentElement.style.colorScheme = theme;
     }
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("wz_theme", theme);
+      safeLocalStorageSet("wz_theme", theme);
       window.__WZ_PRODUCT_SLUG__ = productSlug;
       if (productSlug && productSlug !== "saas-admin") {
-        window.localStorage.setItem(LAST_APP_PRODUCT_KEY, productSlug);
+        safeLocalStorageSet(LAST_APP_PRODUCT_KEY, productSlug);
       }
     }
   }, [theme, productSlug]);
@@ -629,7 +652,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       secondary: themeSecondary
     };
     const overrideRaw = typeof window !== "undefined"
-      ? window.localStorage.getItem(THEME_OVERRIDE_KEY)
+      ? safeLocalStorageGet(THEME_OVERRIDE_KEY, "")
       : null;
     let themeToApply = serverTheme;
     if (overrideRaw) {
@@ -646,13 +669,13 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (themeToApply && themeToApply.primary) {
       const next = JSON.stringify(themeToApply);
       const prev = typeof window !== "undefined"
-        ? window.localStorage.getItem(THEME_LAST_KEY)
+        ? safeLocalStorageGet(THEME_LAST_KEY, "")
         : null;
       if (prev && prev !== next && typeof window !== "undefined") {
-        window.localStorage.setItem(THEME_PREV_KEY, prev);
+        safeLocalStorageSet(THEME_PREV_KEY, prev);
       }
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(THEME_LAST_KEY, next);
+        safeLocalStorageSet(THEME_LAST_KEY, next);
       }
     }
     applyThemeColors(themeToApply);
@@ -675,13 +698,13 @@ function AppShell({ state, productPrefix, productSlug }) {
     }
     const popupDate = new Date().toISOString().slice(0, 10);
     const popupKey = `wz_free_plan_popup_date:${productSlug || "worksuite"}`;
-    const lastShown = window.localStorage.getItem(popupKey);
+    const lastShown = safeLocalStorageGet(popupKey, "");
     if (lastShown === popupDate) {
       setShowFreePlanModal(false);
       return;
     }
     setShowFreePlanModal(true);
-    window.localStorage.setItem(popupKey, popupDate);
+    safeLocalStorageSet(popupKey, popupDate);
   }, [productSlug, shouldShowCurrentProductFreePlanPopup]);
 
   useEffect(() => {
@@ -750,7 +773,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           const roleAccessData = await apiFetch("/api/business-autopilot/role-access");
           if (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object") {
             roleAccessMap = roleAccessData.role_access_map;
-            window.localStorage.setItem(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(roleAccessMap));
+            safeLocalStorageSet(BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(roleAccessMap));
           }
         } catch {
           // Fallback to cached local role access map.
@@ -2056,6 +2079,9 @@ function GlobalDeleteConfirmBridge() {
       if (!text) {
         return false;
       }
+      if (text.includes("deleted items")) {
+        return false;
+      }
       return (
         text.includes("delete")
         || text.includes("remove")
@@ -2590,7 +2616,7 @@ export default function App() {
     if (!match && location.pathname && location.pathname !== "/" && !isDealer && !isSaasAdminPath) {
       const inferredProductSlug = inferProductSlugFromInnerPath(location.pathname);
       const lastProductSlug = typeof window !== "undefined"
-        ? String(window.localStorage.getItem(LAST_APP_PRODUCT_KEY) || window.__WZ_PRODUCT_SLUG__ || "worksuite").trim()
+        ? String(safeLocalStorageGet(LAST_APP_PRODUCT_KEY, "") || window.__WZ_PRODUCT_SLUG__ || "worksuite").trim()
         : "worksuite";
       const preferredProductSlug = inferredProductSlug || lastProductSlug;
       const preferredProductRoute = productRoutes.find((route) => route.slug === preferredProductSlug) || productRoutes[0];

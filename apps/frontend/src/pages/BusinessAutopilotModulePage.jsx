@@ -233,6 +233,7 @@ const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
 ];
 const CRM_FOLLOWUP_RELATED_TO_TYPES = ["Lead", "CRM Contact", "Client"];
 const CRM_FOLLOWUP_STATUS_TABS = ["ongoing", "pending", "missed", "completed"];
+const CRM_DEAL_STATUS_OPTIONS = ["Open", "Won", "Lost"];
 const CRM_FOLLOWUP_AUTO_DELETE_DAYS = 90;
 const CRM_SOFT_DELETE_RETENTION_DAYS = 60;
 
@@ -1020,19 +1021,65 @@ function formatCurrencyNumberInput(rawValue, currencyCode) {
   return numericValue.toLocaleString(locale, { maximumFractionDigits: 2 });
 }
 
+const CURRENCY_MAX_INTEGER_DIGITS = 10;
+const CURRENCY_MAX_DECIMAL_DIGITS = 2;
+const AMOUNT_MAX_NUMERIC_VALUE = 9999999999.99;
+const AMOUNT_FIELD_KEYS = new Set([
+  "amount",
+  "leadamount",
+  "dealvalueexpected",
+  "wonamountfinal",
+  "projectvalue",
+  "price",
+  "tax",
+  "rate",
+  "cost",
+  "dealvalue",
+  "wonamount",
+]);
+
+function isAmountFieldKey(fieldKey) {
+  const key = String(fieldKey || "").trim().toLowerCase();
+  if (!key) {
+    return false;
+  }
+  return AMOUNT_FIELD_KEYS.has(key);
+}
+
 function sanitizeCurrencyInput(rawValue) {
   const value = String(rawValue ?? "");
-  const noSpaces = value.replace(/\s+/g, "");
-  const cleaned = noSpaces.replace(/[^\d.,-]/g, "");
-  const withoutMinus = cleaned.replace(/-/g, "");
-  const dotNormalized = withoutMinus.replace(/,/g, ".");
-  const parts = dotNormalized.split(".");
-  if (parts.length <= 1) {
-    return parts[0] || "";
+  const noSpaces = value.replace(/\s+/g, "").replace(/-/g, "");
+  const cleaned = noSpaces.replace(/[^\d.,]/g, "");
+  if (!cleaned) {
+    return "";
   }
-  const integerPart = parts.shift() || "";
-  const decimalPart = parts.join("").slice(0, 2);
-  return decimalPart ? `${integerPart}.${decimalPart}` : integerPart;
+
+  let normalized = cleaned;
+  if (normalized.includes(".")) {
+    // Dot is treated as decimal separator; commas are grouping separators.
+    normalized = normalized.replace(/,/g, "");
+  } else if (normalized.includes(",")) {
+    const commaCount = (normalized.match(/,/g) || []).length;
+    if (commaCount > 1) {
+      // 1,23,456 / 123,456 style grouping
+      normalized = normalized.replace(/,/g, "");
+    } else {
+      const [left = "", right = ""] = normalized.split(",");
+      // Single comma with <=2 trailing digits can be decimal input (e.g., 12,5)
+      normalized = right.length > 0 && right.length <= CURRENCY_MAX_DECIMAL_DIGITS
+        ? `${left}.${right}`
+        : `${left}${right}`;
+    }
+  }
+
+  const parts = normalized.split(".");
+  const integerRaw = (parts.shift() || "").replace(/[^\d]/g, "");
+  const integerPart = integerRaw.slice(0, CURRENCY_MAX_INTEGER_DIGITS);
+  const decimalPart = parts.join("").replace(/[^\d]/g, "").slice(0, CURRENCY_MAX_DECIMAL_DIGITS);
+  if (!integerPart && !decimalPart) {
+    return "";
+  }
+  return decimalPart ? `${integerPart || "0"}.${decimalPart}` : (integerPart || "0");
 }
 
 function getCurrencySymbol(currencyCode) {
@@ -1926,33 +1973,65 @@ function normalizeCrmData(value) {
     if (Array.isArray(value[key])) {
       base[key] = key === "leads"
         ? value[key].map((row) => normalizeCrmLeadRecord(row))
+        : key === "deals"
+        ? value[key].map((row) => normalizeCrmDealRecord(row))
         : key === "teams"
         ? value[key].map((row) => normalizeCrmTeamRecord(row))
         : value[key];
     }
   });
   base.leads = (base.leads || []).map((row) => normalizeCrmLeadRecord(row));
+  base.deals = (base.deals || []).map((row) => normalizeCrmDealRecord(row));
   base.teams = (base.teams || []).map((row) => normalizeCrmTeamRecord(row));
   return base;
 }
 
 function normalizeCrmLeadRecord(row = {}) {
-  const normalizedAssignType = String(row.assignType || "").trim().toLowerCase();
+  const leadName = String(row.name || row.lead_name || "").trim();
+  const leadAmount = row.leadAmount ?? row.lead_amount ?? "";
+  const leadSource = String(row.leadSource || row.lead_source || "").trim();
+  const normalizedAssignType = String(row.assignType || row.assign_type || "").trim().toLowerCase();
   const assignType = normalizedAssignType === "team" ? "Team" : "Users";
   const assignedUser = Array.isArray(row.assignedUser)
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
-    : String(row.assignedUser || (assignType.toLowerCase() !== "team" ? row.assignedTo || "" : ""))
+    : String(
+      row.assignedUser
+      || row.assigned_user_name
+      || (assignType.toLowerCase() !== "team" ? row.assignedTo || "" : "")
+    )
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
-  const assignedTeam = String(row.assignedTeam || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")).trim();
+  const assignedTeam = String(
+    row.assignedTeam
+    || row.assigned_team
+    || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")
+  ).trim();
   return {
     ...row,
+    name: leadName,
+    leadAmount: String(leadAmount ?? "").trim(),
+    leadSource,
     assignType,
     assignedUser,
     assignedTeam,
     assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser.join(", "))).trim(),
-    createdBy: String(row.createdBy || row.owner || "").trim(),
+    createdBy: String(row.createdBy || row.created_by_name || row.owner || "").trim(),
+  };
+}
+
+function normalizeCrmDealRecord(row = {}) {
+  const dealName = String(row.dealName || row.deal_name || "").trim();
+  const expectedValue = row.dealValueExpected ?? row.deal_value ?? row.dealValue ?? "";
+  const wonValue = row.wonAmountFinal ?? row.won_amount_final ?? row.won_amount ?? row.amount ?? "";
+  return {
+    ...row,
+    dealName,
+    dealValueExpected: String(expectedValue ?? "").trim(),
+    wonAmountFinal: String(wonValue ?? "").trim(),
+    assignedTeam: String(row.assignedTeam || row.assigned_team || "").trim(),
+    assignedTo: String(row.assignedTo || row.assigned_user_name || row.assigned_team || "").trim(),
+    createdBy: String(row.createdBy || row.created_by_name || "").trim(),
   };
 }
 
@@ -4644,6 +4723,7 @@ function CrmOnePageModule() {
   const [teamCategorySearchOpen, setTeamCategorySearchOpen] = useState(false);
   const [teamMemberSearch, setTeamMemberSearch] = useState("");
   const [teamMemberSearchOpen, setTeamMemberSearchOpen] = useState(false);
+  const [dealQuickEditPopup, setDealQuickEditPopup] = useState(null);
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
   const [dealCompanySearchOpen, setDealCompanySearchOpen] = useState(false);
   const [activityClientSearchOpen, setActivityClientSearchOpen] = useState(false);
@@ -4658,6 +4738,7 @@ function CrmOnePageModule() {
   const [activityEmployeeSearch, setActivityEmployeeSearch] = useState("");
   const [activityEmployeeSearchOpen, setActivityEmployeeSearchOpen] = useState(false);
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
+  const [leadPhoneLockedFromClient, setLeadPhoneLockedFromClient] = useState(false);
   const [leadAssignedUserSearch, setLeadAssignedUserSearch] = useState("");
   const [leadAssignedUserSearchOpen, setLeadAssignedUserSearchOpen] = useState(false);
   const [followUpRelatedToType, setFollowUpRelatedToType] = useState(CRM_FOLLOWUP_RELATED_TO_TYPES[0]);
@@ -4665,7 +4746,7 @@ function CrmOnePageModule() {
   const [followUpRelatedToSearchOpen, setFollowUpRelatedToSearchOpen] = useState(false);
   const [followUpOwnerSearch, setFollowUpOwnerSearch] = useState("");
   const [followUpOwnerSearchOpen, setFollowUpOwnerSearchOpen] = useState(false);
-  const [showDeletedItems, setShowDeletedItems] = useState(false);
+  const [deletedViewSection, setDeletedViewSection] = useState("");
   const sectionFormRef = useRef(null);
   const crmCurrencyCode = String(getOrgCurrency() || "INR").trim().toUpperCase() || "INR";
   const crmCurrencySymbol = getCurrencySymbol(crmCurrencyCode);
@@ -4676,7 +4757,7 @@ function CrmOnePageModule() {
   const isCrmAdmin = normalizedCurrentUserRole === "company_admin" || normalizedCurrentUserRole === "org_admin";
 
   function isSoftDeletedCrmRow(row) {
-    return Boolean(row?.isDeleted) || Boolean(row?.deletedAt);
+    return Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at);
   }
 
   function parseOwnerNames(value) {
@@ -4803,7 +4884,7 @@ function CrmOnePageModule() {
   }, [moduleData.followUps]);
 
   useEffect(() => {
-    setShowDeletedItems(false);
+    setDeletedViewSection("");
   }, [activeSection]);
 
   useEffect(() => {
@@ -4852,6 +4933,7 @@ function CrmOnePageModule() {
   useEffect(() => {
     if (activeSection !== "leads") {
       setLeadCompanySearchOpen(false);
+      setLeadPhoneLockedFromClient(false);
       setLeadAssignedUserSearch("");
       setLeadAssignedUserSearchOpen(false);
     }
@@ -4906,9 +4988,8 @@ function CrmOnePageModule() {
     const activities = (moduleData.activities || []).filter((row) => isRowAssignedToCurrentUser("activities", row) && !isSoftDeletedCrmRow(row));
     const teams = (moduleData.teams || []).filter((row) => isRowAssignedToCurrentUser("teams", row) && !isSoftDeletedCrmRow(row));
     const openLeads = leads.filter((row) => !["closed", "converted"].includes(String(row.status || "").toLowerCase())).length;
-    const leadPipelineAmount = leads.reduce((sum, row) => sum + parseNumber(row.leadAmount), 0);
-    const dealWonAmount = deals.reduce((sum, row) => sum + parseNumber(row.wonAmountFinal || row.amount), 0);
-    const pipelineValue = leadPipelineAmount + dealWonAmount;
+    // Pipeline should be based on Lead Amount total to avoid duplicate counting from linked deals.
+    const pipelineValue = leads.reduce((sum, row) => sum + parseNumber(row.leadAmount), 0);
     const today = new Date().toISOString().slice(0, 10);
     const followupsToday = followUps.filter((row) => {
       if (String(row.dueDate || "") !== today) return false;
@@ -4997,7 +5078,7 @@ function CrmOnePageModule() {
         normalizedValue = normalizedMeetingTime;
       }
     }
-    if (["leadAmount", "dealValueExpected", "wonAmountFinal", "amount"].includes(String(fieldKey || ""))) {
+    if (isAmountFieldKey(fieldKey)) {
       normalizedValue = formatCurrencyNumberInput(sanitizeCurrencyInput(normalizedValue), crmCurrencyCode);
     }
     const normalizedFieldKey = String(fieldKey || "").toLowerCase();
@@ -5046,6 +5127,7 @@ function CrmOnePageModule() {
     }
     if (sectionKey === "leads") {
       setLeadCompanySearchOpen(false);
+      setLeadPhoneLockedFromClient(false);
       setLeadAssignedUserSearch("");
       setLeadAssignedUserSearchOpen(false);
     }
@@ -5124,6 +5206,7 @@ function CrmOnePageModule() {
     }
     if (sectionKey === "leads") {
       setLeadCompanySearchOpen(false);
+      setLeadPhoneLockedFromClient(false);
       setLeadAssignedUserSearch("");
       setLeadAssignedUserSearchOpen(false);
     }
@@ -5203,6 +5286,7 @@ function CrmOnePageModule() {
   }
 
   function onDelete(sectionKey, rowId) {
+    const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     setModuleData((prev) => ({
       ...prev,
       [sectionKey]: (prev[sectionKey] || []).map((row) => (
@@ -5210,7 +5294,9 @@ function CrmOnePageModule() {
           ? {
               ...row,
               isDeleted: true,
+              is_deleted: true,
               deletedAt: new Date().toISOString(),
+              deleted_at: new Date().toISOString(),
               deletedBy: currentUserName || "Current User",
             }
           : row
@@ -5219,17 +5305,87 @@ function CrmOnePageModule() {
     if (editingIds[sectionKey] === rowId) {
       resetSectionForm(sectionKey);
     }
+    const sectionLabelMap = {
+      leads: "Lead",
+      deals: "Deal",
+      salesOrders: "Sales Order",
+      contacts: "Contact",
+      followUps: "Follow-up",
+      meetings: "Meeting",
+      activities: "Activity",
+      teams: "Team",
+    };
+    const rowLabel = sectionLabelMap[String(sectionKey || "").trim()] || "CRM Item";
+    const primaryName = String(
+      targetRow?.name
+      || targetRow?.leadName
+      || targetRow?.dealName
+      || targetRow?.customerName
+      || targetRow?.subject
+      || targetRow?.title
+      || targetRow?.company
+      || ""
+    ).trim();
+    const details = primaryName
+      ? `${rowLabel} deleted: ${primaryName}`
+      : `${rowLabel} deleted (ID: ${rowId})`;
+    apiFetch("/api/business-autopilot/crm/activity-log", {
+      method: "POST",
+      body: JSON.stringify({
+        action: `Delete CRM ${rowLabel}`,
+        details,
+      }),
+    }).catch(() => {});
   }
 
   function onRestore(sectionKey, rowId) {
+    const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     setModuleData((prev) => ({
       ...prev,
       [sectionKey]: (prev[sectionKey] || []).map((row) => (
         String(row.id) === String(rowId)
-          ? { ...row, isDeleted: false, deletedAt: "", deletedBy: "" }
+          ? {
+              ...row,
+              isDeleted: false,
+              is_deleted: false,
+              deletedAt: "",
+              deleted_at: "",
+              deletedBy: "",
+            }
           : row
       )),
     }));
+    const sectionLabelMap = {
+      leads: "Lead",
+      deals: "Deal",
+      salesOrders: "Sales Order",
+      contacts: "Contact",
+      followUps: "Follow-up",
+      meetings: "Meeting",
+      activities: "Activity",
+      teams: "Team",
+    };
+    const rowLabel = sectionLabelMap[String(sectionKey || "").trim()] || "CRM Item";
+    const primaryName = String(
+      targetRow?.name
+      || targetRow?.leadName
+      || targetRow?.dealName
+      || targetRow?.customerName
+      || targetRow?.subject
+      || targetRow?.title
+      || targetRow?.company
+      || ""
+    ).trim();
+    const details = primaryName
+      ? `${rowLabel} restored: ${primaryName}`
+      : `${rowLabel} restored (ID: ${rowId})`;
+    apiFetch("/api/business-autopilot/crm/activity-log", {
+      method: "POST",
+      body: JSON.stringify({
+        action: `Restore CRM ${rowLabel}`,
+        details,
+      }),
+    }).catch(() => {});
   }
 
   function onPermanentDelete(sectionKey, rowId) {
@@ -5239,12 +5395,21 @@ function CrmOnePageModule() {
     }));
   }
 
-  function onToggleDeletedItemsView(event) {
-    if (event) {
-      event.preventDefault();
-      event.stopPropagation();
+  function openDeletedItemsView(sectionKey, event) {
+    const normalizedSection = String(sectionKey || "").trim();
+    setDeletedViewSection(normalizedSection);
+    window.requestAnimationFrame(() => {
+      setDeletedViewSection(normalizedSection);
+    });
+    if (normalizedSection === "leads") {
+      setLeadStatusTab("all");
+    } else if (normalizedSection === "deals") {
+      setDealStatusTab("all");
+    } else if (normalizedSection === "meetings") {
+      setMeetingStatusTab("all");
+    } else if (normalizedSection === "followUps") {
+      setFollowUpStatusTab("all");
     }
-    setShowDeletedItems((prev) => !prev);
   }
 
   function onConvertLeadToDeal(leadRow) {
@@ -6063,14 +6228,108 @@ function CrmOnePageModule() {
       ? parseInt(String(row?.employeeCount || "").trim(), 10)
       : members.length;
     setTeamMembersPopup({
+      title: "Team Employees",
       name: String(row?.name || "Team").trim(),
       members,
       count,
     });
   }
 
+  function openLeadAssignedEmployeesPopup(row) {
+    const assignType = String(row?.assignType || "").trim().toLowerCase();
+    if (assignType === "team") {
+      const assignedTeamName = String(row?.assignedTeam || row?.assignedTo || "").trim();
+      const matchedTeam = (moduleData.teams || []).find(
+        (team) => String(team?.name || "").trim().toLowerCase() === assignedTeamName.toLowerCase()
+      );
+      const members = Array.from(new Set(parseTeamMemberList(matchedTeam?.members)));
+      setTeamMembersPopup({
+        title: "Assigned Employees",
+        name: assignedTeamName || "Assigned Team",
+        members,
+        count: members.length,
+      });
+      return;
+    }
+    const members = Array.isArray(row?.assignedUser)
+      ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+      : String(row?.assignedUser || row?.assignedTo || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    setTeamMembersPopup({
+      title: "Assigned Employees",
+      name: String(row?.name || row?.company || "Lead").trim(),
+      members: Array.from(new Set(members)),
+      count: members.length,
+    });
+  }
+
   function closeTeamMembersPopup() {
     setTeamMembersPopup(null);
+  }
+
+  function openDealQuickEditPopup(row) {
+    const dealId = String(row?.id || "").trim();
+    if (!dealId) {
+      return;
+    }
+    setDealQuickEditPopup({
+      id: dealId,
+      dealName: String(row?.dealName || row?.name || "").trim() || "Deal",
+      dealValueExpected: String(row?.dealValueExpected || row?.dealValue || "").trim(),
+      wonAmountFinal: String(row?.wonAmountFinal || "").trim(),
+      status: String(row?.status || "Open").trim() || "Open",
+      error: "",
+    });
+  }
+
+  function closeDealQuickEditPopup() {
+    setDealQuickEditPopup(null);
+  }
+
+  function saveDealQuickEditPopup(event) {
+    event.preventDefault();
+    if (!dealQuickEditPopup?.id) {
+      setDealQuickEditPopup((prev) => (prev ? { ...prev, error: "Invalid deal selected." } : prev));
+      return;
+    }
+    const normalizedWonAmount = formatCurrencyNumberInput(
+      sanitizeCurrencyInput(dealQuickEditPopup.wonAmountFinal || ""),
+      crmCurrencyCode
+    );
+    const wonAmountNumber = parseNumber(normalizedWonAmount);
+    const expectedAmountNumber = parseNumber(dealQuickEditPopup.dealValueExpected || "");
+    if (expectedAmountNumber > 0 && wonAmountNumber > expectedAmountNumber) {
+      setDealQuickEditPopup((prev) => (
+        prev
+          ? {
+              ...prev,
+              error: `Won Amount cannot exceed Deal Value (${formatCurrencyAmount(expectedAmountNumber, crmCurrencyCode)}).`,
+            }
+          : prev
+      ));
+      return;
+    }
+    const nextStatus = String(dealQuickEditPopup.status || "").trim();
+    if (!nextStatus) {
+      setDealQuickEditPopup((prev) => (prev ? { ...prev, error: "Status is required." } : prev));
+      return;
+    }
+    setModuleData((prev) => ({
+      ...prev,
+      deals: (prev.deals || []).map((row) => (
+        String(row.id || "").trim() === dealQuickEditPopup.id
+          ? {
+              ...row,
+              wonAmountFinal: normalizedWonAmount,
+              status: nextStatus,
+              updatedAt: new Date().toISOString(),
+            }
+          : row
+      )),
+    }));
+    setDealQuickEditPopup(null);
   }
 
   return (
@@ -6121,7 +6380,8 @@ function CrmOnePageModule() {
         const accessibleRows = rows.filter((row) => isRowAssignedToCurrentUser(sectionKey, row));
         const activeRows = accessibleRows.filter((row) => !isSoftDeletedCrmRow(row));
         const deletedRows = accessibleRows.filter((row) => isSoftDeletedCrmRow(row));
-        const tableRows = showDeletedItems ? deletedRows : activeRows;
+        const isDeletedSectionView = deletedViewSection === sectionKey;
+        const tableRows = isDeletedSectionView ? deletedRows : activeRows;
         const leadStatusTabs = [
           { key: "all", label: "All" },
           { key: "open", label: "Open" },
@@ -6148,7 +6408,7 @@ function CrmOnePageModule() {
         ];
         const filteredRows = sectionKey === "leads"
           ? tableRows.filter((row) => {
-              if (leadStatusTab === "all") {
+              if (isDeletedSectionView || leadStatusTab === "all") {
                 return true;
               }
               return String(row.status || "").trim().toLowerCase() === leadStatusTab;
@@ -6494,6 +6754,7 @@ function CrmOnePageModule() {
           : [];
         return (
 		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
+		            {sectionKey !== "deals" ? (
 		            <div className={sectionKey === "teams" ? "col-12 col-xl-3" : ""}>
             <div className={`card p-3 ${editingId ? "crm-form-editing-highlight" : ""}`}>
               <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
@@ -6854,6 +7115,7 @@ function CrmOnePageModule() {
                                       options={DIAL_COUNTRY_PICKER_OPTIONS}
                                       style={{ maxWidth: (sectionKey === "leads" || sectionKey === "contacts") ? "120px" : "220px" }}
                                       ariaLabel="CRM country code"
+                                      disabled={sectionKey === "leads" && leadPhoneLockedFromClient}
                                     />
                                     <input
                                       type="text"
@@ -6861,6 +7123,7 @@ function CrmOnePageModule() {
                                       placeholder={field.placeholder}
                                       value={formValues.phone || ""}
                                       required={isCrmFieldRequired(sectionKey, field, formValues)}
+                                      readOnly={sectionKey === "leads" && leadPhoneLockedFromClient}
                                       onChange={(event) => setField(sectionKey, "phone", event.target.value)}
                                     />
                                   </div>
@@ -6880,6 +7143,7 @@ function CrmOnePageModule() {
                                       onBlur={() => window.setTimeout(() => setLeadCompanySearchOpen(false), 120)}
                                       onChange={(event) => {
                                         setField(sectionKey, field.key, event.target.value);
+                                        setLeadPhoneLockedFromClient(false);
                                         setLeadCompanySearchOpen(true);
                                       }}
                                     />
@@ -6896,15 +7160,17 @@ function CrmOnePageModule() {
                                                   className="crm-inline-suggestions__item"
                                                   onMouseDown={(event) => event.preventDefault()}
                                                   onClick={() => {
+                                                    const autoPhone = String(contact.phone || "").trim();
                                                     setForms((prev) => ({
                                                       ...prev,
                                                       leads: {
                                                         ...prev.leads,
                                                         company: String(contact.company || "").trim(),
                                                         phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
-                                                        phone: String(contact.phone || "").trim(),
+                                                        phone: autoPhone,
                                                       },
                                                     }));
+                                                    setLeadPhoneLockedFromClient(Boolean(autoPhone));
                                                     setLeadCompanySearchOpen(false);
                                                   }}
                                                 >
@@ -6924,15 +7190,17 @@ function CrmOnePageModule() {
                                                   className="crm-inline-suggestions__item"
                                                   onMouseDown={(event) => event.preventDefault()}
                                                   onClick={() => {
+                                                    const autoPhone = String(customer.phone || "").trim();
                                                     setForms((prev) => ({
                                                       ...prev,
                                                       leads: {
                                                         ...prev.leads,
                                                         company: String(customer.companyName || customer.name || "").trim(),
                                                         phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
-                                                        phone: String(customer.phone || "").trim(),
+                                                        phone: autoPhone,
                                                       },
                                                     }));
+                                                    setLeadPhoneLockedFromClient(Boolean(autoPhone));
                                                     setLeadCompanySearchOpen(false);
                                                   }}
                                                 >
@@ -7837,7 +8105,7 @@ function CrmOnePageModule() {
                                       : "text"
                                   }
                                   inputMode={
-                                    ["leadAmount", "dealValueExpected", "wonAmountFinal", "amount"].includes(String(field.key || ""))
+                                    isAmountFieldKey(field.key)
                                       ? "decimal"
                                       : field.type === "email" || String(field.key || "").toLowerCase().includes("email")
                                       ? "email"
@@ -7930,16 +8198,21 @@ function CrmOnePageModule() {
               </form>
             </div>
             </div>
+            ) : null}
 
-		            <div className={sectionKey === "teams" ? "col-12 col-xl-9" : ""}>
+		            <div
+              className={sectionKey === "teams" ? "col-12 col-xl-9" : ""}
+              style={sectionKey === "leads" ? { paddingTop: "25px" } : undefined}
+            >
             <SearchablePaginatedTableCard
+              key={`${sectionKey}-${isDeletedSectionView ? "deleted" : "active"}`}
               title={`${config.label} List`}
               badgeLabel=""
               rows={filteredRows}
               columns={tableColumns}
               withoutOuterCard={sectionKey !== "teams"}
               searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-              noRowsText={showDeletedItems ? `No deleted ${config.label.toLowerCase()} items.` : `No ${config.label.toLowerCase()} yet.`}
+              noRowsText={isDeletedSectionView ? `No deleted ${config.label.toLowerCase()} items.` : `No ${config.label.toLowerCase()} yet.`}
               enableExport={sectionKey !== "meetings"}
               enableImport={sectionKey !== "meetings"}
               exportFileName={`crm-${config.label.toLowerCase().replace(/\s+/g, "-")}`}
@@ -7952,7 +8225,10 @@ function CrmOnePageModule() {
                         key={`lead-status-tab-${tab.key}`}
                         type="button"
                         className={`btn btn-sm ${leadStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                        onClick={() => setLeadStatusTab(tab.key)}
+                        onClick={() => {
+                          setLeadStatusTab(tab.key);
+                          setDeletedViewSection("");
+                        }}
                       >
                         {tab.label} ({leadTabCounts[tab.key] || 0})
                       </button>
@@ -7960,8 +8236,9 @@ function CrmOnePageModule() {
                     {isCrmAdmin ? (
                       <button
                         type="button"
-                        className={`btn btn-sm ${showDeletedItems ? "btn-danger" : "btn-outline-danger"}`}
-                        onClick={onToggleDeletedItemsView}
+                        data-no-delete-confirm="true"
+                        className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                        onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
                         Deleted Items ({deletedRows.length})
                       </button>
@@ -7978,7 +8255,10 @@ function CrmOnePageModule() {
                       key={`deal-status-tab-${tab.key}`}
                       type="button"
                       className={`btn btn-sm ${dealStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => setDealStatusTab(tab.key)}
+                      onClick={() => {
+                        setDealStatusTab(tab.key);
+                        setDeletedViewSection("");
+                      }}
                     >
                       {tab.label} ({dealTabCounts[tab.key] || 0})
                     </button>
@@ -7986,8 +8266,9 @@ function CrmOnePageModule() {
                   {isCrmAdmin ? (
                     <button
                       type="button"
-                      className={`btn btn-sm ${showDeletedItems ? "btn-danger" : "btn-outline-danger"}`}
-                      onClick={onToggleDeletedItemsView}
+                      data-no-delete-confirm="true"
+                      className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                      onClick={(event) => openDeletedItemsView(sectionKey, event)}
                     >
                       Deleted Items ({deletedRows.length})
                     </button>
@@ -8001,7 +8282,10 @@ function CrmOnePageModule() {
                         key={`followup-status-tab-${tab.key}`}
                         type="button"
                         className={`btn btn-sm ${followUpStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                        onClick={() => setFollowUpStatusTab(tab.key)}
+                        onClick={() => {
+                          setFollowUpStatusTab(tab.key);
+                          setDeletedViewSection("");
+                        }}
                       >
                         {tab.label} ({followUpTabCounts[tab.key] || 0})
                       </button>
@@ -8009,8 +8293,9 @@ function CrmOnePageModule() {
                     {isCrmAdmin ? (
                       <button
                         type="button"
-                        className={`btn btn-sm ${showDeletedItems ? "btn-danger" : "btn-outline-danger"}`}
-                        onClick={onToggleDeletedItemsView}
+                        data-no-delete-confirm="true"
+                        className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                        onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
                         Deleted Items ({deletedRows.length})
                       </button>
@@ -8027,7 +8312,10 @@ function CrmOnePageModule() {
                       key={`meeting-status-tab-${tab.key}`}
                       type="button"
                       className={`btn btn-sm ${meetingStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => setMeetingStatusTab(tab.key)}
+                      onClick={() => {
+                        setMeetingStatusTab(tab.key);
+                        setDeletedViewSection("");
+                      }}
                     >
                       {tab.label} ({meetingTabCounts[tab.key] || 0})
                     </button>
@@ -8035,8 +8323,9 @@ function CrmOnePageModule() {
                   {isCrmAdmin ? (
                     <button
                       type="button"
-                      className={`btn btn-sm ${showDeletedItems ? "btn-danger" : "btn-outline-danger"}`}
-                      onClick={onToggleDeletedItemsView}
+                      data-no-delete-confirm="true"
+                      className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                      onClick={(event) => openDeletedItemsView(sectionKey, event)}
                     >
                       Deleted Items ({deletedRows.length})
                     </button>
@@ -8046,8 +8335,9 @@ function CrmOnePageModule() {
                 <div className="d-flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className={`btn btn-sm ${showDeletedItems ? "btn-danger" : "btn-outline-danger"}`}
-                    onClick={onToggleDeletedItemsView}
+                    data-no-delete-confirm="true"
+                    className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                    onClick={(event) => openDeletedItemsView(sectionKey, event)}
                   >
                     Deleted Items ({deletedRows.length})
                   </button>
@@ -8077,21 +8367,33 @@ function CrmOnePageModule() {
 	                    return `${String(row.phoneCountryCode || "+91").trim()} ${phone}`;
 	                  }
                   if (sectionKey === "leads" && column.key === "assignedTo") {
+                    const assignType = String(row.assignType || "").trim().toLowerCase();
                     const assignedUsers = Array.isArray(row.assignedUser)
                       ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
                       : String(row.assignedUser || row.assignedTo || "")
                         .split(",")
                         .map((item) => item.trim())
                         .filter(Boolean);
-                    if (String(row.assignType || "").trim().toLowerCase() !== "team" && assignedUsers.length > 1) {
-	                      return (
-	                        <button
-	                          type="button"
-	                          className="btn btn-link btn-sm p-0 align-baseline"
-	                          onClick={() => onEdit(sectionKey, row)}
-	                        >
-	                          {assignedUsers.length} Employees
-	                        </button>
+                    if (assignType === "team") {
+                      return formatDateLikeCellValue(
+                        column.key,
+                        String(row.assignedTeam || row.assignedTo || "").trim(),
+                        "-"
+                      );
+                    }
+                    if (assignedUsers.length) {
+                      if (assignedUsers.length === 1) {
+                        return assignedUsers[0];
+                      }
+                      const label = `${assignedUsers.length} Employees`;
+                      return (
+                        <button
+                          type="button"
+                          className="btn btn-link btn-sm p-0 align-baseline"
+                          onClick={() => openLeadAssignedEmployeesPopup(row)}
+                        >
+                          {label}
+                        </button>
                       );
                     }
                     return formatDateLikeCellValue(column.key, row[column.key], "-");
@@ -8135,7 +8437,7 @@ function CrmOnePageModule() {
 	                })
               }
               renderActions={(row) => (
-                showDeletedItems ? (
+                isDeletedSectionView ? (
                   <div className="d-inline-flex gap-2">
                     {isCrmAdmin ? (
                       <button type="button" className="btn btn-sm btn-outline-success" onClick={() => onRestore(sectionKey, row.id)}>
@@ -8173,7 +8475,15 @@ function CrmOnePageModule() {
                       </button>
                     ) : null}
                     {canEditCrmRow(sectionKey, row) ? (
-                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEdit(sectionKey, row)}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-info"
+                        onClick={() => (
+                          sectionKey === "deals"
+                            ? openDealQuickEditPopup(row)
+                            : onEdit(sectionKey, row)
+                        )}
+                      >
                         Edit
                       </button>
                     ) : null}
@@ -8322,6 +8632,84 @@ function CrmOnePageModule() {
           </div>
         </div>
       ) : null}
+      {dealQuickEditPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeDealQuickEditPopup}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(440px, 94vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Edit Deal</h5>
+                <div className="small text-secondary">{dealQuickEditPopup.dealName || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeDealQuickEditPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <form className="d-flex flex-column gap-3" onSubmit={saveDealQuickEditPopup}>
+              {dealQuickEditPopup.error ? (
+                <div className="alert alert-danger py-2 mb-0">{dealQuickEditPopup.error}</div>
+              ) : null}
+              <div>
+                <label className="form-label small text-secondary mb-1">{`Won Amount (${crmCurrencyCode} ${crmCurrencySymbol})`}</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="form-control"
+                  placeholder="Final Won Amount"
+                  value={dealQuickEditPopup.wonAmountFinal || ""}
+                  onChange={(event) => setDealQuickEditPopup((prev) => (
+                    prev
+                      ? {
+                          ...prev,
+                          wonAmountFinal: formatCurrencyNumberInput(sanitizeCurrencyInput(event.target.value), crmCurrencyCode),
+                          error: "",
+                        }
+                      : prev
+                  ))}
+                />
+                {parseNumber(dealQuickEditPopup.dealValueExpected || "") > 0 ? (
+                  <div className="small text-secondary mt-1">
+                    {`Max allowed: ${formatCurrencyAmount(parseNumber(dealQuickEditPopup.dealValueExpected || ""), crmCurrencyCode)}`}
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <label className="form-label small text-secondary mb-1">Status *</label>
+                <select
+                  className="form-select"
+                  value={dealQuickEditPopup.status || "Open"}
+                  onChange={(event) => setDealQuickEditPopup((prev) => (
+                    prev
+                      ? { ...prev, status: event.target.value, error: "" }
+                      : prev
+                  ))}
+                >
+                  {CRM_DEAL_STATUS_OPTIONS.map((option) => (
+                    <option key={`deal-edit-status-${option}`} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="d-flex justify-content-end gap-2">
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeDealQuickEditPopup}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-success btn-sm">
+                  Update
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
       {teamMembersPopup ? (
         <div
           role="dialog"
@@ -8337,7 +8725,7 @@ function CrmOnePageModule() {
           >
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
               <div>
-                <h5 className="mb-1">Team Employees</h5>
+                <h5 className="mb-1">{teamMembersPopup.title || "Team Employees"}</h5>
                 <div className="small text-secondary">{teamMembersPopup.name || "-"}</div>
               </div>
               <button type="button" className="btn btn-sm btn-outline-light" onClick={closeTeamMembersPopup}>
@@ -9711,10 +10099,12 @@ function ProjectDetailPage() {
                     <input
                       type="number"
                       min="0"
+                      max={AMOUNT_MAX_NUMERIC_VALUE}
+                      step="0.01"
                       className="form-control"
                       value={projectDetail.projectValue || ""}
                       placeholder="Enter project value"
-                      onChange={(event) => updateProjectDetails((prev) => ({ ...prev, projectValue: event.target.value }))}
+                      onChange={(event) => updateProjectDetails((prev) => ({ ...prev, projectValue: sanitizeCurrencyInput(event.target.value) }))}
                     />
                   </div>
                 ) : null}
@@ -9799,7 +10189,7 @@ function ProjectDetailPage() {
               </div>
               <div className="col-12 col-md-2">
                 <label className="form-label small text-secondary mb-1">Amount</label>
-                <input type="number" min="0" className="form-control" value={expenseForm.amount || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, amount: event.target.value }))} placeholder="0" />
+                <input type="number" min="0" max={AMOUNT_MAX_NUMERIC_VALUE} step="0.01" className="form-control" value={expenseForm.amount || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, amount: sanitizeCurrencyInput(event.target.value) }))} placeholder="0" />
               </div>
               <div className="col-12 col-md-3">
                 <label className="form-label small text-secondary mb-1">Date</label>
@@ -11993,7 +12383,11 @@ function CategoryCrudModule({
   function onChangeField(fieldKey, nextValue) {
     const fieldMeta = (config.fields || []).find((field) => field.key === fieldKey);
     const normalizedValue = typeof nextValue === "string"
-      ? clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      ? (
+        isAmountFieldKey(fieldKey)
+          ? sanitizeCurrencyInput(nextValue)
+          : clampBusinessAutopilotText(fieldKey, nextValue, { isTextarea: fieldMeta?.type === "textarea" })
+      )
       : nextValue;
     setFormValues((prev) => ({ ...prev, [fieldKey]: normalizedValue }));
   }
@@ -13366,6 +13760,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       }));
       return;
     }
+    if (key === "amount") {
+      setSubscriptionForm((prev) => ({ ...prev, amount: sanitizeCurrencyInput(value) }));
+      return;
+    }
     setSubscriptionForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -13504,7 +13902,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       planDurationDays,
       customerId: String(subscriptionForm.customerId || "").trim(),
       paymentDescription: String(subscriptionForm.paymentDescription || "").trim(),
-      amount: String(subscriptionForm.amount || "0").trim(),
+      amount: sanitizeCurrencyInput(subscriptionForm.amount || "0"),
       currency: String(subscriptionForm.currency || defaultCurrency).trim().toUpperCase() || defaultCurrency,
       startDate: String(subscriptionForm.startDate || "").trim(),
       endDate: String(subscriptionForm.endDate || "").trim() || "",
@@ -16199,6 +16597,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     placeholder="0.00"
                     type="number"
                     min="0"
+                    max={AMOUNT_MAX_NUMERIC_VALUE}
                     step="0.01"
                   />
                 </div>

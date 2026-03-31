@@ -7,6 +7,29 @@ const FALLBACK_CURRENCY_CODES = [
   "HKD", "KRW", "VND", "BRL", "MXN", "ARS", "CLP", "COP", "PKR", "BDT"
 ];
 
+function safeLocalStorageGet(key, fallback = "") {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_error) {
+    // Ignore storage write failures in restricted browser modes.
+  }
+}
+
 function normalizeCurrency(value) {
   const code = String(value || "").trim().toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : FALLBACK_CURRENCY;
@@ -32,7 +55,7 @@ export function getCurrencyCodeOptions() {
 export function setOrgCurrency(value) {
   const normalized = normalizeCurrency(value);
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(ORG_CURRENCY_KEY, normalized);
+    safeLocalStorageSet(ORG_CURRENCY_KEY, normalized);
   }
   return normalized;
 }
@@ -41,7 +64,7 @@ export function getOrgCurrency() {
   if (typeof window === "undefined") {
     return FALLBACK_CURRENCY;
   }
-  const stored = window.localStorage.getItem(ORG_CURRENCY_KEY);
+  const stored = safeLocalStorageGet(ORG_CURRENCY_KEY, FALLBACK_CURRENCY);
   return setOrgCurrency(stored || FALLBACK_CURRENCY);
 }
 
@@ -59,4 +82,3 @@ export function formatCurrencyAmount(amount, currency = FALLBACK_CURRENCY, local
     return `${normalizedCurrency} ${safeValue.toLocaleString(locale, { maximumFractionDigits: 2 })}`;
   }
 }
-

@@ -1564,6 +1564,27 @@ export default function BusinessAutopilotUsersPage() {
   }, [form.password]);
 
   useEffect(() => {
+    if (!createUserFormDisabled || isEditingUser) {
+      return;
+    }
+    setForm((prev) => {
+      const hasValues = [
+        prev.first_name,
+        prev.last_name,
+        prev.email,
+        prev.password,
+        prev.phone_number_input,
+        prev.department_id,
+        prev.employee_role_id,
+      ].some((value) => String(value || "").trim());
+      if (!hasValues) {
+        return prev;
+      }
+      return defaultForm;
+    });
+  }, [createUserFormDisabled, isEditingUser]);
+
+  useEffect(() => {
     const input = createPasswordInputRef.current;
     if (!input) {
       return;

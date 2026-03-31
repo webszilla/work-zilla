@@ -20,7 +20,7 @@ from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
 from apps.backend.products.models import Product
-from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription
+from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, log_admin_activity
 from core.email_utils import send_templated_email
 from core.notification_emails import mark_email_verified
 
@@ -99,6 +99,31 @@ TEMP_PASSWORD_LENGTH = 10
 
 def _get_business_autopilot_product():
     return Product.objects.filter(slug=BUSINESS_AUTOPILOT_PRODUCT_SLUG).first()
+
+
+@require_http_methods(["POST"])
+def crm_activity_log(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+    action = str(payload.get("action") or "").strip()
+    details = str(payload.get("details") or "").strip()
+    if not action:
+        return JsonResponse({"detail": "action_required"}, status=400)
+    log_admin_activity(
+        request.user,
+        action[:120],
+        details[:500],
+        product_slug=BUSINESS_AUTOPILOT_PRODUCT_SLUG,
+        request=request,
+    )
+    return JsonResponse({"logged": True})
 
 
 def _generate_temp_login_password(length: int = TEMP_PASSWORD_LENGTH):
@@ -616,12 +641,19 @@ def _build_org_user_meta(org, users=None):
     has_subscription = bool(active_sub and active_sub.plan)
     addon_count = int(active_sub.addon_count or 0) if has_subscription else 0
     allow_addons = bool(active_sub.plan.allow_addons) if has_subscription else False
+    is_ba_trial = False
+    if has_subscription:
+        product_slug = str(getattr(getattr(active_sub.plan, "product", None), "slug", "") or "").strip().lower()
+        status = str(getattr(active_sub, "status", "") or "").strip().lower()
+        is_ba_trial = product_slug in BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES and status == "trialing"
 
     if has_subscription:
         base_limit = _get_effective_employee_limit(active_sub.plan)
         # For paid/tiered plans, minimum 1 user is included by default.
         if base_limit <= 0 and not _is_free_plan(active_sub.plan):
             base_limit = 1
+        if is_ba_trial:
+            base_limit = max(base_limit, 3)
     else:
         base_limit = 0
 
@@ -638,7 +670,7 @@ def _build_org_user_meta(org, users=None):
     elif not can_add_users:
         limit_message = "User limit reached. Add-on users required to add or enable more users."
 
-    if has_subscription and _is_business_autopilot_free_plan(active_sub.plan):
+    if has_subscription and (_is_business_autopilot_free_plan(active_sub.plan) or is_ba_trial):
         base_included_users = 1
         extra_included_users = max(0, employee_limit - base_included_users)
     else:
