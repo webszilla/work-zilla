@@ -3,7 +3,7 @@ import json
 import logging
 import secrets
 import string
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Optional
@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.shortcuts import render
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_time
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
@@ -32,6 +33,7 @@ from .models import (
     OrganizationDepartment,
     CrmDeal,
     CrmLead,
+    CrmMeeting,
     CrmSalesOrder,
     AccountsWorkspace,
     EmployeeSalaryHistory,
@@ -3492,10 +3494,25 @@ def _crm_clean_user_id_list(value):
     return list(dict.fromkeys(user_ids))
 
 
+def _crm_clean_int_list(value):
+    raw = value if isinstance(value, list) else []
+    numbers = []
+    for item in raw:
+        try:
+            parsed = int(str(item or "").strip())
+        except (TypeError, ValueError):
+            continue
+        if parsed < 0:
+            continue
+        numbers.append(parsed)
+    return list(dict.fromkeys(numbers))
+
+
 def _crm_can_access_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
         return True
     user_ids = set(_crm_clean_user_id_list(getattr(row, "assigned_user_ids", [])))
+    user_ids.update(_crm_clean_user_id_list(getattr(row, "owner_user_ids", [])))
     assigned_user_id = getattr(row, "assigned_user_id", None)
     if assigned_user_id:
         user_ids.add(int(assigned_user_id))
@@ -3571,6 +3588,111 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
+
+
+def _serialize_crm_meeting(row: CrmMeeting):
+    return {
+        "id": row.id,
+        "title": row.title,
+        "company_or_client_name": row.company_or_client_name,
+        "related_to": row.related_to,
+        "meeting_date": row.meeting_date.isoformat() if row.meeting_date else "",
+        "meeting_time": row.meeting_time.strftime("%H:%M") if row.meeting_time else "",
+        "owner": row.owner_names,
+        "owner_user_ids": _crm_clean_user_id_list(row.owner_user_ids),
+        "meeting_mode": row.meeting_mode,
+        "reminder_channel": row.reminder_channels if isinstance(row.reminder_channels, list) else [],
+        "reminder_days": _crm_clean_int_list(row.reminder_days),
+        "reminder_minutes": _crm_clean_int_list(row.reminder_minutes),
+        "reminder_summary": row.reminder_summary,
+        "status": row.status,
+        "is_deleted": bool(row.is_deleted),
+        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "created_by_id": row.created_by_id,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def _crm_meeting_recipient_emails(org: Organization, row: CrmMeeting):
+    emails = []
+    owner_ids = _crm_clean_user_id_list(row.owner_user_ids)
+    if owner_ids:
+        users = (
+            OrganizationUser.objects
+            .filter(organization=org, user_id__in=owner_ids, is_active=True)
+            .select_related("user")
+        )
+        for membership in users:
+            email = str(getattr(membership.user, "email", "") or "").strip().lower()
+            if email:
+                emails.append(email)
+    if not emails and row.created_by_id:
+        fallback_email = str(getattr(row.created_by, "email", "") or "").strip().lower()
+        if fallback_email:
+            emails.append(fallback_email)
+    return list(dict.fromkeys(emails))
+
+
+def _dispatch_due_crm_meeting_reminders(org: Organization = None, now=None, limit_per_run: int = 500):
+    now_value = now or timezone.now()
+    queryset = CrmMeeting.objects.filter(is_deleted=False).exclude(status__in=["Completed", "Cancelled", "Missed"])
+    if org:
+        queryset = queryset.filter(organization=org)
+    rows = list(queryset.select_related("organization", "created_by").order_by("meeting_date", "meeting_time", "id")[:limit_per_run])
+    if not rows:
+        return {"checked": 0, "sent": 0}
+
+    sent = 0
+    for row in rows:
+        if not row.meeting_date or not row.meeting_time:
+            continue
+        meeting_dt = datetime.combine(row.meeting_date, row.meeting_time)
+        if timezone.is_naive(meeting_dt):
+            meeting_dt = timezone.make_aware(meeting_dt, timezone.get_current_timezone())
+        channels = {str(item or "").strip().lower() for item in (row.reminder_channels if isinstance(row.reminder_channels, list) else [])}
+        if "email" not in channels:
+            continue
+        day_offsets = _crm_clean_int_list(row.reminder_days)
+        minute_offsets = _crm_clean_int_list(row.reminder_minutes)
+        schedule_points = []
+        schedule_points.extend([("day", days, meeting_dt - timedelta(days=days)) for days in day_offsets])
+        schedule_points.extend([("minute", minutes, meeting_dt - timedelta(minutes=minutes)) for minutes in minute_offsets])
+        if not schedule_points:
+            continue
+        sent_map = row.reminder_email_sent_map if isinstance(row.reminder_email_sent_map, dict) else {}
+        updated_map = dict(sent_map)
+        recipients = _crm_meeting_recipient_emails(row.organization, row)
+        if not recipients:
+            continue
+        for offset_type, offset_value, trigger_dt in schedule_points:
+            key = f"{offset_type}:{offset_value}"
+            if updated_map.get(key):
+                continue
+            if now_value < trigger_dt:
+                continue
+            if now_value > (meeting_dt + timedelta(minutes=15)):
+                continue
+            subject = f"Meeting Reminder: {row.title or 'Meeting'}"
+            context = {
+                "meeting_title": row.title or "Meeting",
+                "company_or_client_name": row.company_or_client_name or "-",
+                "related_to": row.related_to or "-",
+                "meeting_date": row.meeting_date.isoformat() if row.meeting_date else "",
+                "meeting_time": row.meeting_time.strftime("%I:%M %p") if row.meeting_time else "",
+                "meeting_mode": row.meeting_mode or "-",
+                "offset_type": "days" if offset_type == "day" else "minutes",
+                "offset_value": offset_value,
+                "owner": row.owner_names or "-",
+            }
+            mail_sent = send_templated_email(recipients, subject, "emails/crm_meeting_reminder.txt", context)
+            if mail_sent:
+                updated_map[key] = now_value.isoformat()
+                sent += 1
+        if updated_map != sent_map:
+            row.reminder_email_sent_map = updated_map
+            row.save(update_fields=["reminder_email_sent_map", "updated_at"])
+    return {"checked": len(rows), "sent": sent}
 
 
 @require_http_methods(["GET", "POST"])
@@ -3743,6 +3865,123 @@ def crm_deals(request, deal_id: int = None):
         row.deleted_at = timezone.now()
         row.deleted_by = request.user
         row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_at"])
+        return JsonResponse({"deleted": True})
+
+    return JsonResponse({"detail": "invalid_method"}, status=405)
+
+
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+def crm_meetings(request, meeting_id: int = None):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    if request.method == "GET" and not meeting_id:
+        _dispatch_due_crm_meeting_reminders(org=org)
+        rows = [
+            row
+            for row in CrmMeeting.objects.filter(organization=org).order_by("-created_at")
+            if _crm_can_access_row(request.user, org, row)
+        ]
+        return JsonResponse({"meetings": [_serialize_crm_meeting(row) for row in rows]})
+
+    if request.method == "POST" and not meeting_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
+        if not title:
+            return JsonResponse({"detail": "title_required"}, status=400)
+        meeting_date = parse_date(str(payload.get("meeting_date") or payload.get("meetingDate") or "").strip() or "")
+        meeting_time = parse_time(str(payload.get("meeting_time") or payload.get("meetingTime") or "").strip() or "")
+        row = CrmMeeting.objects.create(
+            organization=org,
+            title=title[:180],
+            company_or_client_name=str(payload.get("company_or_client_name") or payload.get("companyOrClientName") or "").strip()[:180],
+            related_to=str(payload.get("related_to") or payload.get("relatedTo") or "").strip()[:180],
+            meeting_date=meeting_date,
+            meeting_time=meeting_time,
+            owner_names=str(payload.get("owner") or "").strip()[:500],
+            owner_user_ids=_crm_clean_user_id_list(payload.get("owner_user_ids") or payload.get("ownerUserIds")),
+            meeting_mode=str(payload.get("meeting_mode") or payload.get("meetingMode") or "").strip()[:30],
+            reminder_channels=payload.get("reminder_channel") if isinstance(payload.get("reminder_channel"), list)
+            else payload.get("reminderChannel") if isinstance(payload.get("reminderChannel"), list)
+            else [],
+            reminder_days=_crm_clean_int_list(payload.get("reminder_days") if payload.get("reminder_days") is not None else payload.get("reminderDays")),
+            reminder_minutes=_crm_clean_int_list(payload.get("reminder_minutes") if payload.get("reminder_minutes") is not None else payload.get("reminderMinutes")),
+            reminder_summary=str(payload.get("reminder_summary") or payload.get("reminderSummary") or "").strip()[:255],
+            status=str(payload.get("status") or "Scheduled").strip()[:30] or "Scheduled",
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        _dispatch_due_crm_meeting_reminders(org=org)
+        return JsonResponse({"meeting": _serialize_crm_meeting(row)}, status=201)
+
+    row = CrmMeeting.objects.filter(organization=org, id=meeting_id).first() if meeting_id else None
+    if not row:
+        return JsonResponse({"detail": "meeting_not_found"}, status=404)
+    if not _crm_can_access_row(request.user, org, row):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if request.method == "PATCH":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if "title" in payload or "meeting_title" in payload:
+            title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
+            if title:
+                row.title = title[:180]
+        if "company_or_client_name" in payload or "companyOrClientName" in payload:
+            row.company_or_client_name = str(payload.get("company_or_client_name") or payload.get("companyOrClientName") or "").strip()[:180]
+        if "related_to" in payload or "relatedTo" in payload:
+            row.related_to = str(payload.get("related_to") or payload.get("relatedTo") or "").strip()[:180]
+        if "meeting_date" in payload or "meetingDate" in payload:
+            row.meeting_date = parse_date(str(payload.get("meeting_date") or payload.get("meetingDate") or "").strip() or "")
+        if "meeting_time" in payload or "meetingTime" in payload:
+            row.meeting_time = parse_time(str(payload.get("meeting_time") or payload.get("meetingTime") or "").strip() or "")
+        if "owner" in payload:
+            row.owner_names = str(payload.get("owner") or "").strip()[:500]
+        if "owner_user_ids" in payload or "ownerUserIds" in payload:
+            row.owner_user_ids = _crm_clean_user_id_list(payload.get("owner_user_ids") or payload.get("ownerUserIds"))
+        if "meeting_mode" in payload or "meetingMode" in payload:
+            row.meeting_mode = str(payload.get("meeting_mode") or payload.get("meetingMode") or "").strip()[:30]
+        if "reminder_channel" in payload or "reminderChannel" in payload:
+            channels = payload.get("reminder_channel") if isinstance(payload.get("reminder_channel"), list) else payload.get("reminderChannel")
+            row.reminder_channels = channels if isinstance(channels, list) else []
+        if "reminder_days" in payload or "reminderDays" in payload:
+            row.reminder_days = _crm_clean_int_list(payload.get("reminder_days") if payload.get("reminder_days") is not None else payload.get("reminderDays"))
+        if "reminder_minutes" in payload or "reminderMinutes" in payload:
+            row.reminder_minutes = _crm_clean_int_list(payload.get("reminder_minutes") if payload.get("reminder_minutes") is not None else payload.get("reminderMinutes"))
+        if "reminder_summary" in payload or "reminderSummary" in payload:
+            row.reminder_summary = str(payload.get("reminder_summary") or payload.get("reminderSummary") or "").strip()[:255]
+        if "status" in payload:
+            row.status = str(payload.get("status") or row.status).strip()[:30] or row.status
+        if "is_deleted" in payload:
+            is_deleted = bool(payload.get("is_deleted"))
+            row.is_deleted = is_deleted
+            row.deleted_at = timezone.now() if is_deleted else None
+            row.deleted_by = request.user if is_deleted else None
+        row.updated_by = request.user
+        row.save()
+        _dispatch_due_crm_meeting_reminders(org=org)
+        return JsonResponse({"meeting": _serialize_crm_meeting(row)})
+
+    if request.method == "DELETE":
+        permanent = str(request.GET.get("permanent") or "").strip() in {"1", "true", "yes"}
+        if permanent:
+            if not _crm_is_admin(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
+            row.delete()
+            return JsonResponse({"deleted": True, "permanent": True})
+        row.is_deleted = True
+        row.deleted_at = timezone.now()
+        row.deleted_by = request.user
+        row.updated_by = request.user
+        row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
         return JsonResponse({"deleted": True})
 
     return JsonResponse({"detail": "invalid_method"}, status=405)

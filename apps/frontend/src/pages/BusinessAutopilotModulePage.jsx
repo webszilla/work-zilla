@@ -17,6 +17,9 @@ import {
 
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
+const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
+const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
+const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
@@ -234,8 +237,7 @@ const CRM_MEETING_REMINDER_MINUTE_OPTIONS = [
 const CRM_FOLLOWUP_RELATED_TO_TYPES = ["Lead", "CRM Contact", "Client"];
 const CRM_FOLLOWUP_STATUS_TABS = ["ongoing", "pending", "missed", "completed"];
 const CRM_DEAL_STATUS_OPTIONS = ["Open", "Won", "Lost"];
-const CRM_FOLLOWUP_AUTO_DELETE_DAYS = 90;
-const CRM_SOFT_DELETE_RETENTION_DAYS = 60;
+const CRM_SOFT_DELETE_RETENTION_DAYS = 180;
 
 const CRM_SECTION_CONFIG = {
   leads: {
@@ -255,6 +257,7 @@ const CRM_SECTION_CONFIG = {
     fields: [
       { key: "name", label: "Lead Name", placeholder: "Enter lead name" },
       { key: "company", label: "Company", placeholder: "Company / Business name" },
+      { key: "contactPerson", label: "Contact Person", placeholder: "Client / Contact person", required: false },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
       { key: "leadAmount", label: "Lead Amount", placeholder: "Lead amount", required: false },
@@ -263,7 +266,7 @@ const CRM_SECTION_CONFIG = {
       { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
       { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
       { key: "stage", label: "Stage", type: "select", options: ["New", "Qualified", "Proposal"], defaultValue: "New" },
-      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Converted"], defaultValue: "Open" }
+      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Onhold"], defaultValue: "Open" }
     ]
   },
   contacts: {
@@ -283,7 +286,7 @@ const CRM_SECTION_CONFIG = {
       { key: "email", label: "Email", placeholder: "contact@example.com" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
-      { key: "tag", label: "Tag", type: "select", options: ["Customer", "Prospect", "Vendor"], defaultValue: "" }
+      { key: "tag", label: "Tag", type: "select", options: ["Client", "Prospect", "Vendor"], defaultValue: "" }
     ]
   },
   teams: {
@@ -410,36 +413,21 @@ const CRM_SECTION_CONFIG = {
   }
 };
 
-const DEFAULT_CRM_DATA = {
-  leads: [
-    { id: "crm_l1", name: "Ravi Kumar", company: "Ultra HD Prints", leadAmount: "35000", phoneCountryCode: "+91", phone: "9876543210", assignType: "Users", assignedUser: ["GP Prakash"], assignedTeam: "", assignedTo: "GP Prakash", createdBy: "GP Prakash", stage: "Qualified", status: "Open" },
-    { id: "crm_l2", name: "Priya N", company: "North India Jewels", leadAmount: "50000", phoneCountryCode: "+91", phone: "9123456780", assignType: "Team", assignedUser: [], assignedTeam: "Sales Team", assignedTo: "Sales Team", createdBy: "GP Prakash", stage: "Proposal", status: "Open" }
-  ],
-  contacts: [
-    { id: "crm_c1", name: "Ravi Kumar", company: "Ultra HD Prints", email: "ravi@uhdprints.example", phoneCountryCode: "+91", phone: "9876543210", tag: "Customer" },
-    { id: "crm_c2", name: "Priya N", company: "North India Jewels", email: "priya@nij.example", phoneCountryCode: "+91", phone: "9123456780", tag: "Prospect" }
-  ],
-  teams: [
-    { id: "crm_t1", name: "Sales Team", members: ["GP Prakash", "Guru"], createdBy: "GP Prakash" }
-  ],
-  deals: [
-    { id: "crm_d1", dealName: "POS Billing Setup", company: "Ultra HD Prints", stage: "Qualified", dealValueExpected: "85000", wonAmountFinal: "25000", status: "Open" },
-    { id: "crm_d2", dealName: "WhatsApp Campaign Suite", company: "North India Jewels", stage: "Proposal", dealValueExpected: "42000", wonAmountFinal: "17000", status: "Open" }
-  ],
-  salesOrders: [],
-  followUps: [
-    { id: "crm_f1", subject: "Demo callback", relatedTo: "Ultra HD Prints", dueDate: "2026-02-25", owner: "GP Prakash", status: "Pending" },
-    { id: "crm_f2", subject: "Pricing confirmation", relatedTo: "North India Jewels", dueDate: "2026-02-25", owner: "GP Prakash", status: "Pending" }
-  ],
-  activities: [
-    { id: "crm_a1", activityType: "Call", relatedTo: "Ultra HD Prints", date: "2026-02-24", owner: "GP Prakash", notes: "Discussed rollout scope" },
-    { id: "crm_a2", activityType: "Email", relatedTo: "North India Jewels", date: "2026-02-24", owner: "GP Prakash", notes: "Sent proposal PDF" }
-  ],
-  meetings: [
-    { id: "crm_m1", title: "Ultra HD Prints Demo", relatedTo: "Ultra HD Prints", meetingDate: "2026-02-26", meetingTime: "11:00", owner: "GP Prakash", meetingMode: "Online", reminderChannel: "WhatsApp", reminderMinutes: "30", status: "Scheduled", reminderSummary: "WhatsApp • 30 min before" },
-    { id: "crm_m2", title: "North India Jewels Pricing Call", relatedTo: "North India Jewels", meetingDate: "2026-02-27", meetingTime: "16:30", owner: "GP Prakash", meetingMode: "Phone", reminderChannel: "App Alert", reminderMinutes: "15", status: "Scheduled", reminderSummary: "App Alert • 15 min before" }
-  ]
-};
+const LEGACY_DEMO_CRM_IDS = new Set([
+  "crm_l1",
+  "crm_l2",
+  "crm_c1",
+  "crm_c2",
+  "crm_t1",
+  "crm_d1",
+  "crm_d2",
+  "crm_f1",
+  "crm_f2",
+  "crm_a1",
+  "crm_a2",
+  "crm_m1",
+  "crm_m2",
+]);
 
 const PROJECT_TAB_CONFIG = {
   projects: {
@@ -1964,7 +1952,7 @@ function parseTeamMemberList(rawMembers) {
 
 function normalizeCrmData(value) {
   const base = Object.fromEntries(
-    Object.keys(CRM_SECTION_CONFIG).map((key) => [key, Array.isArray(DEFAULT_CRM_DATA[key]) ? [...DEFAULT_CRM_DATA[key]] : []])
+    Object.keys(CRM_SECTION_CONFIG).map((key) => [key, []])
   );
   if (!value || typeof value !== "object") {
     return base;
@@ -1973,23 +1961,171 @@ function normalizeCrmData(value) {
     if (Array.isArray(value[key])) {
       base[key] = key === "leads"
         ? value[key].map((row) => normalizeCrmLeadRecord(row))
+        : key === "contacts"
+        ? value[key].map((row) => normalizeCrmContactRecord(row))
         : key === "deals"
         ? value[key].map((row) => normalizeCrmDealRecord(row))
+        : key === "meetings"
+        ? value[key].map((row) => normalizeCrmMeetingRecord(row))
         : key === "teams"
         ? value[key].map((row) => normalizeCrmTeamRecord(row))
         : value[key];
     }
   });
   base.leads = (base.leads || []).map((row) => normalizeCrmLeadRecord(row));
+  base.contacts = (base.contacts || []).map((row) => normalizeCrmContactRecord(row));
   base.deals = (base.deals || []).map((row) => normalizeCrmDealRecord(row));
+  base.meetings = (base.meetings || []).map((row) => normalizeCrmMeetingRecord(row));
   base.teams = (base.teams || []).map((row) => normalizeCrmTeamRecord(row));
   return base;
+}
+
+function buildScopedCrmStorageKey(authData = {}) {
+  const userId = String(authData?.user?.id || "").trim();
+  const orgId = String(
+    authData?.profile?.organization_id
+    || authData?.profile?.org_id
+    || authData?.profile?.company_id
+    || ""
+  ).trim();
+  const email = String(authData?.user?.email || "").trim().toLowerCase();
+  const parts = [orgId, userId, email].filter(Boolean).map((part) =>
+    String(part).replace(/[^a-z0-9_.-]/gi, "_")
+  );
+  if (!parts.length) {
+    return CRM_STORAGE_KEY;
+  }
+  return `${CRM_STORAGE_KEY_PREFIX}__${parts.join("__")}`;
+}
+
+function normalizeCrmRoleToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function readCrmRoleAccessMapFromStorage() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(CRM_ROLE_ACCESS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole) {
+  const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
+  const normalizedProfileRole = normalizeCrmRoleToken(profileRole);
+  const normalizedEmployeeRole = normalizeCrmRoleToken(employeeRole);
+  const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
+
+  if (normalizedEmployeeRole) {
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "employee_role" && normalizeCrmRoleToken(rawRole) === normalizedEmployeeRole) {
+        return value;
+      }
+    }
+  }
+  if (normalizedProfileRole) {
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "system" && normalizeCrmRoleToken(rawRole) === normalizedProfileRole) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function isLegacyDemoCrmRow(row = {}) {
+  const id = String(row?.id || "").trim().toLowerCase();
+  if (id && LEGACY_DEMO_CRM_IDS.has(id)) {
+    return true;
+  }
+  const name = String(row?.name || row?.dealName || row?.title || row?.subject || "").trim().toLowerCase();
+  const company = String(row?.company || row?.relatedTo || "").trim().toLowerCase();
+  if (!name && !company) {
+    return false;
+  }
+  return (
+    (name === "ravi kumar" && company === "ultra hd prints")
+    || (name === "priya n" && company === "north india jewels")
+    || name === "pos billing setup"
+    || name === "whatsapp campaign suite"
+  );
+}
+
+function stripLegacyDemoCrmData(value) {
+  const normalized = normalizeCrmData(value);
+  const cleaned = {};
+  Object.keys(CRM_SECTION_CONFIG).forEach((key) => {
+    const rows = Array.isArray(normalized[key]) ? normalized[key] : [];
+    cleaned[key] = rows.filter((row) => !isLegacyDemoCrmRow(row));
+  });
+  return normalizeCrmData(cleaned);
+}
+
+function readCrmDataFromStorage() {
+  try {
+    const activeKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
+    if (!activeKey) {
+      return normalizeCrmData(null);
+    }
+    const keysToTry = [activeKey];
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      if (!isValidCrmData(parsed)) {
+        continue;
+      }
+      return stripLegacyDemoCrmData(parsed);
+    }
+    return normalizeCrmData(null);
+  } catch (_error) {
+    return normalizeCrmData(null);
+  }
+}
+
+function normalizeCrmContactTag(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "customer" || normalized === "client") {
+    return "Client";
+  }
+  if (normalized === "prospect") {
+    return "Prospect";
+  }
+  if (normalized === "vendor" || normalized === "vendors") {
+    return "Vendor";
+  }
+  return String(value || "").trim();
+}
+
+function normalizeCrmContactRecord(row = {}) {
+  return {
+    ...row,
+    tag: normalizeCrmContactTag(row.tag),
+  };
 }
 
 function normalizeCrmLeadRecord(row = {}) {
   const leadName = String(row.name || row.lead_name || "").trim();
   const leadAmount = row.leadAmount ?? row.lead_amount ?? "";
   const leadSource = String(row.leadSource || row.lead_source || "").trim();
+  const normalizedStatus = String(row.status || "").trim().toLowerCase();
+  const status = normalizedStatus === "converted"
+    ? "Closed"
+    : normalizedStatus === "on hold" || normalizedStatus === "onhold"
+      ? "Onhold"
+      : String(row.status || "").trim();
   const normalizedAssignType = String(row.assignType || row.assign_type || "").trim().toLowerCase();
   const assignType = normalizedAssignType === "team" ? "Team" : "Users";
   const assignedUser = Array.isArray(row.assignedUser)
@@ -2010,8 +2146,13 @@ function normalizeCrmLeadRecord(row = {}) {
   return {
     ...row,
     name: leadName,
+    contactPerson: String(row.contactPerson || row.contact_person || "").trim(),
     leadAmount: String(leadAmount ?? "").trim(),
     leadSource,
+    status,
+    statusUpdatedAt: String(row.statusUpdatedAt || row.status_updated_at || "").trim(),
+    createdAt: String(row.createdAt || row.created_at || "").trim(),
+    updatedAt: String(row.updatedAt || row.updated_at || "").trim(),
     assignType,
     assignedUser,
     assignedTeam,
@@ -2032,6 +2173,48 @@ function normalizeCrmDealRecord(row = {}) {
     assignedTeam: String(row.assignedTeam || row.assigned_team || "").trim(),
     assignedTo: String(row.assignedTo || row.assigned_user_name || row.assigned_team || "").trim(),
     createdBy: String(row.createdBy || row.created_by_name || "").trim(),
+  };
+}
+
+function normalizeCrmMeetingRecord(row = {}) {
+  const reminderChannels = Array.isArray(row.reminderChannel)
+    ? row.reminderChannel
+    : Array.isArray(row.reminder_channel)
+      ? row.reminder_channel
+      : typeof row.reminderChannel === "string"
+        ? row.reminderChannel.split(",").map((item) => item.trim()).filter(Boolean)
+        : [];
+  const reminderDays = parseCrmMeetingReminderDayValues(row.reminderDays ?? row.reminder_days);
+  const reminderMinutes = parseCrmMeetingReminderMinuteValues(row.reminderMinutes ?? row.reminder_minutes);
+  const meetingDate = normalizeMeetingDateValue(row.meetingDate ?? row.meeting_date ?? "");
+  const meetingTime = normalizeMeetingTimeValue(row.meetingTime ?? row.meeting_time ?? "");
+  return {
+    ...row,
+    serverMeetingId: row.serverMeetingId || row.id || "",
+    title: String(row.title || "").trim(),
+    companyOrClientName: String(row.companyOrClientName || row.company_or_client_name || "").trim(),
+    relatedTo: String(row.relatedTo || row.related_to || "").trim(),
+    meetingDate: meetingDate || "",
+    meetingTime: meetingTime || "",
+    owner: String(row.owner || "").trim(),
+    ownerUserIds: Array.isArray(row.ownerUserIds)
+      ? row.ownerUserIds.map((item) => String(item || "").trim()).filter(Boolean)
+      : Array.isArray(row.owner_user_ids)
+        ? row.owner_user_ids.map((item) => String(item || "").trim()).filter(Boolean)
+        : [],
+    meetingMode: String(row.meetingMode || row.meeting_mode || "").trim(),
+    reminderChannel: reminderChannels,
+    reminderDays,
+    reminderMinutes,
+    reminderSummary: String(
+      row.reminderSummary
+      || row.reminder_summary
+      || buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminderMinutes)
+      || ""
+    ).trim(),
+    status: String(row.status || "").trim() || "Scheduled",
+    isDeleted: Boolean(row.isDeleted || row.is_deleted),
+    deletedAt: row.deletedAt || row.deleted_at || "",
   };
 }
 
@@ -2320,35 +2503,11 @@ function readSharedAccountsVendors() {
 }
 
 function readSharedCrmContacts() {
-  try {
-    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
-    if (!raw) {
-      return [...(DEFAULT_CRM_DATA.contacts || [])];
-    }
-    const parsed = JSON.parse(raw);
-    if (!isValidCrmData(parsed)) {
-      return [...(DEFAULT_CRM_DATA.contacts || [])];
-    }
-    return normalizeCrmData(parsed).contacts || [];
-  } catch (_error) {
-    return [...(DEFAULT_CRM_DATA.contacts || [])];
-  }
+  return readCrmDataFromStorage().contacts || [];
 }
 
 function readSharedCrmTeams() {
-  try {
-    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
-    if (!raw) {
-      return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
-    }
-    const parsed = JSON.parse(raw);
-    if (!isValidCrmData(parsed)) {
-      return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
-    }
-    return (normalizeCrmData(parsed).teams || []).map((row) => normalizeCrmTeamRecord(row));
-  } catch (_error) {
-    return [...(DEFAULT_CRM_DATA.teams || [])].map((row) => normalizeCrmTeamRecord(row));
-  }
+  return (readCrmDataFromStorage().teams || []).map((row) => normalizeCrmTeamRecord(row));
 }
 
 function readSharedHrEmployees() {
@@ -2601,6 +2760,20 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     })();
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function refreshRoleAccessFromStorage() {
+      setCrmRoleAccessMap(readCrmRoleAccessMapFromStorage());
+    }
+    window.addEventListener("storage", refreshRoleAccessFromStorage);
+    window.addEventListener("focus", refreshRoleAccessFromStorage);
+    window.addEventListener("wz:business-autopilot-role-access-changed", refreshRoleAccessFromStorage);
+    return () => {
+      window.removeEventListener("storage", refreshRoleAccessFromStorage);
+      window.removeEventListener("focus", refreshRoleAccessFromStorage);
+      window.removeEventListener("wz:business-autopilot-role-access-changed", refreshRoleAccessFromStorage);
     };
   }, []);
 
@@ -3993,34 +4166,6 @@ function getCurrentTimeHm() {
   return `${hh}:${mm}`;
 }
 
-function getDateFromIso(value) {
-  const dateString = String(value || "").trim();
-  if (!dateString) {
-    return null;
-  }
-  const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) {
-    return null;
-  }
-  const [, year, month, day] = match;
-  const parsedDate = new Date(Number(year), Number(month) - 1, Number(day));
-  if (Number.isNaN(parsedDate.getTime())) {
-    return null;
-  }
-  return parsedDate;
-}
-
-function isDateOlderThanDays(value, days) {
-  const comparedDate = getDateFromIso(value);
-  if (!comparedDate) {
-    return false;
-  }
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setDate(cutoff.getDate() - days);
-  return comparedDate < cutoff;
-}
-
 function getFollowUpCompletedDate(row) {
   return (
     row && (
@@ -4519,11 +4664,11 @@ function SearchablePaginatedTableCard({
           ) : null}
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsExcelCsv}>
             <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
-            Export CSV
+            Export
           </button>
           <button type="button" className="btn btn-sm btn-outline-success" onClick={exportAsPdf}>
             <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
-            Export PDF
+            Export
           </button>
         </>
       ) : null}
@@ -4685,7 +4830,7 @@ function SearchablePaginatedTableCard({
 
 function CrmOnePageModule() {
   const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"];
-  const [moduleData, setModuleData] = useState(() => normalizeCrmData(DEFAULT_CRM_DATA));
+  const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
   const [activeSection, setActiveSection] = useState(sectionOrder[0]);
   const [calendarMonthDate, setCalendarMonthDate] = useState(() => {
     const now = new Date();
@@ -4693,6 +4838,7 @@ function CrmOnePageModule() {
   });
   const [meetingPopup, setMeetingPopup] = useState(null);
   const [leadStatusTab, setLeadStatusTab] = useState("all");
+  const [contactTagTab, setContactTagTab] = useState("all");
   const [dealStatusTab, setDealStatusTab] = useState("all");
   const [meetingStatusTab, setMeetingStatusTab] = useState("all");
   const [followUpStatusTab, setFollowUpStatusTab] = useState("all");
@@ -4716,6 +4862,9 @@ function CrmOnePageModule() {
   const [currentUserName, setCurrentUserName] = useState("Current User");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState("");
+  const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
+  const [crmRoleAccessMap, setCrmRoleAccessMap] = useState(() => readCrmRoleAccessMapFromStorage());
+  const [crmStorageKey, setCrmStorageKey] = useState("");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
   const [teamMembersPopup, setTeamMembersPopup] = useState(null);
@@ -4746,7 +4895,11 @@ function CrmOnePageModule() {
   const [followUpRelatedToSearchOpen, setFollowUpRelatedToSearchOpen] = useState(false);
   const [followUpOwnerSearch, setFollowUpOwnerSearch] = useState("");
   const [followUpOwnerSearchOpen, setFollowUpOwnerSearchOpen] = useState(false);
+  const [crmSelectedRowIds, setCrmSelectedRowIds] = useState(() =>
+    Object.fromEntries(Object.keys(CRM_SECTION_CONFIG).map((key) => [key, []]))
+  );
   const [deletedViewSection, setDeletedViewSection] = useState("");
+  const [crmActionPopup, setCrmActionPopup] = useState({ open: false, title: "", message: "" });
   const sectionFormRef = useRef(null);
   const crmCurrencyCode = String(getOrgCurrency() || "INR").trim().toUpperCase() || "INR";
   const crmCurrencySymbol = getCurrencySymbol(crmCurrencyCode);
@@ -4755,6 +4908,12 @@ function CrmOnePageModule() {
   const normalizedCurrentUserEmail = String(currentUserEmail || "").trim().toLowerCase();
   const normalizedCurrentUserRole = String(currentUserRole || "").trim().toLowerCase();
   const isCrmAdmin = normalizedCurrentUserRole === "company_admin" || normalizedCurrentUserRole === "org_admin";
+  const crmRoleAccessRecord = useMemo(
+    () => resolveCrmRoleAccessRecord(crmRoleAccessMap, currentUserRole, currentUserEmployeeRole),
+    [crmRoleAccessMap, currentUserRole, currentUserEmployeeRole]
+  );
+  const crmSectionAccessLevel = String(crmRoleAccessRecord?.sections?.crm || "No Access").trim();
+  const hasCrmFullAccess = isCrmAdmin || crmSectionAccessLevel === "Full Access";
 
   function isSoftDeletedCrmRow(row) {
     return Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at);
@@ -4806,32 +4965,68 @@ function CrmOnePageModule() {
     return isRowAssignedToCurrentUser(sectionKey, row);
   }
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (isValidCrmData(parsed)) {
-        setModuleData(normalizeCrmData(parsed));
-      }
-    } catch (_error) {
-      // Ignore invalid CRM cache.
+  function canDeleteCrmRow(sectionKey, row) {
+    if (isCrmAdmin) {
+      return true;
     }
-  }, []);
+    if (!hasCrmFullAccess) {
+      return false;
+    }
+    return isRowAssignedToCurrentUser(sectionKey, row);
+  }
 
   useEffect(() => {
-    window.localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(moduleData));
-  }, [moduleData]);
+    if (!crmStorageKey) {
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(crmStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (isValidCrmData(parsed)) {
+          setModuleData(stripLegacyDemoCrmData(parsed));
+          window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+          return;
+        }
+      }
+
+      const legacyRaw = window.localStorage.getItem(CRM_STORAGE_KEY);
+      if (legacyRaw) {
+        const legacyParsed = JSON.parse(legacyRaw);
+        if (isValidCrmData(legacyParsed)) {
+          const migrated = stripLegacyDemoCrmData(legacyParsed);
+          setModuleData(migrated);
+          window.localStorage.setItem(crmStorageKey, JSON.stringify(migrated));
+        } else {
+          setModuleData(normalizeCrmData(null));
+        }
+        window.localStorage.removeItem(CRM_STORAGE_KEY);
+      } else {
+        setModuleData(normalizeCrmData(null));
+      }
+      window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+    } catch (_error) {
+      setModuleData(normalizeCrmData(null));
+    }
+  }, [crmStorageKey]);
+
+  useEffect(() => {
+    if (!crmStorageKey) {
+      return;
+    }
+    const cleaned = stripLegacyDemoCrmData(moduleData);
+    window.localStorage.setItem(crmStorageKey, JSON.stringify(cleaned));
+    window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+  }, [moduleData, crmStorageKey]);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const [usersData, authData] = await Promise.all([
+        const [usersData, authData, roleAccessData] = await Promise.all([
           apiFetch("/api/business-autopilot/users"),
           apiFetch("/api/auth/me"),
+          apiFetch("/api/business-autopilot/role-access").catch(() => null),
         ]);
         if (!active) return;
         setCrmUserDirectory(Array.isArray(usersData?.users) ? usersData.users : []);
@@ -4846,6 +5041,24 @@ function CrmOnePageModule() {
         setCurrentUserName(name || "Current User");
         setCurrentUserEmail(String(authData?.user?.email || "").trim());
         setCurrentUserRole(String(authData?.profile?.role || "").trim());
+        const normalizedEmail = String(authData?.user?.email || "").trim().toLowerCase();
+        const matchedDirectoryUser = (Array.isArray(usersData?.users) ? usersData.users : []).find(
+          (row) => String(row?.email || "").trim().toLowerCase() === normalizedEmail
+        );
+        setCurrentUserEmployeeRole(
+          String(
+            matchedDirectoryUser?.employee_role
+            || authData?.user?.employee_role
+            || ""
+          ).trim()
+        );
+        const nextRoleAccessMap = (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map))
+          ? roleAccessData.role_access_map
+          : readCrmRoleAccessMapFromStorage();
+        setCrmRoleAccessMap(nextRoleAccessMap);
+        window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
+        setCrmStorageKey(buildScopedCrmStorageKey(authData));
+        await refreshCrmMeetingsFromBackend();
       } catch {
         if (!active) return;
         setCrmUserDirectory([]);
@@ -4854,34 +5067,15 @@ function CrmOnePageModule() {
         setCurrentUserName("Current User");
         setCurrentUserEmail("");
         setCurrentUserRole("");
+        setCurrentUserEmployeeRole("");
+        setCrmRoleAccessMap(readCrmRoleAccessMapFromStorage());
+        setCrmStorageKey("");
       }
     })();
     return () => {
       active = false;
     };
   }, []);
-
-  useEffect(() => {
-    const followUps = Array.isArray(moduleData.followUps) ? moduleData.followUps : [];
-    const rowsToKeep = followUps.filter((row) => {
-      const normalizedStatus = String(row?.status || "").trim().toLowerCase();
-      if (normalizedStatus !== "completed") {
-        return true;
-      }
-      const completedDate = getFollowUpCompletedDate(row);
-      if (!completedDate) {
-        return true;
-      }
-      return !isDateOlderThanDays(completedDate, CRM_FOLLOWUP_AUTO_DELETE_DAYS);
-    });
-    if (rowsToKeep.length === followUps.length) {
-      return;
-    }
-    setModuleData((prev) => ({
-      ...prev,
-      followUps: rowsToKeep,
-    }));
-  }, [moduleData.followUps]);
 
   useEffect(() => {
     setDeletedViewSection("");
@@ -4987,7 +5181,7 @@ function CrmOnePageModule() {
     const meetings = (moduleData.meetings || []).filter((row) => isRowAssignedToCurrentUser("meetings", row) && !isSoftDeletedCrmRow(row));
     const activities = (moduleData.activities || []).filter((row) => isRowAssignedToCurrentUser("activities", row) && !isSoftDeletedCrmRow(row));
     const teams = (moduleData.teams || []).filter((row) => isRowAssignedToCurrentUser("teams", row) && !isSoftDeletedCrmRow(row));
-    const openLeads = leads.filter((row) => !["closed", "converted"].includes(String(row.status || "").toLowerCase())).length;
+    const openLeads = leads.filter((row) => !["closed", "onhold"].includes(String(row.status || "").toLowerCase())).length;
     // Pipeline should be based on Lead Amount total to avoid duplicate counting from linked deals.
     const pipelineValue = leads.reduce((sum, row) => sum + parseNumber(row.leadAmount), 0);
     const today = new Date().toISOString().slice(0, 10);
@@ -5060,6 +5254,35 @@ function CrmOnePageModule() {
       .filter((value, index, list) => list.indexOf(value) === index),
     [sharedCustomerOptions]
   );
+
+  function buildMeetingOwnerUserIds(ownerNames = []) {
+    const normalizedNames = Array.isArray(ownerNames)
+      ? ownerNames.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    if (!normalizedNames.length) {
+      return [];
+    }
+    const nameSet = new Set(normalizedNames.map((item) => item.toLowerCase()));
+    const matchedIds = crmDirectoryOptions
+      .filter((item) => nameSet.has(String(item.name || "").trim().toLowerCase()))
+      .map((item) => String(item.id || "").trim())
+      .filter(Boolean);
+    return Array.from(new Set(matchedIds));
+  }
+
+  async function refreshCrmMeetingsFromBackend() {
+    try {
+      const data = await apiFetch("/api/business-autopilot/meetings");
+      const meetings = Array.isArray(data?.meetings)
+        ? data.meetings
+            .map((row) => normalizeCrmMeetingRecord(row))
+            .filter((row) => !isLegacyDemoCrmRow(row))
+        : [];
+      setModuleData((prev) => ({ ...prev, meetings }));
+    } catch (_error) {
+      // Keep local meetings when backend is unavailable.
+    }
+  }
 
   function setField(sectionKey, fieldKey, value) {
     const fieldMeta = (CRM_SECTION_CONFIG[sectionKey]?.fields || []).find((field) => field.key === fieldKey);
@@ -5168,6 +5391,8 @@ function CrmOnePageModule() {
     setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
     const normalizedRow = sectionKey === "leads"
       ? normalizeCrmLeadRecord(row)
+      : sectionKey === "contacts"
+      ? normalizeCrmContactRecord(row)
       : sectionKey === "teams"
       ? normalizeCrmTeamRecord(row)
       : row;
@@ -5285,8 +5510,155 @@ function CrmOnePageModule() {
     return true;
   }
 
+  function toggleCrmRowSelection(sectionKey, rowId, checked) {
+    const normalizedSection = String(sectionKey || "").trim();
+    const normalizedRowId = String(rowId || "").trim();
+    if (!normalizedSection || !normalizedRowId) {
+      return;
+    }
+    setCrmSelectedRowIds((prev) => {
+      const currentIds = Array.isArray(prev[normalizedSection]) ? prev[normalizedSection] : [];
+      const nextSet = new Set(currentIds.map((value) => String(value || "").trim()).filter(Boolean));
+      if (checked) {
+        nextSet.add(normalizedRowId);
+      } else {
+        nextSet.delete(normalizedRowId);
+      }
+      return {
+        ...prev,
+        [normalizedSection]: Array.from(nextSet),
+      };
+    });
+  }
+
+  function toggleCrmSelectAllRows(sectionKey, rowIds, checked) {
+    const normalizedSection = String(sectionKey || "").trim();
+    if (!normalizedSection) {
+      return;
+    }
+    const normalizedIds = Array.isArray(rowIds)
+      ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    setCrmSelectedRowIds((prev) => {
+      const currentIds = Array.isArray(prev[normalizedSection]) ? prev[normalizedSection] : [];
+      const nextSet = new Set(currentIds.map((value) => String(value || "").trim()).filter(Boolean));
+      normalizedIds.forEach((id) => {
+        if (checked) {
+          nextSet.add(id);
+        } else {
+          nextSet.delete(id);
+        }
+      });
+      return {
+        ...prev,
+        [normalizedSection]: Array.from(nextSet),
+      };
+    });
+  }
+
+  function clearCrmSelection(sectionKey) {
+    const normalizedSection = String(sectionKey || "").trim();
+    if (!normalizedSection) {
+      return;
+    }
+    setCrmSelectedRowIds((prev) => ({
+      ...prev,
+      [normalizedSection]: [],
+    }));
+  }
+
+  function onBulkSoftDelete(sectionKey, rowIds) {
+    const normalizedSection = String(sectionKey || "").trim();
+    const normalizedIds = Array.isArray(rowIds)
+      ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (!normalizedSection || !normalizedIds.length) {
+      return;
+    }
+    const eligibleIds = normalizedIds.filter((rowId) => {
+      const row = (moduleData?.[normalizedSection] || []).find((item) => String(item?.id || "").trim() === rowId);
+      return canDeleteCrmRow(normalizedSection, row);
+    });
+    if (!eligibleIds.length) {
+      return;
+    }
+    const rowIdSet = new Set(eligibleIds);
+    const nowIso = new Date().toISOString();
+    setModuleData((prev) => ({
+      ...prev,
+      [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+        rowIdSet.has(String(row.id || "").trim())
+          ? {
+              ...row,
+              isDeleted: true,
+              is_deleted: true,
+              deletedAt: nowIso,
+              deleted_at: nowIso,
+              deletedBy: currentUserName || "Current User",
+            }
+          : row
+      )),
+    }));
+    if (editingIds[normalizedSection] && rowIdSet.has(String(editingIds[normalizedSection] || "").trim())) {
+      resetSectionForm(normalizedSection);
+    }
+    clearCrmSelection(normalizedSection);
+  }
+
+  function onBulkRestore(sectionKey, rowIds) {
+    if (!isCrmAdmin) {
+      return;
+    }
+    const normalizedSection = String(sectionKey || "").trim();
+    const normalizedIds = Array.isArray(rowIds)
+      ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (!normalizedSection || !normalizedIds.length) {
+      return;
+    }
+    const rowIdSet = new Set(normalizedIds);
+    setModuleData((prev) => ({
+      ...prev,
+      [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+        rowIdSet.has(String(row.id || "").trim())
+          ? {
+              ...row,
+              isDeleted: false,
+              is_deleted: false,
+              deletedAt: "",
+              deleted_at: "",
+              deletedBy: "",
+            }
+          : row
+      )),
+    }));
+    clearCrmSelection(normalizedSection);
+  }
+
+  function onBulkPermanentDelete(sectionKey, rowIds) {
+    if (!isCrmAdmin) {
+      return;
+    }
+    const normalizedSection = String(sectionKey || "").trim();
+    const normalizedIds = Array.isArray(rowIds)
+      ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (!normalizedSection || !normalizedIds.length) {
+      return;
+    }
+    const rowIdSet = new Set(normalizedIds);
+    setModuleData((prev) => ({
+      ...prev,
+      [normalizedSection]: (prev[normalizedSection] || []).filter((row) => !rowIdSet.has(String(row.id || "").trim())),
+    }));
+    clearCrmSelection(normalizedSection);
+  }
+
   function onDelete(sectionKey, rowId) {
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
+    if (!canDeleteCrmRow(sectionKey, targetRow)) {
+      return;
+    }
     setModuleData((prev) => ({
       ...prev,
       [sectionKey]: (prev[sectionKey] || []).map((row) => (
@@ -5336,9 +5708,21 @@ function CrmOnePageModule() {
         details,
       }),
     }).catch(() => {});
+    if (sectionKey === "meetings") {
+      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
+      if (serverMeetingId) {
+        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+    }
+    toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
   function onRestore(sectionKey, rowId) {
+    if (!isCrmAdmin) {
+      return;
+    }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     setModuleData((prev) => ({
       ...prev,
@@ -5386,16 +5770,42 @@ function CrmOnePageModule() {
         details,
       }),
     }).catch(() => {});
+    if (sectionKey === "meetings") {
+      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
+      if (serverMeetingId) {
+        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_deleted: false }),
+        }).catch(() => {});
+      }
+    }
+    toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
   function onPermanentDelete(sectionKey, rowId) {
+    if (!isCrmAdmin) {
+      return;
+    }
+    const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     setModuleData((prev) => ({
       ...prev,
       [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
     }));
+    if (sectionKey === "meetings") {
+      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
+      if (serverMeetingId) {
+        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}?permanent=1`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+    }
+    toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
   function openDeletedItemsView(sectionKey, event) {
+    if (!isCrmAdmin) {
+      return;
+    }
     const normalizedSection = String(sectionKey || "").trim();
     setDeletedViewSection(normalizedSection);
     window.requestAnimationFrame(() => {
@@ -5403,6 +5813,8 @@ function CrmOnePageModule() {
     });
     if (normalizedSection === "leads") {
       setLeadStatusTab("all");
+    } else if (normalizedSection === "contacts") {
+      setContactTagTab("all");
     } else if (normalizedSection === "deals") {
       setDealStatusTab("all");
     } else if (normalizedSection === "meetings") {
@@ -5424,22 +5836,44 @@ function CrmOnePageModule() {
       if (!sourceLead) {
         return prev;
       }
+      const nowIso = new Date().toISOString();
       const existingDeal = deals.find((row) => String(row.sourceLeadId || "").trim() === leadId);
       const nextLeads = leads.map((row) => (
         String(row.id) === leadId
-          ? { ...row, status: "Converted", stage: row.stage || "Qualified", updatedAt: new Date().toISOString() }
+          ? {
+              ...row,
+              status: "Closed",
+              stage: row.stage || "Qualified",
+              updatedAt: nowIso,
+              statusUpdatedAt: nowIso,
+            }
           : row
       ));
       if (existingDeal) {
         return { ...prev, leads: nextLeads };
       }
       const expectedValue = String(sourceLead.leadAmount || "").trim();
+      const normalizedLeadName = String(sourceLead.name || sourceLead.company || "Lead").trim() || "Lead";
+      const normalizedAssignedUsers = Array.isArray(sourceLead.assignedUser)
+        ? sourceLead.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
       const dealPayload = {
         id: `deals_${Date.now()}`,
         sourceLeadId: leadId,
-        dealName: `${String(sourceLead.name || sourceLead.company || "Lead").trim()} Opportunity`,
+        dealName: normalizedLeadName,
         company: String(sourceLead.company || "").trim(),
         dealValueExpected: expectedValue,
+        phoneCountryCode: String(sourceLead.phoneCountryCode || "+91").trim(),
+        phone: String(sourceLead.phone || "").trim(),
+        stage: String(sourceLead.stage || "").trim(),
+        assignType: String(sourceLead.assignType || "Users").trim(),
+        assignedUser: normalizedAssignedUsers,
+        assignedTeam: String(sourceLead.assignedTeam || "").trim(),
+        assignedTo: String(sourceLead.assignedTo || "").trim(),
+        leadSource: String(sourceLead.leadSource || "").trim(),
+        sourceLeadName: String(sourceLead.name || "").trim(),
+        sourceLeadStatus: String(sourceLead.status || "").trim(),
+        sourceLeadAmount: expectedValue,
         wonAmountFinal: "",
         status: "Open",
         createdBy: String(currentUserName || "Current User").trim(),
@@ -5451,6 +5885,31 @@ function CrmOnePageModule() {
       };
     });
     setActiveSection("deals");
+  }
+
+  function buildLeadSyncedDealPatch(leadRow = {}) {
+    const normalizedLeadName = String(leadRow?.name || leadRow?.company || "Lead").trim() || "Lead";
+    const expectedValue = String(leadRow?.leadAmount || "").trim();
+    const normalizedAssignedUsers = Array.isArray(leadRow?.assignedUser)
+      ? leadRow.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    return {
+      dealName: normalizedLeadName,
+      company: String(leadRow?.company || "").trim(),
+      dealValueExpected: expectedValue,
+      phoneCountryCode: String(leadRow?.phoneCountryCode || "+91").trim(),
+      phone: String(leadRow?.phone || "").trim(),
+      stage: String(leadRow?.stage || "").trim(),
+      assignType: String(leadRow?.assignType || "Users").trim(),
+      assignedUser: normalizedAssignedUsers,
+      assignedTeam: String(leadRow?.assignedTeam || "").trim(),
+      assignedTo: String(leadRow?.assignedTo || "").trim(),
+      leadSource: String(leadRow?.leadSource || "").trim(),
+      sourceLeadName: String(leadRow?.name || "").trim(),
+      sourceLeadStatus: String(leadRow?.status || "").trim(),
+      sourceLeadAmount: expectedValue,
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   function onConvertDealToSalesOrder(dealRow) {
@@ -5498,7 +5957,7 @@ function CrmOnePageModule() {
     setActiveSection("salesOrders");
   }
 
-  function onSubmit(sectionKey, event) {
+  async function onSubmit(sectionKey, event) {
     event.preventDefault();
     const config = CRM_SECTION_CONFIG[sectionKey];
     const values = forms[sectionKey] || {};
@@ -5542,8 +6001,8 @@ function CrmOnePageModule() {
       }
       return !String(effectiveValues[field.key] || "").trim();
     });
-    if (sectionKey === "teams" && !selectedTeamDepartments.length) {
-      missingFields.push({ key: "departmentFilters", label: "Select Department" });
+    if (sectionKey === "teams" && !selectedTeamDepartments.length && !selectedTeamEmployeeRoles.length) {
+      missingFields.push({ key: "departmentFilters", label: "Select Department or Employee Role" });
     }
     if (missingFields.length || invalidEmailFields.length) {
       const missingFieldMap = {};
@@ -5606,6 +6065,7 @@ function CrmOnePageModule() {
     setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: {} }));
     setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
     const editingId = editingIds[sectionKey];
+    const isEditFlow = Boolean(editingId);
     const existingRowForEdit = editingId
       ? (moduleData[sectionKey] || []).find((row) => String(row.id) === String(editingId))
       : null;
@@ -5629,12 +6089,35 @@ function CrmOnePageModule() {
       }
     });
     if (sectionKey === "leads") {
+      const nowIso = new Date().toISOString();
+      const previousLead = editingId
+        ? (moduleData.leads || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
+        : null;
+      const previousStatus = String(previousLead?.status || "").trim().toLowerCase();
+      const nextStatus = String(payload.status || "").trim().toLowerCase();
+      const isClosedLike = ["closed", "onhold"].includes(nextStatus);
       const assignType = String(payload.assignType || "Users").trim();
       payload.assignedTo = assignType.toLowerCase() === "team"
         ? String(payload.assignedTeam || "").trim()
         : (Array.isArray(payload.assignedUser) ? payload.assignedUser.join(", ") : String(payload.assignedUser || "").trim());
       payload.createdBy = String(currentUserName || "Current User").trim();
+      payload.updatedAt = nowIso;
+      if (!editingId) {
+        payload.createdAt = nowIso;
+      } else if (previousLead?.createdAt) {
+        payload.createdAt = String(previousLead.createdAt || "").trim();
+      }
+      if (isClosedLike) {
+        payload.statusUpdatedAt = previousStatus !== nextStatus
+          ? nowIso
+          : String(previousLead?.statusUpdatedAt || previousLead?.updatedAt || nowIso).trim();
+      } else {
+        payload.statusUpdatedAt = "";
+      }
       payload = normalizeCrmLeadRecord(payload);
+    }
+    if (sectionKey === "contacts") {
+      payload = normalizeCrmContactRecord(payload);
     }
     if (sectionKey === "teams") {
       payload.createdBy = String(currentUserName || "Current User").trim();
@@ -5653,6 +6136,7 @@ function CrmOnePageModule() {
       payload.meetingDate = normalizeMeetingDateValue(payload.meetingDate);
       payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
       payload.owner = meetingOwners.join(", ");
+      payload.ownerUserIds = buildMeetingOwnerUserIds(meetingOwners);
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
       payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
@@ -5677,24 +6161,99 @@ function CrmOnePageModule() {
         payload.completedDate = "";
       }
     }
+    let meetingServerId = "";
+    if (sectionKey === "meetings") {
+      const meetingApiPayload = {
+        title: payload.title || "",
+        company_or_client_name: payload.companyOrClientName || "",
+        related_to: payload.relatedTo || "",
+        meeting_date: payload.meetingDate || "",
+        meeting_time: payload.meetingTime || "",
+        owner: payload.owner || "",
+        owner_user_ids: Array.isArray(payload.ownerUserIds) ? payload.ownerUserIds : [],
+        meeting_mode: payload.meetingMode || "",
+        reminder_channel: Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [],
+        reminder_days: Array.isArray(payload.reminderDays) ? payload.reminderDays : [],
+        reminder_minutes: Array.isArray(payload.reminderMinutes) ? payload.reminderMinutes : [],
+        reminder_summary: payload.reminderSummary || "",
+        status: payload.status || "Scheduled",
+        is_deleted: false,
+      };
+      try {
+        const existingServerId = String(existingRowForEdit?.serverMeetingId || existingRowForEdit?.id || "").trim();
+        const response = existingServerId
+          ? await apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(existingServerId)}`, {
+              method: "PATCH",
+              body: JSON.stringify(meetingApiPayload),
+            })
+          : await apiFetch("/api/business-autopilot/meetings", {
+              method: "POST",
+              body: JSON.stringify(meetingApiPayload),
+            });
+        const backendMeeting = response?.meeting ? normalizeCrmMeetingRecord(response.meeting) : null;
+        if (backendMeeting) {
+          meetingServerId = String(backendMeeting.serverMeetingId || backendMeeting.id || "").trim();
+          payload = {
+            ...payload,
+            ...backendMeeting,
+            serverMeetingId: meetingServerId || payload.serverMeetingId || "",
+            id: String(backendMeeting.id || existingRowForEdit?.id || "").trim() || payload.id,
+          };
+        }
+      } catch (_error) {
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          [sectionKey]: "Unable to save meeting reminder settings. Please try again.",
+        }));
+        return;
+      }
+    }
     setModuleData((prev) => {
       const rows = prev[sectionKey] || [];
       if (editingId) {
+        const nextRows = rows.map((row) => (
+          String(row.id) === String(editingId)
+            ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName }
+            : row
+        ));
+        if (sectionKey === "leads") {
+          const syncedLead = nextRows.find((row) => String(row.id) === String(editingId));
+          const syncedDealPatch = buildLeadSyncedDealPatch(syncedLead || {});
+          const nextDeals = (prev.deals || []).map((row) => (
+            String(row.sourceLeadId || "").trim() === String(editingId).trim()
+              ? {
+                  ...row,
+                  ...syncedDealPatch,
+                }
+              : row
+          ));
+          return {
+            ...prev,
+            [sectionKey]: nextRows,
+            deals: nextDeals,
+          };
+        }
         return {
           ...prev,
-          [sectionKey]: rows.map((row) => (
-            String(row.id) === String(editingId)
-              ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName }
-              : row
-          )),
+          [sectionKey]: nextRows,
         };
       }
+      const newRowId = sectionKey === "meetings"
+        ? (String(meetingServerId || payload.serverMeetingId || payload.id || "").trim() || `${sectionKey}_${Date.now()}`)
+        : `${sectionKey}_${Date.now()}`;
       return {
         ...prev,
-        [sectionKey]: [{ id: `${sectionKey}_${Date.now()}`, ...payload }, ...rows],
+        [sectionKey]: [{ id: newRowId, ...payload, serverMeetingId: meetingServerId || payload.serverMeetingId || "" }, ...rows],
       };
     });
     resetSectionForm(sectionKey);
+    setCrmActionPopup({
+      open: true,
+      title: isEditFlow ? "Edit Completed" : "Created",
+      message: isEditFlow
+        ? `${config.itemLabel} updated successfully.`
+        : `${config.itemLabel} created successfully.`,
+    });
   }
 
   function toggleCrmTeamCategory(categoryType, value) {
@@ -6380,13 +6939,22 @@ function CrmOnePageModule() {
         const accessibleRows = rows.filter((row) => isRowAssignedToCurrentUser(sectionKey, row));
         const activeRows = accessibleRows.filter((row) => !isSoftDeletedCrmRow(row));
         const deletedRows = accessibleRows.filter((row) => isSoftDeletedCrmRow(row));
-        const isDeletedSectionView = deletedViewSection === sectionKey;
+        const isDeletedSectionView = isCrmAdmin && deletedViewSection === sectionKey;
         const tableRows = isDeletedSectionView ? deletedRows : activeRows;
+        const deletedItemsNotice = isDeletedSectionView
+          ? `Deleted ${config.label.toLowerCase()} items older than ${CRM_SOFT_DELETE_RETENTION_DAYS} days will be automatically deleted.`
+          : "";
         const leadStatusTabs = [
           { key: "all", label: "All" },
           { key: "open", label: "Open" },
           { key: "closed", label: "Closed" },
-          { key: "converted", label: "Converted" },
+          { key: "onhold", label: "Onhold" },
+        ];
+        const contactTagTabs = [
+          { key: "all", label: "All" },
+          { key: "client", label: "Clients" },
+          { key: "prospect", label: "Prospect" },
+          { key: "vendor", label: "Vendors" },
         ];
         const dealStatusTabs = [
           { key: "all", label: "All" },
@@ -6412,6 +6980,13 @@ function CrmOnePageModule() {
                 return true;
               }
               return String(row.status || "").trim().toLowerCase() === leadStatusTab;
+            })
+          : sectionKey === "contacts"
+          ? tableRows.filter((row) => {
+              if (isDeletedSectionView || contactTagTab === "all") {
+                return true;
+              }
+              return normalizeCrmContactTag(row.tag).toLowerCase() === contactTagTab;
             })
           : sectionKey === "deals"
           ? tableRows.filter((row) => {
@@ -6456,38 +7031,110 @@ function CrmOnePageModule() {
           }
           return column;
         });
+        const leadTabRowsForCount = sectionKey === "leads" ? activeRows : [];
+        const contactTabRowsForCount = sectionKey === "contacts" ? activeRows : [];
+        const dealTabRowsForCount = sectionKey === "deals" ? activeRows : [];
+        const meetingTabRowsForCount = sectionKey === "meetings" ? activeRows : [];
+        const followUpTabRowsForCount = sectionKey === "followUps" ? activeRows : [];
         const leadTabCounts = sectionKey === "leads"
           ? leadStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
-                ? tableRows.length
-                : tableRows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+                ? leadTabRowsForCount.length
+                : leadTabRowsForCount.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+              return acc;
+            }, {})
+          : {};
+        const contactTagCounts = sectionKey === "contacts"
+          ? contactTagTabs.reduce((acc, tab) => {
+              acc[tab.key] = tab.key === "all"
+                ? contactTabRowsForCount.length
+                : contactTabRowsForCount.filter((row) => normalizeCrmContactTag(row.tag).toLowerCase() === tab.key).length;
               return acc;
             }, {})
           : {};
         const meetingTabCounts = sectionKey === "meetings"
           ? meetingStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
-                ? tableRows.length
-                : tableRows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+                ? meetingTabRowsForCount.length
+                : meetingTabRowsForCount.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
               return acc;
             }, {})
           : {};
         const dealTabCounts = sectionKey === "deals"
           ? dealStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
-                ? tableRows.length
-                : tableRows.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+                ? dealTabRowsForCount.length
+                : dealTabRowsForCount.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
               return acc;
             }, {})
           : {};
         const followUpTabCounts = sectionKey === "followUps"
           ? followUpStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
-                ? tableRows.length
-                : tableRows.filter((row) => getFollowUpEffectiveStatus(row) === tab.key).length;
+                ? followUpTabRowsForCount.length
+                : followUpTabRowsForCount.filter((row) => getFollowUpEffectiveStatus(row) === tab.key).length;
               return acc;
             }, {})
           : {};
+        const selectedIdsForSection = Array.isArray(crmSelectedRowIds[sectionKey]) ? crmSelectedRowIds[sectionKey] : [];
+        const selectedIdSet = new Set(selectedIdsForSection.map((value) => String(value || "").trim()).filter(Boolean));
+        const selectableRowIds = filteredRows
+          .filter((row) => {
+            if (isDeletedSectionView) {
+              return isCrmAdmin;
+            }
+            return canDeleteCrmRow(sectionKey, row);
+          })
+          .map((row) => String(row.id || "").trim())
+          .filter(Boolean);
+        const selectedVisibleCount = selectableRowIds.reduce((count, rowId) => (selectedIdSet.has(rowId) ? count + 1 : count), 0);
+        const hasSelectableRows = selectableRowIds.length > 0;
+        const allVisibleSelected = hasSelectableRows && selectedVisibleCount === selectableRowIds.length;
+        const bulkActions = (
+          <div className="d-flex flex-wrap gap-2">
+            {hasSelectableRows ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                onClick={() => toggleCrmSelectAllRows(sectionKey, selectableRowIds, !allVisibleSelected)}
+              >
+                {allVisibleSelected ? "Unselect All" : "Select All"}
+              </button>
+            ) : null}
+            {selectedVisibleCount > 0 ? (
+              isDeletedSectionView ? (
+                <>
+                  {isCrmAdmin ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-success"
+                      onClick={() => onBulkRestore(sectionKey, selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)))}
+                    >
+                      Restore Selected ({selectedVisibleCount})
+                    </button>
+                  ) : null}
+                  {isCrmAdmin ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger"
+                      onClick={() => onBulkPermanentDelete(sectionKey, selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)))}
+                    >
+                      Delete Selected ({selectedVisibleCount})
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-danger"
+                  onClick={() => onBulkSoftDelete(sectionKey, selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)))}
+                >
+                  Delete Selected ({selectedVisibleCount})
+                </button>
+              )
+            ) : null}
+          </div>
+        );
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
@@ -7015,8 +7662,10 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "name" || field.key === "company"
                                       ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "contactPerson"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "phone"
-                                      ? "col-12 col-md-6 col-xl-4"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "leadAmount"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "leadSource"
@@ -7143,6 +7792,7 @@ function CrmOnePageModule() {
                                       onBlur={() => window.setTimeout(() => setLeadCompanySearchOpen(false), 120)}
                                       onChange={(event) => {
                                         setField(sectionKey, field.key, event.target.value);
+                                        setField(sectionKey, "contactPerson", "");
                                         setLeadPhoneLockedFromClient(false);
                                         setLeadCompanySearchOpen(true);
                                       }}
@@ -7166,6 +7816,7 @@ function CrmOnePageModule() {
                                                       leads: {
                                                         ...prev.leads,
                                                         company: String(contact.company || "").trim(),
+                                                        contactPerson: String(contact.name || "").trim(),
                                                         phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
                                                         phone: autoPhone,
                                                       },
@@ -7196,6 +7847,7 @@ function CrmOnePageModule() {
                                                       leads: {
                                                         ...prev.leads,
                                                         company: String(customer.companyName || customer.name || "").trim(),
+                                                        contactPerson: String(customer.clientName || customer.name || "").trim(),
                                                         phoneCountryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
                                                         phone: autoPhone,
                                                       },
@@ -8114,6 +8766,7 @@ function CrmOnePageModule() {
                                   className={`form-control ${sectionKey === "meetings" && field.key === "relatedTo" ? "crm-meeting-relatedto-input" : ""}`}
                                   placeholder={field.placeholder}
                                   value={formValues[field.key] || ""}
+                                  readOnly={sectionKey === "leads" && field.key === "contactPerson"}
                                   required={isCrmFieldRequired(sectionKey, field, formValues)}
                                   onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                 />
@@ -8243,35 +8896,76 @@ function CrmOnePageModule() {
                         Deleted Items ({deletedRows.length})
                       </button>
                     ) : null}
+                    {bulkActions}
                   </div>
-                  <div className="small text-secondary">
-                    Closed and converted leads older than 180 days will be automatically deleted.
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">
+                      {deletedItemsNotice}
+                    </div>
+                  ) : null}
+                </div>
+              ) : sectionKey === "contacts" ? (
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
+                    {contactTagTabs.map((tab) => (
+                      <button
+                        key={`contact-tag-tab-${tab.key}`}
+                        type="button"
+                        className={`btn btn-sm ${contactTagTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                        onClick={() => {
+                          setContactTagTab(tab.key);
+                          setDeletedViewSection("");
+                        }}
+                      >
+                        {tab.label} ({contactTagCounts[tab.key] || 0})
+                      </button>
+                    ))}
+                    {isCrmAdmin ? (
+                      <button
+                        type="button"
+                        data-no-delete-confirm="true"
+                        className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                        onClick={(event) => openDeletedItemsView(sectionKey, event)}
+                      >
+                        Deleted Items ({deletedRows.length})
+                      </button>
+                    ) : null}
+                    {bulkActions}
                   </div>
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">{deletedItemsNotice}</div>
+                  ) : null}
                 </div>
               ) : sectionKey === "deals" ? (
-                <div className="d-flex flex-wrap gap-2">
-                  {dealStatusTabs.map((tab) => (
-                    <button
-                      key={`deal-status-tab-${tab.key}`}
-                      type="button"
-                      className={`btn btn-sm ${dealStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => {
-                        setDealStatusTab(tab.key);
-                        setDeletedViewSection("");
-                      }}
-                    >
-                      {tab.label} ({dealTabCounts[tab.key] || 0})
-                    </button>
-                  ))}
-                  {isCrmAdmin ? (
-                    <button
-                      type="button"
-                      data-no-delete-confirm="true"
-                      className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
-                      onClick={(event) => openDeletedItemsView(sectionKey, event)}
-                    >
-                      Deleted Items ({deletedRows.length})
-                    </button>
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
+                    {dealStatusTabs.map((tab) => (
+                      <button
+                        key={`deal-status-tab-${tab.key}`}
+                        type="button"
+                        className={`btn btn-sm ${dealStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                        onClick={() => {
+                          setDealStatusTab(tab.key);
+                          setDeletedViewSection("");
+                        }}
+                      >
+                        {tab.label} ({dealTabCounts[tab.key] || 0})
+                      </button>
+                    ))}
+                    {isCrmAdmin ? (
+                      <button
+                        type="button"
+                        data-no-delete-confirm="true"
+                        className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                        onClick={(event) => openDeletedItemsView(sectionKey, event)}
+                      >
+                        Deleted Items ({deletedRows.length})
+                      </button>
+                    ) : null}
+                    {bulkActions}
+                  </div>
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">{deletedItemsNotice}</div>
                   ) : null}
                 </div>
               ) : sectionKey === "followUps" ? (
@@ -8300,27 +8994,47 @@ function CrmOnePageModule() {
                         Deleted Items ({deletedRows.length})
                       </button>
                     ) : null}
+                    {bulkActions}
                   </div>
-                  <div className="small text-secondary">
-                    Completed follow-ups older than 90 days are automatically deleted.
-                  </div>
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">{deletedItemsNotice}</div>
+                  ) : null}
                 </div>
               ) : sectionKey === "meetings" ? (
-                <div className="d-flex flex-wrap gap-2">
-                  {meetingStatusTabs.map((tab) => (
-                    <button
-                      key={`meeting-status-tab-${tab.key}`}
-                      type="button"
-                      className={`btn btn-sm ${meetingStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => {
-                        setMeetingStatusTab(tab.key);
-                        setDeletedViewSection("");
-                      }}
-                    >
-                      {tab.label} ({meetingTabCounts[tab.key] || 0})
-                    </button>
-                  ))}
-                  {isCrmAdmin ? (
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
+                    {meetingStatusTabs.map((tab) => (
+                      <button
+                        key={`meeting-status-tab-${tab.key}`}
+                        type="button"
+                        className={`btn btn-sm ${meetingStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                        onClick={() => {
+                          setMeetingStatusTab(tab.key);
+                          setDeletedViewSection("");
+                        }}
+                      >
+                        {tab.label} ({meetingTabCounts[tab.key] || 0})
+                      </button>
+                    ))}
+                    {isCrmAdmin ? (
+                      <button
+                        type="button"
+                        data-no-delete-confirm="true"
+                        className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
+                        onClick={(event) => openDeletedItemsView(sectionKey, event)}
+                      >
+                        Deleted Items ({deletedRows.length})
+                      </button>
+                    ) : null}
+                    {bulkActions}
+                  </div>
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">{deletedItemsNotice}</div>
+                  ) : null}
+                </div>
+              ) : isCrmAdmin ? (
+                <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-wrap gap-2">
                     <button
                       type="button"
                       data-no-delete-confirm="true"
@@ -8329,20 +9043,15 @@ function CrmOnePageModule() {
                     >
                       Deleted Items ({deletedRows.length})
                     </button>
+                    {bulkActions}
+                  </div>
+                  {isDeletedSectionView ? (
+                    <div className="small text-secondary">{deletedItemsNotice}</div>
                   ) : null}
                 </div>
-              ) : isCrmAdmin ? (
-                <div className="d-flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    data-no-delete-confirm="true"
-                    className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
-                    onClick={(event) => openDeletedItemsView(sectionKey, event)}
-                  >
-                    Deleted Items ({deletedRows.length})
-                  </button>
-                </div>
-              ) : null}
+              ) : (
+                bulkActions
+              )}
               searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
               pageSize={sectionKey === "leads" ? 15 : DEFAULT_TABLE_PAGE_SIZE}
               exportCellValue={(row, column) => {
@@ -8421,6 +9130,9 @@ function CrmOnePageModule() {
                     const effectiveStatus = getFollowUpEffectiveStatus(row);
                     return `${effectiveStatus[0].toUpperCase()}${effectiveStatus.slice(1)}`;
                   }
+                  if (sectionKey === "contacts" && column.key === "tag") {
+                    return formatDateLikeCellValue(column.key, normalizeCrmContactTag(row[column.key]), "-");
+                  }
                   if (sectionKey === "leads" && column.key === "leadAmount") {
                     const amount = parseNumber(row[column.key]);
                     return amount ? formatCurrencyAmount(amount, crmCurrencyCode) : "-";
@@ -8440,6 +9152,14 @@ function CrmOnePageModule() {
                 isDeletedSectionView ? (
                   <div className="d-inline-flex gap-2">
                     {isCrmAdmin ? (
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0 align-self-center"
+                        checked={selectedIdSet.has(String(row.id || "").trim())}
+                        onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
+                      />
+                    ) : null}
+                    {isCrmAdmin ? (
                       <button type="button" className="btn btn-sm btn-outline-success" onClick={() => onRestore(sectionKey, row.id)}>
                         Restore
                       </button>
@@ -8452,12 +9172,20 @@ function CrmOnePageModule() {
                   </div>
                 ) : (
                   <div className="d-inline-flex gap-2">
+                    {canEditCrmRow(sectionKey, row) ? (
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0 align-self-center"
+                        checked={selectedIdSet.has(String(row.id || "").trim())}
+                        onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
+                      />
+                    ) : null}
                     {sectionKey === "leads" && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-success"
                         onClick={() => onConvertLeadToDeal(row)}
-                        disabled={String(row.status || "").trim().toLowerCase() === "converted"}
+                        disabled={["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase())}
                         title="Create deal from lead"
                       >
                         Convert to Deal
@@ -8487,7 +9215,7 @@ function CrmOnePageModule() {
                         Edit
                       </button>
                     ) : null}
-                    {canEditCrmRow(sectionKey, row) ? (
+                    {canDeleteCrmRow(sectionKey, row) ? (
                       <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDelete(sectionKey, row.id)}>
                         Delete
                       </button>
@@ -8719,7 +9447,7 @@ function CrmOnePageModule() {
           onClick={closeTeamMembersPopup}
         >
           <div
-            className="card p-3"
+            className="card p-3 wz-team-members-popup"
             style={{ width: "min(420px, 92vw)" }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -8728,7 +9456,7 @@ function CrmOnePageModule() {
                 <h5 className="mb-1">{teamMembersPopup.title || "Team Employees"}</h5>
                 <div className="small text-secondary">{teamMembersPopup.name || "-"}</div>
               </div>
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeTeamMembersPopup}>
+              <button type="button" className="btn btn-sm wz-team-members-popup-close" onClick={closeTeamMembersPopup}>
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
@@ -8755,6 +9483,37 @@ function CrmOnePageModule() {
               ) : (
                 <div className="small text-secondary">No employees found.</div>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {crmActionPopup.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay"
+          onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+        >
+          <div className="modal-panel" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <h5 className="mb-0">{crmActionPopup.title || "Success"}</h5>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="text-secondary mb-3">{crmActionPopup.message || "Operation completed successfully."}</div>
+            <div className="d-flex justify-content-end">
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+              >
+                OK
+              </button>
             </div>
           </div>
         </div>

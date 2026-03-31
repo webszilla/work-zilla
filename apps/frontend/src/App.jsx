@@ -120,6 +120,7 @@ const THEME_PREV_KEY = "wz_brand_theme_prev";
 const LAST_APP_PRODUCT_KEY = "wz_last_app_product_slug";
 const BUSINESS_AUTOPILOT_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const BUSINESS_AUTOPILOT_USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
+const LAST_SIGNOUT_AT_STORAGE_KEY = "wz_last_signout_at";
 
 function safeLocalStorageGet(key, fallback = "") {
   if (typeof window === "undefined") {
@@ -142,6 +143,10 @@ function safeLocalStorageSet(key, value) {
   } catch {
     // Ignore storage write failures (private mode / blocked storage).
   }
+}
+
+function rememberLastSignoutTime() {
+  safeLocalStorageSet(LAST_SIGNOUT_AT_STORAGE_KEY, new Date().toISOString());
 }
 
 function normalizeSidebarMenuStyle(value) {
@@ -1298,7 +1303,15 @@ function AppShell({ state, productPrefix, productSlug }) {
                     </NavLink>
                   )
                 ))}
-            <a className="nav-link wz-nav-link" href="/auth/logout/" onClick={handleSidebarNavClick} {...getSidebarNavProps("Logout")}>
+            <a
+              className="nav-link wz-nav-link"
+              href="/auth/logout/"
+              onClick={() => {
+                rememberLastSignoutTime();
+                handleSidebarNavClick();
+              }}
+              {...getSidebarNavProps("Logout")}
+            >
               <i className="bi bi-box-arrow-right nav-icon wz-nav-icon" aria-hidden="true" />
               {renderSidebarNavLabel("Logout")}
             </a>
@@ -2427,6 +2440,7 @@ export default function App() {
         window.clearTimeout(timerId);
       }
       timerId = window.setTimeout(async () => {
+        rememberLastSignoutTime();
         try {
           await apiFetch("/api/auth/logout", { method: "POST", body: "{}" });
         } catch {

@@ -5,9 +5,11 @@ import ProductAccessSection from "../components/ProductAccessSection.jsx";
 import { formatCurrencyAmount, getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
 
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
+const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
+const LAST_SIGNOUT_AT_STORAGE_KEY = "wz_last_signout_at";
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function normalizeDateValue(value) {
@@ -71,6 +73,24 @@ function toIsoDateLocal(value) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "Not Available";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not Available";
+  }
+  return date.toLocaleString("en-IN", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 }
 
 function buildMeetingCalendarModel(monthDate, meetings = []) {
@@ -234,8 +254,10 @@ export default function BusinessAutopilotDashboardPage({
     userCount: 0,
     billPendingAmount: 0,
     openTickets: 0,
+    newMails: 0,
     todayMeetings: 0,
     myPlans: Array.isArray(subscriptions) ? subscriptions.length : 0,
+    lastSignoutAt: "",
   });
   const entries = Array.isArray(modules) ? modules : [];
   const allModules = Array.isArray(catalog) && catalog.length ? catalog : entries;
@@ -324,8 +346,10 @@ export default function BusinessAutopilotDashboardPage({
       let userCount = 0;
       let billPendingAmount = 0;
       let openTickets = 0;
+      let newMails = 0;
       let todayMeetings = 0;
       const myPlans = Array.isArray(subscriptions) ? subscriptions.length : 0;
+      const lastSignoutAt = String(window.localStorage.getItem(LAST_SIGNOUT_AT_STORAGE_KEY) || "").trim();
       const todayIso = new Date().toISOString().slice(0, 10);
 
       try {
@@ -380,7 +404,8 @@ export default function BusinessAutopilotDashboardPage({
       }
 
       try {
-        const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+        const scopedKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
+        const raw = window.localStorage.getItem(scopedKey || CRM_STORAGE_KEY);
         const localData = raw ? JSON.parse(raw) : {};
         const meetings = Array.isArray(localData?.meetings) ? localData.meetings : [];
         if (active) {
@@ -394,6 +419,16 @@ export default function BusinessAutopilotDashboardPage({
         todayMeetings = 0;
       }
 
+      try {
+        const inboxData = await apiFetch("/api/dashboard/inbox");
+        newMails = Number(inboxData?.unread_count || 0);
+        if (!Number.isFinite(newMails) || newMails < 0) {
+          newMails = 0;
+        }
+      } catch {
+        newMails = 0;
+      }
+
       if (!active) {
         return;
       }
@@ -402,8 +437,10 @@ export default function BusinessAutopilotDashboardPage({
         userCount,
         billPendingAmount,
         openTickets,
+        newMails,
         todayMeetings,
         myPlans,
+        lastSignoutAt,
       });
     }
     loadQuickStats();
@@ -444,7 +481,7 @@ export default function BusinessAutopilotDashboardPage({
 
   const formatCurrency = (value) => formatCurrencyAmount(value, orgCurrency);
 
-  const statCards = [
+  const adminStatCards = [
     { key: "myAttendance", label: "My Attendance", value: String(quickStats.myAttendance || 0), icon: "bi-calendar-check", href: withProductBase("/hrm#attendance") },
     { key: "users", label: "Total Users", value: String(quickStats.userCount || 0), icon: "bi-people", href: withProductBase("/users") },
     { key: "billing", label: "Bill Pendings", value: formatCurrency(quickStats.billPendingAmount), icon: "bi-wallet2", href: withProductBase("/billing") },
@@ -452,6 +489,14 @@ export default function BusinessAutopilotDashboardPage({
     { key: "meetings", label: "Today Meetings", value: String(quickStats.todayMeetings || 0), icon: "bi-calendar-event", href: "#" },
     { key: "plans", label: "My Plans", value: String(quickStats.myPlans || 0), icon: "bi-clipboard-check", href: withProductBase("/plans") },
   ];
+  const userStatCards = [
+    { key: "tickets", label: "Open Tickets", value: String(quickStats.openTickets || 0), icon: "bi-life-preserver", href: withProductBase("/ticketing") },
+    { key: "mails", label: "New Mails", value: String(quickStats.newMails || 0), icon: "bi-envelope", href: withProductBase("/inbox-and-ticket") },
+    { key: "meetings", label: "Today Meetings", value: String(quickStats.todayMeetings || 0), icon: "bi-calendar-event", href: "#" },
+    { key: "lastSignout", label: "My Last Signout", value: formatDateTime(quickStats.lastSignoutAt), icon: "bi-box-arrow-right", href: "#" },
+  ];
+  const statCards = isOrgAdmin ? adminStatCards : userStatCards;
+  const showDashboardDetails = isOrgAdmin;
 
   const comparisonData = useMemo(() => {
     const invoiceRows = Array.isArray(accountsWorkspace?.invoices) ? accountsWorkspace.invoices : [];
@@ -499,7 +544,7 @@ export default function BusinessAutopilotDashboardPage({
       </p>
       <div className="row g-3 mb-3">
         {statCards.map((card) => (
-          <div className="col-12 col-md-6 col-xl-2" key={card.key}>
+          <div className={`col-12 col-md-6 ${isOrgAdmin ? "col-xl-2" : "col-xl-3"}`} key={card.key}>
             <div className="card p-3 h-100 stat-card">
               <div className="stat-icon stat-icon-primary">
                 <i className={`bi ${card.icon}`} aria-hidden="true" />
@@ -518,135 +563,139 @@ export default function BusinessAutopilotDashboardPage({
           </div>
         ))}
       </div>
-      {moduleError ? (
-        <div className="alert alert-danger py-2">{moduleError}</div>
-      ) : null}
-      {entries.length ? (
-        <div className="row g-3">
-          {entries.map((module) => (
-            <div className="col-12 col-md-6 col-xl-2" key={module.slug}>
-              <div className="card p-3 h-100 d-flex flex-column">
-                <h6 className="mb-1">{module.name}</h6>
-                <div className="text-secondary small mb-2">Module Enabled</div>
-                <Link className="btn btn-primary btn-sm mt-auto" to={toModulePath(module)}>
-                  Open
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="alert alert-warning mb-0">
-          No modules are enabled for this organization yet.
-        </div>
-      )}
-      <div style={{ marginTop: "40px" }}>
-        <div className="row g-3">
-          <div className="col-12 col-xl-8">
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-              <h4 className="mb-0">Monthly Sales & Expenses Comparison</h4>
-              <div className="d-flex align-items-center gap-2">
-                <label className="small text-secondary mb-0" htmlFor="baerp-comparison-year">Year</label>
-                <select
-                  id="baerp-comparison-year"
-                  className="form-select form-select-sm"
-                  style={{ minWidth: "110px" }}
-                  value={comparisonData.selectedYear}
-                  onChange={(event) => setSelectedComparisonYear(Number(event.target.value))}
-                >
-                  {comparisonData.yearOptions.map((year) => (
-                    <option value={year} key={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+      {showDashboardDetails ? (
+        <>
+          {moduleError ? (
+            <div className="alert alert-danger py-2">{moduleError}</div>
+          ) : null}
+          {entries.length ? (
             <div className="row g-3">
-              <div className="col-12 col-lg-6">
-                <MonthlyComparisonChartCard
-                  title="Monthly Sales"
-                  icon="bi-graph-up-arrow"
-                  currentYear={comparisonData.selectedYear}
-                  previousYear={comparisonData.previousYear}
-                  currentSeries={comparisonData.salesCurrent}
-                  previousSeries={comparisonData.salesPrevious}
-                  yPrefix={`${orgCurrency} `}
-                />
-              </div>
-              <div className="col-12 col-lg-6">
-                <MonthlyComparisonChartCard
-                  title="Monthly Expenses"
-                  icon="bi-graph-down-arrow"
-                  currentYear={comparisonData.selectedYear}
-                  previousYear={comparisonData.previousYear}
-                  currentSeries={comparisonData.expensesCurrent}
-                  previousSeries={comparisonData.expensesPrevious}
-                  yPrefix={`${orgCurrency} `}
-                />
-              </div>
+              {entries.map((module) => (
+                <div className="col-12 col-md-6 col-xl-2" key={module.slug}>
+                  <div className="card p-3 h-100 d-flex flex-column">
+                    <h6 className="mb-1">{module.name}</h6>
+                    <div className="text-secondary small mb-2">Module Enabled</div>
+                    <Link className="btn btn-primary btn-sm mt-auto" to={toModulePath(module)}>
+                      Open
+                    </Link>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="col-12 col-xl-4">
-            <div className="card p-3 h-100">
-              <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
-                <h6 className="mb-0">Meeting Calendar</h6>
-                <div className="d-flex align-items-center gap-1">
-                  <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(-1)}>
-                    <i className="bi bi-chevron-left" aria-hidden="true" />
-                  </button>
-                  <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(1)}>
-                    <i className="bi bi-chevron-right" aria-hidden="true" />
-                  </button>
+          ) : (
+            <div className="alert alert-warning mb-0">
+              No modules are enabled for this organization yet.
+            </div>
+          )}
+          <div style={{ marginTop: "40px" }}>
+            <div className="row g-3">
+              <div className="col-12 col-xl-8">
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                  <h4 className="mb-0">Monthly Sales & Expenses Comparison</h4>
+                  <div className="d-flex align-items-center gap-2">
+                    <label className="small text-secondary mb-0" htmlFor="baerp-comparison-year">Year</label>
+                    <select
+                      id="baerp-comparison-year"
+                      className="form-select form-select-sm"
+                      style={{ minWidth: "110px" }}
+                      value={comparisonData.selectedYear}
+                      onChange={(event) => setSelectedComparisonYear(Number(event.target.value))}
+                    >
+                      {comparisonData.yearOptions.map((year) => (
+                        <option value={year} key={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="row g-3">
+                  <div className="col-12 col-lg-6">
+                    <MonthlyComparisonChartCard
+                      title="Monthly Sales"
+                      icon="bi-graph-up-arrow"
+                      currentYear={comparisonData.selectedYear}
+                      previousYear={comparisonData.previousYear}
+                      currentSeries={comparisonData.salesCurrent}
+                      previousSeries={comparisonData.salesPrevious}
+                      yPrefix={`${orgCurrency} `}
+                    />
+                  </div>
+                  <div className="col-12 col-lg-6">
+                    <MonthlyComparisonChartCard
+                      title="Monthly Expenses"
+                      icon="bi-graph-down-arrow"
+                      currentYear={comparisonData.selectedYear}
+                      previousYear={comparisonData.previousYear}
+                      currentSeries={comparisonData.expensesCurrent}
+                      previousSeries={comparisonData.expensesPrevious}
+                      yPrefix={`${orgCurrency} `}
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="small text-secondary mb-2">{meetingCalendar.monthLabel}</div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                  gap: "6px",
-                }}
-              >
-                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayLabel) => (
-                  <div key={`head-${dayLabel}`} className="small text-secondary text-center fw-semibold">
-                    {dayLabel}
+              <div className="col-12 col-xl-4">
+                <div className="card p-3 h-100">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <h6 className="mb-0">Meeting Calendar</h6>
+                    <div className="d-flex align-items-center gap-1">
+                      <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(-1)}>
+                        <i className="bi bi-chevron-left" aria-hidden="true" />
+                      </button>
+                      <button type="button" className="btn btn-sm btn-outline-light" onClick={() => changeMeetingCalendarMonth(1)}>
+                        <i className="bi bi-chevron-right" aria-hidden="true" />
+                      </button>
+                    </div>
                   </div>
-                ))}
-                {meetingCalendar.cells.map((cell) => (
+                  <div className="small text-secondary mb-2">{meetingCalendar.monthLabel}</div>
                   <div
-                    key={cell.isoDate}
-                    className="rounded"
                     style={{
-                      minHeight: "56px",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      padding: "4px",
-                      background: cell.isToday ? "rgba(var(--bs-primary-rgb),0.12)" : "rgba(255,255,255,0.02)",
-                      opacity: cell.inMonth ? 1 : 0.45,
+                      display: "grid",
+                      gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                      gap: "6px",
                     }}
-                    title={cell.meetings.length ? `${cell.meetings.length} meeting(s)` : ""}
                   >
-                    <div className="small fw-semibold" style={{ lineHeight: 1.1 }}>{cell.day}</div>
-                    {cell.meetings.length ? (
-                      <div className="mt-1">
-                        <span className="badge bg-success" style={{ fontSize: "0.65rem" }}>
-                          {cell.meetings.length}
-                        </span>
-                        {cell.meetings[0]?.meetingTime ? (
-                          <div className="small text-truncate mt-1" style={{ fontSize: "0.68rem" }}>
-                            {String(cell.meetings[0].meetingTime)}
+                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayLabel) => (
+                      <div key={`head-${dayLabel}`} className="small text-secondary text-center fw-semibold">
+                        {dayLabel}
+                      </div>
+                    ))}
+                    {meetingCalendar.cells.map((cell) => (
+                      <div
+                        key={cell.isoDate}
+                        className="rounded"
+                        style={{
+                          minHeight: "56px",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          padding: "4px",
+                          background: cell.isToday ? "rgba(var(--bs-primary-rgb),0.12)" : "rgba(255,255,255,0.02)",
+                          opacity: cell.inMonth ? 1 : 0.45,
+                        }}
+                        title={cell.meetings.length ? `${cell.meetings.length} meeting(s)` : ""}
+                      >
+                        <div className="small fw-semibold" style={{ lineHeight: 1.1 }}>{cell.day}</div>
+                        {cell.meetings.length ? (
+                          <div className="mt-1">
+                            <span className="badge bg-success" style={{ fontSize: "0.65rem" }}>
+                              {cell.meetings.length}
+                            </span>
+                            {cell.meetings[0]?.meetingTime ? (
+                              <div className="small text-truncate mt-1" style={{ fontSize: "0.68rem" }}>
+                                {String(cell.meetings[0].meetingTime)}
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
-                    ) : null}
+                    ))}
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      {canManageModules ? (
+        </>
+      ) : null}
+      {showDashboardDetails && canManageModules ? (
         <div className="mt-4">
           <h6 className="mb-2">Module Access Settings</h6>
           <div className="text-secondary small mb-3">Enable or disable eligible ERP modules for your organization.</div>
@@ -676,11 +725,13 @@ export default function BusinessAutopilotDashboardPage({
           </div>
         </div>
       ) : null}
-      <ProductAccessSection
-        products={products}
-        subscriptions={subscriptions}
-        currentProductKey="business-autopilot-erp"
-      />
+      {showDashboardDetails ? (
+        <ProductAccessSection
+          products={products}
+          subscriptions={subscriptions}
+          currentProductKey="business-autopilot-erp"
+        />
+      ) : null}
     </div>
   );
 }

@@ -614,3 +614,64 @@ class CrmSalesOrder(models.Model):
 
     def __str__(self):
         return f"SalesOrder({self.organization_id} - {self.order_id})"
+
+
+class CrmMeeting(models.Model):
+    STATUS_CHOICES = (
+        ("Scheduled", "Scheduled"),
+        ("Completed", "Completed"),
+        ("Rescheduled", "Rescheduled"),
+        ("Cancelled", "Cancelled"),
+        ("Missed", "Missed"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_meetings",
+    )
+    title = models.CharField(max_length=180)
+    company_or_client_name = models.CharField(max_length=180, blank=True, default="")
+    related_to = models.CharField(max_length=180, blank=True, default="")
+    meeting_date = models.DateField(null=True, blank=True)
+    meeting_time = models.TimeField(null=True, blank=True)
+    owner_names = models.TextField(blank=True, default="")
+    owner_user_ids = models.JSONField(default=list, blank=True)
+    meeting_mode = models.CharField(max_length=30, blank=True, default="")
+    reminder_channels = models.JSONField(default=list, blank=True)
+    reminder_days = models.JSONField(default=list, blank=True)
+    reminder_minutes = models.JSONField(default=list, blank=True)
+    reminder_summary = models.CharField(max_length=255, blank=True, default="")
+    reminder_email_sent_map = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="Scheduled")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_created_meetings",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_updated_meetings",
+    )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_deleted_meetings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"Meeting({self.organization_id} - {self.title})"
