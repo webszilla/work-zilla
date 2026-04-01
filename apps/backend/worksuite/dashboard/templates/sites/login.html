@@ -24,8 +24,12 @@
         </div>
     {% endif %}
     {% if error %}
-        <div class="alert alert-danger text-center">
-            {{ error }}
+        <div
+            class="alert alert-danger text-center"
+            id="loginLockAlert"
+            {% if lock_remaining_seconds %}data-lock-remaining-seconds="{{ lock_remaining_seconds }}"{% endif %}
+        >
+            <span data-lock-message>{{ error }}</span>
         </div>
     {% endif %}
 
@@ -108,6 +112,46 @@
       overlay.setAttribute("aria-hidden", "false");
       if (submitBtn) submitBtn.disabled = true;
     });
+  })();
+
+  (function () {
+    var lockAlert = document.getElementById("loginLockAlert");
+    if (!lockAlert) return;
+    var rawRemaining = parseInt(lockAlert.getAttribute("data-lock-remaining-seconds") || "0", 10);
+    if (!Number.isFinite(rawRemaining) || rawRemaining <= 0) return;
+
+    var submitBtn = document.querySelector("[data-auth-submit-btn]");
+    var lockMessage = lockAlert.querySelector("[data-lock-message]") || lockAlert;
+    var timerRef = null;
+    var remaining = rawRemaining;
+
+    function pad(value) {
+      return String(Math.max(0, value)).padStart(2, "0");
+    }
+
+    function renderMessage() {
+      if (remaining > 0) {
+        var minutes = Math.floor(remaining / 60);
+        var seconds = remaining % 60;
+        lockMessage.textContent = "Too many failed attempts. Try again in " + pad(minutes) + ":" + pad(seconds) + ".";
+        lockAlert.classList.remove("alert-success");
+        lockAlert.classList.add("alert-danger");
+        return;
+      }
+      lockMessage.textContent = "You can login now.";
+      lockAlert.classList.remove("alert-danger");
+      lockAlert.classList.add("alert-success");
+      lockAlert.removeAttribute("data-lock-remaining-seconds");
+      if (timerRef) {
+        window.clearInterval(timerRef);
+      }
+    }
+
+    renderMessage();
+    timerRef = window.setInterval(function () {
+      remaining -= 1;
+      renderMessage();
+    }, 1000);
   })();
 </script>
 {% endblock %}

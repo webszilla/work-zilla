@@ -20,11 +20,13 @@ const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
 const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
 const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
+const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
+const ACCOUNTS_STORAGE_KEY_PREFIX = "wz_business_autopilot_accounts_module_scope";
 const DEFAULT_TABLE_PAGE_SIZE = 5;
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: String(option?.value || "").trim(),
@@ -852,127 +854,13 @@ const SUBSCRIPTION_ALERT_OPTIONS = [
 ];
 
 const DEFAULT_ACCOUNTS_DATA = {
-  customers: [
-    {
-      id: "cust_1",
-      name: "Ultra HD Prints",
-      gstin: "33ABCDE1234F1Z5",
-      phone: "9876543210",
-      email: "accounts@ultrahdprints.example",
-      billingAddress: "No 17, 2nd Cross Street, Venkateswara Nagar"
-    }
-  ],
-  itemMasters: [
-    {
-      id: "itm_1",
-      name: "POS Billing Setup",
-      itemType: "Service",
-      sku: "POS-SETUP",
-      hsnSacCode: "998313",
-      unit: "Nos",
-      defaultRate: "24999",
-      taxPercent: "18"
-    },
-    {
-      id: "itm_2",
-      name: "Thermal Printer",
-      itemType: "Product",
-      sku: "THERMAL-PRN",
-      hsnSacCode: "844332",
-      unit: "Nos",
-      defaultRate: "15000",
-      taxPercent: "18"
-    }
-  ],
-  gstTemplates: [
-    {
-      id: "gst_1",
-      name: "India GST 18% (Intra State)",
-      taxScope: "Intra State",
-      cgst: "9",
-      sgst: "9",
-      igst: "0",
-      cess: "0",
-      status: "Active",
-      notes: "Default GST for local billing"
-    },
-    {
-      id: "gst_2",
-      name: "India GST 18% (Inter State)",
-      taxScope: "Inter State",
-      cgst: "0",
-      sgst: "0",
-      igst: "18",
-      cess: "0",
-      status: "Active",
-      notes: "Use for interstate billing"
-    }
-  ],
-  billingTemplates: [
-    {
-      id: "bt_1",
-      name: "Default GST Invoice Template",
-      docType: "Invoice",
-      gstTemplateId: "gst_1",
-      prefix: "INV",
-      themeColor: "#22c55e",
-      footerNote: "Thank you for your business.",
-      termsText: "Payment due within 7 days.",
-      status: "Active"
-    },
-    {
-      id: "bt_2",
-      name: "Estimate Proposal Template",
-      docType: "Estimate",
-      gstTemplateId: "gst_1",
-      prefix: "EST",
-      themeColor: "#3b82f6",
-      footerNote: "Estimate validity: 15 days.",
-      termsText: "Subject to stock availability.",
-      status: "Active"
-    }
-  ],
-  estimates: [
-    {
-      id: "est_1",
-      docNo: "EST-1001",
-      customerName: "Ultra HD Prints",
-      customerGstin: "33ABCDE1234F1Z5",
-      issueDate: "2026-02-20",
-      dueDate: "2026-02-27",
-      status: "Sent",
-      gstTemplateId: "gst_1",
-      billingTemplateId: "bt_2",
-      salesperson: "Guru",
-      billingAddress: "No 17, 2nd Cross Street, Venkateswara Nagar",
-      notes: "Quote includes installation support.",
-      termsText: "Advance 50% before order confirmation.",
-      items: [
-        { id: "eli_1", description: "Thermal Printer", qty: "2", rate: "15000", taxPercent: "18" },
-        { id: "eli_2", description: "Barcode Scanner", qty: "4", rate: "3500", taxPercent: "18" }
-      ]
-    }
-  ],
-  invoices: [
-    {
-      id: "inv_1",
-      docNo: "INV-1001",
-      customerName: "Ultra HD Prints",
-      customerGstin: "33ABCDE1234F1Z5",
-      issueDate: "2026-02-24",
-      dueDate: "2026-03-03",
-      status: "Draft",
-      gstTemplateId: "gst_1",
-      billingTemplateId: "bt_1",
-      salesperson: "Guru",
-      billingAddress: "No 17, 2nd Cross Street, Venkateswara Nagar",
-      notes: "Thanks for your business.",
-      termsText: "Due on receipt.",
-      items: [
-        { id: "ili_1", description: "POS Billing Setup", qty: "1", rate: "24999", taxPercent: "18" }
-      ]
-    }
-  ]
+  customers: [],
+  vendors: [],
+  itemMasters: [],
+  gstTemplates: [],
+  billingTemplates: [],
+  estimates: [],
+  invoices: []
 };
 
 function parseNumber(value) {
@@ -1984,7 +1872,8 @@ function normalizeCrmData(value) {
 function buildScopedCrmStorageKey(authData = {}) {
   const userId = String(authData?.user?.id || "").trim();
   const orgId = String(
-    authData?.profile?.organization_id
+    authData?.organization_id
+    || authData?.profile?.organization_id
     || authData?.profile?.org_id
     || authData?.profile?.company_id
     || ""
@@ -2001,11 +1890,31 @@ function buildScopedCrmStorageKey(authData = {}) {
 
 function getOrganizationIdFromAuth(authData = {}) {
   return String(
-    authData?.profile?.organization_id
+    authData?.organization_id
+    || authData?.profile?.organization_id
     || authData?.profile?.org_id
     || authData?.profile?.company_id
     || ""
   ).trim();
+}
+
+function setActiveBusinessAutopilotOrgId(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  if (!normalizedOrgId) {
+    return;
+  }
+  window.localStorage.setItem(BA_ACTIVE_ORG_STORAGE_KEY, normalizedOrgId);
+}
+
+function getActiveBusinessAutopilotOrgId() {
+  return String(window.localStorage.getItem(BA_ACTIVE_ORG_STORAGE_KEY) || "").trim();
+}
+
+function buildScopedAccountsStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${ACCOUNTS_STORAGE_KEY_PREFIX}__${normalizedOrgId}`
+    : ACCOUNTS_STORAGE_KEY;
 }
 
 function getActiveCrmScopeOrgId() {
@@ -2020,11 +1929,50 @@ function getActiveCrmScopeOrgId() {
 function buildScopedCrmContactsStorageKey(authData = {}) {
   const orgId = getOrganizationIdFromAuth(authData)
     || String(authData?.organization_id || "").trim()
+    || getActiveBusinessAutopilotOrgId()
     || getActiveCrmScopeOrgId();
   const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
   return normalizedOrgId
     ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${normalizedOrgId}`
     : CRM_STORAGE_KEY;
+}
+
+function getOrgScopedCrmStorageKeys(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  if (!normalizedOrgId || typeof window === "undefined") {
+    return [];
+  }
+  const prefix = `${CRM_STORAGE_KEY_PREFIX}__${normalizedOrgId}__`;
+  return Object.keys(window.localStorage || {}).filter((key) => String(key || "").startsWith(prefix));
+}
+
+function collectOrgScopedCrmContacts(orgId = "") {
+  const seen = new Set();
+  const merged = [];
+  getOrgScopedCrmStorageKeys(orgId).forEach((key) => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!isValidCrmData(parsed)) {
+        return;
+      }
+      const contacts = (stripLegacyDemoCrmData(parsed).contacts || []).map((row) => normalizeCrmContactRecord(row));
+      contacts.forEach((row) => {
+        const dedupKey = buildCrmImportDedupKey("contacts", row) || String(row.id || "").trim();
+        if (!dedupKey || seen.has(dedupKey)) {
+          return;
+        }
+        seen.add(dedupKey);
+        merged.push(row);
+      });
+    } catch (_error) {
+      // noop
+    }
+  });
+  return merged;
 }
 
 function normalizeCrmRoleToken(value) {
@@ -2625,21 +2573,55 @@ function getSharedCustomerDisplayName(row = {}) {
   return companyName || clientName;
 }
 
-function readSharedAccountsData() {
+function isLegacyDemoAccountCustomer(row = {}) {
+  const company = String(row.companyName || row.name || "").trim().toLowerCase();
+  const email = String(row.email || "").trim().toLowerCase();
+  return (
+    company === "ultra hd prints"
+    || email === "accounts@ultrahdprints.example"
+    || String(row.id || "").trim() === "cust_1"
+  );
+}
+
+function sanitizeAccountsWorkspaceData(data = DEFAULT_ACCOUNTS_DATA) {
+  const base = isValidAccountsData(data) ? data : DEFAULT_ACCOUNTS_DATA;
+  return {
+    ...base,
+    customers: (Array.isArray(base.customers) ? base.customers : []).filter((row) => !isLegacyDemoAccountCustomer(row)),
+  };
+}
+
+function readLegacyAccountsData() {
   try {
     const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
     if (!raw) {
       return DEFAULT_ACCOUNTS_DATA;
     }
     const parsed = JSON.parse(raw);
-    return isValidAccountsData(parsed) ? parsed : DEFAULT_ACCOUNTS_DATA;
+    return sanitizeAccountsWorkspaceData(parsed);
   } catch (_error) {
     return DEFAULT_ACCOUNTS_DATA;
   }
 }
 
-function readSharedAccountsCustomers() {
-  return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+function readSharedAccountsData(storageKey = "") {
+  try {
+    const resolvedKey = String(storageKey || "").trim() || buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const raw = window.localStorage.getItem(resolvedKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isValidAccountsData(parsed)) {
+        return sanitizeAccountsWorkspaceData(parsed);
+      }
+    }
+    return resolvedKey === ACCOUNTS_STORAGE_KEY ? readLegacyAccountsData() : DEFAULT_ACCOUNTS_DATA;
+  } catch (_error) {
+    return DEFAULT_ACCOUNTS_DATA;
+  }
+}
+
+function readSharedAccountsCustomers(storageKey = "") {
+  return (readSharedAccountsData(storageKey).customers || []).map((row) => normalizeSharedCustomerRecord(row));
 }
 
 function normalizeSharedVendorDisplayName(row = {}) {
@@ -2657,8 +2639,8 @@ function normalizeSharedVendorDisplayName(row = {}) {
   return vendorName;
 }
 
-function readSharedAccountsVendors() {
-  const accountData = readSharedAccountsData();
+function readSharedAccountsVendors(storageKey = "") {
+  const accountData = readSharedAccountsData(storageKey);
   const rows = Array.isArray(accountData?.vendors) ? accountData.vendors : [];
   return rows
     .map((row) => normalizeSharedVendorDisplayName(row))
@@ -2668,6 +2650,9 @@ function readSharedAccountsVendors() {
 function readSharedCrmContacts(storageKey = "") {
   try {
     const resolvedKey = String(storageKey || "").trim() || buildScopedCrmContactsStorageKey();
+    const orgId = resolvedKey.startsWith(`${CRM_SHARED_CONTACTS_KEY_PREFIX}__`)
+      ? resolvedKey.replace(`${CRM_SHARED_CONTACTS_KEY_PREFIX}__`, "").split("__")[0]
+      : getActiveCrmScopeOrgId();
     const raw = window.localStorage.getItem(resolvedKey);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -2676,7 +2661,14 @@ function readSharedCrmContacts(storageKey = "") {
         : Array.isArray(parsed?.contacts)
           ? parsed.contacts
           : [];
-      return contacts.map((row) => normalizeCrmContactRecord(row));
+      const normalizedContacts = contacts.map((row) => normalizeCrmContactRecord(row));
+      if (normalizedContacts.length) {
+        return normalizedContacts;
+      }
+    }
+    const recoveredContacts = collectOrgScopedCrmContacts(orgId);
+    if (recoveredContacts.length) {
+      return recoveredContacts;
     }
   } catch (_error) {
     // fall through to legacy reader
@@ -4145,12 +4137,13 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
-  const currentData = readSharedAccountsData();
+  const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+  const currentData = readSharedAccountsData(accountsStorageKey);
   const nextData = {
     ...currentData,
     customers: nextCustomers.map((row) => normalizeSharedCustomerRecord(row)),
   };
-  window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+  window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
   try {
     await apiFetch("/api/business-autopilot/accounts/workspace", {
       method: "PUT",
@@ -5346,10 +5339,27 @@ function CrmOnePageModule() {
   }
 
   useEffect(() => {
-    if (!crmStorageKey) {
+    if (!crmStorageKey || !crmSharedContactsKey) {
       return;
     }
     crmStorageHydratedRef.current = false;
+    const mergeHydratedWithInMemory = (incomingData, sharedContacts) => {
+      const incoming = normalizeCrmData(incomingData);
+      const shared = Array.isArray(sharedContacts) ? sharedContacts : [];
+      return (previousState) => {
+        const prev = normalizeCrmData(previousState);
+        const merged = { ...incoming };
+        ["leads", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"].forEach((sectionKey) => {
+          const incomingRows = Array.isArray(incoming[sectionKey]) ? incoming[sectionKey] : [];
+          const prevRows = Array.isArray(prev[sectionKey]) ? prev[sectionKey] : [];
+          merged[sectionKey] = incomingRows.length ? incomingRows : prevRows;
+        });
+        const incomingContacts = Array.isArray(incoming.contacts) ? incoming.contacts : [];
+        const prevContacts = Array.isArray(prev.contacts) ? prev.contacts : [];
+        merged.contacts = shared.length ? shared : (incomingContacts.length ? incomingContacts : prevContacts);
+        return merged;
+      };
+    };
     try {
       const sharedContacts = readSharedCrmContacts(crmSharedContactsKey);
       const raw = window.localStorage.getItem(crmStorageKey);
@@ -5358,14 +5368,12 @@ function CrmOnePageModule() {
         if (isValidCrmData(parsed)) {
           const cleaned = stripLegacyDemoCrmData(parsed);
           const nextContacts = sharedContacts.length ? sharedContacts : (cleaned.contacts || []);
-          setModuleData({
-            ...cleaned,
-            contacts: nextContacts,
-          });
+          setModuleData(mergeHydratedWithInMemory({ ...cleaned, contacts: nextContacts }, sharedContacts));
           if (!sharedContacts.length && nextContacts.length) {
             writeSharedCrmContacts(crmSharedContactsKey, nextContacts);
           }
           window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+          crmStorageHydratedRef.current = true;
           return;
         }
       }
@@ -5376,40 +5384,29 @@ function CrmOnePageModule() {
         if (isValidCrmData(legacyParsed)) {
           const migrated = stripLegacyDemoCrmData(legacyParsed);
           const nextContacts = sharedContacts.length ? sharedContacts : (migrated.contacts || []);
-          setModuleData({
-            ...migrated,
-            contacts: nextContacts,
-          });
+          setModuleData(mergeHydratedWithInMemory({ ...migrated, contacts: nextContacts }, sharedContacts));
           if (!sharedContacts.length && nextContacts.length) {
             writeSharedCrmContacts(crmSharedContactsKey, nextContacts);
           }
           window.localStorage.setItem(crmStorageKey, JSON.stringify(migrated));
         } else {
-          setModuleData({
-            ...normalizeCrmData(null),
-            contacts: sharedContacts,
-          });
+          setModuleData(mergeHydratedWithInMemory({ ...normalizeCrmData(null), contacts: sharedContacts }, sharedContacts));
         }
         window.localStorage.removeItem(CRM_STORAGE_KEY);
       } else {
-        setModuleData({
-          ...normalizeCrmData(null),
-          contacts: sharedContacts,
-        });
+        setModuleData(mergeHydratedWithInMemory({ ...normalizeCrmData(null), contacts: sharedContacts }, sharedContacts));
       }
       window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
       crmStorageHydratedRef.current = true;
     } catch (_error) {
-      setModuleData({
-        ...normalizeCrmData(null),
-        contacts: readSharedCrmContacts(crmSharedContactsKey),
-      });
+      const fallbackContacts = readSharedCrmContacts(crmSharedContactsKey);
+      setModuleData(mergeHydratedWithInMemory({ ...normalizeCrmData(null), contacts: fallbackContacts }, fallbackContacts));
       crmStorageHydratedRef.current = true;
     }
   }, [crmStorageKey, crmSharedContactsKey]);
 
   useEffect(() => {
-    if (!crmStorageKey) {
+    if (!crmStorageKey || !crmSharedContactsKey) {
       return;
     }
     if (!crmStorageHydratedRef.current) {
@@ -5450,66 +5447,64 @@ function CrmOnePageModule() {
   useEffect(() => {
     let active = true;
     (async () => {
-      try {
-        const [usersData, authData, roleAccessData] = await Promise.all([
-          apiFetch("/api/business-autopilot/users"),
-          apiFetch("/api/auth/me"),
-          apiFetch("/api/business-autopilot/role-access").catch(() => null),
-        ]);
-        if (!active) return;
-        setCrmUserDirectory(Array.isArray(usersData?.users) ? usersData.users : []);
-        setCrmDepartmentDirectory(Array.isArray(usersData?.departments) ? usersData.departments : []);
-        setCrmEmployeeRoleDirectory(Array.isArray(usersData?.employee_roles) ? usersData.employee_roles : []);
-        setCanManageCrmUsers(Boolean(usersData?.can_manage_users));
-        const name = String(
-          authData?.user?.first_name
-          || authData?.user?.username
-          || authData?.profile?.name
-          || "Current User"
-        ).trim();
-        setCurrentUserName(name || "Current User");
-        setCurrentUserId(String(authData?.user?.id || "").trim());
-        setCurrentUserEmail(String(authData?.user?.email || "").trim());
-        setCurrentUserRole(String(authData?.profile?.role || "").trim());
-        const normalizedEmail = String(authData?.user?.email || "").trim().toLowerCase();
-        const matchedDirectoryUser = (Array.isArray(usersData?.users) ? usersData.users : []).find(
-          (row) => String(row?.email || "").trim().toLowerCase() === normalizedEmail
-        );
-        setCurrentUserEmployeeRole(
-          String(
-            matchedDirectoryUser?.employee_role
-            || authData?.user?.employee_role
-            || ""
-          ).trim()
-        );
-        const nextRoleAccessMap = (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map))
-          ? roleAccessData.role_access_map
-          : readCrmRoleAccessMapFromStorage();
-        setCrmRoleAccessMap(nextRoleAccessMap);
-        window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
-        const scopedAuthData = {
-          ...authData,
-          organization_id: usersData?.organization_id || authData?.organization_id || "",
-        };
-        setCrmStorageKey(buildScopedCrmStorageKey(scopedAuthData));
-        setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(scopedAuthData));
-        await refreshCrmRowsFromBackend();
-        await refreshCrmMeetingsFromBackend();
-      } catch {
-        if (!active) return;
-        setCrmUserDirectory([]);
-        setCrmDepartmentDirectory([]);
-        setCrmEmployeeRoleDirectory([]);
-        setCanManageCrmUsers(false);
-        setCurrentUserName("Current User");
-        setCurrentUserId("");
-        setCurrentUserEmail("");
-        setCurrentUserRole("");
-        setCurrentUserEmployeeRole("");
-        setCrmRoleAccessMap(readCrmRoleAccessMapFromStorage());
-        setCrmStorageKey("");
-        setCrmSharedContactsKey("");
+      const authData = await apiFetch("/api/auth/me").catch(() => null);
+      if (!active) return;
+
+      const name = String(
+        authData?.user?.first_name
+        || authData?.user?.username
+        || authData?.profile?.name
+        || "Current User"
+      ).trim();
+      setCurrentUserName(name || "Current User");
+      setCurrentUserId(String(authData?.user?.id || "").trim());
+      setCurrentUserEmail(String(authData?.user?.email || "").trim());
+      setCurrentUserRole(String(authData?.profile?.role || authData?.user?.role || "").trim());
+
+      const [usersData, roleAccessData] = await Promise.all([
+        apiFetch("/api/business-autopilot/users").catch(() => null),
+        apiFetch("/api/business-autopilot/role-access").catch(() => null),
+      ]);
+      if (!active) return;
+
+      const directoryUsers = Array.isArray(usersData?.users) ? usersData.users : [];
+      setCrmUserDirectory(directoryUsers);
+      setCrmDepartmentDirectory(Array.isArray(usersData?.departments) ? usersData.departments : []);
+      setCrmEmployeeRoleDirectory(Array.isArray(usersData?.employee_roles) ? usersData.employee_roles : []);
+      setCanManageCrmUsers(Boolean(usersData?.can_manage_users));
+
+      const normalizedEmail = String(authData?.user?.email || "").trim().toLowerCase();
+      const matchedDirectoryUser = directoryUsers.find(
+        (row) => String(row?.email || "").trim().toLowerCase() === normalizedEmail
+      );
+      setCurrentUserEmployeeRole(
+        String(
+          matchedDirectoryUser?.employee_role
+          || authData?.user?.employee_role
+          || ""
+        ).trim()
+      );
+
+      const nextRoleAccessMap = (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map))
+        ? roleAccessData.role_access_map
+        : readCrmRoleAccessMapFromStorage();
+      setCrmRoleAccessMap(nextRoleAccessMap);
+      window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
+
+      const activeOrgId = String(usersData?.organization_id || authData?.organization_id || getOrganizationIdFromAuth(authData) || getActiveBusinessAutopilotOrgId() || "").trim();
+      if (activeOrgId) {
+        setActiveBusinessAutopilotOrgId(activeOrgId);
       }
+      setSharedCustomers(readSharedAccountsCustomers(buildScopedAccountsStorageKey(activeOrgId)));
+      setAccountsVendors(readSharedAccountsVendors(buildScopedAccountsStorageKey(activeOrgId)));
+      const scopedAuthData = {
+        ...authData,
+        organization_id: activeOrgId,
+      };
+      setCrmStorageKey(buildScopedCrmStorageKey(scopedAuthData));
+      setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(scopedAuthData));
+      await refreshCrmRowsFromBackend();
+      await refreshCrmMeetingsFromBackend();
     })();
     return () => {
       active = false;
@@ -14828,6 +14823,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setIsAccountsLoading(true);
       setAccountsSyncError("");
       try {
+        const usersData = await apiFetch("/api/business-autopilot/users").catch(() => null);
+        const activeOrgId = String(usersData?.organization_id || getActiveBusinessAutopilotOrgId() || "").trim();
+        if (activeOrgId) {
+          setActiveBusinessAutopilotOrgId(activeOrgId);
+        }
+        const accountsStorageKey = buildScopedAccountsStorageKey(activeOrgId);
         const res = await apiFetch("/api/business-autopilot/accounts/workspace");
         if (!active) {
           return;
@@ -14835,11 +14836,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         const backendData = res?.data;
         if (isValidAccountsData(backendData)) {
           setModuleData(backendData);
-          window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(backendData));
+          window.localStorage.setItem(accountsStorageKey, JSON.stringify(backendData));
           setAccountsSyncStatus("Synced from server");
         } else {
           try {
-            const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+            const raw = window.localStorage.getItem(accountsStorageKey);
             if (raw) {
               const parsed = JSON.parse(raw);
               if (isValidAccountsData(parsed)) {
@@ -14856,7 +14857,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           return;
         }
         try {
-          const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+          const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+          const raw = window.localStorage.getItem(accountsStorageKey);
           if (raw) {
             const parsed = JSON.parse(raw);
             if (isValidAccountsData(parsed)) {
@@ -14976,7 +14978,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(moduleData));
+    const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    window.localStorage.setItem(accountsStorageKey, JSON.stringify(moduleData));
     if (!hasLoadedWorkspaceRef.current) {
       return;
     }

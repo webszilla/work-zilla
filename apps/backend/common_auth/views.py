@@ -1,6 +1,6 @@
 import random
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.tokens import default_token_generator
@@ -32,6 +32,7 @@ from .signals import user_registration_success
 
 LOGIN_MAX_FAILED_ATTEMPTS = 4
 LOGIN_LOCK_SECONDS = 15 * 60
+LOGIN_LOCK_SESSION_KEY = "login_lock_until"
 
 
 @require_GET
@@ -108,13 +109,13 @@ def _is_login_locked(identifier: str, ip_address: str):
     state = cache.get(key) or {}
     locked_until = state.get("locked_until")
     if not locked_until:
-        return False, 0
+        return False, 0, None
     now = timezone.now()
     if locked_until <= now:
         cache.delete(key)
-        return False, 0
+        return False, 0, None
     remaining_seconds = int((locked_until - now).total_seconds())
-    return True, max(1, remaining_seconds)
+    return True, max(1, remaining_seconds), locked_until
 
 
 def _register_login_failure(identifier: str, ip_address: str):
@@ -135,6 +136,38 @@ def _register_login_failure(identifier: str, ip_address: str):
 
 def _clear_login_lock(identifier: str, ip_address: str):
     cache.delete(_login_attempt_cache_key(identifier, ip_address))
+
+
+def _set_session_login_lock_until(request, locked_until):
+    if not locked_until:
+        request.session.pop(LOGIN_LOCK_SESSION_KEY, None)
+        return
+    request.session[LOGIN_LOCK_SESSION_KEY] = locked_until.isoformat()
+    request.session.modified = True
+
+
+def _get_session_login_lock_remaining(request):
+    raw = str(request.session.get(LOGIN_LOCK_SESSION_KEY) or "").strip()
+    if not raw:
+        return 0
+    try:
+        locked_until = datetime.fromisoformat(raw)
+    except ValueError:
+        request.session.pop(LOGIN_LOCK_SESSION_KEY, None)
+        return 0
+    if timezone.is_naive(locked_until):
+        locked_until = timezone.make_aware(locked_until, timezone.get_current_timezone())
+    now = timezone.now()
+    if locked_until <= now:
+        request.session.pop(LOGIN_LOCK_SESSION_KEY, None)
+        return 0
+    return max(1, int((locked_until - now).total_seconds()))
+
+
+def _build_login_lock_error(remaining_seconds):
+    minutes = remaining_seconds // 60
+    seconds = remaining_seconds % 60
+    return f"Too many failed attempts. Try again in {minutes:02d}:{seconds:02d}."
 
 
 def _build_signup_captcha(request):
@@ -166,21 +199,21 @@ def login_view(request):
         if request.user.is_authenticated:
             return redirect("/my-account/")
         captcha_question = _build_login_captcha(request)
-        return render(request, "sites/login.html", {"next": next_url, "captcha_question": captcha_question})
+        lock_remaining_seconds = _get_session_login_lock_remaining(request)
+        context = {
+            "next": next_url,
+            "captcha_question": captcha_question,
+            "lock_remaining_seconds": lock_remaining_seconds,
+        }
+        if lock_remaining_seconds > 0:
+            context["error"] = _build_login_lock_error(lock_remaining_seconds)
+        return render(request, "sites/login.html", context)
 
     username_or_email = request.POST.get("username") or request.POST.get("email")
     password = request.POST.get("password")
     captcha_answer = str(request.POST.get("captcha_answer") or "").strip()
     expected_captcha = str(request.session.get("login_captcha_answer") or "").strip()
     client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get("REMOTE_ADDR", "")
-
-    if not expected_captcha or captcha_answer != expected_captcha:
-        captcha_question = _build_login_captcha(request)
-        return render(
-            request,
-            "sites/login.html",
-            {"next": next_url, "error": "Captcha answer is incorrect. Please try again.", "captcha_question": captcha_question},
-        )
 
     if not username_or_email or not password:
         captcha_question = _build_login_captcha(request)
@@ -189,18 +222,28 @@ def login_view(request):
             "sites/login.html",
             {"next": next_url, "error": "Username/Email and password are required", "captcha_question": captcha_question},
         )
-    is_locked, remaining_seconds = _is_login_locked(username_or_email, client_ip)
+
+    is_locked, remaining_seconds, locked_until = _is_login_locked(username_or_email, client_ip)
     if is_locked:
-        remaining_minutes = max(1, (remaining_seconds + 59) // 60)
+        _set_session_login_lock_until(request, locked_until)
         captcha_question = _build_login_captcha(request)
         return render(
             request,
             "sites/login.html",
             {
                 "next": next_url,
-                "error": f"Too many failed attempts. Please try again after {remaining_minutes} minutes.",
+                "error": _build_login_lock_error(remaining_seconds),
                 "captcha_question": captcha_question,
+                "lock_remaining_seconds": remaining_seconds,
             },
+        )
+
+    if not expected_captcha or captcha_answer != expected_captcha:
+        captcha_question = _build_login_captcha(request)
+        return render(
+            request,
+            "sites/login.html",
+            {"next": next_url, "error": "Captcha answer is incorrect. Please try again.", "captcha_question": captcha_question},
         )
     user = authenticate(request, username=username_or_email, password=password)
     if user is None:
@@ -213,17 +256,27 @@ def login_view(request):
     if user is None:
         just_locked = _register_login_failure(username_or_email, client_ip)
         if just_locked:
-            error_message = "Too many failed attempts. Please try again after 15 minutes."
+            locked_until = timezone.now() + timedelta(seconds=LOGIN_LOCK_SECONDS)
+            _set_session_login_lock_until(request, locked_until)
+            error_message = _build_login_lock_error(LOGIN_LOCK_SECONDS)
+            lock_remaining_seconds = LOGIN_LOCK_SECONDS
         else:
             error_message = "Username or password is incorrect. Please check and try again."
+            lock_remaining_seconds = _get_session_login_lock_remaining(request)
         captcha_question = _build_login_captcha(request)
         return render(
             request,
             "sites/login.html",
-            {"next": next_url, "error": error_message, "captcha_question": captcha_question},
+            {
+                "next": next_url,
+                "error": error_message,
+                "captcha_question": captcha_question,
+                "lock_remaining_seconds": lock_remaining_seconds,
+            },
         )
 
     _clear_login_lock(username_or_email, client_ip)
+    _set_session_login_lock_until(request, None)
     login(request, user)
     request.session.pop("login_captcha_answer", None)
     request.session.pop("login_captcha_question", None)

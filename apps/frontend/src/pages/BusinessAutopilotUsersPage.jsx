@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
-import { HrManagementModule } from "./BusinessAutopilotModulePage.jsx";
 import { clampBusinessAutopilotText, getBusinessAutopilotMaxLength } from "../lib/businessAutopilotFormRules.js";
+
+const HrManagementModule = lazy(() =>
+  import("./BusinessAutopilotModulePage.jsx").then((module) => ({ default: module.HrManagementModule }))
+);
 
 const defaultForm = {
   first_name: "",
@@ -17,6 +20,20 @@ const defaultForm = {
   role: "org_user",
   department_id: "",
   employee_role_id: ""
+};
+
+const defaultEmailCheckState = {
+  checking: false,
+  checkedEmail: "",
+  exists: false,
+  message: "",
+  status: "idle",
+  existingUser: false,
+  samePasswordAllowed: false,
+  passwordRequired: true,
+  alreadyBusinessAutopilotUser: false,
+  belongsToAnotherOrganization: false,
+  existingProducts: [],
 };
 
 const defaultEditForm = {
@@ -50,6 +67,8 @@ const DEFAULT_USER_META = {
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
+const ACCOUNTS_STORAGE_KEY_PREFIX = "wz_business_autopilot_accounts_module_scope";
+const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
@@ -313,31 +332,84 @@ function normalizeSharedCustomerRecord(row = {}) {
   };
 }
 
-function readSharedAccountsData() {
+function isLegacyDemoAccountCustomer(row = {}) {
+  const company = String(row.companyName || row.name || "").trim().toLowerCase();
+  const email = String(row.email || "").trim().toLowerCase();
+  return (
+    company === "ultra hd prints"
+    || email === "accounts@ultrahdprints.example"
+    || String(row.id || "").trim() === "cust_1"
+  );
+}
+
+function sanitizeAccountsWorkspaceData(data = { customers: [], vendors: [] }) {
+  const safeData = data && typeof data === "object" ? data : { customers: [], vendors: [] };
+  return {
+    ...safeData,
+    customers: (Array.isArray(safeData.customers) ? safeData.customers : []).filter((row) => !isLegacyDemoAccountCustomer(row)),
+    vendors: Array.isArray(safeData.vendors) ? safeData.vendors : [],
+  };
+}
+
+function setActiveBusinessAutopilotOrgId(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  if (!normalizedOrgId) {
+    return;
+  }
+  window.localStorage.setItem(BA_ACTIVE_ORG_STORAGE_KEY, normalizedOrgId);
+}
+
+function getActiveBusinessAutopilotOrgId() {
+  return String(window.localStorage.getItem(BA_ACTIVE_ORG_STORAGE_KEY) || "").trim();
+}
+
+function buildScopedAccountsStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${ACCOUNTS_STORAGE_KEY_PREFIX}__${normalizedOrgId}`
+    : ACCOUNTS_STORAGE_KEY;
+}
+
+function readLegacyAccountsData() {
   try {
     const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" ? parsed : { customers: [], vendors: [] };
+    return sanitizeAccountsWorkspaceData(parsed);
   } catch {
     return { customers: [], vendors: [] };
   }
 }
 
-function readSharedAccountsCustomers() {
-  return (readSharedAccountsData().customers || []).map((row) => normalizeSharedCustomerRecord(row));
+function readSharedAccountsData(storageKey = "") {
+  try {
+    const resolvedKey = String(storageKey || "").trim() || buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const raw = window.localStorage.getItem(resolvedKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return sanitizeAccountsWorkspaceData(parsed);
+    }
+    return resolvedKey === ACCOUNTS_STORAGE_KEY ? readLegacyAccountsData() : { customers: [], vendors: [] };
+  } catch {
+    return { customers: [], vendors: [] };
+  }
 }
 
-function readSharedAccountsVendors() {
-  return (readSharedAccountsData().vendors || []).map((row) => normalizeSharedCustomerRecord(row));
+function readSharedAccountsCustomers(storageKey = "") {
+  return (readSharedAccountsData(storageKey).customers || []).map((row) => normalizeSharedCustomerRecord(row));
+}
+
+function readSharedAccountsVendors(storageKey = "") {
+  return (readSharedAccountsData(storageKey).vendors || []).map((row) => normalizeSharedCustomerRecord(row));
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
-  const currentData = readSharedAccountsData();
+  const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+  const currentData = readSharedAccountsData(accountsStorageKey);
   const nextData = {
     ...currentData,
     customers: nextCustomers.map((row) => normalizeSharedCustomerRecord(row)),
   };
-  window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+  window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
   try {
     await apiFetch("/api/business-autopilot/accounts/workspace", {
       method: "PUT",
@@ -785,6 +857,7 @@ export default function BusinessAutopilotUsersPage() {
   const [clientPage, setClientPage] = useState(1);
   const [vendorSearch, setVendorSearch] = useState("");
   const [vendorPage, setVendorPage] = useState(1);
+  const [createEmailCheck, setCreateEmailCheck] = useState(defaultEmailCheckState);
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [crmContacts, setCrmContacts] = useState(() => readSharedCrmContacts());
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
@@ -811,11 +884,14 @@ export default function BusinessAutopilotUsersPage() {
     cancelText: "Cancel",
   });
   const actionDialogResolveRef = useRef(null);
+  const emailCheckDebounceRef = useRef(null);
+  const emailCheckRequestRef = useRef(0);
   const clientImportInputRef = useRef(null);
   const vendorImportInputRef = useRef(null);
   const userFormRef = useRef(null);
   const createPasswordInputRef = useRef(null);
   const pageSize = 5;
+  const isEditingUser = Boolean(editForm.membership_id);
 
   function closeActionDialog(result) {
     const resolver = actionDialogResolveRef.current;
@@ -863,6 +939,7 @@ export default function BusinessAutopilotUsersPage() {
   function applyUsersResponse(data, options = {}) {
     const nextUsers = Array.isArray(data?.users) ? data.users : [];
     const nextDeletedUsers = Array.isArray(data?.deleted_users) ? data.deleted_users : (options.preserveDeletedUsers ? deletedUsers : []);
+    const activeOrgId = String(data?.organization_id || "").trim();
     setUsers(nextUsers);
     setDeletedUsers(nextDeletedUsers);
     setUserMeta(normalizeUserMeta(data?.meta, nextUsers));
@@ -874,6 +951,11 @@ export default function BusinessAutopilotUsersPage() {
     writeSharedHrEmployees(syncedHrEmployees);
     if (typeof data?.can_manage_users === "boolean") {
       setCanManageUsers(Boolean(data.can_manage_users));
+    }
+    if (activeOrgId) {
+      setActiveBusinessAutopilotOrgId(activeOrgId);
+      setSharedCustomers(readSharedAccountsCustomers(buildScopedAccountsStorageKey(activeOrgId)));
+      setSharedVendors(readSharedAccountsVendors(buildScopedAccountsStorageKey(activeOrgId)));
     }
   }
 
@@ -933,6 +1015,88 @@ export default function BusinessAutopilotUsersPage() {
     }
   }
 
+  useEffect(() => {
+    if (isEditingUser) {
+      return;
+    }
+    const email = String(form.email || "").trim().toLowerCase();
+    if (emailCheckDebounceRef.current) {
+      window.clearTimeout(emailCheckDebounceRef.current);
+    }
+    if (!email) {
+      setCreateEmailCheck(defaultEmailCheckState);
+      return;
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setCreateEmailCheck({
+        ...defaultEmailCheckState,
+        checkedEmail: email,
+        status: "error",
+        message: "Enter a valid email.",
+      });
+      return;
+    }
+    setCreateEmailCheck((prev) => ({
+      ...prev,
+      checking: true,
+      checkedEmail: email,
+      status: "neutral",
+      message: "Checking email availability...",
+    }));
+    emailCheckDebounceRef.current = window.setTimeout(async () => {
+      const requestId = emailCheckRequestRef.current + 1;
+      emailCheckRequestRef.current = requestId;
+      try {
+        const payload = await apiFetch(`/api/business-autopilot/users/check-email?email=${encodeURIComponent(email)}`);
+        if (emailCheckRequestRef.current !== requestId) {
+          return;
+        }
+        setCreateEmailCheck({
+          checking: false,
+          checkedEmail: email,
+          exists: !payload?.available,
+          message: String(payload?.message || "Email is available."),
+          status: payload?.available ? "success" : "warning",
+          existingUser: Boolean(payload?.existing_user),
+          samePasswordAllowed: Boolean(payload?.same_password_allowed),
+          passwordRequired: Boolean(payload?.password_required),
+          alreadyBusinessAutopilotUser: Boolean(payload?.already_assigned_to_business_autopilot),
+          belongsToAnotherOrganization: Boolean(payload?.belongs_to_another_organization),
+          existingProducts: Array.isArray(payload?.existing_products) ? payload.existing_products : [],
+        });
+        if (payload?.existing_user && payload?.same_password_allowed) {
+          setForm((prev) => ({ ...prev, password: "" }));
+        }
+      } catch (error) {
+        if (emailCheckRequestRef.current !== requestId) {
+          return;
+        }
+        const payload = error?.data || {};
+        setCreateEmailCheck({
+          checking: false,
+          checkedEmail: email,
+          exists: true,
+          message: String(payload?.message || error?.message || "Unable to validate email right now."),
+          status: "error",
+          existingUser: Boolean(payload?.existing_user),
+          samePasswordAllowed: Boolean(payload?.same_password_allowed),
+          passwordRequired: !Boolean(payload?.existing_user && payload?.same_password_allowed),
+          alreadyBusinessAutopilotUser: Boolean(payload?.already_assigned_to_business_autopilot),
+          belongsToAnotherOrganization: Boolean(payload?.belongs_to_another_organization),
+          existingProducts: Array.isArray(payload?.existing_products) ? payload.existing_products : [],
+        });
+        if (payload?.existing_user && payload?.same_password_allowed) {
+          setForm((prev) => ({ ...prev, password: "" }));
+        }
+      }
+    }, 350);
+    return () => {
+      if (emailCheckDebounceRef.current) {
+        window.clearTimeout(emailCheckDebounceRef.current);
+      }
+    };
+  }, [form.email, isEditingUser]);
+
   function openEdit(user) {
     const matchedRole = employeeRoles.find((role) => role.name === (user.employee_role || ""));
     const matchedDepartment = departments.find((department) => department.name === (user.department || ""));
@@ -971,11 +1135,14 @@ export default function BusinessAutopilotUsersPage() {
     }
     if (!String(editForm.phone_number_input || "").trim()) {
       setNotice("Phone number is required.");
+      await openAlertDialog("Phone number is required to update this user.", { title: "Update Failed" });
       return;
     }
     setSavingEdit(true);
     setNotice("");
     try {
+      const targetMembershipId = String(editForm.membership_id || "");
+      const requestedEmail = String(editForm.email || "").trim().toLowerCase();
       const data = await apiFetch(`/api/business-autopilot/users/${editForm.membership_id}`, {
         method: "PUT",
         body: JSON.stringify({
@@ -991,13 +1158,29 @@ export default function BusinessAutopilotUsersPage() {
         })
       });
       applyUsersResponse(data, { preserveDeletedUsers: true });
-      setNotice("User updated successfully.");
+      const savedUser = Array.isArray(data?.users)
+        ? data.users.find((user) => String(user?.membership_id || "") === targetMembershipId)
+        : null;
+      const savedEmail = String(savedUser?.email || "").trim().toLowerCase();
+      if (savedEmail && requestedEmail && savedEmail !== requestedEmail) {
+        const mismatchMessage = `Update response mismatch. Requested email: ${requestedEmail}, but saved email is ${savedEmail}.`;
+        setNotice(mismatchMessage);
+        await openAlertDialog(mismatchMessage, { title: "Update Check" });
+      } else {
+        setNotice("User updated successfully.");
+        await openAlertDialog(
+          `User updated successfully.${savedEmail ? `\nSaved login email: ${savedEmail}` : ""}`,
+          { title: "Updated" }
+        );
+      }
       cancelEdit();
     } catch (error) {
       if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
         await showAddonRequiredPopup(error?.data?.message);
       } else {
-        setNotice(error?.message || "Unable to update user.");
+        const message = error?.message || "Unable to update user.";
+        setNotice(message);
+        await openAlertDialog(message, { title: "Update Failed" });
       }
     } finally {
       setSavingEdit(false);
@@ -1306,10 +1489,26 @@ export default function BusinessAutopilotUsersPage() {
       setNotice("Phone number is required.");
       return;
     }
+    if (createEmailCheck.checking) {
+      setNotice("Email availability is still checking. Please wait.");
+      return;
+    }
+    if (createEmailCheck.alreadyBusinessAutopilotUser) {
+      setNotice(createEmailCheck.message || "This user is already created in Business Autopilot.");
+      return;
+    }
+    if (createEmailCheck.belongsToAnotherOrganization) {
+      setNotice(createEmailCheck.message || "This email is already assigned to another organization.");
+      return;
+    }
+    if (!createEmailCheck.passwordRequired) {
+      setForm((prev) => ({ ...prev, password: "" }));
+    }
     const basePayload = {
       ...form,
       name: buildDisplayName(form.first_name, form.last_name),
       phone_number: buildCombinedPhoneValue(form.phone_country_code, form.phone_number_input),
+      confirm_existing_user: Boolean(createEmailCheck.existingUser && createEmailCheck.samePasswordAllowed),
     };
     setSaving(true);
     setNotice("");
@@ -1348,6 +1547,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       applyUsersResponse(data, { preserveDeletedUsers: true });
       setForm(defaultForm);
+      setCreateEmailCheck(defaultEmailCheckState);
       const createdCredentials = data?.created_user_credentials || null;
       const credentialDelivery = data?.credential_delivery || {};
       if (createdCredentials?.email && createdCredentials?.password) {
@@ -1790,8 +1990,15 @@ export default function BusinessAutopilotUsersPage() {
     });
     return Array.from(unique.values());
   }, [employeeRoles]);
-  const isEditingUser = Boolean(editForm.membership_id);
   const createUserFormDisabled = !isEditingUser && !userMeta.can_add_users;
+  const shouldDisableCreatePassword = !isEditingUser && createEmailCheck.existingUser && createEmailCheck.samePasswordAllowed;
+  const createEmailStatusClass = createEmailCheck.status === "error"
+    ? "text-danger"
+    : createEmailCheck.status === "success"
+      ? "text-success"
+      : createEmailCheck.status === "warning"
+        ? "text-warning"
+        : "text-secondary";
   const availableUsersLabel = userMeta.has_unlimited_users
     ? "Unlimited"
     : `${Math.max(0, Number(userMeta.employee_limit) || 0)} (Base ${Math.max(0, Number(userMeta.base_included_users) || 0)} + Extra ${Math.max(0, Number(userMeta.extra_included_users) || 0)})`;
@@ -1830,7 +2037,7 @@ export default function BusinessAutopilotUsersPage() {
     if (!input) {
       return;
     }
-    if (isEditingUser || !String(form.password || "").trim()) {
+    if (isEditingUser || shouldDisableCreatePassword || !String(form.password || "").trim()) {
       input.setCustomValidity("");
       return;
     }
@@ -1839,7 +2046,7 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     input.setCustomValidity("");
-  }, [createPasswordStrength.score, form.password, isEditingUser]);
+  }, [createPasswordStrength.score, form.password, isEditingUser, shouldDisableCreatePassword]);
 
   useEffect(() => {
     const refreshCrmContacts = () => setCrmContacts(readSharedCrmContacts());
@@ -2447,13 +2654,14 @@ export default function BusinessAutopilotUsersPage() {
     const nextVendors = editingVendorId
       ? sharedVendors.map((row) => (row.id === editingVendorId ? { ...row, ...payload } : row))
       : [payload, ...sharedVendors];
-    const currentData = readSharedAccountsData();
+    const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const currentData = readSharedAccountsData(accountsStorageKey);
     const nextData = {
       ...currentData,
       vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
     };
     setSharedVendors(nextVendors);
-    window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+    window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
     try {
       await apiFetch("/api/business-autopilot/accounts/workspace", {
         method: "PUT",
@@ -2482,13 +2690,14 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     const nextVendors = sharedVendors.filter((row) => String(row.id) !== String(vendorId));
-    const currentData = readSharedAccountsData();
+    const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const currentData = readSharedAccountsData(accountsStorageKey);
     const nextData = {
       ...currentData,
       vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
     };
     setSharedVendors(nextVendors);
-    window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+    window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
     try {
       await apiFetch("/api/business-autopilot/accounts/workspace", {
         method: "PUT",
@@ -2701,13 +2910,14 @@ export default function BusinessAutopilotUsersPage() {
         return;
       }
       const nextVendors = [...nextRows, ...sharedVendors];
-      const currentData = readSharedAccountsData();
+      const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+      const currentData = readSharedAccountsData(accountsStorageKey);
       const nextData = {
         ...currentData,
         vendors: nextVendors.map((row) => normalizeSharedCustomerRecord(row)),
       };
       setSharedVendors(nextVendors);
-      window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(nextData));
+      window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
       try {
         await apiFetch("/api/business-autopilot/accounts/workspace", {
           method: "PUT",
@@ -2783,7 +2993,15 @@ export default function BusinessAutopilotUsersPage() {
           <div className="text-secondary">You do not have access to this section.</div>
         </div>
       ) : activeTopTab === "create-employee" ? (
-        <HrManagementModule embeddedEmployeeOnly />
+        <Suspense
+          fallback={(
+            <div className="card p-3">
+              <div className="text-secondary">Loading HR module...</div>
+            </div>
+          )}
+        >
+          <HrManagementModule embeddedEmployeeOnly />
+        </Suspense>
       ) : activeTopTab === "users" ? (
         <>
           {canManageUsersTab ? (
@@ -3048,6 +3266,12 @@ export default function BusinessAutopilotUsersPage() {
                         }}
                         required
                       />
+                      {!isEditingUser && createEmailCheck.message ? (
+                        <small className={`d-block mt-2 ${createEmailStatusClass}`}>
+                          {createEmailCheck.message}
+                          {createEmailCheck.existingProducts?.length ? ` Existing products: ${formatExistingProductList(createEmailCheck.existingProducts)}.` : ""}
+                        </small>
+                      ) : null}
                     </div>
                     <div className="col-12 col-md-6 col-xl-2">
                       <select
@@ -3123,7 +3347,7 @@ export default function BusinessAutopilotUsersPage() {
                         type="password"
                         ref={createPasswordInputRef}
                         className="form-control"
-                        placeholder="Password"
+                        placeholder={shouldDisableCreatePassword ? "Existing password will continue" : "Password"}
                         value={isEditingUser ? editForm.password : form.password}
                         maxLength={getBusinessAutopilotMaxLength("password")}
                         onChange={(event) => {
@@ -3135,7 +3359,8 @@ export default function BusinessAutopilotUsersPage() {
                           setForm((prev) => ({ ...prev, password: value }));
                         }}
                         minLength={6}
-                        required={!isEditingUser}
+                        required={!isEditingUser && !shouldDisableCreatePassword}
+                        disabled={!isEditingUser && shouldDisableCreatePassword}
                       />
                       {!isEditingUser ? (
                         <div className="mt-2">
@@ -3154,12 +3379,14 @@ export default function BusinessAutopilotUsersPage() {
                                 height: "100%",
                                 width: `${createPasswordStrength.width}%`,
                                 background: createPasswordStrength.color,
-                                transition: "width 140ms ease, background-color 140ms ease",
-                              }}
-                            />
+                              transition: "width 140ms ease, background-color 140ms ease",
+                            }}
+                          />
                           </div>
                           <small className="text-secondary">
-                            Password strength: {createPasswordStrength.label}
+                            {shouldDisableCreatePassword
+                              ? "This user already exists in another product. Their existing password will continue to work."
+                              : `Password strength: ${createPasswordStrength.label}`}
                           </small>
                         </div>
                       ) : null}
@@ -3169,7 +3396,13 @@ export default function BusinessAutopilotUsersPage() {
                         <button
                           type="submit"
                           className="btn btn-primary flex-fill"
-                          disabled={createUserFormDisabled || (isEditingUser ? savingEdit : saving)}
+                          disabled={
+                            createUserFormDisabled
+                            || (isEditingUser ? savingEdit : saving)
+                            || (!isEditingUser && createEmailCheck.checking)
+                            || (!isEditingUser && createEmailCheck.alreadyBusinessAutopilotUser)
+                            || (!isEditingUser && createEmailCheck.belongsToAnotherOrganization)
+                          }
                           title={isEditingUser ? "Update User" : "Create User"}
                         >
                           {isEditingUser ? (savingEdit ? "Updating..." : "Update") : (saving ? "Creating..." : "Create")}

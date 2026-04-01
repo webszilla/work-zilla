@@ -110,7 +110,6 @@ class BusinessAutopilotUserAccessTests(TestCase):
                 "first_name": "Pradeep",
                 "last_name": "PR",
                 "email": "pr@gmail.com",
-                "password": "newpass456",
                 "role": "org_user",
                 "confirm_existing_user": True,
             },
@@ -130,6 +129,35 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertTrue(
             OrganizationUser.objects.filter(organization=self.org, user=existing_user).exists()
         )
+
+    def test_user_email_check_returns_existing_product_context(self):
+        existing_user = User.objects.create_user(
+            username="context@gmail.com",
+            email="context@gmail.com",
+            password="samepass123",
+        )
+        UserProfile.objects.create(
+            user=existing_user,
+            organization=self.org,
+            role="org_user",
+        )
+        UserProductAccess.objects.create(
+            user=existing_user,
+            product=self.wa_product,
+            permission=UserProductAccess.PERMISSION_VIEW,
+            granted_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/business-autopilot/users/check-email?email=context@gmail.com")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["available"])
+        self.assertTrue(payload["existing_user"])
+        self.assertTrue(payload["same_password_allowed"])
+        self.assertFalse(payload["password_required"])
+        self.assertEqual(payload["existing_products"][0]["slug"], "whatsapp-automation")
 
     def test_deleting_business_autopilot_user_only_revokes_that_product_access(self):
         product_user = User.objects.create_user(

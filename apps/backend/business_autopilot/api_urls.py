@@ -17,6 +17,7 @@ urlpatterns = [
     path("sales-orders/<int:order_id>", api_views.crm_sales_orders, name="business_autopilot_crm_sales_order_detail"),
     path("modules", api_views.org_enabled_modules, name="business_autopilot_modules"),
     path("users", api_views.org_users, name="business_autopilot_users"),
+    path("users/check-email", api_views.org_user_email_check, name="business_autopilot_user_email_check"),
     path("users/<int:membership_id>", api_views.org_user_detail, name="business_autopilot_user_detail"),
     path("users/<int:membership_id>/toggle-status", api_views.org_user_toggle_status, name="business_autopilot_user_toggle_status"),
     path("users/<int:membership_id>/verify-email", api_views.org_user_verify_email, name="business_autopilot_user_verify_email"),

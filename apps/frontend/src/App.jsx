@@ -63,7 +63,6 @@ import StorageUsersPage from "./pages/StorageUsersPage.jsx";
 import StorageDashboardPage from "./pages/StorageDashboardPage.jsx";
 import ImpositionProductDashboardPage from "./pages/ImpositionProductDashboardPage.jsx";
 import ImpositionProductUsersPage from "./pages/ImpositionProductUsersPage.jsx";
-import BusinessAutopilotUsersPage from "./pages/BusinessAutopilotUsersPage.jsx";
 import AiChatbotInboxPage from "./pages/AiChatbotInboxPage.jsx";
 import AiChatbotWidgetsPage from "./pages/AiChatbotWidgetsPage.jsx";
 import AiChatbotLeadsPage from "./pages/AiChatbotLeadsPage.jsx";
@@ -92,6 +91,7 @@ import { apiFetch } from "./lib/api.js";
 
 const BusinessAutopilotDashboardPage = lazy(() => import("./pages/BusinessAutopilotDashboardPage.jsx"));
 const BusinessAutopilotModulePage = lazy(() => import("./pages/BusinessAutopilotModulePage.jsx"));
+const BusinessAutopilotUsersPage = lazy(() => import("./pages/BusinessAutopilotUsersPage.jsx"));
 
 const emptyState = {
   loading: true,
@@ -1625,7 +1625,11 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <StorageUsersPage />
                 : productSlug === "imposition-software"
                 ? <ImpositionProductUsersPage />
-                : <BusinessAutopilotUsersPage />,
+                : (
+                  <Suspense fallback={<div className="card p-3">Loading users...</div>}>
+                    <BusinessAutopilotUsersPage />
+                  </Suspense>
+                ),
               {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:

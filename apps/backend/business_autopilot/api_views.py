@@ -1636,11 +1636,13 @@ def org_users(request):
             if not selected_role:
                 return JsonResponse({"detail": "employee_role_not_found"}, status=404)
             employee_role = selected_role.name
-        if not name or not email or not password:
-            return JsonResponse({"detail": "name_email_password_required"}, status=400)
-        if len(password) < 6:
-            return JsonResponse({"detail": "password_too_short"}, status=400)
         existing_user = User.objects.filter(email__iexact=email).first()
+        if not name or not email:
+            return JsonResponse({"detail": "name_email_required"}, status=400)
+        if not existing_user and not password:
+            return JsonResponse({"detail": "password_required"}, status=400)
+        if password and len(password) < 6:
+            return JsonResponse({"detail": "password_too_short"}, status=400)
 
         newly_created_user = False
         plain_password_for_share = ""
@@ -1762,6 +1764,85 @@ def org_users(request):
         "company_key": org.company_key,
     }
     return JsonResponse(payload)
+
+
+@require_http_methods(["GET"])
+def org_user_email_check(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+
+    org = _resolve_org(request.user)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "available": False}, status=404)
+
+    can_manage_users = _can_manage_users(request.user, org)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    email = str(request.GET.get("email") or "").strip().lower()
+    if not email:
+        return JsonResponse({"ok": False, "available": False, "message": "Email is required."}, status=400)
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return JsonResponse({"ok": False, "available": False, "message": "Enter a valid email."}, status=400)
+
+    existing_user = User.objects.filter(email__iexact=email).first()
+    if not existing_user:
+        return JsonResponse(
+            {
+                "ok": True,
+                "available": True,
+                "existing_user": False,
+                "same_password_allowed": False,
+                "password_required": True,
+                "message": "Email is available.",
+            }
+        )
+
+    existing_profile = UserProfile.objects.filter(user=existing_user).first()
+    if existing_profile and existing_profile.organization_id and existing_profile.organization_id != org.id:
+        return JsonResponse(
+            {
+                "ok": True,
+                "available": False,
+                "existing_user": True,
+                "same_password_allowed": False,
+                "password_required": False,
+                "belongs_to_another_organization": True,
+                "message": "This email is already assigned to another organization.",
+            },
+            status=409,
+        )
+
+    existing_products = _get_user_granted_products(existing_user)
+    already_has_business_autopilot = any(
+        product["slug"] == BUSINESS_AUTOPILOT_PRODUCT_SLUG for product in existing_products
+    )
+    if already_has_business_autopilot:
+        return JsonResponse(
+            {
+                "ok": True,
+                "available": False,
+                "existing_user": True,
+                "same_password_allowed": True,
+                "password_required": False,
+                "already_assigned_to_business_autopilot": True,
+                "existing_products": existing_products,
+                "message": "This user is already created in Business Autopilot.",
+            },
+            status=409,
+        )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "available": False,
+            "existing_user": True,
+            "same_password_allowed": True,
+            "password_required": False,
+            "existing_products": existing_products,
+            "message": "This user is already created in another product. The same password will continue to work.",
+        }
+    )
 
 
 @require_http_methods(["PUT", "DELETE", "POST"])
