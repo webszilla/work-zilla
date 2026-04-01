@@ -1441,6 +1441,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       cancelEditEmployeeRole();
       setNotice("Employee role updated.");
+      await openAlertDialog("Employee role updated successfully.", { title: "Updated" });
     } catch (error) {
       const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
       if (error?.status === 403) {
@@ -1518,6 +1519,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       cancelEditDepartment();
       setNotice("Department updated.");
+      await openAlertDialog("Department updated successfully.", { title: "Updated" });
     } catch (error) {
       const detail = String(error?.data?.detail || error?.message || "").trim().toLowerCase();
       if (error?.status === 403) {

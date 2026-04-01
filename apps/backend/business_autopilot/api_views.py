@@ -243,14 +243,15 @@ def _can_manage_users(user: User, org: Organization = None):
         return False
     if user.is_superuser or user.is_staff:
         return True
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    profile_role = str(getattr(profile, "role", "") or "").strip().lower()
+    if profile_role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+        return True
     if org:
         membership = _get_org_membership(user, org)
         if membership:
             return str(membership.role or "").strip().lower() == "company_admin"
-    profile = UserProfile.objects.filter(user=user).only("role").first()
-    if not profile:
-        return False
-    return profile.role in {"company_admin", "org_admin", "superadmin", "super_admin"}
+    return False
 
 
 def _can_manage_openai(user: User, org: Organization = None):
