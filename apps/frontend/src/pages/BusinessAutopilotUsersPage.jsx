@@ -1745,7 +1745,7 @@ export default function BusinessAutopilotUsersPage() {
   }, [currentUserEmail, users]);
 
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
-  const normalizedCurrentProfileRole = String(currentProfileRole || "").trim().toLowerCase();
+  const normalizedCurrentProfileRole = normalizeRoleToken(currentProfileRole);
   const normalizedCurrentMembershipRole = normalizeRoleToken(currentUserMembershipRole);
   const hasResolvedMembershipRole = Boolean(normalizedCurrentMembershipRole);
   const isOrgAdminUser = canManageUsers
@@ -1791,6 +1791,10 @@ export default function BusinessAutopilotUsersPage() {
       setActiveTopTab(allowedTabs[0]);
     }
   }, [activeTopTab, canManageUsersTab, canViewClientVendorTabs, canViewEmployeeTab]);
+
+  useEffect(() => {
+    setNotice("");
+  }, [activeTopTab, userListTab]);
   const billingStateOptions = getStateOptionsForCountry(String(clientForm.billingCountry || "India"));
   const shippingStateOptions = getStateOptionsForCountry(String(clientForm.shippingCountry || "India"));
   const vendorBillingStateOptions = getStateOptionsForCountry(String(vendorForm.billingCountry || "India"));

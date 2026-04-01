@@ -227,6 +227,26 @@ def _resolve_org(user: User):
     return Organization.objects.filter(owner=user).first()
 
 
+def _normalize_admin_role(value):
+    raw_value = str(value or "").strip().lower()
+    compact_value = re.sub(r"[^a-z0-9]+", "", raw_value)
+    alias_map = {
+        "companyadmin": "company_admin",
+        "orgadmin": "org_admin",
+        "organizationadmin": "org_admin",
+        "companyowner": "owner",
+        "orgowner": "owner",
+        "superadmin": "superadmin",
+        "superuser": "superadmin",
+        "admin": "company_admin",
+        "owner": "owner",
+    }
+    normalized = alias_map.get(compact_value)
+    if normalized:
+        return normalized
+    return raw_value.replace("-", "_").replace(" ", "_")
+
+
 def _can_manage_modules(user: User):
     if not user or not user.is_authenticated:
         return False
@@ -239,9 +259,6 @@ def _can_manage_modules(user: User):
 
 
 def _can_manage_users(user: User, org: Organization = None):
-    def _normalize_admin_role(value):
-        return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-
     if not user or not user.is_authenticated:
         return False
     if user.is_superuser or user.is_staff:

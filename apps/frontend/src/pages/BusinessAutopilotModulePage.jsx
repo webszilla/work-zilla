@@ -5395,6 +5395,9 @@ function CrmOnePageModule() {
 
   useEffect(() => {
     setDeletedViewSection("");
+    setCrmActionPopup({ open: false, title: "", message: "" });
+    setDealQuickEditPopup(null);
+    setTeamMembersPopup(null);
   }, [activeSection]);
 
   useEffect(() => {
