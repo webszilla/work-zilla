@@ -91,7 +91,15 @@ ROLE_ACCESS_SECTION_KEYS = {
     "plans",
     "profile",
 }
-ROLE_ACCESS_LEVELS = {"No Access", "View", "Create/Edit", "Full Access"}
+ROLE_ACCESS_LEVELS = {"No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"}
+ROLE_ACCESS_LEVEL_ALIASES = {
+    "No Access": "No Access",
+    "View": "View",
+    "Create/Edit": "View and Edit",
+    "View and Edit": "View and Edit",
+    "Create, View and Edit": "Create, View and Edit",
+    "Full Access": "Full Access",
+}
 logger = logging.getLogger(__name__)
 
 TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
@@ -230,11 +238,15 @@ def _can_manage_modules(user: User):
     return profile.role in {"company_admin", "org_user", "superadmin", "super_admin"}
 
 
-def _can_manage_users(user: User):
+def _can_manage_users(user: User, org: Organization = None):
     if not user or not user.is_authenticated:
         return False
     if user.is_superuser or user.is_staff:
         return True
+    if org:
+        membership = _get_org_membership(user, org)
+        if membership:
+            return str(membership.role or "").strip().lower() == "company_admin"
     profile = UserProfile.objects.filter(user=user).only("role").first()
     if not profile:
         return False
@@ -273,7 +285,7 @@ def _normalize_role_access_map(payload):
         normalized_sections = {}
         for section_key in ROLE_ACCESS_SECTION_KEYS:
             raw_level = str(sections.get(section_key) or "No Access").strip()
-            normalized_sections[section_key] = raw_level if raw_level in ROLE_ACCESS_LEVELS else "No Access"
+            normalized_sections[section_key] = ROLE_ACCESS_LEVEL_ALIASES.get(raw_level, "No Access")
         normalized[key] = {
             "sections": normalized_sections,
             "can_export": bool(record.get("can_export")),
@@ -1450,7 +1462,7 @@ def org_enabled_modules(request):
             "enabled_modules": enabled_modules,
             "catalog": modules,
             "can_manage_modules": can_manage,
-            "can_manage_users": _can_manage_users(request.user),
+            "can_manage_users": _can_manage_users(request.user, org),
         }
     )
 
@@ -1464,7 +1476,7 @@ def org_users(request):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
 
     created_user_credentials = None
     credential_delivery = {
@@ -1673,7 +1685,7 @@ def org_user_detail(request, membership_id: int):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
@@ -1837,7 +1849,7 @@ def org_user_toggle_status(request, membership_id: int):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
@@ -1907,7 +1919,7 @@ def org_user_resend_credentials(request, membership_id: int):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": []})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
@@ -1963,7 +1975,7 @@ def org_user_verify_email(request, membership_id: int):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
@@ -2012,7 +2024,7 @@ def org_role_access(request):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "role_access_map": {}})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
 
     if request.method == "POST":
@@ -2054,7 +2066,7 @@ def org_employee_roles(request):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "employee_roles": []})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
 
     if request.method == "POST":
         if not can_manage_users:
@@ -2124,7 +2136,7 @@ def org_employee_role_detail(request, role_id: int):
     org = _resolve_org(request.user)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
-    if not _can_manage_users(request.user):
+    if not _can_manage_users(request.user, org):
         return JsonResponse({"detail": "forbidden"}, status=403)
 
     role = OrganizationEmployeeRole.objects.filter(
@@ -2173,7 +2185,7 @@ def org_employee_role_detail(request, role_id: int):
             "authenticated": True,
             "employee_roles": _serialize_employee_roles(org),
             "departments": _serialize_departments(org),
-            "can_manage_users": _can_manage_users(request.user),
+            "can_manage_users": _can_manage_users(request.user, org),
         }
     )
 
@@ -2187,7 +2199,7 @@ def org_departments(request):
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "departments": []})
 
-    can_manage_users = _can_manage_users(request.user)
+    can_manage_users = _can_manage_users(request.user, org)
 
     if request.method == "POST":
         if not can_manage_users:
@@ -2256,7 +2268,7 @@ def org_department_detail(request, department_id: int):
     org = _resolve_org(request.user)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
-    if not _can_manage_users(request.user):
+    if not _can_manage_users(request.user, org):
         return JsonResponse({"detail": "forbidden"}, status=403)
 
     department = OrganizationDepartment.objects.filter(
@@ -2305,7 +2317,7 @@ def org_department_detail(request, department_id: int):
             "authenticated": True,
             "departments": _serialize_departments(org),
             "employee_roles": _serialize_employee_roles(org),
-            "can_manage_users": _can_manage_users(request.user),
+            "can_manage_users": _can_manage_users(request.user, org),
         }
     )
 
@@ -3540,6 +3552,7 @@ def _serialize_crm_lead(row: CrmLead):
         "is_deleted": bool(row.is_deleted),
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
+        "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -3562,6 +3575,7 @@ def _serialize_crm_deal(row: CrmDeal):
         "is_deleted": bool(row.is_deleted),
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
+        "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -3583,8 +3597,11 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         "total_amount": float(row.total_amount or 0),
         "status": row.status,
         "assigned_user_id": row.assigned_user_id,
+        "assigned_user_name": _get_org_user_display_name(row.assigned_user) if row.assigned_user_id else "",
         "is_deleted": bool(row.is_deleted),
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "created_by_id": row.created_by_id,
+        "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -3795,10 +3812,10 @@ def crm_deals(request, deal_id: int = None):
 
     if request.method == "GET" and not deal_id:
         rows = [
-            row
-            for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead").order_by("-created_at")
-            if _crm_can_access_row(request.user, org, row)
-        ]
+        row
+        for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead", "created_by").order_by("-created_at")
+        if _crm_can_access_row(request.user, org, row)
+    ]
         pipeline_value = sum((_crm_to_decimal(row.deal_value) for row in rows if not row.is_deleted), Decimal("0"))
         return JsonResponse({"deals": [_serialize_crm_deal(row) for row in rows], "pipeline_value": float(pipeline_value)})
 
@@ -3996,7 +4013,7 @@ def crm_sales_orders(request, order_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     if request.method == "GET" and not order_id:
-        rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal").order_by("-created_at")
+        rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "created_by").order_by("-created_at")
         visible_rows = [row for row in rows if _crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id]
         return JsonResponse({"sales_orders": [_serialize_crm_sales_order(row) for row in visible_rows]})
 

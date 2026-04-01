@@ -72,9 +72,19 @@ PRODUCTION DB RUNTIME NOTES (2026-03-30)
   - `DB_USER=webszilla_admin2026`
   - `DB_HOST=127.0.0.1`
   - `DB_PORT=5432`
+- Canonical production `.env` DB block (must remain aligned):
+  - `DB_ENGINE=postgresql`
+  - `DB_NAME=webszilla_db`
+  - `DB_USER=webszilla_admin2026`
+  - `DB_HOST=127.0.0.1`
+  - `DB_PORT=5432`
 - If `apps/backend/.env` contains old values (`webszilla_saas` / `webszilla_saas_admin`), migrations fail with auth errors.
 - Validate DB auth before migrate:
+  - `set -a && source apps/backend/.env && set +a`
   - `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
+- If auth check fails:
+  - First correct `apps/backend/.env` DB_NAME/DB_USER to canonical production values above.
+  - Then rerun auth check and only after success run `migrate`.
 - If password mismatch, reset role password (no data move):
   - `sudo -u postgres psql -d postgres -c "ALTER ROLE <db_user> WITH PASSWORD '<new_password>';"`
 
@@ -102,6 +112,11 @@ DB-RELATED TASK EXECUTION STANDARD (MANDATORY)
 - If Git pull is unavailable on server:
   - Use rsync code deploy fallback with DB excludes.
   - Still run live migration + collectstatic + restart in same execution.
+  - Mandatory order after rsync fallback:
+    1) DB auth check from `.env`
+    2) `venv/bin/python apps/backend/manage.py migrate --skip-checks`
+    3) `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
+    4) gunicorn restart
 - Completion rule:
   - A DB-related task is considered incomplete unless:
     - GitHub updated

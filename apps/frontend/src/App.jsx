@@ -360,7 +360,7 @@ const reactPages = [
   { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "storage" },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "storage", adminOnly: true },
   { label: "Users", path: "/users", icon: "bi-people", productOnly: "imposition-software", adminOnly: true },
-  { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp", adminOnly: true },
+  { label: "Users", path: "/users", icon: "bi-people", productOnly: "business-autopilot-erp" },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2" },
   { label: "Dashboard", path: "/", icon: "bi-speedometer2", productOnly: "digital-automation" },
   { label: "Inbox & Ticket", path: "/notifications-inbox", icon: "bi-inbox", productOnly: "worksuite" },
@@ -464,6 +464,11 @@ function AppShell({ state, productPrefix, productSlug }) {
     state.profile?.role === "org_admin" ||
     isSuperuser ||
     isHrView;
+  const businessAutopilotIsAdmin =
+    isSuperuser ||
+    state.profile?.role === "superadmin" ||
+    state.profile?.role === "super_admin" ||
+    autopilotCanManageUsers;
   const isDealer = state.profile?.role === "dealer";
   const isAiChatbotAgent = state.profile?.role === "ai_chatbot_agent";
   const aiChatbotTrial = (state.subscriptions || []).find(
@@ -764,7 +769,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   }, [isBusinessAutopilot]);
 
   useEffect(() => {
-    if (!isBusinessAutopilot || isAdmin) {
+    if (!isBusinessAutopilot || businessAutopilotIsAdmin) {
       setAutopilotAccessRecord(null);
       setAutopilotAccessResolved(true);
       return () => {};
@@ -830,7 +835,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       window.removeEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
       window.removeEventListener("wz:business-autopilot-user-directory-changed", refreshAccess);
     };
-  }, [isAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username, state.user?.employee_role]);
+  }, [businessAutopilotIsAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username, state.user?.employee_role]);
 
   const autopilotCurrentSectionKey = useMemo(
     () => getBusinessAutopilotSectionKey(normalizedPathname),
@@ -901,11 +906,11 @@ function AppShell({ state, productPrefix, productSlug }) {
     if (isBusinessAutopilot) {
       const sectionKey = getBusinessAutopilotSectionKey(item.path);
       const hasDefaultProfileAccess = sectionKey === "profile"
-        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin);
+        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, businessAutopilotIsAdmin);
       if (
         sectionKey
         && !hasDefaultProfileAccess
-        && !hasBusinessAutopilotSectionAccess(autopilotAccessRecord, sectionKey, isAdmin)
+        && !hasBusinessAutopilotSectionAccess(autopilotAccessRecord, sectionKey, businessAutopilotIsAdmin)
       ) {
         return false;
       }
@@ -917,7 +922,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       if (
         isBusinessAutopilot
         && item.path === "/profile"
-        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin)
+        && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, businessAutopilotIsAdmin)
       ) {
         return true;
       }
@@ -1098,9 +1103,11 @@ function AppShell({ state, productPrefix, productSlug }) {
   const userInitials = getInitials(userDisplayName);
   const sidebarRoleLabel = isDealer
     ? "Dealer"
-    : isSaasAdmin || isAdmin
+    : isSaasAdmin
       ? "ORG Admin"
-      : "ORG User";
+      : isBusinessAutopilot
+        ? (businessAutopilotIsAdmin ? "ORG Admin" : "ORG User")
+        : (isAdmin ? "ORG Admin" : "ORG User");
   const showTopbarProductSection = (() => {
     if (isSaasAdminRoute) {
       return isOverviewSection;
@@ -1440,7 +1447,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? (
                   !autopilotAccessResolved
                     ? <div className="card p-3">Loading access...</div>
-                    : hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", isAdmin)
+                    : hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)
                     ? (
                       <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
                         <BusinessAutopilotDashboardPage
@@ -1476,7 +1483,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "crm") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1491,7 +1498,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "hrm") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1506,7 +1513,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "projects") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1521,7 +1528,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "projects") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1540,7 +1547,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "subscriptions") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "subscriptions", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "subscriptions", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1555,7 +1562,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "accounts") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1570,7 +1577,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "ticketing") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "ticketing", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "ticketing", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1585,7 +1592,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 allowed:
                   isBusinessAutopilot &&
                   autopilotModules.some((module) => module.slug === "stocks") &&
-                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "stocks", isAdmin),
+                  hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "stocks", businessAutopilotIsAdmin),
               }
             )}
           />
@@ -1607,8 +1614,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                   (productSlug === "storage" && isAdmin) ||
                   (productSlug === "imposition-software" && isAdmin) ||
                   (isBusinessAutopilot &&
-                    autopilotCanManageUsers &&
-                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "users", isAdmin)),
+                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "users", businessAutopilotIsAdmin)),
               }
             )}
           />
@@ -1670,7 +1676,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot &&
                 autopilotAccessResolved &&
-                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", isAdmin))
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", businessAutopilotIsAdmin))
                 ? <BillingPage />
                 : isBusinessAutopilot
                 ? <BusinessAutopilotAccessDenied sectionLabel="Billing" />
@@ -1683,7 +1689,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot &&
                 autopilotAccessResolved &&
-                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "plans", isAdmin))
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "plans", businessAutopilotIsAdmin))
                 ? <PlansPage />
                 : isBusinessAutopilot
                 ? <BusinessAutopilotAccessDenied sectionLabel="Plans" />
@@ -1695,10 +1701,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot
-                && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, isAdmin)) ||
+                && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, businessAutopilotIsAdmin)) ||
               (isBusinessAutopilot &&
                 autopilotAccessResolved &&
-                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "profile", isAdmin))
+                hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "profile", businessAutopilotIsAdmin))
                 ? <ProfilePage />
                 : isBusinessAutopilot
                 ? <BusinessAutopilotAccessDenied sectionLabel="Profile" />
@@ -1776,7 +1782,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/notifications-inbox"
             element={
-              !isDealer && (!isBusinessAutopilot || !autopilotAccessResolved || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "inbox", isAdmin))
+              !isDealer && (!isBusinessAutopilot || !autopilotAccessResolved || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "inbox", businessAutopilotIsAdmin))
                 ? <OrgInboxPage productSlug={productSlug} />
                 : isBusinessAutopilot
                 ? <BusinessAutopilotAccessDenied sectionLabel="Inbox" />
@@ -1980,7 +1986,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           </div>
           {isBusinessAutopilot && !isDealer && !isSaasAdminRoute && autopilotAccessResolved ? (
             <BusinessAutopilotAssistantWidget
-              enabled={hasBusinessAutopilotSectionAccess(autopilotAccessRecord, autopilotCurrentSectionKey || "dashboard", isAdmin)}
+              enabled={hasBusinessAutopilotSectionAccess(autopilotAccessRecord, autopilotCurrentSectionKey || "dashboard", businessAutopilotIsAdmin)}
               isAdmin={isAdmin}
               subscriptions={state.subscriptions}
             />

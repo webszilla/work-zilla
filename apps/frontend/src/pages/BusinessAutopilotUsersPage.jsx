@@ -76,7 +76,7 @@ const ROLE_ACCESS_SECTIONS = [
   { key: "plans", label: "Plans" },
   { key: "profile", label: "Profile" },
 ];
-const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "Create/Edit", "Full Access"];
+const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"];
 const USER_DETAIL_FIELDS = [
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
@@ -135,6 +135,66 @@ function limitedInput(fieldKey, value) {
 
 function limitedTextarea(fieldKey, value) {
   return clampBusinessAutopilotText(fieldKey, value, { isTextarea: true });
+}
+
+function normalizeRoleAccessLevel(level) {
+  const value = String(level || "").trim();
+  if (value === "Create/Edit") {
+    return "View and Edit";
+  }
+  return ACCESS_LEVEL_OPTIONS.includes(value) ? value : "No Access";
+}
+
+function normalizeRoleAccessMap(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const normalized = {};
+  Object.entries(source).forEach(([key, record]) => {
+    const safeRecord = record && typeof record === "object" && !Array.isArray(record) ? record : {};
+    const sections = safeRecord.sections && typeof safeRecord.sections === "object" && !Array.isArray(safeRecord.sections)
+      ? safeRecord.sections
+      : {};
+    normalized[key] = {
+      ...createDefaultRoleAccessRecord(),
+      ...safeRecord,
+      sections: ROLE_ACCESS_SECTIONS.reduce((acc, section) => {
+        acc[section.key] = normalizeRoleAccessLevel(sections[section.key] || "No Access");
+        return acc;
+      }, {}),
+    };
+  });
+  return normalized;
+}
+
+function normalizeRoleToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function resolveRoleAccessRecord(roleAccessMap, profileRole, employeeRole) {
+  const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
+  const normalizedProfileRole = normalizeRoleToken(profileRole);
+  const normalizedEmployeeRole = normalizeRoleToken(employeeRole);
+  const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
+
+  if (normalizedEmployeeRole) {
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "employee_role" && normalizeRoleToken(rawRole) === normalizedEmployeeRole) {
+        return value;
+      }
+    }
+  }
+  if (normalizedProfileRole) {
+    for (const [key, value] of entries) {
+      const [scope, rawRole] = String(key || "").split(":", 2);
+      if (scope === "system" && normalizeRoleToken(rawRole) === normalizedProfileRole) {
+        return value;
+      }
+    }
+  }
+  return null;
 }
 
 function evaluatePasswordStrength(value) {
@@ -682,6 +742,10 @@ export default function BusinessAutopilotUsersPage() {
   const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
+  const [currentProfileRole, setCurrentProfileRole] = useState("");
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
+  const [currentUserMembershipRole, setCurrentUserMembershipRole] = useState("");
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
   const [roleAccessSaving, setRoleAccessSaving] = useState(false);
   const [roleAccessDirty, setRoleAccessDirty] = useState(false);
@@ -798,19 +862,33 @@ export default function BusinessAutopilotUsersPage() {
       const nextMap = (data?.role_access_map && typeof data.role_access_map === "object" && !Array.isArray(data.role_access_map))
         ? data.role_access_map
         : {};
-      setRoleAccessMap(nextMap);
+      const normalizedRoleMap = normalizeRoleAccessMap(nextMap);
+      setRoleAccessMap(normalizedRoleMap);
       setRoleAccessDirty(false);
-      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextMap));
+      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(normalizedRoleMap));
     } catch {
       try {
         const raw = window.localStorage.getItem(ROLE_ACCESS_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : {};
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          setRoleAccessMap(parsed);
+          setRoleAccessMap(normalizeRoleAccessMap(parsed));
         }
       } catch {
         // Ignore invalid local role access cache.
       }
+    }
+  }
+
+  async function loadCurrentUserProfile() {
+    try {
+      const data = await apiFetch("/api/auth/me");
+      const email = String(data?.user?.email || "").trim();
+      const profileRole = String(data?.profile?.role || data?.user?.role || "").trim();
+      setCurrentUserEmail(email);
+      setCurrentProfileRole(profileRole);
+    } catch {
+      setCurrentUserEmail("");
+      setCurrentProfileRole("");
     }
   }
 
@@ -844,6 +922,9 @@ export default function BusinessAutopilotUsersPage() {
 
   async function handleUpdateUser(event) {
     event.preventDefault();
+    if (!canManageUsersTab) {
+      return;
+    }
     if (!editForm.membership_id || savingEdit) {
       return;
     }
@@ -891,6 +972,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleDeleteUser(membershipId) {
+    if (!canManageUsersTab) {
+      return;
+    }
     if (!membershipId || deletingMembershipId) {
       return;
     }
@@ -928,6 +1012,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleToggleUserStatus(user, nextEnabled) {
+    if (!canManageUsersTab) {
+      return;
+    }
     const membershipId = String(user?.membership_id || "").trim();
     if (!membershipId || togglingMembershipId) {
       return;
@@ -976,6 +1063,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleResendCredentials(user) {
+    if (!canManageUsersTab) {
+      return;
+    }
     const membershipId = String(user?.membership_id || "").trim();
     if (!membershipId || sendingCredentialMembershipId) {
       return;
@@ -1020,6 +1110,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleVerifyUserEmail(user) {
+    if (!canManageUsersTab) {
+      return;
+    }
     const membershipId = String(user?.membership_id || "").trim();
     if (!membershipId || verifyingMembershipId) {
       return;
@@ -1070,6 +1163,7 @@ export default function BusinessAutopilotUsersPage() {
   useEffect(() => {
     loadUsers();
     loadRoleAccess();
+    loadCurrentUserProfile();
   }, []);
 
   useEffect(() => {
@@ -1125,7 +1219,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function handleCreate(event) {
     event.preventDefault();
-    if (!canManageUsers || saving) {
+    if (!canManageUsersTab || saving) {
       return;
     }
     if (!userMeta.can_add_users) {
@@ -1217,7 +1311,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function handleCreateEmployeeRole(event) {
     event.preventDefault();
-    if (!canManageUsers || savingEmployeeRole) {
+    if (!canManageUsersTab || savingEmployeeRole) {
       return;
     }
     const name = newEmployeeRole.trim();
@@ -1256,7 +1350,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function handleCreateDepartment(event) {
     event.preventDefault();
-    if (!canManageUsers || savingDepartment) {
+    if (!canManageUsersTab || savingDepartment) {
       return;
     }
     const name = newDepartment.trim();
@@ -1327,6 +1421,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleUpdateEmployeeRole(roleId) {
+    if (!canManageUsersTab) {
+      return;
+    }
     const name = editingEmployeeRoleName.trim();
     if (!roleId || !name || savingEmployeeRoleRowId) {
       return;
@@ -1362,6 +1459,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleDeleteEmployeeRole(roleId) {
+    if (!canManageUsersTab) {
+      return;
+    }
     if (!roleId || deletingEmployeeRoleId) {
       return;
     }
@@ -1398,6 +1498,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleUpdateDepartment(departmentId) {
+    if (!canManageUsersTab) {
+      return;
+    }
     const name = editingDepartmentName.trim();
     if (!departmentId || !name || savingDepartmentRowId) {
       return;
@@ -1433,6 +1536,9 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleDeleteDepartment(departmentId) {
+    if (!canManageUsersTab) {
+      return;
+    }
     if (!departmentId || deletingDepartmentId) {
       return;
     }
@@ -1623,7 +1729,66 @@ export default function BusinessAutopilotUsersPage() {
     setSelectedRoleAccessKey(roleAccessRoleOptions[0]?.key || SYSTEM_ROLE_OPTIONS[0].key);
   }, [roleAccessRoleOptions, selectedRoleAccessKey]);
 
+  useEffect(() => {
+    if (!currentUserEmail) {
+      setCurrentUserEmployeeRole("");
+      setCurrentUserMembershipRole("");
+      return;
+    }
+    const matchedUser = (users || []).find(
+      (user) => String(user?.email || "").trim().toLowerCase() === String(currentUserEmail || "").trim().toLowerCase()
+    );
+    setCurrentUserEmployeeRole(String(matchedUser?.employee_role || "").trim());
+    setCurrentUserMembershipRole(String(matchedUser?.role || "").trim());
+  }, [currentUserEmail, users]);
+
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
+  const normalizedCurrentProfileRole = String(currentProfileRole || "").trim().toLowerCase();
+  const normalizedCurrentMembershipRole = normalizeRoleToken(currentUserMembershipRole);
+  const hasResolvedMembershipRole = Boolean(normalizedCurrentMembershipRole);
+  const isOrgAdminUser = canManageUsers
+    || normalizedCurrentMembershipRole === "company_admin"
+    || (!hasResolvedMembershipRole && ["company_admin", "org_admin", "superadmin", "super_admin"].includes(normalizedCurrentProfileRole));
+  const usersRoleAccessRecord = useMemo(
+    () => resolveRoleAccessRecord(roleAccessMap, currentProfileRole, currentUserEmployeeRole),
+    [roleAccessMap, currentProfileRole, currentUserEmployeeRole]
+  );
+  const usersSectionAccessLevel = isOrgAdminUser
+    ? "Full Access"
+    : normalizeRoleAccessLevel(usersRoleAccessRecord?.sections?.users || "No Access");
+  const canViewUsersSection = isOrgAdminUser || usersSectionAccessLevel !== "No Access";
+  const canEditUsersSection = isOrgAdminUser || usersSectionAccessLevel === "View and Edit" || usersSectionAccessLevel === "Create, View and Edit" || usersSectionAccessLevel === "Full Access";
+  const canCreateUsersSection = isOrgAdminUser || usersSectionAccessLevel === "Create, View and Edit" || usersSectionAccessLevel === "Full Access";
+  const canDeleteUsersSection = isOrgAdminUser || usersSectionAccessLevel === "Full Access";
+  const canManageUsersTab = isOrgAdminUser;
+  const canManageRoleAccessTab = isOrgAdminUser;
+  const canViewEmployeeTab = canViewUsersSection;
+  const canManageEmployeeTab = canEditUsersSection;
+  const canViewClientVendorTabs = canViewUsersSection;
+  const canEditClientVendorTabs = canEditUsersSection;
+  const canCreateClientVendorTabs = canCreateUsersSection;
+  const canDeleteClientVendorTabs = canDeleteUsersSection;
+
+  useEffect(() => {
+    const allowedTabs = [];
+    if (canManageUsersTab) {
+      allowedTabs.push("users");
+      allowedTabs.push("role-access");
+    }
+    if (canViewEmployeeTab) {
+      allowedTabs.push("create-employee");
+    }
+    if (canViewClientVendorTabs) {
+      allowedTabs.push("clients");
+      allowedTabs.push("vendors");
+    }
+    if (!allowedTabs.length) {
+      return;
+    }
+    if (!allowedTabs.includes(activeTopTab)) {
+      setActiveTopTab(allowedTabs[0]);
+    }
+  }, [activeTopTab, canManageUsersTab, canViewClientVendorTabs, canViewEmployeeTab]);
   const billingStateOptions = getStateOptionsForCountry(String(clientForm.billingCountry || "India"));
   const shippingStateOptions = getStateOptionsForCountry(String(clientForm.shippingCountry || "India"));
   const vendorBillingStateOptions = getStateOptionsForCountry(String(vendorForm.billingCountry || "India"));
@@ -1703,7 +1868,7 @@ export default function BusinessAutopilotUsersPage() {
   const vendorEndIndex = Math.min(normalizedVendorPage * pageSize, filteredVendors.length);
 
   function updateRoleAccess(updater) {
-    if (!canManageUsers) {
+    if (!canManageRoleAccessTab) {
       return;
     }
     setRoleAccessMap((prev) => {
@@ -1718,7 +1883,7 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function handleSaveRoleAccess() {
-    if (!canManageUsers || roleAccessSaving) {
+    if (!canManageRoleAccessTab || roleAccessSaving) {
       return;
     }
     setRoleAccessSaving(true);
@@ -1731,9 +1896,10 @@ export default function BusinessAutopilotUsersPage() {
       const nextMap = (data?.role_access_map && typeof data.role_access_map === "object" && !Array.isArray(data.role_access_map))
         ? data.role_access_map
         : {};
-      setRoleAccessMap(nextMap);
+      const normalizedRoleMap = normalizeRoleAccessMap(nextMap);
+      setRoleAccessMap(normalizedRoleMap);
       setRoleAccessDirty(false);
-      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextMap));
+      window.localStorage.setItem(ROLE_ACCESS_STORAGE_KEY, JSON.stringify(normalizedRoleMap));
       window.dispatchEvent(new CustomEvent("wz:business-autopilot-role-access-changed"));
       setNotice("Role access settings saved.");
     } catch (error) {
@@ -1756,7 +1922,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function saveClient(event) {
     event.preventDefault();
-    if (!canManageUsers) {
+    if (editingClientId ? !canEditClientVendorTabs : !canCreateClientVendorTabs) {
       return;
     }
     const companyName = String(clientForm.companyName || "").trim();
@@ -1857,7 +2023,7 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function deleteClient(clientId) {
-    if (!canManageUsers) {
+    if (!canDeleteClientVendorTabs) {
       return;
     }
     const nextCustomers = sharedCustomers.filter((row) => String(row.id) !== String(clientId));
@@ -1977,7 +2143,7 @@ export default function BusinessAutopilotUsersPage() {
   async function onClientImportFileChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !canManageUsers) {
+    if (!file || !canCreateClientVendorTabs) {
       return;
     }
     try {
@@ -2077,7 +2243,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function saveVendor(event) {
     event.preventDefault();
-    if (!canManageUsers) {
+    if (editingVendorId ? !canEditClientVendorTabs : !canCreateClientVendorTabs) {
       return;
     }
     const companyName = String(vendorForm.companyName || "").trim();
@@ -2173,7 +2339,7 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function deleteVendor(vendorId) {
-    if (!canManageUsers) {
+    if (!canDeleteClientVendorTabs) {
       return;
     }
     const nextVendors = sharedVendors.filter((row) => String(row.id) !== String(vendorId));
@@ -2306,7 +2472,7 @@ export default function BusinessAutopilotUsersPage() {
   async function onVendorImportFileChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !canManageUsers) {
+    if (!file || !canCreateClientVendorTabs) {
       return;
     }
     try {
@@ -2423,51 +2589,65 @@ export default function BusinessAutopilotUsersPage() {
         <h4 className="mb-2">Users</h4>
         <p className="text-secondary mb-0">Create and manage users for Business Autopilot.</p>
         <div className="d-flex flex-wrap gap-2 mt-3">
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTopTab === "users" ? "btn-success" : "btn-outline-light"}`}
-            onClick={() => setActiveTopTab("users")}
-          >
-            Users
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTopTab === "create-employee" ? "btn-success" : "btn-outline-light"}`}
-            onClick={() => setActiveTopTab("create-employee")}
-          >
-            Employee
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTopTab === "role-access" ? "btn-success" : "btn-outline-light"}`}
-            onClick={() => setActiveTopTab("role-access")}
-          >
-            Role Based Access
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTopTab === "clients" ? "btn-success" : "btn-outline-light"}`}
-            onClick={() => setActiveTopTab("clients")}
-          >
-            Clients
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTopTab === "vendors" ? "btn-success" : "btn-outline-light"}`}
-            onClick={() => setActiveTopTab("vendors")}
-          >
-            Vendor Registration
-          </button>
+          {canManageUsersTab ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTopTab === "users" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setActiveTopTab("users")}
+            >
+              Users
+            </button>
+          ) : null}
+          {canViewEmployeeTab ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTopTab === "create-employee" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setActiveTopTab("create-employee")}
+            >
+              Employee
+            </button>
+          ) : null}
+          {canManageRoleAccessTab ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTopTab === "role-access" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setActiveTopTab("role-access")}
+            >
+              Role Based Access
+            </button>
+          ) : null}
+          {canViewClientVendorTabs ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTopTab === "clients" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setActiveTopTab("clients")}
+            >
+              Clients
+            </button>
+          ) : null}
+          {canViewClientVendorTabs ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTopTab === "vendors" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setActiveTopTab("vendors")}
+            >
+              Vendor Registration
+            </button>
+          ) : null}
         </div>
       </div>
 
       {notice ? <div className="alert alert-info py-2 mb-0">{notice}</div> : null}
 
-      {activeTopTab === "create-employee" ? (
+      {!canViewUsersSection && !canViewEmployeeTab && !canViewClientVendorTabs ? (
+        <div className="card p-3">
+          <div className="text-secondary">You do not have access to this section.</div>
+        </div>
+      ) : activeTopTab === "create-employee" ? (
         <HrManagementModule embeddedEmployeeOnly />
       ) : activeTopTab === "users" ? (
         <>
-          {canManageUsers ? (
+          {canManageUsersTab ? (
             <>
               <div className="row g-3">
                 <div className="col-12 col-xl-6">
@@ -3177,7 +3357,7 @@ export default function BusinessAutopilotUsersPage() {
                 type="button"
                 className="btn btn-sm btn-success"
                 onClick={handleSaveRoleAccess}
-                disabled={!canManageUsers || roleAccessSaving || !roleAccessDirty}
+                disabled={!canManageRoleAccessTab || roleAccessSaving || !roleAccessDirty}
               >
                 {roleAccessSaving ? "Saving..." : "Save Access"}
               </button>
@@ -3189,7 +3369,7 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           </div>
 
-          {!canManageUsers ? (
+          {!canManageRoleAccessTab ? (
             <div className="alert alert-warning py-2">Only company admin can update role based access.</div>
           ) : null}
 
@@ -3209,7 +3389,7 @@ export default function BusinessAutopilotUsersPage() {
                       <select
                         className="form-select form-select-sm"
                         value={selectedRoleAccess.sections?.[section.key] || "No Access"}
-                        disabled={!canManageUsers}
+                        disabled={!canManageRoleAccessTab}
                         onChange={(event) => updateRoleAccess((prev) => ({
                           ...prev,
                           sections: { ...(prev.sections || {}), [section.key]: event.target.value }
@@ -3229,19 +3409,19 @@ export default function BusinessAutopilotUsersPage() {
           <div className="row g-3">
             <div className="col-12 col-md-4">
               <div className="form-check form-switch">
-                <input id="rbac-export" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.can_export)} disabled={!canManageUsers} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, can_export: event.target.checked }))} />
+                <input id="rbac-export" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.can_export)} disabled={!canManageRoleAccessTab} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, can_export: event.target.checked }))} />
                 <label className="form-check-label" htmlFor="rbac-export">Allow Export</label>
               </div>
             </div>
             <div className="col-12 col-md-4">
               <div className="form-check form-switch">
-                <input id="rbac-delete" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.can_delete)} disabled={!canManageUsers} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, can_delete: event.target.checked }))} />
+                <input id="rbac-delete" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.can_delete)} disabled={!canManageRoleAccessTab} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, can_delete: event.target.checked }))} />
                 <label className="form-check-label" htmlFor="rbac-delete">Allow Delete</label>
               </div>
             </div>
             <div className="col-12 col-md-4">
               <div className="form-check form-switch">
-                <input id="rbac-self-att" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.attendance_self_service)} disabled={!canManageUsers} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, attendance_self_service: event.target.checked }))} />
+                <input id="rbac-self-att" className="form-check-input" type="checkbox" checked={Boolean(selectedRoleAccess.attendance_self_service)} disabled={!canManageRoleAccessTab} onChange={(event) => updateRoleAccess((prev) => ({ ...prev, attendance_self_service: event.target.checked }))} />
                 <label className="form-check-label" htmlFor="rbac-self-att">Attendance Self-Service</label>
               </div>
             </div>
@@ -3253,7 +3433,7 @@ export default function BusinessAutopilotUsersPage() {
                 placeholder="Notes for this role"
                 value={selectedRoleAccess.remarks || ""}
                 maxLength={getBusinessAutopilotMaxLength("remarks", { isTextarea: true })}
-                disabled={!canManageUsers}
+                disabled={!canManageRoleAccessTab}
                 onChange={(event) => updateRoleAccess((prev) => ({ ...prev, remarks: limitedTextarea("remarks", event.target.value) }))}
               />
             </div>
@@ -3496,7 +3676,7 @@ export default function BusinessAutopilotUsersPage() {
                 ) : null}
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={!canManageUsers}>{editingClientId ? "Update Client" : "Create Client"}</button>
+                <button type="submit" className="btn btn-success btn-sm" disabled={editingClientId ? !canEditClientVendorTabs : !canCreateClientVendorTabs}>{editingClientId ? "Update Client" : "Create Client"}</button>
                 {editingClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetClientForm}>Cancel</button> : null}
               </div>
             </form>
@@ -3513,7 +3693,7 @@ export default function BusinessAutopilotUsersPage() {
                   className="d-none"
                   onChange={onClientImportFileChange}
                 />
-                <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canManageUsers}>
+                <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canCreateClientVendorTabs}>
                   <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
                   Import
                 </button>
@@ -3556,8 +3736,8 @@ export default function BusinessAutopilotUsersPage() {
                         <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
                         <td>
                           <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editClient(row)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canManageUsers} onClick={() => deleteClient(row.id)}>Delete</button>
+                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientVendorTabs} onClick={() => editClient(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientVendorTabs} onClick={() => deleteClient(row.id)}>Delete</button>
                           </div>
                         </td>
                       </tr>
@@ -3758,7 +3938,7 @@ export default function BusinessAutopilotUsersPage() {
                 ) : null}
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={!canManageUsers}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
+                <button type="submit" className="btn btn-success btn-sm" disabled={editingVendorId ? !canEditClientVendorTabs : !canCreateClientVendorTabs}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
                 {editingVendorId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetVendorForm}>Cancel</button> : null}
               </div>
             </form>
@@ -3775,7 +3955,7 @@ export default function BusinessAutopilotUsersPage() {
                 className="d-none"
                 onChange={onVendorImportFileChange}
               />
-              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerVendorImportPicker} disabled={!canManageUsers}>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerVendorImportPicker} disabled={!canCreateClientVendorTabs}>
                 <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
                 Import
               </button>
@@ -3817,8 +3997,8 @@ export default function BusinessAutopilotUsersPage() {
                         <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
                         <td>
                           <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editVendor(row)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canManageUsers} onClick={() => deleteVendor(row.id)}>Delete</button>
+                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientVendorTabs} onClick={() => editVendor(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientVendorTabs} onClick={() => deleteVendor(row.id)}>Delete</button>
                           </div>
                         </td>
                       </tr>

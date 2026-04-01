@@ -2005,6 +2005,17 @@ function normalizeCrmRoleToken(value) {
     .replace(/[\s-]+/g, "_");
 }
 
+function normalizeCrmAccessLevel(value) {
+  const level = String(value || "").trim();
+  if (level === "Create/Edit") {
+    return "View and Edit";
+  }
+  if (["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"].includes(level)) {
+    return level;
+  }
+  return "No Access";
+}
+
 function readCrmRoleAccessMapFromStorage() {
   if (typeof window === "undefined") {
     return {};
@@ -2165,15 +2176,119 @@ function normalizeCrmDealRecord(row = {}) {
   const dealName = String(row.dealName || row.deal_name || "").trim();
   const expectedValue = row.dealValueExpected ?? row.deal_value ?? row.dealValue ?? "";
   const wonValue = row.wonAmountFinal ?? row.won_amount_final ?? row.won_amount ?? row.amount ?? "";
+  const normalizedAssignType = String(row.assignType || row.assign_type || "").trim().toLowerCase();
+  const assignType = normalizedAssignType === "team" ? "Team" : "Users";
+  const assignedUser = Array.isArray(row.assignedUser)
+    ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(
+      row.assignedUser
+      || row.assigned_user_name
+      || (assignType.toLowerCase() !== "team" ? row.assignedTo || "" : "")
+    )
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const assignedTeam = String(
+    row.assignedTeam
+    || row.assigned_team
+    || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")
+  ).trim();
   return {
     ...row,
     dealName,
     dealValueExpected: String(expectedValue ?? "").trim(),
     wonAmountFinal: String(wonValue ?? "").trim(),
-    assignedTeam: String(row.assignedTeam || row.assigned_team || "").trim(),
-    assignedTo: String(row.assignedTo || row.assigned_user_name || row.assigned_team || "").trim(),
+    assignType,
+    assignedUser,
+    assignedTeam,
+    assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser.join(", "))).trim(),
     createdBy: String(row.createdBy || row.created_by_name || "").trim(),
   };
+}
+
+function normalizeCrmSalesOrderRecord(row = {}) {
+  const assignType = "Users";
+  const assignedUser = Array.isArray(row.assignedUser)
+    ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(
+      row.assignedUser
+      || row.assigned_user_name
+      || row.assignedUserName
+      || row.assigned_to
+      || ""
+    )
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  return {
+    ...row,
+    orderId: String(row.orderId || row.order_id || "").trim(),
+    customerName: String(row.customerName || row.customer_name || "").trim(),
+    company: String(row.company || "").trim(),
+    phone: String(row.phone || "").trim(),
+    amount: String(row.amount ?? row.total_amount ?? "").trim(),
+    quantity: String(row.quantity ?? "").trim(),
+    price: String(row.price ?? "").trim(),
+    tax: String(row.tax ?? "").trim(),
+    status: String(row.status || "Pending").trim(),
+    assignType,
+    assignedUser,
+    assignedTo: assignedUser.join(", "),
+    createdBy: String(row.createdBy || row.created_by_name || "").trim(),
+  };
+}
+
+function buildCrmRowMergeKey(sectionKey, row = {}) {
+  const normalize = (value) => String(value || "").trim().toLowerCase();
+  if (sectionKey === "leads") {
+    return [
+      normalize(row.name || row.lead_name),
+      normalize(row.company),
+      normalize(row.phone),
+      normalize(row.leadAmount || row.lead_amount),
+    ].join("|");
+  }
+  if (sectionKey === "deals") {
+    return [
+      normalize(row.dealName || row.deal_name),
+      normalize(row.company),
+      normalize(row.phone),
+      normalize(row.dealValueExpected || row.deal_value || row.dealValue),
+    ].join("|");
+  }
+  if (sectionKey === "salesOrders") {
+    return [
+      normalize(row.orderId || row.order_id),
+      normalize(row.customerName || row.customer_name),
+      normalize(row.company),
+      normalize(row.amount || row.total_amount),
+    ].join("|");
+  }
+  return normalize(row.id);
+}
+
+function mergeCrmRowsByKey(sectionKey, backendRows = [], localRows = []) {
+  const normalizedBackend = Array.isArray(backendRows) ? backendRows : [];
+  const normalizedLocal = Array.isArray(localRows) ? localRows : [];
+  const seen = new Set();
+  const merged = [];
+  normalizedBackend.forEach((row) => {
+    const key = buildCrmRowMergeKey(sectionKey, row);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(row);
+  });
+  normalizedLocal.forEach((row) => {
+    const key = buildCrmRowMergeKey(sectionKey, row);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(row);
+  });
+  return merged;
 }
 
 function normalizeCrmMeetingRecord(row = {}) {
@@ -4860,9 +4975,11 @@ function CrmOnePageModule() {
   const [crmDepartmentDirectory, setCrmDepartmentDirectory] = useState([]);
   const [crmEmployeeRoleDirectory, setCrmEmployeeRoleDirectory] = useState([]);
   const [currentUserName, setCurrentUserName] = useState("Current User");
+  const [currentUserId, setCurrentUserId] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState("");
   const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
+  const [canManageCrmUsers, setCanManageCrmUsers] = useState(false);
   const [crmRoleAccessMap, setCrmRoleAccessMap] = useState(() => readCrmRoleAccessMapFromStorage());
   const [crmStorageKey, setCrmStorageKey] = useState("");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
@@ -4905,15 +5022,43 @@ function CrmOnePageModule() {
   const crmCurrencySymbol = getCurrencySymbol(crmCurrencyCode);
 
   const normalizedCurrentUserName = String(currentUserName || "").trim().toLowerCase();
+  const normalizedCurrentUserId = String(currentUserId || "").trim();
   const normalizedCurrentUserEmail = String(currentUserEmail || "").trim().toLowerCase();
   const normalizedCurrentUserRole = String(currentUserRole || "").trim().toLowerCase();
-  const isCrmAdmin = normalizedCurrentUserRole === "company_admin" || normalizedCurrentUserRole === "org_admin";
+  const isCrmAdmin = Boolean(canManageCrmUsers) || normalizedCurrentUserRole === "company_admin" || normalizedCurrentUserRole === "org_admin";
+  const crmDirectoryPool = useMemo(() => {
+    const source = [...(crmUserDirectory || []), ...readSharedHrEmployees()];
+    const byKey = new Map();
+    source.forEach((row) => {
+      const normalized = normalizeCrmDirectoryEntry(row);
+      if (!normalized) {
+        return;
+      }
+      const key = String(normalized.email || normalized.id || normalized.name).trim().toLowerCase();
+      if (!key || byKey.has(key)) {
+        return;
+      }
+      byKey.set(key, normalized);
+    });
+    return Array.from(byKey.values());
+  }, [crmUserDirectory]);
+  const currentUserDirectoryEntry = useMemo(
+    () => crmDirectoryPool.find((row) => (
+      (normalizedCurrentUserEmail && String(row.email || "").trim().toLowerCase() === normalizedCurrentUserEmail)
+      || (normalizedCurrentUserName && String(row.name || "").trim().toLowerCase() === normalizedCurrentUserName)
+    )) || null,
+    [crmDirectoryPool, normalizedCurrentUserEmail, normalizedCurrentUserName]
+  );
+  const normalizedCurrentUserDepartment = String(currentUserDirectoryEntry?.department || "").trim().toLowerCase();
+  const normalizedCurrentUserEmployeeRole = String(currentUserDirectoryEntry?.employeeRole || currentUserEmployeeRole || "").trim().toLowerCase();
   const crmRoleAccessRecord = useMemo(
     () => resolveCrmRoleAccessRecord(crmRoleAccessMap, currentUserRole, currentUserEmployeeRole),
     [crmRoleAccessMap, currentUserRole, currentUserEmployeeRole]
   );
-  const crmSectionAccessLevel = String(crmRoleAccessRecord?.sections?.crm || "No Access").trim();
+  const crmSectionAccessLevel = normalizeCrmAccessLevel(crmRoleAccessRecord?.sections?.crm || "No Access");
   const hasCrmFullAccess = isCrmAdmin || crmSectionAccessLevel === "Full Access";
+  const hasCrmEditAccess = isCrmAdmin || hasCrmFullAccess || crmSectionAccessLevel === "View and Edit" || crmSectionAccessLevel === "Create, View and Edit";
+  const canCreateCrmRows = isCrmAdmin || hasCrmFullAccess || crmSectionAccessLevel === "Create, View and Edit";
 
   function isSoftDeletedCrmRow(row) {
     return Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at);
@@ -4929,39 +5074,187 @@ function CrmOnePageModule() {
       .filter(Boolean);
   }
 
+  function getTeamMemberNames(teamName) {
+    const normalizedTeamName = String(teamName || "").trim().toLowerCase();
+    if (!normalizedTeamName) {
+      return [];
+    }
+    const matchedTeam = (moduleData.teams || []).find(
+      (team) => String(team?.name || "").trim().toLowerCase() === normalizedTeamName
+    );
+    return parseTeamMemberList(matchedTeam?.members);
+  }
+
+  function getDepartmentMemberNames(departmentName) {
+    const normalizedDepartment = String(departmentName || "").trim().toLowerCase();
+    if (!normalizedDepartment) {
+      return [];
+    }
+    return crmDirectoryPool
+      .filter((row) => String(row?.department || "").trim().toLowerCase() === normalizedDepartment)
+      .map((row) => String(row?.name || "").trim())
+      .filter(Boolean);
+  }
+
+  function getEmployeeRoleMemberNames(employeeRoleName) {
+    const normalizedEmployeeRoleName = String(employeeRoleName || "").trim().toLowerCase();
+    if (!normalizedEmployeeRoleName) {
+      return [];
+    }
+    return crmDirectoryPool
+      .filter((row) => String(row?.employeeRole || "").trim().toLowerCase() === normalizedEmployeeRoleName)
+      .map((row) => String(row?.name || "").trim())
+      .filter(Boolean);
+  }
+
+  function resolveAssignedUserNames(rawValues) {
+    const rawTokens = Array.isArray(rawValues)
+      ? rawValues
+      : String(rawValues || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const resolved = new Set();
+    rawTokens.forEach((token) => {
+      const normalizedToken = String(token || "").trim().toLowerCase();
+      if (!normalizedToken) {
+        return;
+      }
+      const teamMembers = getTeamMemberNames(token);
+      if (teamMembers.length) {
+        teamMembers.forEach((member) => resolved.add(member));
+        return;
+      }
+      const departmentMembers = getDepartmentMemberNames(token);
+      if (departmentMembers.length) {
+        departmentMembers.forEach((member) => resolved.add(member));
+        return;
+      }
+      const employeeRoleMembers = getEmployeeRoleMemberNames(token);
+      if (employeeRoleMembers.length) {
+        employeeRoleMembers.forEach((member) => resolved.add(member));
+        return;
+      }
+      const matchedDirectoryUser = crmDirectoryPool.find((row) => (
+        String(row?.name || "").trim().toLowerCase() === normalizedToken
+        || String(row?.email || "").trim().toLowerCase() === normalizedToken
+      ));
+      if (matchedDirectoryUser?.name) {
+        resolved.add(String(matchedDirectoryUser.name).trim());
+        return;
+      }
+      resolved.add(String(token || "").trim());
+    });
+    return Array.from(resolved).filter(Boolean);
+  }
+
+  function resolveAssignedUserIds(rawValues) {
+    const names = resolveAssignedUserNames(rawValues);
+    if (!names.length) {
+      return [];
+    }
+    const idSet = new Set();
+    names.forEach((name) => {
+      const normalizedName = String(name || "").trim().toLowerCase();
+      if (!normalizedName) {
+        return;
+      }
+      const matched = crmDirectoryPool.find((row) => String(row?.name || "").trim().toLowerCase() === normalizedName);
+      const parsedId = Number.parseInt(String(matched?.id || "").trim(), 10);
+      if (Number.isFinite(parsedId) && parsedId > 0) {
+        idSet.add(parsedId);
+      }
+    });
+    return Array.from(idSet);
+  }
+
   function isRowAssignedToCurrentUser(sectionKey, row) {
     if (!row || isCrmAdmin) {
+      return true;
+    }
+    if (sectionKey === "contacts") {
       return true;
     }
     const createdBy = String(row.createdBy || "").trim().toLowerCase();
     if (createdBy && normalizedCurrentUserName && createdBy === normalizedCurrentUserName) {
       return true;
     }
-    if (sectionKey === "leads") {
-      const assignType = String(row.assignType || "Users").trim().toLowerCase();
-      if (assignType === "team") {
-        const assignedTeamName = String(row.assignedTeam || row.assignedTo || "").trim();
-        if (!assignedTeamName) {
-          return false;
-        }
-        const matchedTeam = (moduleData.teams || []).find(
-          (team) => String(team?.name || "").trim().toLowerCase() === assignedTeamName.toLowerCase()
-        );
-        const teamMembers = parseTeamMemberList(matchedTeam?.members);
-        return teamMembers.some((member) => String(member || "").trim().toLowerCase() === normalizedCurrentUserName);
+    if (sectionKey === "teams") {
+      const teamMembers = parseTeamMemberList(row.members || []);
+      if (teamMembers.some((member) => String(member || "").trim().toLowerCase() === normalizedCurrentUserName)) {
+        return true;
       }
-      const assignedUsers = Array.isArray(row.assignedUser)
-        ? row.assignedUser
-        : String(row.assignedUser || row.assignedTo || "").split(",");
+      const teamDepartments = Array.isArray(row.departmentFilters)
+        ? row.departmentFilters
+        : String(row.departmentFilters || "").split(",");
+      if (normalizedCurrentUserDepartment && teamDepartments.some((department) => String(department || "").trim().toLowerCase() === normalizedCurrentUserDepartment)) {
+        return true;
+      }
+      const teamEmployeeRoles = Array.isArray(row.employeeRoleFilters)
+        ? row.employeeRoleFilters
+        : String(row.employeeRoleFilters || "").split(",");
+      if (normalizedCurrentUserEmployeeRole && teamEmployeeRoles.some((employeeRole) => String(employeeRole || "").trim().toLowerCase() === normalizedCurrentUserEmployeeRole)) {
+        return true;
+      }
+      return false;
+    }
+    if (sectionKey === "leads" || sectionKey === "deals" || sectionKey === "salesOrders") {
+      const assignedUserIds = Array.isArray(row.assigned_user_ids)
+        ? row.assigned_user_ids
+        : (Array.isArray(row.assignedUserIds) ? row.assignedUserIds : []);
+      if (normalizedCurrentUserId) {
+        const currentUserNumericId = Number.parseInt(normalizedCurrentUserId, 10);
+        if (Number.isFinite(currentUserNumericId)) {
+          if (assignedUserIds.some((value) => Number.parseInt(String(value || "").trim(), 10) === currentUserNumericId)) {
+            return true;
+          }
+          if (Number.parseInt(String(row.assigned_user_id || row.assignedUserId || "").trim(), 10) === currentUserNumericId) {
+            return true;
+          }
+          if (Number.parseInt(String(row.created_by_id || row.createdById || "").trim(), 10) === currentUserNumericId) {
+            return true;
+          }
+        }
+      }
+      const assignType = String(row.assignType || "Users").trim().toLowerCase();
+      const assignedUsers = resolveAssignedUserNames(
+        assignType === "team"
+          ? String(row.assignedTeam || row.assignedTo || "").trim()
+          : (Array.isArray(row.assignedUser) ? row.assignedUser : String(row.assignedUser || row.assignedTo || "").split(","))
+      );
+      if (!assignedUsers.length) {
+        return false;
+      }
       return assignedUsers.some((userName) => String(userName || "").trim().toLowerCase() === normalizedCurrentUserName);
     }
     if (sectionKey === "meetings" || sectionKey === "activities" || sectionKey === "followUps") {
-      return parseOwnerNames(row.owner).some((owner) => owner.toLowerCase() === normalizedCurrentUserName);
+      if (normalizedCurrentUserId) {
+        const currentUserNumericId = Number.parseInt(normalizedCurrentUserId, 10);
+        if (Number.isFinite(currentUserNumericId)) {
+          const ownerUserIds = Array.isArray(row.owner_user_ids)
+            ? row.owner_user_ids
+            : (Array.isArray(row.ownerUserIds) ? row.ownerUserIds : []);
+          if (ownerUserIds.some((value) => Number.parseInt(String(value || "").trim(), 10) === currentUserNumericId)) {
+            return true;
+          }
+          if (Number.parseInt(String(row.created_by_id || row.createdById || "").trim(), 10) === currentUserNumericId) {
+            return true;
+          }
+        }
+      }
+      const assignedUsers = resolveAssignedUserNames(parseOwnerNames(row.owner));
+      if (!assignedUsers.length) {
+        return false;
+      }
+      return assignedUsers.some((owner) => owner.toLowerCase() === normalizedCurrentUserName);
     }
     return true;
   }
 
   function canEditCrmRow(sectionKey, row) {
+    if (!hasCrmEditAccess) {
+      return false;
+    }
     return isRowAssignedToCurrentUser(sectionKey, row);
   }
 
@@ -5032,6 +5325,7 @@ function CrmOnePageModule() {
         setCrmUserDirectory(Array.isArray(usersData?.users) ? usersData.users : []);
         setCrmDepartmentDirectory(Array.isArray(usersData?.departments) ? usersData.departments : []);
         setCrmEmployeeRoleDirectory(Array.isArray(usersData?.employee_roles) ? usersData.employee_roles : []);
+        setCanManageCrmUsers(Boolean(usersData?.can_manage_users));
         const name = String(
           authData?.user?.first_name
           || authData?.user?.username
@@ -5039,6 +5333,7 @@ function CrmOnePageModule() {
           || "Current User"
         ).trim();
         setCurrentUserName(name || "Current User");
+        setCurrentUserId(String(authData?.user?.id || "").trim());
         setCurrentUserEmail(String(authData?.user?.email || "").trim());
         setCurrentUserRole(String(authData?.profile?.role || "").trim());
         const normalizedEmail = String(authData?.user?.email || "").trim().toLowerCase();
@@ -5058,13 +5353,16 @@ function CrmOnePageModule() {
         setCrmRoleAccessMap(nextRoleAccessMap);
         window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
         setCrmStorageKey(buildScopedCrmStorageKey(authData));
+        await refreshCrmRowsFromBackend();
         await refreshCrmMeetingsFromBackend();
       } catch {
         if (!active) return;
         setCrmUserDirectory([]);
         setCrmDepartmentDirectory([]);
         setCrmEmployeeRoleDirectory([]);
+        setCanManageCrmUsers(false);
         setCurrentUserName("Current User");
+        setCurrentUserId("");
         setCurrentUserEmail("");
         setCurrentUserRole("");
         setCurrentUserEmployeeRole("");
@@ -5210,20 +5508,8 @@ function CrmOnePageModule() {
     [moduleData.teams]
   );
   const crmDirectoryOptions = useMemo(() => {
-    const map = new Map();
-    const sharedHrEmployees = readSharedHrEmployees();
-    [...(crmUserDirectory || []), ...sharedHrEmployees].forEach((row) => {
-      const normalized = normalizeCrmDirectoryEntry(row);
-      if (!normalized) {
-        return;
-      }
-      const key = normalized.email || normalized.id || normalized.name.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, normalized);
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [crmUserDirectory]);
+    return [...crmDirectoryPool].sort((a, b) => a.name.localeCompare(b.name));
+  }, [crmDirectoryPool]);
   const crmUserOptions = useMemo(
     () => Array.from(new Set(crmDirectoryOptions.map((row) => row.name))).sort((a, b) => a.localeCompare(b)),
     [crmDirectoryOptions]
@@ -5268,6 +5554,33 @@ function CrmOnePageModule() {
       .map((item) => String(item.id || "").trim())
       .filter(Boolean);
     return Array.from(new Set(matchedIds));
+  }
+
+  async function refreshCrmRowsFromBackend() {
+    try {
+      const [leadsData, dealsData, salesOrdersData] = await Promise.all([
+        apiFetch("/api/business-autopilot/leads"),
+        apiFetch("/api/business-autopilot/deals"),
+        apiFetch("/api/business-autopilot/sales-orders"),
+      ]);
+      const leads = Array.isArray(leadsData?.leads)
+        ? leadsData.leads.map((row) => normalizeCrmLeadRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+        : [];
+      const deals = Array.isArray(dealsData?.deals)
+        ? dealsData.deals.map((row) => normalizeCrmDealRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+        : [];
+      const salesOrders = Array.isArray(salesOrdersData?.sales_orders)
+        ? salesOrdersData.sales_orders.map((row) => normalizeCrmSalesOrderRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+        : [];
+      setModuleData((prev) => ({
+        ...prev,
+        leads: mergeCrmRowsByKey("leads", leads, prev.leads || []),
+        deals: mergeCrmRowsByKey("deals", deals, prev.deals || []),
+        salesOrders: mergeCrmRowsByKey("salesOrders", salesOrders, prev.salesOrders || []),
+      }));
+    } catch (_error) {
+      // Keep local rows when backend is unavailable.
+    }
   }
 
   async function refreshCrmMeetingsFromBackend() {
@@ -5824,66 +6137,19 @@ function CrmOnePageModule() {
     }
   }
 
-  function onConvertLeadToDeal(leadRow) {
+  async function onConvertLeadToDeal(leadRow) {
     const leadId = String(leadRow?.id || "").trim();
     if (!leadId) {
       return;
     }
-    setModuleData((prev) => {
-      const leads = Array.isArray(prev.leads) ? prev.leads : [];
-      const deals = Array.isArray(prev.deals) ? prev.deals : [];
-      const sourceLead = leads.find((row) => String(row.id) === leadId);
-      if (!sourceLead) {
-        return prev;
-      }
-      const nowIso = new Date().toISOString();
-      const existingDeal = deals.find((row) => String(row.sourceLeadId || "").trim() === leadId);
-      const nextLeads = leads.map((row) => (
-        String(row.id) === leadId
-          ? {
-              ...row,
-              status: "Closed",
-              stage: row.stage || "Qualified",
-              updatedAt: nowIso,
-              statusUpdatedAt: nowIso,
-            }
-          : row
-      ));
-      if (existingDeal) {
-        return { ...prev, leads: nextLeads };
-      }
-      const expectedValue = String(sourceLead.leadAmount || "").trim();
-      const normalizedLeadName = String(sourceLead.name || sourceLead.company || "Lead").trim() || "Lead";
-      const normalizedAssignedUsers = Array.isArray(sourceLead.assignedUser)
-        ? sourceLead.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
-        : [];
-      const dealPayload = {
-        id: `deals_${Date.now()}`,
-        sourceLeadId: leadId,
-        dealName: normalizedLeadName,
-        company: String(sourceLead.company || "").trim(),
-        dealValueExpected: expectedValue,
-        phoneCountryCode: String(sourceLead.phoneCountryCode || "+91").trim(),
-        phone: String(sourceLead.phone || "").trim(),
-        stage: String(sourceLead.stage || "").trim(),
-        assignType: String(sourceLead.assignType || "Users").trim(),
-        assignedUser: normalizedAssignedUsers,
-        assignedTeam: String(sourceLead.assignedTeam || "").trim(),
-        assignedTo: String(sourceLead.assignedTo || "").trim(),
-        leadSource: String(sourceLead.leadSource || "").trim(),
-        sourceLeadName: String(sourceLead.name || "").trim(),
-        sourceLeadStatus: String(sourceLead.status || "").trim(),
-        sourceLeadAmount: expectedValue,
-        wonAmountFinal: "",
-        status: "Open",
-        createdBy: String(currentUserName || "Current User").trim(),
-      };
-      return {
-        ...prev,
-        leads: nextLeads,
-        deals: [dealPayload, ...deals],
-      };
-    });
+    try {
+      await apiFetch(`/api/business-autopilot/convert-to-deal/${encodeURIComponent(leadId)}`, {
+        method: "POST",
+      });
+      await refreshCrmRowsFromBackend();
+    } catch {
+      return;
+    }
     setActiveSection("deals");
   }
 
@@ -5912,48 +6178,19 @@ function CrmOnePageModule() {
     };
   }
 
-  function onConvertDealToSalesOrder(dealRow) {
+  async function onConvertDealToSalesOrder(dealRow) {
     const dealId = String(dealRow?.id || "").trim();
     if (!dealId) {
       return;
     }
-    setModuleData((prev) => {
-      const deals = Array.isArray(prev.deals) ? prev.deals : [];
-      const salesOrders = Array.isArray(prev.salesOrders) ? prev.salesOrders : [];
-      const sourceDeal = deals.find((row) => String(row.id) === dealId);
-      if (!sourceDeal) {
-        return prev;
-      }
-      const existingOrder = salesOrders.find((row) => String(row.sourceDealId || "").trim() === dealId);
-      if (existingOrder) {
-        return prev;
-      }
-      const now = new Date();
-      const monthCode = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const orderId = `SO-${monthCode}-${String(salesOrders.length + 1).padStart(4, "0")}`;
-      const finalAmount = parseNumber(sourceDeal.wonAmountFinal);
-      const expectedAmount = parseNumber(sourceDeal.dealValueExpected);
-      const orderAmount = finalAmount || expectedAmount || 0;
-      const sourceLead = (Array.isArray(prev.leads) ? prev.leads : []).find((lead) => String(lead.id || "").trim() === String(sourceDeal.sourceLeadId || "").trim());
-      const salesOrderRow = {
-        id: `salesOrders_${Date.now()}`,
-        sourceDealId: dealId,
-        orderId,
-        customerName: String(sourceLead?.name || sourceDeal.dealName || "Customer").trim(),
-        company: String(sourceDeal.company || sourceLead?.company || "").trim(),
-        phone: String(sourceLead?.phone || "").trim(),
-        amount: String(orderAmount || ""),
-        quantity: "1",
-        price: String(orderAmount || ""),
-        tax: "0",
-        status: "Pending",
-        createdBy: String(currentUserName || "Current User").trim(),
-      };
-      return {
-        ...prev,
-        salesOrders: [salesOrderRow, ...salesOrders],
-      };
-    });
+    try {
+      await apiFetch(`/api/business-autopilot/convert-to-sales-order/${encodeURIComponent(dealId)}`, {
+        method: "POST",
+      });
+      await refreshCrmRowsFromBackend();
+    } catch {
+      return;
+    }
     setActiveSection("salesOrders");
   }
 
@@ -6066,6 +6303,20 @@ function CrmOnePageModule() {
     setSectionFormErrors((prev) => ({ ...prev, [sectionKey]: "" }));
     const editingId = editingIds[sectionKey];
     const isEditFlow = Boolean(editingId);
+    if (!isEditFlow && !canCreateCrmRows) {
+      setSectionFormErrors((prev) => ({
+        ...prev,
+        [sectionKey]: "You can create records only with Create, View and Edit or Full Access.",
+      }));
+      return;
+    }
+    if (isEditFlow && !hasCrmEditAccess) {
+      setSectionFormErrors((prev) => ({
+        ...prev,
+        [sectionKey]: "You do not have permission to edit records.",
+      }));
+      return;
+    }
     const existingRowForEdit = editingId
       ? (moduleData[sectionKey] || []).find((row) => String(row.id) === String(editingId))
       : null;
@@ -6097,9 +6348,15 @@ function CrmOnePageModule() {
       const nextStatus = String(payload.status || "").trim().toLowerCase();
       const isClosedLike = ["closed", "onhold"].includes(nextStatus);
       const assignType = String(payload.assignType || "Users").trim();
+      const normalizedAssignedUsers = assignType.toLowerCase() === "team"
+        ? resolveAssignedUserNames(String(payload.assignedTeam || "").trim())
+        : resolveAssignedUserNames(payload.assignedUser);
+      payload.assignedUser = normalizedAssignedUsers.length
+        ? normalizedAssignedUsers
+        : [String(currentUserName || "Current User").trim()];
       payload.assignedTo = assignType.toLowerCase() === "team"
         ? String(payload.assignedTeam || "").trim()
-        : (Array.isArray(payload.assignedUser) ? payload.assignedUser.join(", ") : String(payload.assignedUser || "").trim());
+        : payload.assignedUser.join(", ");
       payload.createdBy = String(currentUserName || "Current User").trim();
       payload.updatedAt = nowIso;
       if (!editingId) {
@@ -6116,6 +6373,45 @@ function CrmOnePageModule() {
       }
       payload = normalizeCrmLeadRecord(payload);
     }
+    if (sectionKey === "deals") {
+      const previousDeal = editingId
+        ? (moduleData.deals || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
+        : null;
+      const assignType = String(payload.assignType || previousDeal?.assignType || "Users").trim();
+      const assignedTeam = String(payload.assignedTeam || previousDeal?.assignedTeam || "").trim();
+      const assignedUsers = assignType.toLowerCase() === "team"
+        ? resolveAssignedUserNames(assignedTeam)
+        : resolveAssignedUserNames(payload.assignedUser || previousDeal?.assignedUser || previousDeal?.assignedTo || "");
+      payload.assignType = assignType || "Users";
+      payload.assignedTeam = assignedTeam;
+      payload.assignedUser = assignedUsers.length
+        ? assignedUsers
+        : [String(currentUserName || "Current User").trim()];
+      payload.assignedTo = assignType.toLowerCase() === "team"
+        ? assignedTeam
+        : payload.assignedUser.join(", ");
+      payload.createdBy = String(previousDeal?.createdBy || currentUserName || "Current User").trim();
+      payload = normalizeCrmDealRecord(payload);
+    }
+    if (sectionKey === "salesOrders") {
+      const previousOrder = editingId
+        ? (moduleData.salesOrders || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
+        : null;
+      const assignType = String(payload.assignType || previousOrder?.assignType || "Users").trim();
+      const assignedTeam = String(payload.assignedTeam || previousOrder?.assignedTeam || "").trim();
+      const assignedUsers = assignType.toLowerCase() === "team"
+        ? resolveAssignedUserNames(assignedTeam)
+        : resolveAssignedUserNames(payload.assignedUser || previousOrder?.assignedUser || previousOrder?.assignedTo || "");
+      payload.assignType = assignType || "Users";
+      payload.assignedTeam = assignedTeam;
+      payload.assignedUser = assignedUsers.length
+        ? assignedUsers
+        : [String(currentUserName || "Current User").trim()];
+      payload.assignedTo = assignType.toLowerCase() === "team"
+        ? assignedTeam
+        : payload.assignedUser.join(", ");
+      payload.createdBy = String(previousOrder?.createdBy || currentUserName || "Current User").trim();
+    }
     if (sectionKey === "contacts") {
       payload = normalizeCrmContactRecord(payload);
     }
@@ -6126,32 +6422,44 @@ function CrmOnePageModule() {
       payload = normalizeCrmTeamRecord(payload);
     }
     if (sectionKey === "meetings") {
-      const meetingOwners = Array.isArray(payload.owner)
+      const meetingOwnersRaw = Array.isArray(payload.owner)
         ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
         : String(payload.owner || "")
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean);
+      const meetingOwners = resolveAssignedUserNames(meetingOwnersRaw);
+      const effectiveMeetingOwners = meetingOwners.length ? meetingOwners : [String(currentUserName || "Current User").trim()];
       const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
       payload.meetingDate = normalizeMeetingDateValue(payload.meetingDate);
       payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
-      payload.owner = meetingOwners.join(", ");
-      payload.ownerUserIds = buildMeetingOwnerUserIds(meetingOwners);
+      payload.owner = effectiveMeetingOwners.join(", ");
+      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveMeetingOwners);
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
       payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
+      payload.createdBy = String(currentUserName || "Current User").trim();
     }
     if (sectionKey === "activities") {
-      const activityOwners = Array.isArray(payload.owner)
+      const activityOwnersRaw = Array.isArray(payload.owner)
         ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
         : String(payload.owner || "")
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean);
-      payload.owner = activityOwners.join(", ");
+      const activityOwners = resolveAssignedUserNames(activityOwnersRaw);
+      const effectiveActivityOwners = activityOwners.length ? activityOwners : [String(currentUserName || "Current User").trim()];
+      payload.owner = effectiveActivityOwners.join(", ");
+      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveActivityOwners);
+      payload.createdBy = String(currentUserName || "Current User").trim();
     }
     if (sectionKey === "followUps") {
+      const followUpOwners = resolveAssignedUserNames(parseOwnerNames(payload.owner));
+      const effectiveFollowUpOwners = followUpOwners.length ? followUpOwners : [String(currentUserName || "Current User").trim()];
+      payload.owner = effectiveFollowUpOwners.join(", ");
+      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveFollowUpOwners);
+      payload.createdBy = String(currentUserName || "Current User").trim();
       const normalizedStatus = String(payload.status || "").trim().toLowerCase();
       const existingFollowUp = editingId ? (moduleData.followUps || []).find((row) => String(row.id) === String(editingId)) : null;
       const existingCompletedDate = existingFollowUp ? String(getFollowUpCompletedDate(existingFollowUp) || "").trim() : "";
@@ -6159,6 +6467,128 @@ function CrmOnePageModule() {
         payload.completedDate = existingCompletedDate || getTodayIsoDate();
       } else {
         payload.completedDate = "";
+      }
+    }
+    if (sectionKey === "leads" || sectionKey === "deals" || sectionKey === "salesOrders") {
+      const assignType = String(payload.assignType || "Users").trim().toLowerCase();
+      const assignedUserNames = assignType === "team"
+        ? resolveAssignedUserNames(String(payload.assignedTeam || "").trim())
+        : resolveAssignedUserNames(payload.assignedUser);
+      const assignedUserIds = resolveAssignedUserIds(assignedUserNames);
+      const fallbackAssignedUserId = Number.parseInt(String(currentUserId || "").trim(), 10);
+      const primaryAssignedUserId = assignedUserIds[0] || (Number.isFinite(fallbackAssignedUserId) ? fallbackAssignedUserId : null);
+      try {
+        if (sectionKey === "leads" && !editingId) {
+          const response = await apiFetch("/api/business-autopilot/leads", {
+            method: "POST",
+            body: JSON.stringify({
+              lead_name: payload.name || "",
+              company: payload.company || "",
+              phone: payload.phone || "",
+              lead_amount: payload.leadAmount || 0,
+              lead_source: payload.leadSource || "",
+              assign_type: payload.assignType || "Users",
+              assigned_user_id: primaryAssignedUserId,
+              assigned_user_ids: assignedUserIds,
+              assigned_team: payload.assignedTeam || "",
+              stage: payload.stage || "New",
+              status: payload.status || "Open",
+            }),
+          });
+          const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
+          if (backendLead) {
+            setModuleData((prev) => ({
+              ...prev,
+              leads: [backendLead, ...(prev.leads || []).filter((row) => String(row.id || "") !== String(backendLead.id || ""))],
+            }));
+          }
+          await refreshCrmRowsFromBackend();
+          resetSectionForm(sectionKey);
+          setCrmActionPopup({
+            open: true,
+            title: "Created",
+            message: `${config.itemLabel} created successfully.`,
+          });
+          return;
+        }
+        if (sectionKey === "deals") {
+          if (editingId) {
+            const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(editingId)}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                stage: payload.stage || "Qualified",
+                status: payload.status || "Open",
+                deal_value: payload.dealValueExpected || 0,
+              }),
+            });
+            const backendDeal = response?.deal ? normalizeCrmDealRecord(response.deal) : null;
+            if (backendDeal) {
+              setModuleData((prev) => ({
+                ...prev,
+                deals: (prev.deals || []).map((row) => (
+                  String(row.id || "") === String(editingId)
+                    ? { ...row, ...backendDeal }
+                    : row
+                )),
+              }));
+            }
+          } else {
+            await apiFetch("/api/business-autopilot/deals", {
+              method: "POST",
+              body: JSON.stringify({
+                deal_name: payload.dealName || "",
+                company: payload.company || "",
+                phone: payload.phone || "",
+                deal_value: payload.dealValueExpected || 0,
+                stage: payload.stage || "Qualified",
+                status: payload.status || "Open",
+                assigned_user_id: primaryAssignedUserId,
+                assigned_user_ids: assignedUserIds,
+                assigned_team: payload.assignedTeam || "",
+              }),
+            });
+          }
+          await refreshCrmRowsFromBackend();
+          resetSectionForm(sectionKey);
+          setCrmActionPopup({
+            open: true,
+            title: editingId ? "Edit Completed" : "Created",
+            message: editingId
+              ? `${config.itemLabel} updated successfully.`
+              : `${config.itemLabel} created successfully.`,
+          });
+          return;
+        }
+        if (sectionKey === "salesOrders" && !editingId) {
+          await apiFetch("/api/business-autopilot/sales-orders", {
+            method: "POST",
+            body: JSON.stringify({
+              customer_name: payload.customerName || "",
+              company: payload.company || "",
+              phone: payload.phone || "",
+              amount: payload.amount || 0,
+              quantity: payload.quantity || 1,
+              price: payload.price || payload.amount || 0,
+              tax: payload.tax || 0,
+              status: payload.status || "Pending",
+              assigned_user_id: primaryAssignedUserId,
+            }),
+          });
+          await refreshCrmRowsFromBackend();
+          resetSectionForm(sectionKey);
+          setCrmActionPopup({
+            open: true,
+            title: "Created",
+            message: `${config.itemLabel} created successfully.`,
+          });
+          return;
+        }
+      } catch (_error) {
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          [sectionKey]: "Unable to save CRM data. Please try again.",
+        }));
+        return;
       }
     }
     let meetingServerId = "";
@@ -7137,6 +7567,8 @@ function CrmOnePageModule() {
         );
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
+        const canSubmitSectionForm = editingId ? hasCrmEditAccess : canCreateCrmRows;
+        const shouldShowCrmForm = sectionKey !== "deals" && (canCreateCrmRows || Boolean(editingId));
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
         const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
         const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
@@ -7401,7 +7833,7 @@ function CrmOnePageModule() {
           : [];
         return (
 		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
-		            {sectionKey !== "deals" ? (
+		            {shouldShowCrmForm ? (
 		            <div className={sectionKey === "teams" ? "col-12 col-xl-3" : ""}>
             <div className={`card p-3 ${editingId ? "crm-form-editing-highlight" : ""}`}>
               <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
@@ -7634,6 +8066,7 @@ function CrmOnePageModule() {
                       <button
                         type="submit"
                         className={sectionKey === "leads" ? "btn btn-success btn-sm" : "btn btn-success btn-sm single-row-form-submit-btn"}
+                        disabled={!canSubmitSectionForm}
                       >
                         {editingId ? "Update" : "Create"}
                       </button>
@@ -8796,6 +9229,7 @@ function CrmOnePageModule() {
                                       ? (sectionKey === "leads" ? "" : "single-row-form-submit-btn")
                                       : ""
                                   }`}
+                                  disabled={!canSubmitSectionForm}
                                 >
                                   {editingId ? "Update" : "Create"}
                                 </button>
@@ -8812,7 +9246,7 @@ function CrmOnePageModule() {
                     </div>
                     {sectionKey === "contacts" ? (
                       <div className="d-flex justify-content-end gap-2 mt-2">
-                        <button type="submit" className="btn btn-success btn-sm">
+                        <button type="submit" className="btn btn-success btn-sm" disabled={!canSubmitSectionForm}>
                           {editingId ? "Update" : "Create"}
                         </button>
                         {editingId ? (
@@ -8824,7 +9258,7 @@ function CrmOnePageModule() {
                     ) : null}
                     {sectionKey === "meetings" ? (
                       <div className="d-flex justify-content-end gap-2 mt-2">
-                        <button type="submit" className="btn btn-success btn-sm">
+                        <button type="submit" className="btn btn-success btn-sm" disabled={!canSubmitSectionForm}>
                           {editingId ? "Update" : "Create"}
                         </button>
                         {editingId ? (
@@ -8836,7 +9270,7 @@ function CrmOnePageModule() {
                     ) : null}
                     {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
                       <div className="d-flex gap-2">
-                        <button type="submit" className="btn btn-success btn-sm">
+                        <button type="submit" className="btn btn-success btn-sm" disabled={!canSubmitSectionForm}>
                           {editingId ? "Update" : "Create"}
                         </button>
                         {editingId ? (
@@ -9180,7 +9614,7 @@ function CrmOnePageModule() {
                         onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
                       />
                     ) : null}
-                    {sectionKey === "leads" && canEditCrmRow(sectionKey, row) ? (
+                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-success"
@@ -9191,7 +9625,7 @@ function CrmOnePageModule() {
                         Convert to Deal
                       </button>
                     ) : null}
-                    {sectionKey === "deals" && canEditCrmRow(sectionKey, row) ? (
+                    {sectionKey === "deals" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-success"
