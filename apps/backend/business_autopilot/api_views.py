@@ -200,7 +200,7 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
         return
     memberships = list(
         OrganizationUser.objects
-        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
+        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
         .select_related("user")
     )
     active_user_ids = set()
@@ -334,8 +334,8 @@ def _get_org_membership(user: User, org: Organization):
         return None
     return (
         OrganizationUser.objects
-        .filter(organization=org, user=user, is_active=True)
-        .only("id", "role", "department", "employee_role", "is_active")
+        .filter(organization=org, user=user, is_active=True, is_deleted=False)
+        .only("id", "role", "department", "employee_role", "is_active", "is_deleted")
         .first()
     )
 
@@ -582,14 +582,15 @@ def _serialize_departments(org):
     return [{"id": row.id, "name": row.name} for row in rows]
 
 
-def _serialize_org_users(org):
+def _serialize_org_users(org, *, include_deleted=False):
     _sync_business_autopilot_membership_access(org)
-    memberships = (
+    queryset = (
         OrganizationUser.objects
         .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
         .select_related("user", "user__userprofile")
         .order_by("-id")
     )
+    memberships = queryset.filter(is_deleted=bool(include_deleted))
     return [
         {
             "id": member.user_id,
@@ -607,15 +608,17 @@ def _serialize_org_users(org):
             "department": member.department or "",
             "employee_role": member.employee_role or "",
             "is_active": bool(member.is_active and member.user.is_active),
+            "is_deleted": bool(member.is_deleted),
             "created_at": member.created_at.isoformat() if member.created_at else "",
+            "deleted_at": member.deleted_at.isoformat() if member.deleted_at else "",
         }
         for member in memberships
     ]
 
 
-def _safe_serialize_org_users(org):
+def _safe_serialize_org_users(org, *, include_deleted=False):
     try:
-        return _serialize_org_users(org)
+        return _serialize_org_users(org, include_deleted=include_deleted)
     except (DatabaseError, OperationalError, IntegrityError):
         logger.exception("Failed to serialize Business Autopilot users for org_id=%s", getattr(org, "id", None))
         return []
@@ -658,7 +661,7 @@ def _safe_serialize_departments(org):
 def _list_org_user_memberships(org):
     return list(
         OrganizationUser.objects
-        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
+        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
         .select_related("user")
         .order_by("id")
     )
@@ -743,6 +746,26 @@ def _build_org_user_meta(org, users=None):
         "limit_message": limit_message,
         "base_included_users": base_included_users,
         "extra_included_users": extra_included_users,
+    }
+
+
+def _build_org_users_response_payload(org, can_manage_users, *, created_user_credentials=None, credential_delivery=None, message=""):
+    users = _safe_serialize_org_users(org)
+    deleted_users = _safe_serialize_org_users(org, include_deleted=True)
+    meta = _build_org_user_meta(org, users=users)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    users = _attach_locked_state(users, lock_state["locked_ids"])
+    return {
+        "authenticated": True,
+        "users": users,
+        "deleted_users": deleted_users,
+        "employee_roles": _safe_serialize_employee_roles(org),
+        "departments": _safe_serialize_departments(org),
+        "can_manage_users": can_manage_users,
+        "meta": meta,
+        "created_user_credentials": created_user_credentials,
+        "credential_delivery": credential_delivery,
+        "message": message,
     }
 
 
@@ -1655,6 +1678,8 @@ def org_users(request):
                     "employee_role": employee_role,
                     "department": department,
                     "is_active": True,
+                    "is_deleted": False,
+                    "deleted_at": None,
                 },
             )
             _grant_business_autopilot_access(user, request.user, role)
@@ -1693,30 +1718,21 @@ def org_users(request):
             }
 
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
-    users = _safe_serialize_org_users(org)
-    user_meta = _build_org_user_meta(org, users=users)
-    lock_state = _compute_org_user_lock_ids(user_meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
-    users = _attach_locked_state(users, lock_state["locked_ids"])
-    return JsonResponse(
-        {
-            "authenticated": True,
-            "organization": {
-                "id": org.id,
-                "name": org.name,
-                "company_key": org.company_key,
-            },
-            "users": users,
-            "employee_roles": _safe_serialize_employee_roles(org),
-            "departments": _safe_serialize_departments(org),
-            "can_manage_users": can_manage_users,
-            "meta": user_meta,
-            "created_user_credentials": created_user_credentials,
-            "credential_delivery": credential_delivery,
-        }
+    payload = _build_org_users_response_payload(
+        org,
+        can_manage_users,
+        created_user_credentials=created_user_credentials,
+        credential_delivery=credential_delivery,
     )
+    payload["organization"] = {
+        "id": org.id,
+        "name": org.name,
+        "company_key": org.company_key,
+    }
+    return JsonResponse(payload)
 
 
-@require_http_methods(["PUT", "DELETE"])
+@require_http_methods(["PUT", "DELETE", "POST"])
 def org_user_detail(request, membership_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -1734,28 +1750,48 @@ def org_user_detail(request, membership_id: int):
         return JsonResponse({"detail": "user_not_found"}, status=404)
 
     if request.method == "DELETE":
+        permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        if membership.is_deleted and not permanent:
+            return JsonResponse({"detail": "user_already_deleted"}, status=400)
         _revoke_business_autopilot_access(membership.user)
-        membership.delete()
+        if permanent:
+            membership.delete()
+            message = "User permanently deleted."
+        else:
+            membership.is_deleted = True
+            membership.is_active = False
+            membership.deleted_at = timezone.now()
+            membership.save(update_fields=["is_deleted", "is_active", "deleted_at", "updated_at"])
+            message = "User moved to deleted items."
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
-        users = _safe_serialize_org_users(org)
-        meta = _build_org_user_meta(org, users=users)
-        lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
-        users = _attach_locked_state(users, lock_state["locked_ids"])
-        return JsonResponse(
-            {
-                "authenticated": True,
-                "users": users,
-                "employee_roles": _safe_serialize_employee_roles(org),
-                "departments": _safe_serialize_departments(org),
-                "can_manage_users": can_manage_users,
-                "meta": meta,
-            }
-        )
+        return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message=message))
+
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        action = str(payload.get("action") or "").strip().lower()
+        if action != "restore":
+            return JsonResponse({"detail": "invalid_action"}, status=400)
+        if not membership.is_deleted:
+            return JsonResponse({"detail": "user_not_deleted"}, status=400)
+        membership.is_deleted = False
+        membership.deleted_at = None
+        membership.is_active = True
+        membership.save(update_fields=["is_deleted", "deleted_at", "is_active", "updated_at"])
+        _sync_org_users_to_plan_limit(org, requested_by=request.user)
+        membership.refresh_from_db()
+        if membership.is_active:
+            _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
+        return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User restored successfully."))
 
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"detail": "invalid_json"}, status=400)
+    if membership.is_deleted:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
 
     role = (payload.get("role") or membership.role or "org_user").strip().lower()
     if role not in ERP_EMPLOYEE_ROLES:
@@ -1864,20 +1900,7 @@ def org_user_detail(request, membership_id: int):
             _revoke_business_autopilot_access(membership.user)
 
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
-    users = _safe_serialize_org_users(org)
-    meta = _build_org_user_meta(org, users=users)
-    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
-    users = _attach_locked_state(users, lock_state["locked_ids"])
-    return JsonResponse(
-        {
-            "authenticated": True,
-            "users": users,
-            "employee_roles": _safe_serialize_employee_roles(org),
-            "departments": _safe_serialize_departments(org),
-            "can_manage_users": can_manage_users,
-            "meta": meta,
-        }
-    )
+    return JsonResponse(_build_org_users_response_payload(org, can_manage_users))
 
 
 @require_http_methods(["POST"])
@@ -1893,7 +1916,7 @@ def org_user_toggle_status(request, membership_id: int):
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
-    membership = OrganizationUser.objects.filter(organization=org, id=membership_id).select_related("user").first()
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id, is_deleted=False).select_related("user").first()
     if not membership or not membership.user:
         return JsonResponse({"detail": "user_not_found"}, status=404)
 
@@ -1963,7 +1986,7 @@ def org_user_resend_credentials(request, membership_id: int):
     if not can_manage_users:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
-    membership = OrganizationUser.objects.filter(organization=org, id=membership_id).select_related("user").first()
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id, is_deleted=False).select_related("user").first()
     if not membership or not membership.user:
         return JsonResponse({"detail": "user_not_found"}, status=404)
 
@@ -2188,7 +2211,7 @@ def org_employee_role_detail(request, role_id: int):
 
     assigned_memberships = list(
         OrganizationUser.objects
-        .filter(organization=org, employee_role__iexact=role.name, role__in=ERP_EMPLOYEE_ROLES)
+        .filter(organization=org, employee_role__iexact=role.name, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
         .select_related("user")
         .order_by("id")
     )
@@ -2335,7 +2358,7 @@ def org_department_detail(request, department_id: int):
 
     assigned_memberships = list(
         OrganizationUser.objects
-        .filter(organization=org, department__iexact=department.name, role__in=ERP_EMPLOYEE_ROLES)
+        .filter(organization=org, department__iexact=department.name, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
         .select_related("user")
         .order_by("id")
     )
@@ -2652,7 +2675,7 @@ def employees_search(request):
 
     memberships = (
         OrganizationUser.objects
-        .filter(organization=org, is_active=True, user__is_active=True, role__in=ERP_EMPLOYEE_ROLES)
+        .filter(organization=org, is_active=True, user__is_active=True, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
         .select_related("user")
     )
     matches = []
@@ -3709,9 +3732,9 @@ def _crm_meeting_recipient_emails(org: Organization, row: CrmMeeting):
     owner_ids = _crm_clean_user_id_list(row.owner_user_ids)
     if owner_ids:
         users = (
-            OrganizationUser.objects
-            .filter(organization=org, user_id__in=owner_ids, is_active=True)
-            .select_related("user")
+        OrganizationUser.objects
+        .filter(organization=org, user_id__in=owner_ids, is_active=True, is_deleted=False)
+        .select_related("user")
         )
         for membership in users:
             email = str(getattr(membership.user, "email", "") or "").strip().lower()

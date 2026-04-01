@@ -714,6 +714,7 @@ export default function BusinessAutopilotUsersPage() {
   const [saving, setSaving] = useState(false);
   const [canManageUsers, setCanManageUsers] = useState(false);
   const [users, setUsers] = useState([]);
+  const [deletedUsers, setDeletedUsers] = useState([]);
   const [userMeta, setUserMeta] = useState(DEFAULT_USER_META);
   const [employeeRoles, setEmployeeRoles] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -737,6 +738,8 @@ export default function BusinessAutopilotUsersPage() {
   const [editForm, setEditForm] = useState(defaultEditForm);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingMembershipId, setDeletingMembershipId] = useState("");
+  const [restoringMembershipId, setRestoringMembershipId] = useState("");
+  const [permanentlyDeletingMembershipId, setPermanentlyDeletingMembershipId] = useState("");
   const [togglingMembershipId, setTogglingMembershipId] = useState("");
   const [verifyingMembershipId, setVerifyingMembershipId] = useState("");
   const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
@@ -828,24 +831,33 @@ export default function BusinessAutopilotUsersPage() {
     });
   }
 
+  function applyUsersResponse(data, options = {}) {
+    const nextUsers = Array.isArray(data?.users) ? data.users : [];
+    const nextDeletedUsers = Array.isArray(data?.deleted_users) ? data.deleted_users : (options.preserveDeletedUsers ? deletedUsers : []);
+    setUsers(nextUsers);
+    setDeletedUsers(nextDeletedUsers);
+    setUserMeta(normalizeUserMeta(data?.meta, nextUsers));
+    writeBusinessAutopilotUserDirectory(nextUsers);
+    setEmployeeRoles(Array.isArray(data?.employee_roles) ? data.employee_roles : []);
+    setDepartments(Array.isArray(data?.departments) ? data.departments : []);
+    const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
+    setHrEmployees(syncedHrEmployees);
+    writeSharedHrEmployees(syncedHrEmployees);
+    if (typeof data?.can_manage_users === "boolean") {
+      setCanManageUsers(Boolean(data.can_manage_users));
+    }
+  }
+
   async function loadUsers() {
     setLoading(true);
     setNotice("");
     try {
       const data = await apiFetch("/api/business-autopilot/users");
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      setCanManageUsers(Boolean(data.can_manage_users));
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data);
     } catch (error) {
       setNotice(error?.message || "Unable to load users.");
       setUsers([]);
+      setDeletedUsers([]);
       setUserMeta(DEFAULT_USER_META);
       writeBusinessAutopilotUserDirectory([]);
       setEmployeeRoles([]);
@@ -949,15 +961,7 @@ export default function BusinessAutopilotUsersPage() {
           is_active: Boolean(editForm.is_active)
         })
       });
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data, { preserveDeletedUsers: true });
       setNotice("User updated successfully.");
       cancelEdit();
     } catch (error) {
@@ -978,29 +982,84 @@ export default function BusinessAutopilotUsersPage() {
     if (!membershipId || deletingMembershipId) {
       return;
     }
+    const targetUser = users.find((user) => String(user?.membership_id || "") === String(membershipId));
+    const confirmed = await openConfirmDialog(
+      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access and may cause user data loss in assigned records. Do you want to continue?`,
+      {
+        title: "Delete User",
+        confirmText: "Delete",
+        cancelText: "Cancel",
+      }
+    );
+    if (!confirmed) {
+      return;
+    }
     setDeletingMembershipId(String(membershipId));
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
         method: "DELETE"
       });
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data);
       if (String(editForm.membership_id) === String(membershipId)) {
         cancelEdit();
       }
-      setNotice("User deleted successfully.");
+      setNotice(String(data?.message || "User deleted successfully."));
     } catch (error) {
       setNotice(error?.message || "Unable to delete user.");
     } finally {
       setDeletingMembershipId("");
+    }
+  }
+
+  async function handleRestoreUser(membershipId) {
+    if (!canManageUsersTab || !membershipId || restoringMembershipId) {
+      return;
+    }
+    setRestoringMembershipId(String(membershipId));
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "restore" }),
+      });
+      applyUsersResponse(data);
+      setNotice(String(data?.message || "User restored successfully."));
+    } catch (error) {
+      setNotice(error?.message || "Unable to restore user.");
+    } finally {
+      setRestoringMembershipId("");
+    }
+  }
+
+  async function handlePermanentDeleteUser(membershipId) {
+    if (!canManageUsersTab || !membershipId || permanentlyDeletingMembershipId) {
+      return;
+    }
+    const targetUser = deletedUsers.find((user) => String(user?.membership_id || "") === String(membershipId));
+    const confirmed = await openConfirmDialog(
+      `Permanently deleting ${String(targetUser?.name || targetUser?.email || "this user")} cannot be undone and may cause permanent user data loss. Do you want to continue?`,
+      {
+        title: "Permanent Delete User",
+        confirmText: "Delete",
+        cancelText: "Cancel",
+      }
+    );
+    if (!confirmed) {
+      return;
+    }
+    setPermanentlyDeletingMembershipId(String(membershipId));
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}?permanent=1`, {
+        method: "DELETE",
+      });
+      applyUsersResponse(data);
+      setNotice(String(data?.message || "User permanently deleted."));
+    } catch (error) {
+      setNotice(error?.message || "Unable to permanently delete user.");
+    } finally {
+      setPermanentlyDeletingMembershipId("");
     }
   }
 
@@ -1041,15 +1100,7 @@ export default function BusinessAutopilotUsersPage() {
         method: "POST",
         body: JSON.stringify({ enabled: Boolean(nextEnabled) }),
       });
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data, { preserveDeletedUsers: true });
       setNotice(String(data?.message || (nextEnabled ? "User activated." : "User deactivated.")));
     } catch (error) {
       if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
@@ -1135,15 +1186,7 @@ export default function BusinessAutopilotUsersPage() {
         method: "POST",
         body: JSON.stringify({}),
       });
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data, { preserveDeletedUsers: true });
       setNotice(String(data?.message || "User email verified successfully."));
     } catch (error) {
       setNotice(error?.message || "Unable to verify user email.");
@@ -1199,7 +1242,7 @@ export default function BusinessAutopilotUsersPage() {
 
   useEffect(() => {
     setUserPage(1);
-  }, [userSearch, users.length]);
+  }, [userSearch, userListTab, users.length, deletedUsers.length]);
 
   useEffect(() => {
     setEmployeeRolePage(1);
@@ -1270,15 +1313,7 @@ export default function BusinessAutopilotUsersPage() {
           throw error;
         }
       }
-      const nextUsers = data.users || [];
-      setUsers(nextUsers);
-      setUserMeta(normalizeUserMeta(data.meta, nextUsers));
-      writeBusinessAutopilotUserDirectory(nextUsers);
-      setEmployeeRoles(data.employee_roles || []);
-      setDepartments(data.departments || []);
-      const syncedHrEmployees = syncHrEmployeeDirectoryFromUsers(nextUsers, readSharedHrEmployees());
-      setHrEmployees(syncedHrEmployees);
-      writeSharedHrEmployees(syncedHrEmployees);
+      applyUsersResponse(data, { preserveDeletedUsers: true });
       setForm(defaultForm);
       const createdCredentials = data?.created_user_credentials || null;
       const credentialDelivery = data?.credential_delivery || {};
@@ -1494,8 +1529,8 @@ export default function BusinessAutopilotUsersPage() {
       if (data.departments) {
         setDepartments(data.departments || []);
       }
-      if (data.users) {
-        setUsers(data.users || []);
+      if (data.users || data.deleted_users) {
+        applyUsersResponse(data, { preserveDeletedUsers: !Array.isArray(data?.deleted_users) });
       }
       if (String(editingEmployeeRoleId) === String(roleId)) {
         cancelEditEmployeeRole();
@@ -1593,8 +1628,8 @@ export default function BusinessAutopilotUsersPage() {
       if (data.employee_roles) {
         setEmployeeRoles(data.employee_roles || []);
       }
-      if (data.users) {
-        setUsers(data.users || []);
+      if (data.users || data.deleted_users) {
+        applyUsersResponse(data, { preserveDeletedUsers: !Array.isArray(data?.deleted_users) });
       }
       if (String(editingDepartmentId) === String(departmentId)) {
         cancelEditDepartment();
@@ -1629,6 +1664,28 @@ export default function BusinessAutopilotUsersPage() {
         .includes(q)
     );
   }, [users, userSearch]);
+  const filteredDeletedUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) {
+      return deletedUsers;
+    }
+    return deletedUsers.filter((user) =>
+      [
+        user.name,
+        user.first_name,
+        user.last_name,
+        user.email,
+        user.department,
+        user.role,
+        user.employee_role,
+        "deleted",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [deletedUsers, userSearch]);
   const pendingEmailVerificationUsers = useMemo(
     () => users.filter((user) => !Boolean(user?.email_verified)),
     [users]
@@ -1671,11 +1728,12 @@ export default function BusinessAutopilotUsersPage() {
     return departments.filter((item) => String(item.name || "").toLowerCase().includes(q));
   }, [departments, departmentSearch]);
 
-  const totalUserPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const currentUserListRows = userListTab === "deleted" ? filteredDeletedUsers : filteredUsers;
+  const totalUserPages = Math.max(1, Math.ceil(currentUserListRows.length / pageSize));
   const normalizedUserPage = Math.min(userPage, totalUserPages);
-  const paginatedUsers = filteredUsers.slice((normalizedUserPage - 1) * pageSize, normalizedUserPage * pageSize);
-  const userStartIndex = filteredUsers.length ? (normalizedUserPage - 1) * pageSize + 1 : 0;
-  const userEndIndex = Math.min(normalizedUserPage * pageSize, filteredUsers.length);
+  const paginatedUsers = currentUserListRows.slice((normalizedUserPage - 1) * pageSize, normalizedUserPage * pageSize);
+  const userStartIndex = currentUserListRows.length ? (normalizedUserPage - 1) * pageSize + 1 : 0;
+  const userEndIndex = Math.min(normalizedUserPage * pageSize, currentUserListRows.length);
   const totalEmployeeRolePages = Math.max(1, Math.ceil(filteredEmployeeRoles.length / pageSize));
   const normalizedEmployeeRolePage = Math.min(employeeRolePage, totalEmployeeRolePages);
   const paginatedEmployeeRoles = filteredEmployeeRoles.slice((normalizedEmployeeRolePage - 1) * pageSize, normalizedEmployeeRolePage * pageSize);
@@ -3127,6 +3185,15 @@ export default function BusinessAutopilotUsersPage() {
               >
                 Email Verification
               </button>
+              {canManageUsersTab ? (
+                <button
+                  type="button"
+                  className={`btn btn-sm ${userListTab === "deleted" ? "btn-danger" : "btn-outline-danger"}`}
+                  onClick={() => setUserListTab("deleted")}
+                >
+                  Deleted Items ({filteredDeletedUsers.length})
+                </button>
+              ) : null}
             </div>
             {userListTab === "all" ? (
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
@@ -3149,6 +3216,14 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
               </div>
             </div>
+            ) : userListTab === "deleted" ? (
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0">Deleted Users ({filteredDeletedUsers.length})</h6>
+                <div className="table-search">
+                  <i className="bi bi-search" aria-hidden="true" />
+                  <input type="search" className="form-control form-control-sm" placeholder="Search users" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
+                </div>
+              </div>
             ) : (
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                 <h6 className="mb-0">Pending Email Verification Users ({filteredPendingEmailVerificationUsers.length})</h6>
@@ -3222,6 +3297,58 @@ export default function BusinessAutopilotUsersPage() {
                     )}
                   </tbody>
                 </table>
+              ) : userListTab === "deleted" ? (
+                <table className="table table-dark table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>First Name</th>
+                      <th>Last Name</th>
+                      <th>Official Email</th>
+                      <th>Department</th>
+                      <th>Employee Role</th>
+                      <th>Deleted At</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={7}>Loading users...</td></tr>
+                    ) : paginatedUsers.length ? (
+                      paginatedUsers.map((user) => (
+                        <tr key={`deleted-${user.membership_id || user.id}`}>
+                          <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
+                          <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
+                          <td>{user.email || "-"}</td>
+                          <td>{user.department || "-"}</td>
+                          <td>{user.employee_role || "-"}</td>
+                          <td>{user.deleted_at ? new Date(user.deleted_at).toLocaleString() : "-"}</td>
+                          <td>
+                            <div className="d-inline-flex gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-success"
+                                onClick={() => handleRestoreUser(user.membership_id)}
+                                disabled={restoringMembershipId === String(user.membership_id)}
+                              >
+                                {restoringMembershipId === String(user.membership_id) ? "Restoring..." : "Restore"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handlePermanentDeleteUser(user.membership_id)}
+                                disabled={permanentlyDeletingMembershipId === String(user.membership_id)}
+                              >
+                                {permanentlyDeletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={7}>No deleted users found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
               ) : (
                 <table className="table table-dark table-hover align-middle mb-0">
                   <thead>
@@ -3266,10 +3393,10 @@ export default function BusinessAutopilotUsersPage() {
                 </table>
               )}
             </div>
-            {!loading && userListTab === "all" ? (
+            {!loading && (userListTab === "all" || userListTab === "deleted") ? (
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
                 <div className="small text-secondary">
-                  Showing {userStartIndex} to {userEndIndex} of {filteredUsers.length} entries
+                  Showing {userStartIndex} to {userEndIndex} of {currentUserListRows.length} entries
                 </div>
                 <TablePagination page={normalizedUserPage} totalPages={totalUserPages} onPageChange={setUserPage} />
               </div>
