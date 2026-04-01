@@ -2664,6 +2664,35 @@ def organization_detail(request, org_id):
     return JsonResponse(_organization_detail_payload(org, subscription))
 
 
+@login_required
+@require_http_methods(["POST"])
+def organization_owner_password(request, org_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id)
+    owner = org.owner
+    if not owner:
+        return JsonResponse({"error": "owner_not_found"}, status=404)
+
+    data = {}
+    if request.body:
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "invalid_json"}, status=400)
+
+    new_password = str(data.get("new_password") or "").strip()
+    if not new_password:
+        return JsonResponse({"error": "password_required"}, status=400)
+    if len(new_password) < 6:
+        return JsonResponse({"error": "password_too_short"}, status=400)
+
+    owner.set_password(new_password)
+    owner.save(update_fields=["password"])
+    return JsonResponse({"status": "ok"})
+
+
 def _plan_payload(plan):
     product = plan.product
     plan_features = plan.features if isinstance(plan.features, dict) else {}

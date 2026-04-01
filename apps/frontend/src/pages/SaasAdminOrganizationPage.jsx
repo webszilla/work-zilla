@@ -284,6 +284,7 @@ export default function SaasAdminOrganizationPage() {
   async function handleSave(event) {
     event.preventDefault();
     setNotice("");
+    const newOwnerPassword = String(form.owner_password || "").trim();
     try {
       await apiFetch(`/api/saas-admin/organizations/${orgId}`, {
         method: "PUT",
@@ -299,7 +300,6 @@ export default function SaasAdminOrganizationPage() {
           status: form.status,
           end_date: form.end_date,
           addon_count: form.addon_count,
-          owner_password: form.owner_password || undefined,
           billing_contact_name: billingForm.contact_name,
           billing_company_name: billingForm.company_name,
           billing_email: billingForm.email,
@@ -313,8 +313,16 @@ export default function SaasAdminOrganizationPage() {
           billing_gstin: billingForm.gstin
         })
       });
+      if (newOwnerPassword) {
+        await apiFetch(`/api/saas-admin/organizations/${orgId}/owner-password`, {
+          method: "POST",
+          body: JSON.stringify({
+            new_password: newOwnerPassword
+          })
+        });
+      }
       setForm((prev) => ({ ...prev, owner_password: "" }));
-      setNotice("Organization updated.");
+      setNotice(newOwnerPassword ? "Organization and admin password updated." : "Organization updated.");
     } catch (error) {
       setState((prev) => ({
         ...prev,

@@ -80,15 +80,40 @@ export async function apiFetch(url, options = {}) {
     };
   }
 
-  const response = await fetch(requestUrl, fetchOptions);
-  const text = await response.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch (error) {
-      data = null;
+  async function parseResponse(response) {
+    const text = await response.text();
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        data = null;
+      }
     }
+    return { text, data };
+  }
+
+  let response = await fetch(requestUrl, fetchOptions);
+  let parsed = await parseResponse(response);
+  let data = parsed.data;
+
+  // Some environments intermittently return CSRF 403 after session rotation.
+  // Refresh token once and retry unsafe requests before surfacing the error.
+  if (
+    !response.ok
+    && response.status === 403
+    && method !== "GET"
+    && method !== "HEAD"
+    && !data
+  ) {
+    await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
+    fetchOptions.headers = {
+      ...fetchOptions.headers,
+      "X-CSRFToken": getCsrfToken()
+    };
+    response = await fetch(requestUrl, fetchOptions);
+    parsed = await parseResponse(response);
+    data = parsed.data;
   }
 
   if (!response.ok) {
