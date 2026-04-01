@@ -788,6 +788,7 @@ def _build_org_users_response_payload(org, can_manage_users, *, created_user_cre
     users = _attach_locked_state(users, lock_state["locked_ids"])
     return {
         "authenticated": True,
+        "organization_id": getattr(org, "id", None),
         "users": users,
         "deleted_users": deleted_users,
         "employee_roles": _safe_serialize_employee_roles(org),
@@ -2005,6 +2006,7 @@ def org_user_toggle_status(request, membership_id: int):
     return JsonResponse(
         {
             "authenticated": True,
+            "organization_id": getattr(org, "id", None),
             "users": users,
             "employee_roles": _safe_serialize_employee_roles(org),
             "departments": _safe_serialize_departments(org),

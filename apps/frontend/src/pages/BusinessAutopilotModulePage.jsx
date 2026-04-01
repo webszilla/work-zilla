@@ -2019,6 +2019,7 @@ function getActiveCrmScopeOrgId() {
 
 function buildScopedCrmContactsStorageKey(authData = {}) {
   const orgId = getOrganizationIdFromAuth(authData)
+    || String(authData?.organization_id || "").trim()
     || getActiveCrmScopeOrgId();
   const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
   return normalizedOrgId
@@ -5486,8 +5487,12 @@ function CrmOnePageModule() {
           : readCrmRoleAccessMapFromStorage();
         setCrmRoleAccessMap(nextRoleAccessMap);
         window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
-        setCrmStorageKey(buildScopedCrmStorageKey(authData));
-        setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(authData));
+        const scopedAuthData = {
+          ...authData,
+          organization_id: usersData?.organization_id || authData?.organization_id || "",
+        };
+        setCrmStorageKey(buildScopedCrmStorageKey(scopedAuthData));
+        setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(scopedAuthData));
         await refreshCrmRowsFromBackend();
         await refreshCrmMeetingsFromBackend();
       } catch {
