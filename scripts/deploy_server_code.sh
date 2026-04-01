@@ -32,6 +32,7 @@ require_file() {
 
 check_local_forbidden_db_artifacts() {
   local found=0
+  local warned=0
   local search_paths=(
     "apps/backend"
     "backups"
@@ -43,8 +44,16 @@ check_local_forbidden_db_artifacts() {
     fi
     while IFS= read -r path; do
       [ -n "$path" ] || continue
-      found=1
-      echo "Blocked local DB artifact: $path"
+      case "$path" in
+        *.sqlite3|*.sqlite3-journal|*.sqlite3-wal|*.sqlite3-shm)
+          warned=1
+          echo "Warning: local SQLite artifact present but excluded from deploy: $path"
+          ;;
+        *)
+          found=1
+          echo "Blocked local DB artifact: $path"
+          ;;
+      esac
     done < <(find "$base" -type f \( \
       -name '*.sqlite3' -o \
       -name '*.sqlite3-journal' -o \
@@ -58,6 +67,9 @@ check_local_forbidden_db_artifacts() {
   if [ "$found" -eq 1 ]; then
     echo "ERROR: Local DB artifacts detected in deploy-sensitive folders. Remove/move them before deploy."
     exit 1
+  fi
+  if [ "$warned" -eq 1 ]; then
+    echo "Continuing deploy because SQLite artifacts are excluded and PostgreSQL runtime is enforced."
   fi
 }
 
