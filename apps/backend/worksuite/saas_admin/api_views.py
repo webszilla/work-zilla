@@ -2604,6 +2604,12 @@ def organization_detail(request, org_id):
                     owner.last_name = (data.get("owner_last_name") or "").strip()
                 if "owner_email" in data:
                     owner.email = (data.get("owner_email") or "").strip()
+                if "owner_password" in data:
+                    new_password = str(data.get("owner_password") or "")
+                    if new_password:
+                        if len(new_password) < 6:
+                            return JsonResponse({"error": "password_too_short"}, status=400)
+                        owner.set_password(new_password)
 
             if "plan_id" in data or "billing_cycle" in data or "status" in data or "end_date" in data:
                 plan_id = data.get("plan_id")

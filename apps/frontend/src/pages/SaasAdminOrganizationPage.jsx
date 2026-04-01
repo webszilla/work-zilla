@@ -176,7 +176,8 @@ export default function SaasAdminOrganizationPage() {
     billing_cycle: "monthly",
     status: "active",
     end_date: "",
-    addon_count: 0
+    addon_count: 0,
+    owner_password: ""
   });
   const [billingForm, setBillingForm] = useState({
     contact_name: "",
@@ -216,7 +217,8 @@ export default function SaasAdminOrganizationPage() {
           billing_cycle: subscription.billing_cycle || "monthly",
           status: subscription.status || "active",
           end_date: subscription.end_date || "",
-          addon_count: subscription.addon_count ?? 0
+          addon_count: subscription.addon_count ?? 0,
+          owner_password: ""
         });
         setBillingForm({
           contact_name: billingProfile.contact_name || "",
@@ -297,6 +299,7 @@ export default function SaasAdminOrganizationPage() {
           status: form.status,
           end_date: form.end_date,
           addon_count: form.addon_count,
+          owner_password: form.owner_password || undefined,
           billing_contact_name: billingForm.contact_name,
           billing_company_name: billingForm.company_name,
           billing_email: billingForm.email,
@@ -310,6 +313,7 @@ export default function SaasAdminOrganizationPage() {
           billing_gstin: billingForm.gstin
         })
       });
+      setForm((prev) => ({ ...prev, owner_password: "" }));
       setNotice("Organization updated.");
     } catch (error) {
       setState((prev) => ({
@@ -547,6 +551,17 @@ export default function SaasAdminOrganizationPage() {
                 className="form-control"
                 value={form.addon_count ?? 0}
                 onChange={(event) => setForm((prev) => ({ ...prev, addon_count: event.target.value }))}
+              />
+            </div>
+            <div className="modal-form-field">
+              <label className="form-label">Admin Password Change</label>
+              <input
+                type="password"
+                className="form-control"
+                value={form.owner_password || ""}
+                placeholder="Leave empty to keep current password"
+                minLength={6}
+                onChange={(event) => setForm((prev) => ({ ...prev, owner_password: event.target.value }))}
               />
             </div>
           </div>
