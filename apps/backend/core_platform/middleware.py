@@ -5,6 +5,7 @@ from datetime import timedelta
 from django.http import HttpResponsePermanentRedirect
 from django.shortcuts import redirect
 from django.core.cache import cache
+from django.middleware.csrf import get_token
 from django.utils import timezone
 
 from apps.backend.brand.models import ProductRouteMapping
@@ -42,6 +43,17 @@ class LegacyMonitorRedirectMiddleware:
             suffix = path[len("/monitor"):]
             return HttpResponsePermanentRedirect(f"/worksuite{suffix}{suffix_query}")
 
+        return self.get_response(request)
+
+
+class AppCsrfBootstrapMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ""
+        if path.startswith("/app"):
+            get_token(request)
         return self.get_response(request)
 
 

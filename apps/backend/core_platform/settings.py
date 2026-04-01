@@ -105,6 +105,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "apps.backend.core_platform.middleware.AppCsrfBootstrapMiddleware",
     "apps.backend.core_platform.middleware.RequestSecurityShieldMiddleware",
     "apps.backend.core_platform.middleware.LegacyMonitorRedirectMiddleware",
     "django.middleware.common.CommonMiddleware",
