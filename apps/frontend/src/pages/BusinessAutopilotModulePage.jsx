@@ -19,6 +19,7 @@ const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
 const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
+const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
@@ -1998,6 +1999,33 @@ function buildScopedCrmStorageKey(authData = {}) {
   return `${CRM_STORAGE_KEY_PREFIX}__${parts.join("__")}`;
 }
 
+function getOrganizationIdFromAuth(authData = {}) {
+  return String(
+    authData?.profile?.organization_id
+    || authData?.profile?.org_id
+    || authData?.profile?.company_id
+    || ""
+  ).trim();
+}
+
+function getActiveCrmScopeOrgId() {
+  const activeKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
+  if (!activeKey.startsWith(`${CRM_STORAGE_KEY_PREFIX}__`)) {
+    return "";
+  }
+  const parts = activeKey.replace(`${CRM_STORAGE_KEY_PREFIX}__`, "").split("__").filter(Boolean);
+  return String(parts[0] || "").trim();
+}
+
+function buildScopedCrmContactsStorageKey(authData = {}) {
+  const orgId = getOrganizationIdFromAuth(authData)
+    || getActiveCrmScopeOrgId();
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${normalizedOrgId}`
+    : CRM_STORAGE_KEY;
+}
+
 function normalizeCrmRoleToken(value) {
   return String(value || "")
     .trim()
@@ -2636,8 +2664,36 @@ function readSharedAccountsVendors() {
     .filter(Boolean);
 }
 
-function readSharedCrmContacts() {
+function readSharedCrmContacts(storageKey = "") {
+  try {
+    const resolvedKey = String(storageKey || "").trim() || buildScopedCrmContactsStorageKey();
+    const raw = window.localStorage.getItem(resolvedKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const contacts = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.contacts)
+          ? parsed.contacts
+          : [];
+      return contacts.map((row) => normalizeCrmContactRecord(row));
+    }
+  } catch (_error) {
+    // fall through to legacy reader
+  }
   return readCrmDataFromStorage().contacts || [];
+}
+
+function writeSharedCrmContacts(storageKey = "", rows = []) {
+  try {
+    const resolvedKey = String(storageKey || "").trim() || buildScopedCrmContactsStorageKey();
+    if (!resolvedKey) {
+      return;
+    }
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => normalizeCrmContactRecord(row));
+    window.localStorage.setItem(resolvedKey, JSON.stringify(normalizedRows));
+  } catch (_error) {
+    // noop
+  }
 }
 
 function readSharedCrmTeams() {
@@ -5001,6 +5057,8 @@ function CrmOnePageModule() {
   const [canManageCrmUsers, setCanManageCrmUsers] = useState(false);
   const [crmRoleAccessMap, setCrmRoleAccessMap] = useState(() => readCrmRoleAccessMapFromStorage());
   const [crmStorageKey, setCrmStorageKey] = useState("");
+  const [crmSharedContactsKey, setCrmSharedContactsKey] = useState("");
+  const crmStorageHydratedRef = useRef(false);
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
   const [teamMembersPopup, setTeamMembersPopup] = useState(null);
@@ -5290,12 +5348,22 @@ function CrmOnePageModule() {
     if (!crmStorageKey) {
       return;
     }
+    crmStorageHydratedRef.current = false;
     try {
+      const sharedContacts = readSharedCrmContacts(crmSharedContactsKey);
       const raw = window.localStorage.getItem(crmStorageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (isValidCrmData(parsed)) {
-          setModuleData(stripLegacyDemoCrmData(parsed));
+          const cleaned = stripLegacyDemoCrmData(parsed);
+          const nextContacts = sharedContacts.length ? sharedContacts : (cleaned.contacts || []);
+          setModuleData({
+            ...cleaned,
+            contacts: nextContacts,
+          });
+          if (!sharedContacts.length && nextContacts.length) {
+            writeSharedCrmContacts(crmSharedContactsKey, nextContacts);
+          }
           window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
           return;
         }
@@ -5306,29 +5374,77 @@ function CrmOnePageModule() {
         const legacyParsed = JSON.parse(legacyRaw);
         if (isValidCrmData(legacyParsed)) {
           const migrated = stripLegacyDemoCrmData(legacyParsed);
-          setModuleData(migrated);
+          const nextContacts = sharedContacts.length ? sharedContacts : (migrated.contacts || []);
+          setModuleData({
+            ...migrated,
+            contacts: nextContacts,
+          });
+          if (!sharedContacts.length && nextContacts.length) {
+            writeSharedCrmContacts(crmSharedContactsKey, nextContacts);
+          }
           window.localStorage.setItem(crmStorageKey, JSON.stringify(migrated));
         } else {
-          setModuleData(normalizeCrmData(null));
+          setModuleData({
+            ...normalizeCrmData(null),
+            contacts: sharedContacts,
+          });
         }
         window.localStorage.removeItem(CRM_STORAGE_KEY);
       } else {
-        setModuleData(normalizeCrmData(null));
+        setModuleData({
+          ...normalizeCrmData(null),
+          contacts: sharedContacts,
+        });
       }
       window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+      crmStorageHydratedRef.current = true;
     } catch (_error) {
-      setModuleData(normalizeCrmData(null));
+      setModuleData({
+        ...normalizeCrmData(null),
+        contacts: readSharedCrmContacts(crmSharedContactsKey),
+      });
+      crmStorageHydratedRef.current = true;
     }
-  }, [crmStorageKey]);
+  }, [crmStorageKey, crmSharedContactsKey]);
 
   useEffect(() => {
     if (!crmStorageKey) {
       return;
     }
+    if (!crmStorageHydratedRef.current) {
+      return;
+    }
     const cleaned = stripLegacyDemoCrmData(moduleData);
     window.localStorage.setItem(crmStorageKey, JSON.stringify(cleaned));
     window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
-  }, [moduleData, crmStorageKey]);
+    writeSharedCrmContacts(crmSharedContactsKey, cleaned.contacts || []);
+  }, [moduleData, crmStorageKey, crmSharedContactsKey]);
+
+  useEffect(() => {
+    if (!crmSharedContactsKey) {
+      return;
+    }
+    function syncSharedContactsIntoModule() {
+      const nextContacts = readSharedCrmContacts(crmSharedContactsKey);
+      setModuleData((prev) => {
+        const previousContacts = Array.isArray(prev?.contacts) ? prev.contacts : [];
+        if (JSON.stringify(previousContacts) === JSON.stringify(nextContacts)) {
+          return prev;
+        }
+        return {
+          ...prev,
+          contacts: nextContacts,
+        };
+      });
+    }
+    syncSharedContactsIntoModule();
+    window.addEventListener("storage", syncSharedContactsIntoModule);
+    window.addEventListener("focus", syncSharedContactsIntoModule);
+    return () => {
+      window.removeEventListener("storage", syncSharedContactsIntoModule);
+      window.removeEventListener("focus", syncSharedContactsIntoModule);
+    };
+  }, [crmSharedContactsKey]);
 
   useEffect(() => {
     let active = true;
@@ -5371,6 +5487,7 @@ function CrmOnePageModule() {
         setCrmRoleAccessMap(nextRoleAccessMap);
         window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
         setCrmStorageKey(buildScopedCrmStorageKey(authData));
+        setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(authData));
         await refreshCrmRowsFromBackend();
         await refreshCrmMeetingsFromBackend();
       } catch {
@@ -5386,6 +5503,7 @@ function CrmOnePageModule() {
         setCurrentUserEmployeeRole("");
         setCrmRoleAccessMap(readCrmRoleAccessMapFromStorage());
         setCrmStorageKey("");
+        setCrmSharedContactsKey("");
       }
     })();
     return () => {

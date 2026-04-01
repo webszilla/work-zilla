@@ -52,6 +52,9 @@ const USER_DIRECTORY_STORAGE_KEY = "wz_business_autopilot_user_directory";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
+const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
+const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
+const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: option.value,
   label: option.label,
@@ -505,17 +508,43 @@ function normalizeCrmContactRecord(row = {}) {
   };
 }
 
+function getActiveCrmScopeOrgId() {
+  try {
+    const activeKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
+    if (!activeKey.startsWith(`${CRM_STORAGE_KEY_PREFIX}__`)) {
+      return "";
+    }
+    const parts = activeKey.replace(`${CRM_STORAGE_KEY_PREFIX}__`, "").split("__").filter(Boolean);
+    return String(parts[0] || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function readSharedCrmContacts() {
   try {
-    const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
-    if (!raw) {
-      return [];
+    const orgId = getActiveCrmScopeOrgId();
+    const sharedKey = orgId ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${String(orgId).replace(/[^a-z0-9_.-]/gi, "_")}` : "";
+    const keysToTry = [sharedKey, CRM_STORAGE_KEY].filter(Boolean);
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      const contacts = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.contacts)
+          ? parsed.contacts
+          : [];
+      const normalized = contacts
+        .map((row) => normalizeCrmContactRecord(row))
+        .filter((row) => row.name || row.company || row.email || row.phone);
+      if (normalized.length || key === sharedKey) {
+        return normalized;
+      }
     }
-    const parsed = JSON.parse(raw);
-    const contacts = Array.isArray(parsed?.contacts) ? parsed.contacts : [];
-    return contacts
-      .map((row) => normalizeCrmContactRecord(row))
-      .filter((row) => row.name || row.company || row.email || row.phone);
+    return [];
   } catch {
     return [];
   }
