@@ -800,6 +800,12 @@ html[data-theme="light"] .wz-route-surface--saas-admin {
   margin-bottom: 0;
 }
 
+.wz-profile-photo-card__note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted, #94a3b8);
+}
+
 .wz-profile-photo-card__actions {
   display: flex;
   align-items: center;

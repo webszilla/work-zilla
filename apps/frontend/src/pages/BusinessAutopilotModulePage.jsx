@@ -6722,7 +6722,7 @@ function CrmOnePageModule() {
           resetSectionForm(sectionKey);
           setCrmActionPopup({
             open: true,
-            title: editingId ? "Edit Completed" : "Created",
+            title: "Successful",
             message: editingId
               ? `${config.itemLabel} updated successfully.`
               : `${config.itemLabel} created successfully.`,
@@ -6770,7 +6770,7 @@ function CrmOnePageModule() {
           resetSectionForm(sectionKey);
           setCrmActionPopup({
             open: true,
-            title: editingId ? "Edit Completed" : "Created",
+            title: "Successful",
             message: editingId
               ? `${config.itemLabel} updated successfully.`
               : `${config.itemLabel} created successfully.`,
@@ -6796,7 +6796,7 @@ function CrmOnePageModule() {
           resetSectionForm(sectionKey);
           setCrmActionPopup({
             open: true,
-            title: "Created",
+            title: "Successful",
             message: `${config.itemLabel} created successfully.`,
           });
           return;
@@ -6897,7 +6897,7 @@ function CrmOnePageModule() {
     resetSectionForm(sectionKey);
     setCrmActionPopup({
       open: true,
-      title: isEditFlow ? "Edit Completed" : "Created",
+      title: "Successful",
       message: isEditFlow
         ? `${config.itemLabel} updated successfully.`
         : `${config.itemLabel} created successfully.`,
@@ -7415,18 +7415,41 @@ function CrmOnePageModule() {
     setMeetingPopup(null);
   }
 
-  function updateMeetingStatus(meetingId, nextStatus) {
+  async function updateMeetingStatus(meetingId, nextStatus) {
     const status = String(nextStatus || "").trim();
     if (!meetingId || !status) return;
-    setModuleData((prev) => ({
-      ...prev,
-      meetings: (prev.meetings || []).map((row) => (
-        String(row.id) === String(meetingId) ? { ...row, status } : row
-      )),
-    }));
-    setMeetingPopup((prev) => (
-      prev && String(prev.id) === String(meetingId) ? { ...prev, status } : prev
-    ));
+    try {
+      const response = await apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(meetingId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      const backendMeeting = response?.meeting ? normalizeCrmMeetingRecord(response.meeting) : null;
+      setModuleData((prev) => ({
+        ...prev,
+        meetings: (prev.meetings || []).map((row) => (
+          String(row.id) === String(meetingId)
+            ? { ...row, ...(backendMeeting || { status }) }
+            : row
+        )),
+      }));
+      setMeetingPopup((prev) => (
+        prev && String(prev.id) === String(meetingId)
+          ? { ...prev, ...(backendMeeting || { status }) }
+          : prev
+      ));
+      setCrmActionPopup({
+        open: true,
+        title: "Successful",
+        message: "Meeting updated successfully.",
+      });
+    } catch (_error) {
+      setCrmActionPopup({
+        open: true,
+        title: "Update Failed",
+        message: "Unable to update this meeting. Please try again.",
+        isError: true,
+      });
+    }
   }
 
   function openTeamMembersPopup(row) {
@@ -7537,6 +7560,11 @@ function CrmOnePageModule() {
       )),
     }));
     setDealQuickEditPopup(null);
+    setCrmActionPopup({
+      open: true,
+      title: "Successful",
+      message: "Deal updated successfully.",
+    });
   }
 
   return (
@@ -9429,17 +9457,17 @@ function CrmOnePageModule() {
                             <div
                               className={
                                 sectionKey === "leads"
-                                  ? "col-12 col-md-6 col-xl-2 ms-xl-auto d-flex align-items-end justify-content-end"
+                                  ? "col-12 col-md-6 col-xl-2 ms-xl-auto d-flex align-items-start justify-content-end crm-submit-align-with-input"
                                   : sectionKey === "deals"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : sectionKey === "followUps"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-start crm-submit-align-with-input"
                                   : sectionKey === "activities"
-                                  ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
+                                  ? "col-12 col-md-6 col-xl-2 ms-xl-auto d-flex align-items-start justify-content-end crm-submit-align-with-input"
                                   : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
                               }
                             >
-                              <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center justify-content-end w-100" : "d-flex gap-2 flex-wrap w-100"}>
+                              <div className={["leads", "activities"].includes(sectionKey) ? "d-flex gap-2 align-items-center justify-content-end w-100" : "d-flex gap-2 flex-wrap w-100"}>
                                 <button
                                   type="submit"
                                   className={`btn btn-success btn-sm ${
@@ -9954,12 +9982,11 @@ function CrmOnePageModule() {
         <div
           role="dialog"
           aria-modal="true"
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          className="modal-overlay wz-crm-popup-overlay"
           onClick={closeMeetingPopup}
         >
           <div
-            className="card p-3"
+            className="card p-3 wz-crm-popup"
             style={{ width: "min(560px, 100%)" }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -9968,7 +9995,7 @@ function CrmOnePageModule() {
                 <h5 className="mb-1">{meetingPopup.title || "Meeting"}</h5>
                 <div className="small text-secondary">{meetingPopup.relatedTo || "-"}</div>
               </div>
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeMeetingPopup}>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeMeetingPopup}>
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
@@ -10016,12 +10043,11 @@ function CrmOnePageModule() {
         <div
           role="dialog"
           aria-modal="true"
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          className="modal-overlay wz-crm-popup-overlay"
           onClick={closeDealQuickEditPopup}
         >
           <div
-            className="card p-3"
+            className="card p-3 wz-crm-popup"
             style={{ width: "min(440px, 94vw)" }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -10030,7 +10056,7 @@ function CrmOnePageModule() {
                 <h5 className="mb-1">Edit Deal</h5>
                 <div className="small text-secondary">{dealQuickEditPopup.dealName || "-"}</div>
               </div>
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeDealQuickEditPopup}>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeDealQuickEditPopup}>
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
@@ -10079,7 +10105,7 @@ function CrmOnePageModule() {
                 </select>
               </div>
               <div className="d-flex justify-content-end gap-2">
-                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeDealQuickEditPopup}>
+                <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeDealQuickEditPopup}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-success btn-sm">
@@ -10094,8 +10120,7 @@ function CrmOnePageModule() {
         <div
           role="dialog"
           aria-modal="true"
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          className="modal-overlay wz-crm-popup-overlay"
           onClick={closeTeamMembersPopup}
         >
           <div
@@ -10143,15 +10168,15 @@ function CrmOnePageModule() {
         <div
           role="dialog"
           aria-modal="true"
-          className="modal-overlay"
+          className="modal-overlay wz-crm-popup-overlay"
           onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
         >
-          <div className="modal-panel" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
               <h5 className="mb-0">{crmActionPopup.title || "Success"}</h5>
               <button
                 type="button"
-                className="btn btn-sm btn-outline-light"
+                className="btn btn-sm wz-crm-popup-close"
                 onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
               >
                 <i className="bi bi-x-lg" aria-hidden="true" />
