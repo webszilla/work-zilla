@@ -48,6 +48,19 @@ export function getCsrfToken() {
   return getCookie("csrftoken");
 }
 
+async function refreshCsrfToken() {
+  const separator = "/api/auth/csrf".includes("?") ? "&" : "?";
+  const csrfUrl = `${buildApiUrl("/api/auth/csrf")}${separator}_ts=${Date.now()}`;
+  await fetch(csrfUrl, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+}
+
 export async function apiFetch(url, options = {}) {
   const requestUrl = buildApiUrl(url);
   const browserTimezone = getBrowserTimezone();
@@ -70,7 +83,7 @@ export async function apiFetch(url, options = {}) {
   }
   if (method !== "GET" && method !== "HEAD") {
     if (!getCsrfToken()) {
-      await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
+      await refreshCsrfToken();
     }
     isFormDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
     fetchOptions.headers = {
@@ -106,7 +119,7 @@ export async function apiFetch(url, options = {}) {
     && method !== "HEAD"
     && !data
   ) {
-    await fetch(buildApiUrl("/api/auth/csrf"), { credentials: "include" });
+    await refreshCsrfToken();
     fetchOptions.headers = {
       ...fetchOptions.headers,
       "X-CSRFToken": getCsrfToken()
