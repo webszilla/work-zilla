@@ -2240,12 +2240,20 @@ function normalizeCrmSalesOrderRecord(row = {}) {
 
 function buildCrmRowMergeKey(sectionKey, row = {}) {
   const normalize = (value) => String(value || "").trim().toLowerCase();
+  const rawId = String(row.id || row.serverMeetingId || "").trim();
+  const stableId = rawId && !rawId.startsWith(`${String(sectionKey || "").trim()}_`)
+    ? normalize(rawId)
+    : "";
+  if (stableId) {
+    return `${String(sectionKey || "").trim().toLowerCase()}:id:${stableId}`;
+  }
   if (sectionKey === "leads") {
     return [
       normalize(row.name || row.lead_name),
       normalize(row.company),
       normalize(row.phone),
-      normalize(row.leadAmount || row.lead_amount),
+      normalize(row.createdBy || row.created_by_name || row.created_by_id),
+      normalize(Array.isArray(row.assigned_user_ids) ? row.assigned_user_ids.join(",") : row.assignedUser || row.assigned_user_name || row.assignedTo),
     ].join("|");
   }
   if (sectionKey === "deals") {
@@ -2253,7 +2261,8 @@ function buildCrmRowMergeKey(sectionKey, row = {}) {
       normalize(row.dealName || row.deal_name),
       normalize(row.company),
       normalize(row.phone),
-      normalize(row.dealValueExpected || row.deal_value || row.dealValue),
+      normalize(row.sourceLeadId || row.lead_id),
+      normalize(row.createdBy || row.created_by_name || row.created_by_id),
     ].join("|");
   }
   if (sectionKey === "salesOrders") {
@@ -2261,10 +2270,10 @@ function buildCrmRowMergeKey(sectionKey, row = {}) {
       normalize(row.orderId || row.order_id),
       normalize(row.customerName || row.customer_name),
       normalize(row.company),
-      normalize(row.amount || row.total_amount),
+      normalize(row.phone),
     ].join("|");
   }
-  return normalize(row.id);
+  return stableId;
 }
 
 function mergeCrmRowsByKey(sectionKey, backendRows = [], localRows = []) {
@@ -2289,6 +2298,15 @@ function mergeCrmRowsByKey(sectionKey, backendRows = [], localRows = []) {
     merged.push(row);
   });
   return merged;
+}
+
+function isTemporaryCrmRowId(sectionKey, rowId) {
+  const normalizedSectionKey = String(sectionKey || "").trim();
+  const normalizedRowId = String(rowId || "").trim();
+  if (!normalizedSectionKey || !normalizedRowId) {
+    return false;
+  }
+  return normalizedRowId.startsWith(`${normalizedSectionKey}_`);
 }
 
 function normalizeCrmMeetingRecord(row = {}) {
@@ -5574,9 +5592,9 @@ function CrmOnePageModule() {
         : [];
       setModuleData((prev) => ({
         ...prev,
-        leads: mergeCrmRowsByKey("leads", leads, prev.leads || []),
-        deals: mergeCrmRowsByKey("deals", deals, prev.deals || []),
-        salesOrders: mergeCrmRowsByKey("salesOrders", salesOrders, prev.salesOrders || []),
+        leads,
+        deals,
+        salesOrders,
       }));
     } catch (_error) {
       // Keep local rows when backend is unavailable.
@@ -5880,7 +5898,7 @@ function CrmOnePageModule() {
     }));
   }
 
-  function onBulkSoftDelete(sectionKey, rowIds) {
+  async function onBulkSoftDelete(sectionKey, rowIds) {
     const normalizedSection = String(sectionKey || "").trim();
     const normalizedIds = Array.isArray(rowIds)
       ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
@@ -5893,6 +5911,47 @@ function CrmOnePageModule() {
       return canDeleteCrmRow(normalizedSection, row);
     });
     if (!eligibleIds.length) {
+      return;
+    }
+    if (normalizedSection === "leads") {
+      const tempIds = eligibleIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = eligibleIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      if (tempIds.length) {
+        const tempIdSet = new Set(tempIds);
+        const nowIso = new Date().toISOString();
+        setModuleData((prev) => ({
+          ...prev,
+          [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+            tempIdSet.has(String(row.id || "").trim())
+              ? {
+                  ...row,
+                  isDeleted: true,
+                  is_deleted: true,
+                  deletedAt: nowIso,
+                  deleted_at: nowIso,
+                  deletedBy: currentUserName || "Current User",
+                }
+              : row
+          )),
+        }));
+      }
+      if (backendIds.length) {
+        try {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+            method: "DELETE",
+          })));
+          await refreshCrmRowsFromBackend();
+        } catch (_error) {
+          setCrmActionPopup({
+            open: true,
+            title: "Delete Failed",
+            message: "Unable to delete the selected leads. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+      }
+      clearCrmSelection(normalizedSection);
       return;
     }
     const rowIdSet = new Set(eligibleIds);
@@ -5918,7 +5977,7 @@ function CrmOnePageModule() {
     clearCrmSelection(normalizedSection);
   }
 
-  function onBulkRestore(sectionKey, rowIds) {
+  async function onBulkRestore(sectionKey, rowIds) {
     if (!isCrmAdmin) {
       return;
     }
@@ -5927,6 +5986,47 @@ function CrmOnePageModule() {
       ? rowIds.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
     if (!normalizedSection || !normalizedIds.length) {
+      return;
+    }
+    if (normalizedSection === "leads") {
+      const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = normalizedIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      if (tempIds.length) {
+        const tempIdSet = new Set(tempIds);
+        setModuleData((prev) => ({
+          ...prev,
+          [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+            tempIdSet.has(String(row.id || "").trim())
+              ? {
+                  ...row,
+                  isDeleted: false,
+                  is_deleted: false,
+                  deletedAt: "",
+                  deleted_at: "",
+                  deletedBy: "",
+                }
+              : row
+          )),
+        }));
+      }
+      if (backendIds.length) {
+        try {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ is_deleted: false }),
+          })));
+          await refreshCrmRowsFromBackend();
+        } catch (_error) {
+          setCrmActionPopup({
+            open: true,
+            title: "Restore Failed",
+            message: "Unable to restore the selected leads. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+      }
+      clearCrmSelection(normalizedSection);
       return;
     }
     const rowIdSet = new Set(normalizedIds);
@@ -5948,7 +6048,7 @@ function CrmOnePageModule() {
     clearCrmSelection(normalizedSection);
   }
 
-  function onBulkPermanentDelete(sectionKey, rowIds) {
+  async function onBulkPermanentDelete(sectionKey, rowIds) {
     if (!isCrmAdmin) {
       return;
     }
@@ -5959,6 +6059,35 @@ function CrmOnePageModule() {
     if (!normalizedSection || !normalizedIds.length) {
       return;
     }
+    if (normalizedSection === "leads") {
+      const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = normalizedIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      if (backendIds.length) {
+        try {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}?permanent=1`, {
+            method: "DELETE",
+          })));
+          await refreshCrmRowsFromBackend();
+        } catch (_error) {
+          setCrmActionPopup({
+            open: true,
+            title: "Permanent Delete Failed",
+            message: "Unable to permanently delete the selected leads. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+      }
+      if (tempIds.length) {
+        const tempIdSet = new Set(tempIds);
+        setModuleData((prev) => ({
+          ...prev,
+          [normalizedSection]: (prev[normalizedSection] || []).filter((row) => !tempIdSet.has(String(row.id || "").trim())),
+        }));
+      }
+      clearCrmSelection(normalizedSection);
+      return;
+    }
     const rowIdSet = new Set(normalizedIds);
     setModuleData((prev) => ({
       ...prev,
@@ -5967,26 +6096,28 @@ function CrmOnePageModule() {
     clearCrmSelection(normalizedSection);
   }
 
-  function onDelete(sectionKey, rowId) {
+  async function onDelete(sectionKey, rowId) {
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     if (!canDeleteCrmRow(sectionKey, targetRow)) {
       return;
     }
-    setModuleData((prev) => ({
-      ...prev,
-      [sectionKey]: (prev[sectionKey] || []).map((row) => (
-        String(row.id) === String(rowId)
-          ? {
-              ...row,
-              isDeleted: true,
-              is_deleted: true,
-              deletedAt: new Date().toISOString(),
-              deleted_at: new Date().toISOString(),
-              deletedBy: currentUserName || "Current User",
-            }
-          : row
-      )),
-    }));
+    const performLocalDelete = () => {
+      setModuleData((prev) => ({
+        ...prev,
+        [sectionKey]: (prev[sectionKey] || []).map((row) => (
+          String(row.id) === String(rowId)
+            ? {
+                ...row,
+                isDeleted: true,
+                is_deleted: true,
+                deletedAt: new Date().toISOString(),
+                deleted_at: new Date().toISOString(),
+                deletedBy: currentUserName || "Current User",
+              }
+            : row
+        )),
+      }));
+    };
     if (editingIds[sectionKey] === rowId) {
       resetSectionForm(sectionKey);
     }
@@ -6014,6 +6145,29 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} deleted: ${primaryName}`
       : `${rowLabel} deleted (ID: ${rowId})`;
+    if (sectionKey === "leads") {
+      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+        performLocalDelete();
+        toggleCrmRowSelection(sectionKey, rowId, false);
+        return;
+      }
+      try {
+        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+          method: "DELETE",
+        });
+        await refreshCrmRowsFromBackend();
+      } catch (_error) {
+        setCrmActionPopup({
+          open: true,
+          title: "Delete Failed",
+          message: `Unable to delete this ${rowLabel.toLowerCase()}. Please try again.`,
+          isError: true,
+        });
+        return;
+      }
+    } else {
+      performLocalDelete();
+    }
     apiFetch("/api/business-autopilot/crm/activity-log", {
       method: "POST",
       body: JSON.stringify({
@@ -6032,26 +6186,28 @@ function CrmOnePageModule() {
     toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
-  function onRestore(sectionKey, rowId) {
+  async function onRestore(sectionKey, rowId) {
     if (!isCrmAdmin) {
       return;
     }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
-    setModuleData((prev) => ({
-      ...prev,
-      [sectionKey]: (prev[sectionKey] || []).map((row) => (
-        String(row.id) === String(rowId)
-          ? {
-              ...row,
-              isDeleted: false,
-              is_deleted: false,
-              deletedAt: "",
-              deleted_at: "",
-              deletedBy: "",
-            }
-          : row
-      )),
-    }));
+    const performLocalRestore = () => {
+      setModuleData((prev) => ({
+        ...prev,
+        [sectionKey]: (prev[sectionKey] || []).map((row) => (
+          String(row.id) === String(rowId)
+            ? {
+                ...row,
+                isDeleted: false,
+                is_deleted: false,
+                deletedAt: "",
+                deleted_at: "",
+                deletedBy: "",
+              }
+            : row
+        )),
+      }));
+    };
     const sectionLabelMap = {
       leads: "Lead",
       deals: "Deal",
@@ -6076,6 +6232,30 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} restored: ${primaryName}`
       : `${rowLabel} restored (ID: ${rowId})`;
+    if (sectionKey === "leads") {
+      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+        performLocalRestore();
+        toggleCrmRowSelection(sectionKey, rowId, false);
+        return;
+      }
+      try {
+        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_deleted: false }),
+        });
+        await refreshCrmRowsFromBackend();
+      } catch (_error) {
+        setCrmActionPopup({
+          open: true,
+          title: "Restore Failed",
+          message: `Unable to restore this ${rowLabel.toLowerCase()}. Please try again.`,
+          isError: true,
+        });
+        return;
+      }
+    } else {
+      performLocalRestore();
+    }
     apiFetch("/api/business-autopilot/crm/activity-log", {
       method: "POST",
       body: JSON.stringify({
@@ -6095,15 +6275,40 @@ function CrmOnePageModule() {
     toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
-  function onPermanentDelete(sectionKey, rowId) {
+  async function onPermanentDelete(sectionKey, rowId) {
     if (!isCrmAdmin) {
       return;
     }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
-    setModuleData((prev) => ({
-      ...prev,
-      [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
-    }));
+    if (sectionKey === "leads") {
+      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+        setModuleData((prev) => ({
+          ...prev,
+          [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
+        }));
+        toggleCrmRowSelection(sectionKey, rowId, false);
+        return;
+      }
+      try {
+        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}?permanent=1`, {
+          method: "DELETE",
+        });
+        await refreshCrmRowsFromBackend();
+      } catch (_error) {
+        setCrmActionPopup({
+          open: true,
+          title: "Permanent Delete Failed",
+          message: "Unable to permanently delete this lead. Please try again.",
+          isError: true,
+        });
+        return;
+      }
+    } else {
+      setModuleData((prev) => ({
+        ...prev,
+        [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
+      }));
+    }
     if (sectionKey === "meetings") {
       const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
       if (serverMeetingId) {
@@ -6478,36 +6683,49 @@ function CrmOnePageModule() {
       const fallbackAssignedUserId = Number.parseInt(String(currentUserId || "").trim(), 10);
       const primaryAssignedUserId = assignedUserIds[0] || (Number.isFinite(fallbackAssignedUserId) ? fallbackAssignedUserId : null);
       try {
-        if (sectionKey === "leads" && !editingId) {
-          const response = await apiFetch("/api/business-autopilot/leads", {
-            method: "POST",
-            body: JSON.stringify({
-              lead_name: payload.name || "",
-              company: payload.company || "",
-              phone: payload.phone || "",
-              lead_amount: payload.leadAmount || 0,
-              lead_source: payload.leadSource || "",
-              assign_type: payload.assignType || "Users",
-              assigned_user_id: primaryAssignedUserId,
-              assigned_user_ids: assignedUserIds,
-              assigned_team: payload.assignedTeam || "",
-              stage: payload.stage || "New",
-              status: payload.status || "Open",
-            }),
-          });
+        if (sectionKey === "leads") {
+          const response = await apiFetch(
+            editingId
+              ? `/api/business-autopilot/leads/${encodeURIComponent(editingId)}`
+              : "/api/business-autopilot/leads",
+            {
+              method: editingId ? "PATCH" : "POST",
+              body: JSON.stringify({
+                lead_name: payload.name || "",
+                company: payload.company || "",
+                phone: payload.phone || "",
+                lead_amount: payload.leadAmount || 0,
+                lead_source: payload.leadSource || "",
+                assign_type: payload.assignType || "Users",
+                assigned_user_id: primaryAssignedUserId,
+                assigned_user_ids: assignedUserIds,
+                assigned_team: payload.assignedTeam || "",
+                stage: payload.stage || "New",
+                status: payload.status || "Open",
+              }),
+            },
+          );
           const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
           if (backendLead) {
             setModuleData((prev) => ({
               ...prev,
-              leads: [backendLead, ...(prev.leads || []).filter((row) => String(row.id || "") !== String(backendLead.id || ""))],
+              leads: editingId
+                ? (prev.leads || []).map((row) => (
+                    String(row.id || "") === String(editingId)
+                      ? { ...row, ...backendLead }
+                      : row
+                  ))
+                : [backendLead, ...(prev.leads || []).filter((row) => String(row.id || "") !== String(backendLead.id || ""))],
             }));
           }
           await refreshCrmRowsFromBackend();
           resetSectionForm(sectionKey);
           setCrmActionPopup({
             open: true,
-            title: "Created",
-            message: `${config.itemLabel} created successfully.`,
+            title: editingId ? "Edit Completed" : "Created",
+            message: editingId
+              ? `${config.itemLabel} updated successfully.`
+              : `${config.itemLabel} created successfully.`,
           });
           return;
         }

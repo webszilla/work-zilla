@@ -6,6 +6,7 @@ from . import api_views
 urlpatterns = [
     path("crm/activity-log", api_views.crm_activity_log, name="business_autopilot_crm_activity_log"),
     path("leads", api_views.crm_leads, name="business_autopilot_crm_leads"),
+    path("leads/<int:lead_id>", api_views.crm_leads, name="business_autopilot_crm_lead_detail"),
     path("convert-to-deal/<int:lead_id>", api_views.crm_convert_to_deal, name="business_autopilot_crm_convert_to_deal"),
     path("deals", api_views.crm_deals, name="business_autopilot_crm_deals"),
     path("deals/<int:deal_id>", api_views.crm_deals, name="business_autopilot_crm_deal_detail"),

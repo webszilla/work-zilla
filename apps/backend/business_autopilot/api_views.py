@@ -3487,7 +3487,10 @@ def _crm_is_admin(user: User, org: Organization):
 
 def _crm_to_decimal(value):
     try:
-        return Decimal(str(value or "0").strip() or "0")
+        normalized = str(value or "0").strip() or "0"
+        normalized = normalized.replace(",", "")
+        normalized = "".join(ch for ch in normalized if ch.isdigit() or ch in {".", "-"})
+        return Decimal(normalized or "0")
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
 
@@ -3713,8 +3716,8 @@ def _dispatch_due_crm_meeting_reminders(org: Organization = None, now=None, limi
     return {"checked": len(rows), "sent": sent}
 
 
-@require_http_methods(["GET", "POST"])
-def crm_leads(request):
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+def crm_leads(request, lead_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
     org = _resolve_org(request.user)
@@ -3751,18 +3754,99 @@ def crm_leads(request):
         )
         return JsonResponse({"lead": _serialize_crm_lead(row)}, status=201)
 
-    rows = [
-        row
-        for row in CrmLead.objects.filter(organization=org).select_related("assigned_user", "created_by").order_by("-created_at")
-        if _crm_can_access_row(request.user, org, row)
-    ]
-    pipeline_value = sum((_crm_to_decimal(row.lead_amount) for row in rows if not row.is_deleted), Decimal("0"))
-    return JsonResponse(
-        {
-            "leads": [_serialize_crm_lead(row) for row in rows],
-            "pipeline_value": float(pipeline_value),
-        }
-    )
+    if request.method == "GET" and not lead_id:
+        rows = [
+            row
+            for row in CrmLead.objects.filter(organization=org).select_related("assigned_user", "created_by").order_by("-created_at")
+            if _crm_can_access_row(request.user, org, row)
+        ]
+        pipeline_value = sum((_crm_to_decimal(row.lead_amount) for row in rows if not row.is_deleted), Decimal("0"))
+        return JsonResponse(
+            {
+                "leads": [_serialize_crm_lead(row) for row in rows],
+                "pipeline_value": float(pipeline_value),
+            }
+        )
+
+    row = CrmLead.objects.filter(organization=org, id=lead_id).select_related("assigned_user", "created_by").first() if lead_id else None
+    if not row:
+        return JsonResponse({"detail": "lead_not_found"}, status=404)
+    if not _crm_can_access_row(request.user, org, row):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if request.method == "PATCH":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        update_fields = ["updated_by", "updated_at"]
+        if "lead_name" in payload or "name" in payload:
+            lead_name = str(payload.get("lead_name") or payload.get("name") or "").strip()
+            if not lead_name:
+                return JsonResponse({"detail": "lead_name_required"}, status=400)
+            row.lead_name = lead_name[:180]
+            update_fields.append("lead_name")
+        if "company" in payload:
+            row.company = str(payload.get("company") or "").strip()[:180]
+            update_fields.append("company")
+        if "phone" in payload:
+            row.phone = str(payload.get("phone") or "").strip()[:40]
+            update_fields.append("phone")
+        if "lead_amount" in payload or "leadAmount" in payload:
+            row.lead_amount = _crm_to_decimal(payload.get("lead_amount") if "lead_amount" in payload else payload.get("leadAmount"))
+            update_fields.append("lead_amount")
+        if "lead_source" in payload or "leadSource" in payload:
+            row.lead_source = str(payload.get("lead_source") or payload.get("leadSource") or "").strip()[:120]
+            update_fields.append("lead_source")
+        if "assign_type" in payload or "assignType" in payload:
+            assign_type = str(payload.get("assign_type") or payload.get("assignType") or "").strip().lower()
+            row.assign_type = "Team" if assign_type == "team" else "Users"
+            update_fields.append("assign_type")
+        if "assigned_user_id" in payload or "assignedUserId" in payload:
+            assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id") if "assigned_user_id" in payload else payload.get("assignedUserId"))
+            row.assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+            update_fields.append("assigned_user")
+        if "assigned_user_ids" in payload or "assignedUserIds" in payload:
+            row.assigned_user_ids = _crm_clean_user_id_list(
+                payload.get("assigned_user_ids") if "assigned_user_ids" in payload else payload.get("assignedUserIds")
+            )
+            update_fields.append("assigned_user_ids")
+        if "assigned_team" in payload or "assignedTeam" in payload:
+            row.assigned_team = str(payload.get("assigned_team") or payload.get("assignedTeam") or "").strip()[:180]
+            update_fields.append("assigned_team")
+        if "stage" in payload:
+            row.stage = str(payload.get("stage") or "New").strip()[:30] or "New"
+            update_fields.append("stage")
+        if "status" in payload:
+            row.status = str(payload.get("status") or "Open").strip()[:30] or "Open"
+            update_fields.append("status")
+        if "is_deleted" in payload:
+            if not _crm_is_admin(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
+            is_deleted = bool(payload.get("is_deleted"))
+            row.is_deleted = is_deleted
+            row.deleted_at = timezone.now() if is_deleted else None
+            row.deleted_by = request.user if is_deleted else None
+            update_fields.extend(["is_deleted", "deleted_at", "deleted_by"])
+        row.updated_by = request.user
+        row.save(update_fields=list(dict.fromkeys(update_fields)))
+        return JsonResponse({"lead": _serialize_crm_lead(row)})
+
+    if request.method == "DELETE":
+        permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        if permanent:
+            if not _crm_is_admin(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
+            row.delete()
+            return JsonResponse({"deleted": True, "permanent": True})
+        row.is_deleted = True
+        row.deleted_at = timezone.now()
+        row.deleted_by = request.user
+        row.updated_by = request.user
+        row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
+        return JsonResponse({"deleted": True})
+
+    return JsonResponse({"detail": "invalid_method"}, status=405)
 
 
 @require_http_methods(["POST"])
