@@ -5042,8 +5042,7 @@ function CrmOnePageModule() {
   const normalizedCurrentUserName = String(currentUserName || "").trim().toLowerCase();
   const normalizedCurrentUserId = String(currentUserId || "").trim();
   const normalizedCurrentUserEmail = String(currentUserEmail || "").trim().toLowerCase();
-  const normalizedCurrentUserRole = String(currentUserRole || "").trim().toLowerCase();
-  const isCrmAdmin = Boolean(canManageCrmUsers) || normalizedCurrentUserRole === "company_admin" || normalizedCurrentUserRole === "org_admin";
+  const normalizedCurrentUserRole = normalizeCrmRoleToken(currentUserRole);
   const crmDirectoryPool = useMemo(() => {
     const source = [...(crmUserDirectory || []), ...readSharedHrEmployees()];
     const byKey = new Map();
@@ -5067,6 +5066,12 @@ function CrmOnePageModule() {
     )) || null,
     [crmDirectoryPool, normalizedCurrentUserEmail, normalizedCurrentUserName]
   );
+  const normalizedCurrentUserMembershipRole = normalizeCrmRoleToken(currentUserDirectoryEntry?.role || "");
+  const isCrmAdmin = Boolean(canManageCrmUsers)
+    || normalizedCurrentUserRole === "company_admin"
+    || normalizedCurrentUserRole === "org_admin"
+    || normalizedCurrentUserMembershipRole === "company_admin"
+    || normalizedCurrentUserMembershipRole === "org_admin";
   const normalizedCurrentUserDepartment = String(currentUserDirectoryEntry?.department || "").trim().toLowerCase();
   const normalizedCurrentUserEmployeeRole = String(currentUserDirectoryEntry?.employeeRole || currentUserEmployeeRole || "").trim().toLowerCase();
   const crmRoleAccessRecord = useMemo(

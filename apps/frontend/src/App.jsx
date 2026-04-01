@@ -231,6 +231,13 @@ function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employ
   return null;
 }
 
+function normalizeBusinessAutopilotRoleToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
   if (isAdmin) {
     return true;
@@ -441,6 +448,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const [autopilotCatalog, setAutopilotCatalog] = useState([]);
   const [autopilotCanManageModules, setAutopilotCanManageModules] = useState(false);
   const [autopilotCanManageUsers, setAutopilotCanManageUsers] = useState(false);
+  const [autopilotMembershipRole, setAutopilotMembershipRole] = useState("");
   const [, setAutopilotModulesLoading] = useState(false);
   const [autopilotModulesResolved, setAutopilotModulesResolved] = useState(false);
   const [autopilotSavingSlug, setAutopilotSavingSlug] = useState("");
@@ -464,10 +472,16 @@ function AppShell({ state, productPrefix, productSlug }) {
     state.profile?.role === "org_admin" ||
     isSuperuser ||
     isHrView;
+  const normalizedBusinessAutopilotProfileRole = normalizeBusinessAutopilotRoleToken(state.profile?.role);
+  const normalizedBusinessAutopilotMembershipRole = normalizeBusinessAutopilotRoleToken(autopilotMembershipRole);
   const businessAutopilotIsAdmin =
     isSuperuser ||
-    state.profile?.role === "superadmin" ||
-    state.profile?.role === "super_admin" ||
+    normalizedBusinessAutopilotProfileRole === "superadmin" ||
+    normalizedBusinessAutopilotProfileRole === "super_admin" ||
+    normalizedBusinessAutopilotProfileRole === "company_admin" ||
+    normalizedBusinessAutopilotProfileRole === "org_admin" ||
+    normalizedBusinessAutopilotMembershipRole === "company_admin" ||
+    normalizedBusinessAutopilotMembershipRole === "org_admin" ||
     autopilotCanManageUsers;
   const isDealer = state.profile?.role === "dealer";
   const isAiChatbotAgent = state.profile?.role === "ai_chatbot_agent";
@@ -726,6 +740,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           setAutopilotCatalog([]);
           setAutopilotCanManageModules(false);
           setAutopilotCanManageUsers(false);
+          setAutopilotMembershipRole("");
           setAutopilotModulesLoading(false);
           setAutopilotModulesResolved(true);
           setAutopilotModuleError("");
@@ -756,6 +771,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           setAutopilotCatalog([]);
           setAutopilotCanManageModules(false);
           setAutopilotCanManageUsers(false);
+          setAutopilotMembershipRole("");
           setAutopilotModuleError("Unable to load modules.");
           setAutopilotModulesLoading(false);
           setAutopilotModulesResolved(true);
@@ -803,6 +819,7 @@ function AppShell({ state, productPrefix, productSlug }) {
         const matchedUser = (Array.isArray(usersDirectory) ? usersDirectory : []).find(
           (row) => String(row?.email || "").trim().toLowerCase() === currentEmail
         );
+        setAutopilotMembershipRole(String(matchedUser?.role || "").trim());
         const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
           roleAccessMap,
           state.profile?.role,
@@ -813,6 +830,7 @@ function AppShell({ state, productPrefix, productSlug }) {
         if (!active) {
           return;
         }
+        setAutopilotMembershipRole("");
         setAutopilotAccessRecord(null);
       } finally {
         if (active) {
