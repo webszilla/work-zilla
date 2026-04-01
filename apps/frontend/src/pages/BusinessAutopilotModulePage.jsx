@@ -5283,13 +5283,7 @@ function CrmOnePageModule() {
   }
 
   function canDeleteCrmRow(sectionKey, row) {
-    if (isCrmAdmin) {
-      return true;
-    }
-    if (!hasCrmFullAccess) {
-      return false;
-    }
-    return isRowAssignedToCurrentUser(sectionKey, row);
+    return Boolean(isCrmAdmin);
   }
 
   useEffect(() => {

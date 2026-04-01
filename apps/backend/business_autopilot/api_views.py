@@ -3967,10 +3967,10 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"lead": _serialize_crm_lead(row)})
 
     if request.method == "DELETE":
+        if not _crm_is_admin(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
         if permanent:
-            if not _crm_is_admin(request.user, org):
-                return JsonResponse({"detail": "forbidden"}, status=403)
             row.delete()
             return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True
@@ -4197,6 +4197,8 @@ def crm_meetings(request, meeting_id: int = None):
         if "status" in payload:
             row.status = str(payload.get("status") or row.status).strip()[:30] or row.status
         if "is_deleted" in payload:
+            if not _crm_is_admin(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
             is_deleted = bool(payload.get("is_deleted"))
             row.is_deleted = is_deleted
             row.deleted_at = timezone.now() if is_deleted else None
@@ -4207,10 +4209,10 @@ def crm_meetings(request, meeting_id: int = None):
         return JsonResponse({"meeting": _serialize_crm_meeting(row)})
 
     if request.method == "DELETE":
+        if not _crm_is_admin(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         permanent = str(request.GET.get("permanent") or "").strip() in {"1", "true", "yes"}
         if permanent:
-            if not _crm_is_admin(request.user, org):
-                return JsonResponse({"detail": "forbidden"}, status=403)
             row.delete()
             return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True

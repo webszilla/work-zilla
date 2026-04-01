@@ -984,7 +984,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const targetUser = users.find((user) => String(user?.membership_id || "") === String(membershipId));
     const confirmed = await openConfirmDialog(
-      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access and may cause user data loss in assigned records. Do you want to continue?`,
+      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access. Their CRM records will be retained for admin view, but the user account will no longer access the workspace. Do you want to continue?`,
       {
         title: "Delete User",
         confirmText: "Delete",
