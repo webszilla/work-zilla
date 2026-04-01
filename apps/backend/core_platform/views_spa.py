@@ -4,6 +4,7 @@ from django.conf import settings
 from django.http import FileResponse, Http404
 from django.shortcuts import redirect
 from django.utils._os import safe_join
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 from core.models import UserProfile
 
@@ -50,6 +51,7 @@ def _open_dist_file(path):
     return None
 
 
+@ensure_csrf_cookie
 def spa_serve(request, path=""):
     if path and not path.endswith("/"):
         file_response = _open_dist_file(path)
