@@ -582,7 +582,38 @@ def _serialize_departments(org):
     return [{"id": row.id, "name": row.name} for row in rows]
 
 
+def _normalize_org_user_taxonomy_assignments(org):
+    active_role_names = {
+        str(name or "").strip().lower()
+        for name in OrganizationEmployeeRole.objects.filter(organization=org, is_active=True).values_list("name", flat=True)
+        if str(name or "").strip()
+    }
+    active_department_names = {
+        str(name or "").strip().lower()
+        for name in OrganizationDepartment.objects.filter(organization=org, is_active=True).values_list("name", flat=True)
+        if str(name or "").strip()
+    }
+    memberships = list(
+        OrganizationUser.objects
+        .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
+        .only("id", "employee_role", "department", "updated_at")
+    )
+    for membership in memberships:
+        update_fields = []
+        employee_role = str(membership.employee_role or "").strip()
+        department = str(membership.department or "").strip()
+        if employee_role and employee_role.lower() not in active_role_names:
+            membership.employee_role = ""
+            update_fields.append("employee_role")
+        if department and department.lower() not in active_department_names:
+            membership.department = ""
+            update_fields.append("department")
+        if update_fields:
+            membership.save(update_fields=[*update_fields, "updated_at"])
+
+
 def _serialize_org_users(org, *, include_deleted=False):
+    _normalize_org_user_taxonomy_assignments(org)
     _sync_business_autopilot_membership_access(org)
     queryset = (
         OrganizationUser.objects
