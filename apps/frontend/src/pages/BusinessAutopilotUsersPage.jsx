@@ -1026,7 +1026,11 @@ export default function BusinessAutopilotUsersPage() {
       applyUsersResponse(data);
       setNotice(String(data?.message || "User restored successfully."));
     } catch (error) {
-      setNotice(error?.message || "Unable to restore user.");
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        setNotice(error?.message || "Unable to restore user.");
+      }
     } finally {
       setRestoringMembershipId("");
     }

@@ -1776,6 +1776,17 @@ def org_user_detail(request, membership_id: int):
             return JsonResponse({"detail": "invalid_action"}, status=400)
         if not membership.is_deleted:
             return JsonResponse({"detail": "user_not_deleted"}, status=400)
+        _sync_org_users_to_plan_limit(org, requested_by=request.user)
+        preview_meta = _build_org_user_meta(org, users=None)
+        if not preview_meta.get("can_add_users"):
+            return JsonResponse(
+                {
+                    "detail": "employee_limit_reached",
+                    "message": preview_meta.get("limit_message") or "User limit reached. Add-on users required to restore this user.",
+                    "meta": preview_meta,
+                },
+                status=403,
+            )
         membership.is_deleted = False
         membership.deleted_at = None
         membership.is_active = True
