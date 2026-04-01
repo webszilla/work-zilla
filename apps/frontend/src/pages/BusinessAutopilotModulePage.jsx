@@ -2461,6 +2461,7 @@ function normalizeCrmDirectoryEntry(row = {}) {
   return {
     id: String(row.id || row.sourceUserId || name).trim(),
     name,
+    role: String(row.role || row.membership_role || "").trim(),
     department: String(row.department || "").trim(),
     employeeRole: String(row.employee_role || row.employeeRole || row.designation || "").trim(),
     email: String(row.email || row.sourceUserEmail || "").trim(),
