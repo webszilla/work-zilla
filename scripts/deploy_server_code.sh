@@ -5,13 +5,94 @@ SERVER_HOST="${SERVER_HOST:-root@89.167.16.104}"
 SERVER_PROJECT_PATH="${SERVER_PROJECT_PATH:-/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com}"
 SERVER_MIN_FREE_MB="${SERVER_MIN_FREE_MB:-1024}"
 SERVER_RETENTION_DAYS="${SERVER_RETENTION_DAYS:-3}"
+SSH_KEY_PATH="${SSH_KEY_PATH:-$HOME/.ssh/workzilla_root}"
+
+FORBIDDEN_DEPLOY_PATTERNS=(
+  "*.sqlite3"
+  "*.sqlite3-journal"
+  "*.sqlite3-wal"
+  "*.sqlite3-shm"
+  "*.sql"
+  "*.dump"
+  "*.bak"
+)
 
 echo "Deploying code to ${SERVER_HOST}:${SERVER_PROJECT_PATH}"
 
 cd "$(dirname "$0")/.."
 
+require_file() {
+  local path="$1"
+  local label="$2"
+  if [ ! -f "$path" ]; then
+    echo "ERROR: ${label} not found at ${path}"
+    exit 1
+  fi
+}
+
+check_local_forbidden_db_artifacts() {
+  local found=0
+  local search_paths=(
+    "apps/backend"
+    "backups"
+    "tmp"
+  )
+  for base in "${search_paths[@]}"; do
+    if [ ! -e "$base" ]; then
+      continue
+    fi
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      found=1
+      echo "Blocked local DB artifact: $path"
+    done < <(find "$base" -type f \( \
+      -name '*.sqlite3' -o \
+      -name '*.sqlite3-journal' -o \
+      -name '*.sqlite3-wal' -o \
+      -name '*.sqlite3-shm' -o \
+      -name '*.sql' -o \
+      -name '*.dump' -o \
+      -name '*.bak' \
+    \) 2>/dev/null)
+  done
+  if [ "$found" -eq 1 ]; then
+    echo "ERROR: Local DB artifacts detected in deploy-sensitive folders. Remove/move them before deploy."
+    exit 1
+  fi
+}
+
+check_git_forbidden_db_tracking() {
+  local found=0
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    found=1
+    echo "Blocked tracked DB artifact in git: $path"
+  done < <(git ls-files | grep -E '(^|/).+(\.sqlite3|\.sqlite3-journal|\.sqlite3-wal|\.sqlite3-shm|\.sql|\.dump|\.bak)$' || true)
+  if [ "$found" -eq 1 ]; then
+    echo "ERROR: Forbidden DB/runtime artifacts are tracked in git. Untrack them before deploy."
+    exit 1
+  fi
+}
+
+check_local_env_postgres_only() {
+  require_file "apps/backend/.env" "Local backend env"
+  if ! grep -Eq '^DB_ENGINE=postgres(ql)?$' apps/backend/.env; then
+    echo "ERROR: Local apps/backend/.env must use DB_ENGINE=postgresql before deploy."
+    exit 1
+  fi
+}
+
+preflight_local_deploy_guard() {
+  require_file "$SSH_KEY_PATH" "Deploy SSH key"
+  check_local_env_postgres_only
+  check_local_forbidden_db_artifacts
+  check_git_forbidden_db_tracking
+}
+
+preflight_local_deploy_guard
+
 DEPLOY_MODE="git"
-if ! ssh "$SERVER_HOST" "[ -d '$SERVER_PROJECT_PATH/.git' ]" >/dev/null 2>&1; then
+if ! ssh -i "$SSH_KEY_PATH" "$SERVER_HOST" "[ -d '$SERVER_PROJECT_PATH/.git' ]" >/dev/null 2>&1; then
   DEPLOY_MODE="rsync"
 fi
 
@@ -41,10 +122,11 @@ if [ "$DEPLOY_MODE" = "rsync" ]; then
     --exclude 'apps/bootstrap_installer/dist/' \
     --exclude 'apps/desktop_app/mac_helper/.build/' \
     --exclude 'build/' \
+    -e "ssh -i ${SSH_KEY_PATH}" \
     ./ "${SERVER_HOST}:${SERVER_PROJECT_PATH}/"
 fi
 
-ssh "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' SERVER_RETENTION_DAYS='$SERVER_RETENTION_DAYS' SERVER_DEPLOY_MODE='$DEPLOY_MODE' bash -s" <<'EOF'
+ssh -i "$SSH_KEY_PATH" "$SERVER_HOST" "SERVER_PROJECT_PATH='$SERVER_PROJECT_PATH' SERVER_MIN_FREE_MB='$SERVER_MIN_FREE_MB' SERVER_RETENTION_DAYS='$SERVER_RETENTION_DAYS' SERVER_DEPLOY_MODE='$DEPLOY_MODE' bash -s" <<'EOF'
 set -euo pipefail
 
 min_free_mb="${SERVER_MIN_FREE_MB:-1024}"
@@ -159,6 +241,13 @@ fi
 if ! grep -Eq '^DB_ENGINE=postgres(ql)?$' apps/backend/.env; then
   echo "ERROR: DB_ENGINE is not postgresql in apps/backend/.env. Aborting deploy to prevent SQLite fallback."
   exit 1
+fi
+find "$SERVER_PROJECT_PATH" -type f \( -name '*.sqlite3' -o -name '*.sqlite3-journal' -o -name '*.sqlite3-wal' -o -name '*.sqlite3-shm' \) \
+  ! -path "$SERVER_PROJECT_PATH/.git/*" \
+  -print >/tmp/workzilla_sqlite_files_after_sync.txt 2>/dev/null || true
+if [ -s /tmp/workzilla_sqlite_files_after_sync.txt ]; then
+  echo "WARNING: SQLite files exist on server (not used by runtime because PostgreSQL is enforced):"
+  cat /tmp/workzilla_sqlite_files_after_sync.txt
 fi
 
 if [ "${SERVER_DEPLOY_MODE:-git}" = "git" ]; then

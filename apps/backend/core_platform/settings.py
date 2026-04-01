@@ -157,11 +157,16 @@ if DB_ENGINE not in {"postgres", "postgresql"}:
     raise ImproperlyConfigured(
         "Only PostgreSQL is supported. Set DB_ENGINE=postgresql in apps/backend/.env."
     )
+DB_NAME = os.environ.get("DB_NAME", "workzilla").strip()
+if DB_NAME.endswith(".sqlite3") or "/" in DB_NAME or "\\" in DB_NAME:
+    raise ImproperlyConfigured(
+        "SQLite-style DB_NAME detected. Production and local SaaS runtime must use PostgreSQL credentials only."
+    )
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "workzilla"),
+        "NAME": DB_NAME,
         "USER": os.environ.get("DB_USER", "workzilla"),
         "PASSWORD": os.environ.get("DB_PASSWORD", ""),
         "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
