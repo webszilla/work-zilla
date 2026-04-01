@@ -1466,6 +1466,24 @@ export default function BusinessAutopilotUsersPage() {
     if (!roleId || deletingEmployeeRoleId) {
       return;
     }
+    const matchedRole = employeeRoles.find((item) => String(item.id) === String(roleId));
+    const assignedUsers = users.filter((user) => (
+      String(user?.employee_role || "").trim().toLowerCase()
+      === String(matchedRole?.name || "").trim().toLowerCase()
+    ));
+    const confirmed = await openConfirmDialog(
+      assignedUsers.length
+        ? `This employee role is assigned to ${assignedUsers.map((user) => user.name || user.email || "User").join(", ")}. If you delete it, it will be removed from those users as well.`
+        : "Delete this employee role?",
+      {
+        title: "Delete Employee Role",
+        confirmText: "Delete",
+        cancelText: "Cancel",
+      }
+    );
+    if (!confirmed) {
+      return;
+    }
     setDeletingEmployeeRoleId(String(roleId));
     setNotice("");
     try {
@@ -1475,6 +1493,9 @@ export default function BusinessAutopilotUsersPage() {
       setEmployeeRoles(data.employee_roles || []);
       if (data.departments) {
         setDepartments(data.departments || []);
+      }
+      if (data.users) {
+        setUsers(data.users || []);
       }
       if (String(editingEmployeeRoleId) === String(roleId)) {
         cancelEditEmployeeRole();
@@ -1544,6 +1565,24 @@ export default function BusinessAutopilotUsersPage() {
     if (!departmentId || deletingDepartmentId) {
       return;
     }
+    const matchedDepartment = departments.find((item) => String(item.id) === String(departmentId));
+    const assignedUsers = users.filter((user) => (
+      String(user?.department || "").trim().toLowerCase()
+      === String(matchedDepartment?.name || "").trim().toLowerCase()
+    ));
+    const confirmed = await openConfirmDialog(
+      assignedUsers.length
+        ? `This department is assigned to ${assignedUsers.map((user) => user.name || user.email || "User").join(", ")}. If you delete it, it will be removed from those users as well.`
+        : "Delete this department?",
+      {
+        title: "Delete Department",
+        confirmText: "Delete",
+        cancelText: "Cancel",
+      }
+    );
+    if (!confirmed) {
+      return;
+    }
     setDeletingDepartmentId(String(departmentId));
     setNotice("");
     try {
@@ -1553,6 +1592,9 @@ export default function BusinessAutopilotUsersPage() {
       setDepartments(data.departments || []);
       if (data.employee_roles) {
         setEmployeeRoles(data.employee_roles || []);
+      }
+      if (data.users) {
+        setUsers(data.users || []);
       }
       if (String(editingDepartmentId) === String(departmentId)) {
         cancelEditDepartment();

@@ -621,6 +621,24 @@ def _safe_serialize_org_users(org):
         return []
 
 
+def _build_membership_assignment_summary(memberships):
+    rows = []
+    for membership in memberships:
+        display_name = _get_org_user_display_name(getattr(membership, "user", None))
+        email = str(getattr(getattr(membership, "user", None), "email", "") or "").strip()
+        label = display_name or email or f"User {membership.id}"
+        rows.append(
+            {
+                "membership_id": membership.id,
+                "user_id": membership.user_id,
+                "name": display_name,
+                "email": email,
+                "label": label,
+            }
+        )
+    return rows
+
+
 def _safe_serialize_employee_roles(org):
     try:
         return _serialize_employee_roles(org)
@@ -2168,6 +2186,14 @@ def org_employee_role_detail(request, role_id: int):
     if not role:
         return JsonResponse({"detail": "employee_role_not_found"}, status=404)
 
+    assigned_memberships = list(
+        OrganizationUser.objects
+        .filter(organization=org, employee_role__iexact=role.name, role__in=ERP_EMPLOYEE_ROLES)
+        .select_related("user")
+        .order_by("id")
+    )
+    affected_users = _build_membership_assignment_summary(assigned_memberships)
+
     if request.method == "PUT":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -2199,6 +2225,11 @@ def org_employee_role_detail(request, role_id: int):
             return JsonResponse({"detail": "employee_role_exists"}, status=400)
     else:
         if role.is_active:
+            if assigned_memberships:
+                for membership in assigned_memberships:
+                    if membership.employee_role:
+                        membership.employee_role = ""
+                        membership.save(update_fields=["employee_role", "updated_at"])
             role.is_active = False
             role.save(update_fields=["is_active", "updated_at"])
 
@@ -2207,7 +2238,9 @@ def org_employee_role_detail(request, role_id: int):
             "authenticated": True,
             "employee_roles": _serialize_employee_roles(org),
             "departments": _serialize_departments(org),
+            "users": _safe_serialize_org_users(org),
             "can_manage_users": _can_manage_users(request.user, org),
+            "affected_users": affected_users,
         }
     )
 
@@ -2300,6 +2333,14 @@ def org_department_detail(request, department_id: int):
     if not department:
         return JsonResponse({"detail": "department_not_found"}, status=404)
 
+    assigned_memberships = list(
+        OrganizationUser.objects
+        .filter(organization=org, department__iexact=department.name, role__in=ERP_EMPLOYEE_ROLES)
+        .select_related("user")
+        .order_by("id")
+    )
+    affected_users = _build_membership_assignment_summary(assigned_memberships)
+
     if request.method == "PUT":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -2331,6 +2372,11 @@ def org_department_detail(request, department_id: int):
             return JsonResponse({"detail": "department_exists"}, status=400)
     else:
         if department.is_active:
+            if assigned_memberships:
+                for membership in assigned_memberships:
+                    if membership.department:
+                        membership.department = ""
+                        membership.save(update_fields=["department", "updated_at"])
             department.is_active = False
             department.save(update_fields=["is_active", "updated_at"])
 
@@ -2339,7 +2385,9 @@ def org_department_detail(request, department_id: int):
             "authenticated": True,
             "departments": _serialize_departments(org),
             "employee_roles": _serialize_employee_roles(org),
+            "users": _safe_serialize_org_users(org),
             "can_manage_users": _can_manage_users(request.user, org),
+            "affected_users": affected_users,
         }
     )
 
@@ -3889,7 +3937,7 @@ def crm_convert_to_deal(request, lead_id: int):
         deal = CrmDeal.objects.create(
             organization=org,
             lead=lead,
-            deal_name=f"{lead.lead_name} Opportunity",
+            deal_name=str(lead.lead_name or "").strip()[:180],
             company=lead.company,
             phone=lead.phone,
             deal_value=_crm_to_decimal(lead.lead_amount),
