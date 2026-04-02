@@ -374,14 +374,14 @@ const CRM_SECTION_CONFIG = {
     icon: "bi-clock-history",
     columns: [
       { key: "activityType", label: "Activity Type" },
-      { key: "relatedTo", label: "Client Name" },
+      { key: "relatedTo", label: "Company / Contacts" },
       { key: "date", label: "Date" },
       { key: "owner", label: "Assigned Users" },
       { key: "notes", label: "Notes" }
     ],
     fields: [
-      { key: "activityType", label: "Activity Type", placeholder: "Call / Meeting / Demo / Email" },
-      { key: "relatedTo", label: "Client Name", placeholder: "Search client / company" },
+      { key: "activityType", label: "Activity Type", placeholder: "Enter activity type" },
+      { key: "relatedTo", label: "Company / Contacts", placeholder: "Search company / contacts" },
       { key: "date", label: "Date", type: "date" },
       { key: "owner", label: "Assigned Users", type: "multiselect", defaultValue: [] },
       { key: "notes", label: "Notes", placeholder: "Short activity notes" }
@@ -402,7 +402,7 @@ const CRM_SECTION_CONFIG = {
     ],
     fields: [
       { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
-      { key: "companyOrClientName", label: "Company / Client Name", type: "datalist", datalistSource: "crmContacts", placeholder: "Select company / client from contacts" },
+      { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
       { key: "meetingDate", label: "Meeting Date", type: "date" },
       { key: "meetingTime", label: "Meeting Time", type: "time" },
@@ -5681,24 +5681,30 @@ function CrmOnePageModule() {
   );
   const leadCompanyCanonicalMap = useMemo(() => {
     const map = new Map();
+    const register = (value, canonicalValue = "") => {
+      const normalizedValue = String(value || "").trim();
+      if (!normalizedValue) {
+        return;
+      }
+      const normalizedKey = normalizedValue.toLowerCase();
+      if (!map.has(normalizedKey)) {
+        map.set(normalizedKey, String(canonicalValue || normalizedValue).trim());
+      }
+    };
+    (moduleData.contacts || []).forEach((contact) => {
+      const canonicalCompany = String(contact?.company || contact?.name || "").trim();
+      register(contact?.company, canonicalCompany);
+      register(contact?.name, canonicalCompany);
+    });
     (sharedCustomerOptions || []).forEach((customer) => {
-      [
-        customer?.companyName,
-        customer?.name,
-        getSharedCustomerDisplayName(customer),
-      ].forEach((value) => {
-        const normalizedValue = String(value || "").trim();
-        if (!normalizedValue) {
-          return;
-        }
-        const normalizedKey = normalizedValue.toLowerCase();
-        if (!map.has(normalizedKey)) {
-          map.set(normalizedKey, normalizedValue);
-        }
-      });
+      const canonicalCompany = String(customer?.companyName || customer?.name || getSharedCustomerDisplayName(customer) || "").trim();
+      register(customer?.companyName, canonicalCompany);
+      register(customer?.name, canonicalCompany);
+      register(customer?.clientName, canonicalCompany);
+      register(getSharedCustomerDisplayName(customer), canonicalCompany);
     });
     return map;
-  }, [sharedCustomerOptions]);
+  }, [moduleData.contacts, sharedCustomerOptions]);
 
   function buildMeetingOwnerUserIds(ownerNames = []) {
     const normalizedNames = Array.isArray(ownerNames)
@@ -6708,7 +6714,7 @@ function CrmOnePageModule() {
         }));
         setSectionFormErrors((prev) => ({
           ...prev,
-          leads: "Please select Company / Business Name from existing Clients list.",
+          leads: "Please select Company / Business Name from existing Contacts or Clients list.",
         }));
         return;
       }
@@ -7986,6 +7992,15 @@ function CrmOnePageModule() {
         const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
         const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
+        const crmContactMatches = sectionKey === "leads"
+          ? (moduleData.contacts || []).filter((contact) => {
+              if (!leadCompanyQuery) {
+                return true;
+              }
+              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
+              return haystack.includes(leadCompanyQuery);
+            }).slice(0, 6)
+          : [];
         const dealCrmContactMatches = sectionKey === "deals"
           ? (moduleData.contacts || []).filter((contact) => {
               if (!dealCompanyQuery) {
@@ -8634,8 +8649,39 @@ function CrmOnePageModule() {
                                       }}
                                     />
                                     {showLeadCompanySuggestions ? (
-                                      customerMatches.length ? (
+                                      (crmContactMatches.length || customerMatches.length) ? (
                                         <div className="crm-inline-suggestions">
+                                          {crmContactMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Contacts</div>
+                                              {crmContactMatches.map((contact) => (
+                                                <button
+                                                  key={`crm-contact-${contact.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    const autoPhone = String(contact.phone || "").trim();
+                                                    setForms((prev) => ({
+                                                      ...prev,
+                                                      leads: {
+                                                        ...prev.leads,
+                                                        company: String(contact.company || contact.name || "").trim(),
+                                                        contactPerson: String(contact.name || "").trim(),
+                                                        phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
+                                                        phone: autoPhone,
+                                                      },
+                                                    }));
+                                                    setLeadPhoneLockedFromClient(Boolean(autoPhone));
+                                                    setLeadCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
                                           {customerMatches.length ? (
                                             <div className="crm-inline-suggestions__group">
                                               <div className="crm-inline-suggestions__title">Clients</div>
@@ -8671,7 +8717,7 @@ function CrmOnePageModule() {
                                       ) : (
                                         <div className="crm-inline-suggestions">
                                           <div className="crm-inline-suggestions__item">
-                                            <span className="crm-inline-suggestions__item-main">No clients found</span>
+                                            <span className="crm-inline-suggestions__item-main">No contact or client results found</span>
                                           </div>
                                         </div>
                                       )
@@ -8986,49 +9032,57 @@ function CrmOnePageModule() {
                                         setActivityClientSearchOpen(true);
                                       }}
                                     />
-                                    {activityClientSearchOpen && (activityContactMatches.length || activityCustomerMatches.length) ? (
-                                      <div className="crm-inline-suggestions">
-                                        {activityContactMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
-                                            {activityContactMatches.map((contact) => (
-                                              <button
-                                                key={`activity-crm-contact-${contact.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
-                                                  setActivityClientSearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                              </button>
-                                            ))}
+                                    {activityClientSearchOpen ? (
+                                      (activityContactMatches.length || activityCustomerMatches.length) ? (
+                                        <div className="crm-inline-suggestions">
+                                          {activityContactMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Contacts</div>
+                                              {activityContactMatches.map((contact) => (
+                                                <button
+                                                  key={`activity-crm-contact-${contact.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                    setActivityClientSearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                          {activityCustomerMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Clients</div>
+                                              {activityCustomerMatches.map((customer) => (
+                                                <button
+                                                  key={`activity-customer-${customer.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(customer.companyName || customer.name || customer.clientName || "").trim());
+                                                    setActivityClientSearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__item">
+                                            <span className="crm-inline-suggestions__item-main">No contact or client results found</span>
                                           </div>
-                                        ) : null}
-                                        {activityCustomerMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">Clients</div>
-                                            {activityCustomerMatches.map((customer) => (
-                                              <button
-                                                key={`activity-customer-${customer.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setField(sectionKey, field.key, String(customer.companyName || customer.clientName || customer.name || "").trim());
-                                                  setActivityClientSearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        ) : null}
-                                      </div>
+                                        </div>
+                                      )
                                     ) : null}
                                   </div>
                                 );
@@ -9126,49 +9180,57 @@ function CrmOnePageModule() {
                                         setMeetingCompanySearchOpen(true);
                                       }}
                                     />
-                                    {meetingCompanySearchOpen && (meetingCrmContactMatches.length || meetingCustomerMatches.length) ? (
-                                      <div className="crm-inline-suggestions">
-                                        {meetingCrmContactMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">CRM Contacts</div>
-                                            {meetingCrmContactMatches.map((contact) => (
-                                              <button
-                                                key={`meeting-crm-contact-${contact.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
-                                                  setMeetingCompanySearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                              </button>
-                                            ))}
+                                    {meetingCompanySearchOpen ? (
+                                      (meetingCrmContactMatches.length || meetingCustomerMatches.length) ? (
+                                        <div className="crm-inline-suggestions">
+                                          {meetingCrmContactMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Contacts</div>
+                                              {meetingCrmContactMatches.map((contact) => (
+                                                <button
+                                                  key={`meeting-crm-contact-${contact.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                    setMeetingCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                          {meetingCustomerMatches.length ? (
+                                            <div className="crm-inline-suggestions__group">
+                                              <div className="crm-inline-suggestions__title">Clients</div>
+                                              {meetingCustomerMatches.map((customer) => (
+                                                <button
+                                                  key={`meeting-customer-${customer.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, String(customer.companyName || customer.name || "").trim());
+                                                    setMeetingCompanySearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__item">
+                                            <span className="crm-inline-suggestions__item-main">No contact or client results found</span>
                                           </div>
-                                        ) : null}
-                                        {meetingCustomerMatches.length ? (
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">Clients</div>
-                                            {meetingCustomerMatches.map((customer) => (
-                                              <button
-                                                key={`meeting-customer-${customer.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => {
-                                                  setField(sectionKey, field.key, String(customer.companyName || customer.clientName || customer.name || "").trim());
-                                                  setMeetingCompanySearchOpen(false);
-                                                }}
-                                              >
-                                                <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                                <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        ) : null}
-                                      </div>
+                                        </div>
+                                      )
                                     ) : null}
                                   </div>
                                 );

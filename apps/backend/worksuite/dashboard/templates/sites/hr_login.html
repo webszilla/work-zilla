@@ -12,7 +12,7 @@
 
     {% if messages %}
         {% for message in messages|slice:"-1:" %}
-            <div class="alert alert-{{ message.tags }} text-center">
+            <div class="alert alert-{{ message.tags }} text-center" data-login-flash data-hide-after-ms="4500">
                 {{ message }}
             </div>
         {% endfor %}
@@ -60,4 +60,35 @@
 {% block sidebar %}{% endblock %}
 
 {% block shell_class %}no-sidebar{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var notices = Array.prototype.slice.call(document.querySelectorAll("[data-login-flash]"));
+    if (!notices.length) return;
+    if (notices.length > 1) {
+      notices.slice(0, -1).forEach(function (node) {
+        if (node && node.parentNode) {
+          node.parentNode.removeChild(node);
+        }
+      });
+    }
+    var activeNotice = notices[notices.length - 1];
+    if (!activeNotice) return;
+    var hideAfter = parseInt(activeNotice.getAttribute("data-hide-after-ms") || "4500", 10);
+    if (!Number.isFinite(hideAfter) || hideAfter < 1000) {
+      hideAfter = 4500;
+    }
+    window.setTimeout(function () {
+      activeNotice.style.transition = "opacity 0.35s ease";
+      activeNotice.style.opacity = "0";
+      window.setTimeout(function () {
+        if (activeNotice && activeNotice.parentNode) {
+          activeNotice.parentNode.removeChild(activeNotice);
+        }
+      }, 380);
+    }, hideAfter);
+  })();
+</script>
+{% endblock %}
 
