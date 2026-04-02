@@ -98,6 +98,15 @@ const ROLE_ACCESS_SECTIONS = [
   { key: "plans", label: "Plans" },
   { key: "profile", label: "Profile" },
 ];
+const ROLE_ACCESS_SECTION_MODULE_SLUG = {
+  crm: "crm",
+  hr: "hrm",
+  projects: "projects",
+  accounts: "accounts",
+  subscriptions: "subscriptions",
+  ticketing: "ticketing",
+  stocks: "stocks",
+};
 const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"];
 const USER_DETAIL_FIELDS = [
   { key: "first_name", label: "First Name" },
@@ -185,6 +194,44 @@ function normalizeRoleAccessMap(value) {
     };
   });
   return normalized;
+}
+
+function extractEnabledModuleSlugs(payload) {
+  const toSlugList = (source) => {
+    if (!Array.isArray(source)) {
+      return [];
+    }
+    const collected = source
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (item && typeof item === "object") {
+          return item.slug;
+        }
+        return "";
+      })
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    return Array.from(new Set(collected));
+  };
+
+  const fromEnabledModules = toSlugList(payload?.enabled_modules);
+  if (fromEnabledModules.length) {
+    return fromEnabledModules;
+  }
+
+  if (Array.isArray(payload?.modules)) {
+    const enabledFromModules = payload.modules
+      .filter((module) => Boolean(module?.enabled))
+      .map((module) => module?.slug);
+    const fromModules = toSlugList(enabledFromModules);
+    if (fromModules.length) {
+      return fromModules;
+    }
+  }
+
+  return [];
 }
 
 function encodeRoleAccessBlob(value) {
@@ -867,6 +914,8 @@ export default function BusinessAutopilotUsersPage() {
   const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
   const [notice, setNotice] = useState("");
   const [roleAccessMap, setRoleAccessMap] = useState({});
+  const [enabledModuleSlugs, setEnabledModuleSlugs] = useState([]);
+  const [hasResolvedEnabledModules, setHasResolvedEnabledModules] = useState(false);
   const [currentProfileRole, setCurrentProfileRole] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
@@ -1020,6 +1069,17 @@ export default function BusinessAutopilotUsersPage() {
       } catch {
         // Ignore invalid local role access cache.
       }
+    }
+  }
+
+  async function loadEnabledModules() {
+    try {
+      const data = await apiFetch("/api/business-autopilot/modules");
+      setEnabledModuleSlugs(extractEnabledModuleSlugs(data));
+      setHasResolvedEnabledModules(true);
+    } catch {
+      setEnabledModuleSlugs([]);
+      setHasResolvedEnabledModules(false);
     }
   }
 
@@ -1444,6 +1504,7 @@ export default function BusinessAutopilotUsersPage() {
   useEffect(() => {
     loadUsers();
     loadRoleAccess();
+    loadEnabledModules();
     loadCurrentUserProfile();
   }, []);
 
@@ -2014,6 +2075,19 @@ export default function BusinessAutopilotUsersPage() {
     });
     return Array.from(unique.values());
   }, [employeeRoles]);
+  const visibleRoleAccessSections = useMemo(() => {
+    if (!hasResolvedEnabledModules) {
+      return ROLE_ACCESS_SECTIONS;
+    }
+    const enabledSet = new Set(enabledModuleSlugs.map((slug) => String(slug || "").trim().toLowerCase()));
+    return ROLE_ACCESS_SECTIONS.filter((section) => {
+      const moduleSlug = ROLE_ACCESS_SECTION_MODULE_SLUG[section.key];
+      if (!moduleSlug) {
+        return true;
+      }
+      return enabledSet.has(moduleSlug);
+    });
+  }, [enabledModuleSlugs, hasResolvedEnabledModules]);
   const createUserFormDisabled = !isEditingUser && !userMeta.can_add_users;
   const shouldDisableCreatePassword = !isEditingUser && createEmailCheck.existingUser && createEmailCheck.samePasswordAllowed;
   const createEmailStatusClass = createEmailCheck.status === "error"
@@ -3850,7 +3924,7 @@ export default function BusinessAutopilotUsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {ROLE_ACCESS_SECTIONS.map((section) => (
+                {visibleRoleAccessSections.map((section) => (
                   <tr key={section.key}>
                     <td>{section.label}</td>
                     <td>
@@ -3911,12 +3985,12 @@ export default function BusinessAutopilotUsersPage() {
           <div>
             <div className="small text-secondary mb-2">Enabled Access Preview</div>
             <div className="d-flex flex-wrap gap-2">
-              {ROLE_ACCESS_SECTIONS.filter((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access").map((section) => (
+              {visibleRoleAccessSections.filter((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access").map((section) => (
                 <span key={`rbac-preview-${section.key}`} className="badge text-bg-success">
                   {section.label}: {selectedRoleAccess.sections?.[section.key]}
                 </span>
               ))}
-              {!ROLE_ACCESS_SECTIONS.some((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access") ? (
+              {!visibleRoleAccessSections.some((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access") ? (
                 <span className="text-secondary small">No access sections configured.</span>
               ) : null}
             </div>
