@@ -187,6 +187,27 @@ function normalizeRoleAccessMap(value) {
   return normalized;
 }
 
+function encodeRoleAccessBlob(value) {
+  try {
+    const serialized = JSON.stringify(value || {});
+    const encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+    if (encoder && typeof window !== "undefined" && typeof window.btoa === "function") {
+      const bytes = encoder.encode(serialized);
+      let binary = "";
+      bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+      return window.btoa(binary);
+    }
+    if (typeof window !== "undefined" && typeof window.btoa === "function") {
+      return window.btoa(unescape(encodeURIComponent(serialized)));
+    }
+  } catch (_error) {
+    return "";
+  }
+  return "";
+}
+
 function normalizeRoleToken(value) {
   return String(value || "")
     .trim()
@@ -2238,9 +2259,10 @@ export default function BusinessAutopilotUsersPage() {
     setRoleAccessSaving(true);
     setNotice("");
     try {
+      const encodedRoleAccess = encodeRoleAccessBlob(roleAccessMap);
       const data = await apiFetch("/api/business-autopilot/role-access", {
         method: "POST",
-        body: JSON.stringify({ role_access_map: roleAccessMap }),
+        body: JSON.stringify(encodedRoleAccess ? { role_access_blob: encodedRoleAccess } : { role_access_map: roleAccessMap }),
       });
       const nextMap = (data?.role_access_map && typeof data.role_access_map === "object" && !Array.isArray(data.role_access_map))
         ? data.role_access_map

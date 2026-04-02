@@ -1,4 +1,6 @@
 import calendar
+import base64
+import binascii
 import json
 import logging
 import re
@@ -2252,7 +2254,15 @@ def org_role_access(request):
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
-        role_access_map = payload.get("role_access_map", payload)
+        role_access_blob = str(payload.get("role_access_blob") or "").strip()
+        if role_access_blob:
+            try:
+                decoded = base64.b64decode(role_access_blob.encode("ascii"), validate=True).decode("utf-8")
+                role_access_map = json.loads(decoded or "{}")
+            except (ValueError, binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+                return JsonResponse({"detail": "invalid_role_access_blob"}, status=400)
+        else:
+            role_access_map = payload.get("role_access_map", payload)
         normalized_role_access_map = _normalize_role_access_map(role_access_map)
         settings_obj.business_autopilot_role_access_map = normalized_role_access_map
         settings_obj.save(update_fields=["business_autopilot_role_access_map"])
