@@ -5679,6 +5679,26 @@ function CrmOnePageModule() {
       .filter((value, index, list) => list.indexOf(value) === index),
     [sharedCustomerOptions]
   );
+  const leadCompanyCanonicalMap = useMemo(() => {
+    const map = new Map();
+    (sharedCustomerOptions || []).forEach((customer) => {
+      [
+        customer?.companyName,
+        customer?.name,
+        getSharedCustomerDisplayName(customer),
+      ].forEach((value) => {
+        const normalizedValue = String(value || "").trim();
+        if (!normalizedValue) {
+          return;
+        }
+        const normalizedKey = normalizedValue.toLowerCase();
+        if (!map.has(normalizedKey)) {
+          map.set(normalizedKey, normalizedValue);
+        }
+      });
+    });
+    return map;
+  }, [sharedCustomerOptions]);
 
   function buildMeetingOwnerUserIds(ownerNames = []) {
     const normalizedNames = Array.isArray(ownerNames)
@@ -6670,6 +6690,31 @@ function CrmOnePageModule() {
       const previousLead = editingId
         ? (moduleData.leads || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
         : null;
+      const normalizedCompany = String(payload.company || "").trim().toLowerCase();
+      const previousLeadCompany = String(previousLead?.company || "").trim().toLowerCase();
+      const canReusePreviousCompany = Boolean(
+        editingId
+        && normalizedCompany
+        && normalizedCompany === previousLeadCompany
+      );
+      const canonicalCompanyName = leadCompanyCanonicalMap.get(normalizedCompany) || "";
+      if (!canonicalCompanyName && !canReusePreviousCompany) {
+        setSectionFieldErrors((prev) => ({
+          ...prev,
+          leads: {
+            ...(prev.leads || {}),
+            company: true,
+          },
+        }));
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          leads: "Please select Company / Business Name from existing Clients list.",
+        }));
+        return;
+      }
+      if (canonicalCompanyName) {
+        payload.company = canonicalCompanyName;
+      }
       const previousStatus = String(previousLead?.status || "").trim().toLowerCase();
       const nextStatus = String(payload.status || "").trim().toLowerCase();
       const isClosedLike = ["closed", "onhold"].includes(nextStatus);
@@ -7941,15 +7986,6 @@ function CrmOnePageModule() {
         const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
         const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
-        const crmContactMatches = sectionKey === "leads"
-          ? (moduleData.contacts || []).filter((contact) => {
-              if (!leadCompanyQuery) {
-                return true;
-              }
-              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
-              return haystack.includes(leadCompanyQuery);
-            }).slice(0, 6)
-          : [];
         const dealCrmContactMatches = sectionKey === "deals"
           ? (moduleData.contacts || []).filter((contact) => {
               if (!dealCompanyQuery) {
@@ -8598,39 +8634,8 @@ function CrmOnePageModule() {
                                       }}
                                     />
                                     {showLeadCompanySuggestions ? (
-                                      (crmContactMatches.length || customerMatches.length) ? (
+                                      customerMatches.length ? (
                                         <div className="crm-inline-suggestions">
-                                          {crmContactMatches.length ? (
-                                            <div className="crm-inline-suggestions__group">
-                                              <div className="crm-inline-suggestions__title">CRM Contacts</div>
-                                              {crmContactMatches.map((contact) => (
-                                                <button
-                                                  key={`crm-contact-${contact.id}`}
-                                                  type="button"
-                                                  className="crm-inline-suggestions__item"
-                                                  onMouseDown={(event) => event.preventDefault()}
-                                                  onClick={() => {
-                                                    const autoPhone = String(contact.phone || "").trim();
-                                                    setForms((prev) => ({
-                                                      ...prev,
-                                                      leads: {
-                                                        ...prev.leads,
-                                                        company: String(contact.company || "").trim(),
-                                                        contactPerson: String(contact.name || "").trim(),
-                                                        phoneCountryCode: String(contact.phoneCountryCode || "+91").trim() || "+91",
-                                                        phone: autoPhone,
-                                                      },
-                                                    }));
-                                                    setLeadPhoneLockedFromClient(Boolean(autoPhone));
-                                                    setLeadCompanySearchOpen(false);
-                                                  }}
-                                                >
-                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                                </button>
-                                              ))}
-                                            </div>
-                                          ) : null}
                                           {customerMatches.length ? (
                                             <div className="crm-inline-suggestions__group">
                                               <div className="crm-inline-suggestions__title">Clients</div>
@@ -8666,7 +8671,7 @@ function CrmOnePageModule() {
                                       ) : (
                                         <div className="crm-inline-suggestions">
                                           <div className="crm-inline-suggestions__item">
-                                            <span className="crm-inline-suggestions__item-main">No company results found</span>
+                                            <span className="crm-inline-suggestions__item-main">No clients found</span>
                                           </div>
                                         </div>
                                       )
@@ -12324,8 +12329,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   }
 
   function buildEmployeeFormValuesFromName(selectedName, previousValues = {}) {
-    const trimmedName = String(selectedName || "").trim();
-    const normalizedName = trimmedName.toLowerCase();
+    const rawName = String(selectedName || "");
+    const normalizedName = rawName.toLowerCase();
     const matchedUser = hrUserLookupByName.get(normalizedName) || null;
     const matchedEmployee = (
       matchedUser?.id
@@ -12336,12 +12341,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
       temporarySameAsPermanent: false,
       ...previousValues,
-      name: trimmedName,
+      name: rawName,
     };
 
     if (matchedUser) {
       const phoneParts = splitCombinedPhoneValue(matchedUser.phone_number || "");
-      nextValues.name = String(matchedUser.name || trimmedName).trim();
+      nextValues.name = String(matchedUser.name || rawName).trim();
       nextValues.department = String(matchedUser.department || nextValues.department || "").trim();
       nextValues.designation = String(matchedUser.employee_role || nextValues.designation || "").trim();
       nextValues.contactCountryCode = phoneParts.countryCode || nextValues.contactCountryCode || "+91";

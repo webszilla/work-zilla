@@ -2301,9 +2301,16 @@ export default function App() {
     const sanitizeValue = (el, value) => {
       const text = semanticText(el);
       let next = String(value ?? "");
-      if (hasAny(text, ["phone", "mobile", "whatsapp"])) {
+      const isPhoneField = hasAny(text, ["phone", "mobile", "whatsapp"]);
+      const isOtpOrPinField = (
+        hasWord(text, "otp")
+        || hasWord(text, "pin")
+        || hasAny(text, ["pincode", "pin code", "postal", "zip"])
+      );
+
+      if (isPhoneField) {
         next = next.replace(/[^\d+]/g, "");
-      } else if (hasAny(text, ["postal", "pincode", "zip", "otp", "pin"])) {
+      } else if (isOtpOrPinField) {
         next = next.replace(/[^\d]/g, "");
       } else if (hasAny(text, ["gstin"])) {
         next = next.toUpperCase().replace(/[^A-Z0-9]/g, "");

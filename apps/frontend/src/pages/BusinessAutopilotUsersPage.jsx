@@ -1700,8 +1700,8 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/employee-roles/${roleId}`, {
-        method: "PUT",
-        body: JSON.stringify({ name })
+        method: "POST",
+        body: JSON.stringify({ action: "update", name })
       });
       setEmployeeRoles(data.employee_roles || []);
       if (data.departments) {
@@ -1756,7 +1756,8 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/employee-roles/${roleId}`, {
-        method: "DELETE"
+        method: "POST",
+        body: JSON.stringify({ action: "delete" })
       });
       setEmployeeRoles(data.employee_roles || []);
       if (data.departments) {
@@ -1799,8 +1800,8 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/departments/${departmentId}`, {
-        method: "PUT",
-        body: JSON.stringify({ name })
+        method: "POST",
+        body: JSON.stringify({ action: "update", name })
       });
       setDepartments(data.departments || []);
       if (data.employee_roles) {
@@ -1855,7 +1856,8 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/departments/${departmentId}`, {
-        method: "DELETE"
+        method: "POST",
+        body: JSON.stringify({ action: "delete" })
       });
       setDepartments(data.departments || []);
       if (data.employee_roles) {
@@ -3082,7 +3084,7 @@ export default function BusinessAutopilotUsersPage() {
                                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => startEditDepartment(item)}>
                                     Edit
                                   </button>
-                                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={deletingDepartmentId === String(item.id)} onClick={() => handleDeleteDepartment(item.id)}>
+                                  <button type="button" className="btn btn-sm btn-outline-danger" data-no-delete-confirm="true" disabled={deletingDepartmentId === String(item.id)} onClick={() => handleDeleteDepartment(item.id)}>
                                     {deletingDepartmentId === String(item.id) ? "Deleting..." : "Delete"}
                                   </button>
                                 </>
@@ -3180,7 +3182,7 @@ export default function BusinessAutopilotUsersPage() {
                                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => startEditEmployeeRole(item)}>
                                     Edit
                                   </button>
-                                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={deletingEmployeeRoleId === String(item.id)} onClick={() => handleDeleteEmployeeRole(item.id)}>
+                                  <button type="button" className="btn btn-sm btn-outline-danger" data-no-delete-confirm="true" disabled={deletingEmployeeRoleId === String(item.id)} onClick={() => handleDeleteEmployeeRole(item.id)}>
                                     {deletingEmployeeRoleId === String(item.id) ? "Deleting..." : "Delete"}
                                   </button>
                                 </>
@@ -3551,7 +3553,7 @@ export default function BusinessAutopilotUsersPage() {
                                   ? "Updating..."
                                   : (user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive"))}
                               </button>
-                              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
+                              <button type="button" className="btn btn-sm btn-outline-danger" data-no-delete-confirm="true" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
                                 {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
                               </button>
                             </div>
@@ -3601,6 +3603,7 @@ export default function BusinessAutopilotUsersPage() {
                               <button
                                 type="button"
                                 className="btn btn-sm btn-outline-danger"
+                                data-no-delete-confirm="true"
                                 onClick={() => handlePermanentDeleteUser(user.membership_id)}
                                 disabled={permanentlyDeletingMembershipId === String(user.membership_id)}
                               >
@@ -4461,7 +4464,7 @@ export default function BusinessAutopilotUsersPage() {
       )}
       {actionDialog.open ? (
         <div className="modal-overlay" onClick={() => closeActionDialog(actionDialog.variant !== "confirm")}>
-          <div className="modal-panel" style={{ width: "min(520px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-panel" data-confirm-dialog="true" style={{ width: "min(520px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="mb-3">
               <h5 className="mb-1">{actionDialog.title}</h5>
               <div className="text-secondary" style={{ whiteSpace: "pre-wrap" }}>
@@ -4470,11 +4473,11 @@ export default function BusinessAutopilotUsersPage() {
             </div>
             <div className="d-flex flex-wrap justify-content-end gap-2">
               {actionDialog.variant === "confirm" ? (
-                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => closeActionDialog(false)}>
+                <button type="button" className="btn btn-outline-light btn-sm" data-no-delete-confirm="true" onClick={() => closeActionDialog(false)}>
                   {actionDialog.cancelText}
                 </button>
               ) : null}
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => closeActionDialog(true)}>
+              <button type="button" className="btn btn-primary btn-sm" data-no-delete-confirm="true" onClick={() => closeActionDialog(true)}>
                 {actionDialog.confirmText}
               </button>
             </div>

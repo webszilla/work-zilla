@@ -2317,7 +2317,7 @@ def org_employee_roles(request):
     )
 
 
-@require_http_methods(["PUT", "DELETE"])
+@require_http_methods(["PUT", "DELETE", "POST"])
 def org_employee_role_detail(request, role_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -2342,11 +2342,27 @@ def org_employee_role_detail(request, role_id: int):
     )
     affected_users = _build_membership_assignment_summary(assigned_memberships)
 
-    if request.method == "PUT":
+    payload = {}
+    resolved_method = request.method
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        action = str(payload.get("action") or "").strip().lower()
+        if action in {"delete", "remove"}:
+            resolved_method = "DELETE"
+        elif action in {"update", "edit", "save"} or "name" in payload:
+            resolved_method = "PUT"
+        else:
+            return JsonResponse({"detail": "invalid_action"}, status=400)
+
+    if resolved_method == "PUT":
+        if request.method != "POST":
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
@@ -2464,7 +2480,7 @@ def org_departments(request):
     )
 
 
-@require_http_methods(["PUT", "DELETE"])
+@require_http_methods(["PUT", "DELETE", "POST"])
 def org_department_detail(request, department_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -2489,11 +2505,27 @@ def org_department_detail(request, department_id: int):
     )
     affected_users = _build_membership_assignment_summary(assigned_memberships)
 
-    if request.method == "PUT":
+    payload = {}
+    resolved_method = request.method
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        action = str(payload.get("action") or "").strip().lower()
+        if action in {"delete", "remove"}:
+            resolved_method = "DELETE"
+        elif action in {"update", "edit", "save"} or "name" in payload:
+            resolved_method = "PUT"
+        else:
+            return JsonResponse({"detail": "invalid_action"}, status=400)
+
+    if resolved_method == "PUT":
+        if request.method != "POST":
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
