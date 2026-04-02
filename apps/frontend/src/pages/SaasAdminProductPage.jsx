@@ -1289,7 +1289,7 @@ export default function SaasAdminProductPage() {
         addon_count: editModal.form.addon_count
       };
       await apiFetch(`/api/saas-admin/organizations/${editModal.data.organization.id}`, {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify(payload)
       });
       await refreshOrganizations();
@@ -1333,7 +1333,7 @@ export default function SaasAdminProductPage() {
     setUserEditModal((prev) => ({ ...prev, loading: true, error: "" }));
     try {
       await apiFetch(`/api/saas-admin/products/${slug}/users/${userEditModal.data.user.id}`, {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({
           name: userEditModal.form.name,
           email: userEditModal.form.email,
@@ -1763,7 +1763,7 @@ export default function SaasAdminProductPage() {
 
         if (planModal.mode === "edit") {
           await apiFetch(`/api/saas-admin/plans/${planModal.planId}`, {
-            method: "PUT",
+            method: "POST",
             body: JSON.stringify(payload)
           });
         } else {
@@ -1939,7 +1939,7 @@ export default function SaasAdminProductPage() {
       });
       if (planModal.mode === "edit") {
         await apiFetch(`/api/saas-admin/plans/${planModal.planId}`, {
-          method: "PUT",
+          method: "POST",
           body: JSON.stringify(payload)
         });
       } else {

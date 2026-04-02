@@ -2896,7 +2896,7 @@ def plans_list(request):
 
 
 @login_required
-@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_http_methods(["GET", "POST", "PUT", "PATCH", "DELETE"])
 def plan_detail(request, plan_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
@@ -3164,7 +3164,7 @@ def product_users(request, slug):
 
 
 @login_required
-@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_http_methods(["GET", "POST", "PUT", "PATCH", "DELETE"])
 def product_user_detail(request, slug, user_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
