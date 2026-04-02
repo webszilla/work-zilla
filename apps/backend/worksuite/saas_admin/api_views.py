@@ -2517,7 +2517,7 @@ def _organization_detail_payload(org, subscription):
 
 @login_required
 @csrf_exempt
-@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_http_methods(["GET", "POST", "PUT", "PATCH", "DELETE"])
 def organization_detail(request, org_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")

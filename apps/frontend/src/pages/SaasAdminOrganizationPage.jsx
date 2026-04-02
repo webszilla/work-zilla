@@ -192,10 +192,21 @@ export default function SaasAdminOrganizationPage() {
     country: "",
     gstin: ""
   });
-  const [popup, setPopup] = useState({ open: false, type: "success", message: "" });
+  const [alertDialog, setAlertDialog] = useState({
+    open: false,
+    type: "success",
+    title: "",
+    message: ""
+  });
 
-  function showPopup(message, type = "success") {
-    setPopup({ open: true, type, message: String(message || "").trim() });
+  function showAlertDialog(message, type = "success") {
+    const normalizedType = type === "danger" ? "danger" : "success";
+    setAlertDialog({
+      open: true,
+      type: normalizedType,
+      title: normalizedType === "danger" ? "Failed" : "Successful",
+      message: String(message || "").trim()
+    });
   }
 
   useEffect(() => {
@@ -286,23 +297,13 @@ export default function SaasAdminOrganizationPage() {
     }
   }, [location.hash]);
 
-  useEffect(() => {
-    if (!popup.open) {
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      setPopup((prev) => ({ ...prev, open: false }));
-    }, 4500);
-    return () => window.clearTimeout(timer);
-  }, [popup.open]);
-
   async function handleSave(event) {
     event.preventDefault();
     setNotice("");
     const newOwnerPassword = String(form.owner_password || "").trim();
     try {
       await apiFetch(`/api/saas-admin/organizations/${orgId}`, {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({
           name: form.name,
           company_key: form.company_key,
@@ -339,7 +340,7 @@ export default function SaasAdminOrganizationPage() {
       setForm((prev) => ({ ...prev, owner_password: "" }));
       const successMessage = newOwnerPassword ? "Organization and admin password updated." : "Organization updated.";
       setNotice(successMessage);
-      showPopup(successMessage, "success");
+      showAlertDialog(successMessage, "success");
       setState((prev) => ({ ...prev, error: "" }));
     } catch (error) {
       const statusCode = Number(error?.status || 0);
@@ -358,7 +359,7 @@ export default function SaasAdminOrganizationPage() {
         ...prev,
         error: errorMessage
       }));
-      showPopup(errorMessage, "danger");
+      showAlertDialog(errorMessage, "danger");
     }
   }
 
@@ -379,28 +380,26 @@ export default function SaasAdminOrganizationPage() {
 
   return (
     <>
-      {popup.open ? (
-        <div
-          style={{
-            position: "fixed",
-            top: "18px",
-            right: "18px",
-            zIndex: 2000,
-            minWidth: "280px",
-            maxWidth: "420px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.35)"
-          }}
-          className={`alert alert-${popup.type === "danger" ? "danger" : "success"} mb-0`}
-          role="alert"
-        >
-          <div className="d-flex align-items-start justify-content-between gap-2">
-            <span>{popup.message}</span>
-            <button
-              type="button"
-              className="btn-close"
-              aria-label="Close"
-              onClick={() => setPopup((prev) => ({ ...prev, open: false }))}
-            />
+      {alertDialog.open ? (
+        <div className="modal-overlay" onClick={() => setAlertDialog((prev) => ({ ...prev, open: false }))}>
+          <div
+            className="modal-panel"
+            style={{ width: "min(460px, 92vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h5>{alertDialog.title}</h5>
+            <div className={alertDialog.type === "danger" ? "text-danger mb-3" : "text-secondary mb-3"}>
+              {alertDialog.message}
+            </div>
+            <div className="d-flex justify-content-end">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAlertDialog((prev) => ({ ...prev, open: false }))}
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
