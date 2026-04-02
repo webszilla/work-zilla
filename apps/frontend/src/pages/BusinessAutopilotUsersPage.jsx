@@ -3255,6 +3255,7 @@ export default function BusinessAutopilotUsersPage() {
                     <div className="col-12 col-md-6 col-xl-4">
                       <input
                         type="email"
+                        data-skip-email-validation="true"
                         className="form-control"
                         placeholder="Official Email"
                         value={isEditingUser ? editForm.email : form.email}

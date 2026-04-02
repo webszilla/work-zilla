@@ -57,6 +57,23 @@ class AppCsrfBootstrapMiddleware:
         return self.get_response(request)
 
 
+class ApiHttpMethodOverrideMiddleware:
+    ALLOWED_OVERRIDES = {"PUT", "PATCH", "DELETE"}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ""
+        request_method = str(request.META.get("REQUEST_METHOD") or "").upper()
+        if path.startswith("/api/") and request_method == "POST":
+            override = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+            if override in self.ALLOWED_OVERRIDES:
+                request.META["ORIGINAL_REQUEST_METHOD"] = request_method
+                request.META["REQUEST_METHOD"] = override
+        return self.get_response(request)
+
+
 class RequestSecurityShieldMiddleware:
     BLOCK_SECONDS = 15 * 60
     NOT_FOUND_WINDOW_SECONDS = 5 * 60

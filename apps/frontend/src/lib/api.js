@@ -66,6 +66,10 @@ export async function apiFetch(url, options = {}) {
   const browserTimezone = getBrowserTimezone();
   const normalizedPath = String(url || "").trim().toLowerCase();
   const isSaasAdminApi = normalizedPath.startsWith("/api/saas-admin/");
+  const requestedMethod = String(options.method || "GET").toUpperCase();
+  const methodOverride = ["PUT", "PATCH", "DELETE"].includes(requestedMethod)
+    ? requestedMethod
+    : "";
   const fetchOptions = {
     credentials: "include",
     headers: {
@@ -94,9 +98,12 @@ export async function apiFetch(url, options = {}) {
       await refreshCsrfToken();
     }
     isFormDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+    const transportMethod = methodOverride ? "POST" : method;
+    fetchOptions.method = transportMethod;
     fetchOptions.headers = {
       ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
       "X-CSRFToken": getCsrfToken(),
+      ...(methodOverride ? { "X-HTTP-Method-Override": methodOverride } : {}),
       ...fetchOptions.headers
     };
   }

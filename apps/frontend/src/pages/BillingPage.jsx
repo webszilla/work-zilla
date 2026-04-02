@@ -375,13 +375,24 @@ export default function BillingPage() {
   async function handleAddonSubmit(event) {
     event.preventDefault();
     setNotice("");
+    const requestedAddonCount = Math.max(0, Number.parseInt(addonCount, 10) || 0);
     try {
       const data = await apiFetch("/api/dashboard/employees/addons", {
         method: "POST",
-        body: JSON.stringify({ addon_count: addonCount })
+        body: JSON.stringify({ addon_count: requestedAddonCount })
       });
-      if (data?.redirect) {
-        window.location.href = data.redirect;
+      const paymentRedirect = String(
+        data?.redirect
+        || data?.payment_redirect
+        || data?.bank_transfer_redirect
+        || ""
+      ).trim();
+      if (requestedAddonCount > 0) {
+        window.location.href = paymentRedirect || "/my-account/bank-transfer/";
+        return;
+      }
+      if (paymentRedirect) {
+        window.location.href = paymentRedirect;
         return;
       }
       setNotice("Add-ons updated.");
