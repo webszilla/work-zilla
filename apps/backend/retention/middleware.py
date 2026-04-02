@@ -50,6 +50,20 @@ ARCHIVED_READONLY_ENDPOINTS = (
 )
 
 
+def _is_system_admin_user(user):
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
+        return True
+    try:
+        from core.models import UserProfile
+        profile = UserProfile.objects.filter(user=user).only("role").first()
+    except Exception:
+        profile = None
+    role = str(getattr(profile, "role", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return role in {"superadmin", "super_admin", "saas_admin", "saasadmin"}
+
+
 class RetentionEnforcementMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -60,7 +74,7 @@ class RetentionEnforcementMiddleware:
                 return self.get_response(request)
 
         user = getattr(request, "user", None)
-        if user and user.is_authenticated and getattr(user, "is_superuser", False):
+        if _is_system_admin_user(user):
             return self.get_response(request)
 
         organization = resolve_org_from_request(request)

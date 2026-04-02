@@ -343,9 +343,17 @@ export default function SaasAdminOrganizationPage() {
       setState((prev) => ({ ...prev, error: "" }));
     } catch (error) {
       const statusCode = Number(error?.status || 0);
-      const errorMessage = statusCode === 403
-        ? "Request blocked (403). Please refresh and try again."
-        : (error?.message || "Unable to update organization.");
+      const backendReason = String(
+        error?.data?.detail
+          || error?.data?.error
+          || error?.message
+          || ""
+      ).trim();
+      const errorMessage = backendReason || (
+        statusCode === 403
+          ? "Request blocked (403). Please refresh and try again."
+          : "Unable to update organization."
+      );
       setState((prev) => ({
         ...prev,
         error: errorMessage
