@@ -233,3 +233,56 @@ class BusinessAutopilotUserAccessTests(TestCase):
         payload = response.json()
         user_emails = {row.get("email") for row in payload.get("users", [])}
         self.assertIn("listed@gmail.com", user_emails)
+
+    def test_user_update_supports_post_action_update(self):
+        product_user = User.objects.create_user(
+            username="user-update@gmail.com",
+            email="user-update@gmail.com",
+            password="pw123456",
+            first_name="Old",
+            last_name="Name",
+        )
+        UserProfile.objects.create(
+            user=product_user,
+            organization=self.org,
+            role="org_user",
+            phone_number="+919900000001",
+        )
+        membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=product_user,
+            role="org_user",
+            is_active=True,
+            department="Sales",
+            employee_role="Executive",
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            f"/api/business-autopilot/users/{membership.id}",
+            data={
+                "action": "update",
+                "first_name": "New",
+                "last_name": "Name",
+                "email": "user-updated@gmail.com",
+                "password": "",
+                "phone_number": "+919900000009",
+                "role": "org_user",
+                "department": "Marketing",
+                "employee_role": "Lead",
+                "is_active": True,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        product_user.refresh_from_db()
+        membership.refresh_from_db()
+        profile = UserProfile.objects.get(user=product_user)
+        self.assertEqual(product_user.email, "user-updated@gmail.com")
+        self.assertEqual(product_user.username, "user-updated@gmail.com")
+        self.assertEqual(product_user.first_name, "New")
+        self.assertEqual(product_user.last_name, "Name")
+        self.assertEqual(profile.phone_number, "+919900000009")
+        self.assertEqual(membership.department, "Marketing")
+        self.assertEqual(membership.employee_role, "Lead")

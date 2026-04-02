@@ -1862,8 +1862,44 @@ def org_user_detail(request, membership_id: int):
     if not membership:
         return JsonResponse({"detail": "user_not_found"}, status=404)
 
-    if request.method == "DELETE":
+    payload = {}
+    resolved_method = request.method
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        action = str(payload.get("action") or "").strip().lower()
+        if action == "restore":
+            resolved_method = "RESTORE"
+        elif action in {"delete", "remove"}:
+            resolved_method = "DELETE"
+        elif action in {"update", "edit", "save"} or any(
+            key in payload
+            for key in {
+                "first_name",
+                "last_name",
+                "name",
+                "email",
+                "password",
+                "phone_number",
+                "role",
+                "department",
+                "department_id",
+                "employee_role",
+                "employee_role_id",
+                "is_active",
+            }
+        ):
+            resolved_method = "PUT"
+        else:
+            return JsonResponse({"detail": "invalid_action"}, status=400)
+
+    if resolved_method == "DELETE":
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        if request.method == "POST":
+            permanent_raw = str(payload.get("permanent") or "").strip().lower()
+            permanent = permanent or permanent_raw in {"1", "true", "yes"}
         if membership.is_deleted and not permanent:
             return JsonResponse({"detail": "user_already_deleted"}, status=400)
         _revoke_business_autopilot_access(membership.user)
@@ -1879,14 +1915,7 @@ def org_user_detail(request, membership_id: int):
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
         return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message=message))
 
-    if request.method == "POST":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-        action = str(payload.get("action") or "").strip().lower()
-        if action != "restore":
-            return JsonResponse({"detail": "invalid_action"}, status=400)
+    if resolved_method == "RESTORE":
         if not membership.is_deleted:
             return JsonResponse({"detail": "user_not_deleted"}, status=400)
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
@@ -1910,10 +1939,11 @@ def org_user_detail(request, membership_id: int):
             _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
         return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User restored successfully."))
 
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"detail": "invalid_json"}, status=400)
+    if request.method != "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
     if membership.is_deleted:
         return JsonResponse({"detail": "user_not_found"}, status=404)
 

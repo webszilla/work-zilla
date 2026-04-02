@@ -13086,8 +13086,9 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       if (membershipId) {
         try {
           const updateData = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
-            method: "PUT",
+            method: "POST",
             body: JSON.stringify({
+              action: "update",
               first_name: String(matchedDirectoryUser?.first_name || "").trim(),
               last_name: String(matchedDirectoryUser?.last_name || "").trim(),
               email: String(matchedDirectoryUser?.email || "").trim(),

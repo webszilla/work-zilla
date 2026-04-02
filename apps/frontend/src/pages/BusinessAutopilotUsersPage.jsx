@@ -1144,8 +1144,9 @@ export default function BusinessAutopilotUsersPage() {
       const targetMembershipId = String(editForm.membership_id || "");
       const requestedEmail = String(editForm.email || "").trim().toLowerCase();
       const data = await apiFetch(`/api/business-autopilot/users/${editForm.membership_id}`, {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({
+          action: "update",
           first_name: editForm.first_name,
           last_name: editForm.last_name,
           email: editForm.email,
