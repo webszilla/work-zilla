@@ -64,6 +64,8 @@ async function refreshCsrfToken() {
 export async function apiFetch(url, options = {}) {
   const requestUrl = buildApiUrl(url);
   const browserTimezone = getBrowserTimezone();
+  const normalizedPath = String(url || "").trim().toLowerCase();
+  const isSaasAdminApi = normalizedPath.startsWith("/api/saas-admin/");
   const fetchOptions = {
     credentials: "include",
     headers: {
@@ -75,7 +77,13 @@ export async function apiFetch(url, options = {}) {
 
   const method = (fetchOptions.method || "GET").toUpperCase();
   let isFormDataBody = false;
-  if (typeof window !== "undefined" && window.__WZ_READ_ONLY__ && method !== "GET" && method !== "HEAD") {
+  if (
+    typeof window !== "undefined"
+    && window.__WZ_READ_ONLY__
+    && method !== "GET"
+    && method !== "HEAD"
+    && !isSaasAdminApi
+  ) {
     const err = new Error("read_only");
     err.status = 403;
     err.data = { error: "read_only" };
