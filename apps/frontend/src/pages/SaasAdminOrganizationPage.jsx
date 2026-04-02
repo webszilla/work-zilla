@@ -192,6 +192,11 @@ export default function SaasAdminOrganizationPage() {
     country: "",
     gstin: ""
   });
+  const [popup, setPopup] = useState({ open: false, type: "success", message: "" });
+
+  function showPopup(message, type = "success") {
+    setPopup({ open: true, type, message: String(message || "").trim() });
+  }
 
   useEffect(() => {
     let active = true;
@@ -281,6 +286,16 @@ export default function SaasAdminOrganizationPage() {
     }
   }, [location.hash]);
 
+  useEffect(() => {
+    if (!popup.open) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setPopup((prev) => ({ ...prev, open: false }));
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [popup.open]);
+
   async function handleSave(event) {
     event.preventDefault();
     setNotice("");
@@ -322,12 +337,20 @@ export default function SaasAdminOrganizationPage() {
         });
       }
       setForm((prev) => ({ ...prev, owner_password: "" }));
-      setNotice(newOwnerPassword ? "Organization and admin password updated." : "Organization updated.");
+      const successMessage = newOwnerPassword ? "Organization and admin password updated." : "Organization updated.";
+      setNotice(successMessage);
+      showPopup(successMessage, "success");
+      setState((prev) => ({ ...prev, error: "" }));
     } catch (error) {
+      const statusCode = Number(error?.status || 0);
+      const errorMessage = statusCode === 403
+        ? "Request blocked (403). Please refresh and try again."
+        : (error?.message || "Unable to update organization.");
       setState((prev) => ({
         ...prev,
-        error: error?.message || "Unable to update organization."
+        error: errorMessage
       }));
+      showPopup(errorMessage, "danger");
     }
   }
 
@@ -348,6 +371,31 @@ export default function SaasAdminOrganizationPage() {
 
   return (
     <>
+      {popup.open ? (
+        <div
+          style={{
+            position: "fixed",
+            top: "18px",
+            right: "18px",
+            zIndex: 2000,
+            minWidth: "280px",
+            maxWidth: "420px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.35)"
+          }}
+          className={`alert alert-${popup.type === "danger" ? "danger" : "success"} mb-0`}
+          role="alert"
+        >
+          <div className="d-flex align-items-start justify-content-between gap-2">
+            <span>{popup.message}</span>
+            <button
+              type="button"
+              className="btn-close"
+              aria-label="Close"
+              onClick={() => setPopup((prev) => ({ ...prev, open: false }))}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <h3 className="page-title">Organization Details</h3>
         <button

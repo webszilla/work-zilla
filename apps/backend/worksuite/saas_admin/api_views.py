@@ -21,6 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from django.utils.dateparse import parse_date
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from core.models import (
@@ -2515,6 +2516,7 @@ def _organization_detail_payload(org, subscription):
 
 
 @login_required
+@csrf_exempt
 @require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
 def organization_detail(request, org_id):
     if not _is_saas_admin_user(request.user):
@@ -2665,6 +2667,7 @@ def organization_detail(request, org_id):
 
 
 @login_required
+@csrf_exempt
 @require_http_methods(["POST"])
 def organization_owner_password(request, org_id):
     if not _is_saas_admin_user(request.user):
