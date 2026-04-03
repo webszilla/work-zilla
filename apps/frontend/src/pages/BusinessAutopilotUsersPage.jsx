@@ -108,6 +108,11 @@ const ROLE_ACCESS_SECTION_MODULE_SLUG = {
   stocks: "stocks",
 };
 const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"];
+const USER_SUB_ACCESS_OPTIONS = [
+  { key: "employee", label: "Employee" },
+  { key: "clients", label: "Clients" },
+  { key: "vendors", label: "Vendor Registration" },
+];
 const USER_DETAIL_FIELDS = [
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
@@ -176,6 +181,29 @@ function normalizeRoleAccessLevel(level) {
   return ACCESS_LEVEL_OPTIONS.includes(value) ? value : "No Access";
 }
 
+function createDefaultUserSubSections() {
+  return USER_SUB_ACCESS_OPTIONS.reduce((acc, item) => {
+    acc[item.key] = { enabled: false, access_level: "No Access" };
+    return acc;
+  }, {});
+}
+
+function normalizeUserSubSections(value, fallbackAccessLevel = "No Access") {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const fallbackLevel = normalizeRoleAccessLevel(fallbackAccessLevel);
+  return USER_SUB_ACCESS_OPTIONS.reduce((acc, item) => {
+    const raw = source[item.key];
+    const safe = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const accessLevel = normalizeRoleAccessLevel(safe.access_level || "No Access");
+    const enabled = Boolean(safe.enabled) && accessLevel !== "No Access";
+    acc[item.key] = {
+      enabled,
+      access_level: enabled ? accessLevel : (fallbackLevel === "No Access" ? "No Access" : fallbackLevel),
+    };
+    return acc;
+  }, {});
+}
+
 function normalizeRoleAccessMap(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const normalized = {};
@@ -191,6 +219,10 @@ function normalizeRoleAccessMap(value) {
         acc[section.key] = normalizeRoleAccessLevel(sections[section.key] || "No Access");
         return acc;
       }, {}),
+      user_sub_sections: normalizeUserSubSections(
+        safeRecord.user_sub_sections,
+        sections.users || "No Access"
+      ),
     };
   });
   return normalized;
@@ -337,6 +369,7 @@ function createDefaultRoleAccessRecord() {
       acc[item.key] = "No Access";
       return acc;
     }, {}),
+    user_sub_sections: createDefaultUserSubSections(),
     can_export: false,
     can_delete: false,
     attendance_self_service: false,
@@ -438,6 +471,13 @@ function buildScopedAccountsStorageKey(orgId = "") {
     : ACCOUNTS_STORAGE_KEY;
 }
 
+function resolveScopedAccountsStorageKey(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  return buildScopedAccountsStorageKey(resolvedOrgId);
+}
+
 function readLegacyAccountsData() {
   try {
     const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
@@ -450,7 +490,7 @@ function readLegacyAccountsData() {
 
 function readSharedAccountsData(storageKey = "") {
   try {
-    const resolvedKey = String(storageKey || "").trim() || buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const resolvedKey = String(storageKey || "").trim() || resolveScopedAccountsStorageKey();
     const raw = window.localStorage.getItem(resolvedKey);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -471,7 +511,7 @@ function readSharedAccountsVendors(storageKey = "") {
 }
 
 async function persistSharedAccountsCustomers(nextCustomers) {
-  const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+  const accountsStorageKey = resolveScopedAccountsStorageKey();
   const currentData = readSharedAccountsData(accountsStorageKey);
   const nextData = {
     ...currentData,
@@ -2080,10 +2120,13 @@ export default function BusinessAutopilotUsersPage() {
   }, [employeeRoles]);
   const visibleRoleAccessSections = useMemo(() => {
     if (!hasResolvedEnabledModules) {
-      return ROLE_ACCESS_SECTIONS;
+      return ROLE_ACCESS_SECTIONS.filter((section) => section.key !== "users");
     }
     const enabledSet = new Set(enabledModuleSlugs.map((slug) => String(slug || "").trim().toLowerCase()));
     return ROLE_ACCESS_SECTIONS.filter((section) => {
+      if (section.key === "users") {
+        return false;
+      }
       const moduleSlug = ROLE_ACCESS_SECTION_MODULE_SLUG[section.key];
       if (!moduleSlug) {
         return true;
@@ -2199,18 +2242,48 @@ export default function BusinessAutopilotUsersPage() {
   const usersSectionAccessLevel = isOrgAdminUser
     ? "Full Access"
     : normalizeRoleAccessLevel(usersRoleAccessRecord?.sections?.users || "No Access");
-  const canViewUsersSection = isOrgAdminUser || usersSectionAccessLevel !== "No Access";
-  const canEditUsersSection = isOrgAdminUser || usersSectionAccessLevel === "View and Edit" || usersSectionAccessLevel === "Create, View and Edit" || usersSectionAccessLevel === "Full Access";
-  const canCreateUsersSection = isOrgAdminUser || usersSectionAccessLevel === "Create, View and Edit" || usersSectionAccessLevel === "Full Access";
-  const canDeleteUsersSection = isOrgAdminUser || usersSectionAccessLevel === "Full Access";
+  const usersSubSections = normalizeUserSubSections(
+    usersRoleAccessRecord?.user_sub_sections,
+    usersSectionAccessLevel
+  );
+  const employeeAccessLevel = isOrgAdminUser
+    ? "Full Access"
+    : normalizeRoleAccessLevel(
+      usersSubSections.employee?.enabled
+        ? usersSubSections.employee?.access_level
+        : usersSectionAccessLevel
+    );
+  const clientsAccessLevel = isOrgAdminUser
+    ? "Full Access"
+    : normalizeRoleAccessLevel(
+      usersSubSections.clients?.enabled
+        ? usersSubSections.clients?.access_level
+        : usersSectionAccessLevel
+    );
+  const vendorsAccessLevel = isOrgAdminUser
+    ? "Full Access"
+    : normalizeRoleAccessLevel(
+      usersSubSections.vendors?.enabled
+        ? usersSubSections.vendors?.access_level
+        : usersSectionAccessLevel
+    );
+  const canViewUsersSection = isOrgAdminUser
+    || usersSectionAccessLevel !== "No Access"
+    || employeeAccessLevel !== "No Access"
+    || clientsAccessLevel !== "No Access"
+    || vendorsAccessLevel !== "No Access";
   const canManageUsersTab = isOrgAdminUser;
   const canManageRoleAccessTab = isOrgAdminUser;
-  const canViewEmployeeTab = canViewUsersSection;
-  const canManageEmployeeTab = canEditUsersSection;
-  const canViewClientVendorTabs = canViewUsersSection;
-  const canEditClientVendorTabs = canEditUsersSection;
-  const canCreateClientVendorTabs = canCreateUsersSection;
-  const canDeleteClientVendorTabs = canDeleteUsersSection;
+  const canViewEmployeeTab = isOrgAdminUser || employeeAccessLevel !== "No Access";
+  const canManageEmployeeTab = isOrgAdminUser || employeeAccessLevel === "View and Edit" || employeeAccessLevel === "Create, View and Edit" || employeeAccessLevel === "Full Access";
+  const canViewClientsTab = isOrgAdminUser || clientsAccessLevel !== "No Access";
+  const canEditClientsTab = isOrgAdminUser || clientsAccessLevel === "View and Edit" || clientsAccessLevel === "Create, View and Edit" || clientsAccessLevel === "Full Access";
+  const canCreateClientsTab = isOrgAdminUser || clientsAccessLevel === "Create, View and Edit" || clientsAccessLevel === "Full Access";
+  const canDeleteClientsTab = isOrgAdminUser || clientsAccessLevel === "Full Access";
+  const canViewVendorsTab = isOrgAdminUser || vendorsAccessLevel !== "No Access";
+  const canEditVendorsTab = isOrgAdminUser || vendorsAccessLevel === "View and Edit" || vendorsAccessLevel === "Create, View and Edit" || vendorsAccessLevel === "Full Access";
+  const canCreateVendorsTab = isOrgAdminUser || vendorsAccessLevel === "Create, View and Edit" || vendorsAccessLevel === "Full Access";
+  const canDeleteVendorsTab = isOrgAdminUser || vendorsAccessLevel === "Full Access";
 
   useEffect(() => {
     const allowedTabs = [];
@@ -2221,8 +2294,10 @@ export default function BusinessAutopilotUsersPage() {
     if (canViewEmployeeTab) {
       allowedTabs.push("create-employee");
     }
-    if (canViewClientVendorTabs) {
+    if (canViewClientsTab) {
       allowedTabs.push("clients");
+    }
+    if (canViewVendorsTab) {
       allowedTabs.push("vendors");
     }
     if (!allowedTabs.length) {
@@ -2231,7 +2306,7 @@ export default function BusinessAutopilotUsersPage() {
     if (!allowedTabs.includes(activeTopTab)) {
       setActiveTopTab(allowedTabs[0]);
     }
-  }, [activeTopTab, canManageUsersTab, canViewClientVendorTabs, canViewEmployeeTab]);
+  }, [activeTopTab, canManageUsersTab, canViewClientsTab, canViewEmployeeTab, canViewVendorsTab]);
 
   useEffect(() => {
     setNotice("");
@@ -2370,7 +2445,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function saveClient(event) {
     event.preventDefault();
-    if (editingClientId ? !canEditClientVendorTabs : !canCreateClientVendorTabs) {
+    if (editingClientId ? !canEditClientsTab : !canCreateClientsTab) {
       return;
     }
     const companyName = String(clientForm.companyName || "").trim();
@@ -2471,7 +2546,7 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function deleteClient(clientId) {
-    if (!canDeleteClientVendorTabs) {
+    if (!canDeleteClientsTab) {
       return;
     }
     const nextCustomers = sharedCustomers.filter((row) => String(row.id) !== String(clientId));
@@ -2591,7 +2666,7 @@ export default function BusinessAutopilotUsersPage() {
   async function onClientImportFileChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !canCreateClientVendorTabs) {
+    if (!file || !canCreateClientsTab) {
       return;
     }
     try {
@@ -2691,7 +2766,7 @@ export default function BusinessAutopilotUsersPage() {
 
   async function saveVendor(event) {
     event.preventDefault();
-    if (editingVendorId ? !canEditClientVendorTabs : !canCreateClientVendorTabs) {
+    if (editingVendorId ? !canEditVendorsTab : !canCreateVendorsTab) {
       return;
     }
     const companyName = String(vendorForm.companyName || "").trim();
@@ -2788,7 +2863,7 @@ export default function BusinessAutopilotUsersPage() {
   }
 
   async function deleteVendor(vendorId) {
-    if (!canDeleteClientVendorTabs) {
+    if (!canDeleteVendorsTab) {
       return;
     }
     const nextVendors = sharedVendors.filter((row) => String(row.id) !== String(vendorId));
@@ -2922,7 +2997,7 @@ export default function BusinessAutopilotUsersPage() {
   async function onVendorImportFileChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !canCreateClientVendorTabs) {
+    if (!file || !canCreateVendorsTab) {
       return;
     }
     try {
@@ -3067,7 +3142,7 @@ export default function BusinessAutopilotUsersPage() {
               Role Based Access
             </button>
           ) : null}
-          {canViewClientVendorTabs ? (
+          {canViewClientsTab ? (
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "clients" ? "btn-success" : "btn-outline-light"}`}
@@ -3076,7 +3151,7 @@ export default function BusinessAutopilotUsersPage() {
               Clients
             </button>
           ) : null}
-          {canViewClientVendorTabs ? (
+          {canViewVendorsTab ? (
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "vendors" ? "btn-success" : "btn-outline-light"}`}
@@ -3090,7 +3165,7 @@ export default function BusinessAutopilotUsersPage() {
 
       {notice ? <div className="alert alert-info py-2 mb-0">{notice}</div> : null}
 
-      {!canViewUsersSection && !canViewEmployeeTab && !canViewClientVendorTabs ? (
+      {!canViewUsersSection && !canViewEmployeeTab && !canViewClientsTab && !canViewVendorsTab ? (
         <div className="card p-3">
           <div className="text-secondary">You do not have access to this section.</div>
         </div>
@@ -3577,7 +3652,7 @@ export default function BusinessAutopilotUsersPage() {
                     window.location.href = "/app/business-autopilot/billing";
                   }}
                 >
-                  Add Users
+                  Increase User Limit
                 </button>
                 <div className="table-search">
                   <i className="bi bi-search" aria-hidden="true" />
@@ -3951,6 +4026,73 @@ export default function BusinessAutopilotUsersPage() {
             </table>
           </div>
 
+          <div className="card p-3 mb-3">
+            <div className="small text-secondary mb-2">Users: Sub Access Controls</div>
+            <div className="d-flex flex-column gap-2">
+              {USER_SUB_ACCESS_OPTIONS.map((item) => {
+                const subRecord = selectedRoleAccess.user_sub_sections?.[item.key] || { enabled: false, access_level: "No Access" };
+                const enabled = Boolean(subRecord.enabled);
+                const currentLevel = normalizeRoleAccessLevel(subRecord.access_level || "No Access");
+                return (
+                  <div key={`rbac-user-sub-${item.key}`} className="row g-2 align-items-center">
+                    <div className="col-12 col-md-5">
+                      <div className="form-check">
+                        <input
+                          id={`rbac-user-sub-check-${item.key}`}
+                          className="form-check-input"
+                          type="checkbox"
+                          checked={enabled}
+                          disabled={!canManageRoleAccessTab}
+                          onChange={(event) => {
+                            const nextEnabled = event.target.checked;
+                            updateRoleAccess((prev) => ({
+                              ...prev,
+                              user_sub_sections: {
+                                ...(prev.user_sub_sections || {}),
+                                [item.key]: {
+                                  enabled: nextEnabled,
+                                  access_level: nextEnabled
+                                    ? (currentLevel === "No Access" ? "View" : currentLevel)
+                                    : "No Access",
+                                },
+                              },
+                            }));
+                          }}
+                        />
+                        <label className="form-check-label small text-secondary mb-0" htmlFor={`rbac-user-sub-check-${item.key}`}>
+                          {item.label}
+                        </label>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-7">
+                      <select
+                        className="form-select form-select-sm"
+                        disabled={!canManageRoleAccessTab || !enabled}
+                        value={enabled ? currentLevel : "No Access"}
+                        onChange={(event) => {
+                          updateRoleAccess((prev) => ({
+                            ...prev,
+                            user_sub_sections: {
+                              ...(prev.user_sub_sections || {}),
+                              [item.key]: {
+                                enabled: true,
+                                access_level: normalizeRoleAccessLevel(event.target.value),
+                              },
+                            },
+                          }));
+                        }}
+                      >
+                        {ACCESS_LEVEL_OPTIONS.filter((level) => level !== "No Access").map((level) => (
+                          <option key={`rbac-user-sub-level-${item.key}-${level}`} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="row g-3">
             <div className="col-12 col-md-4">
               <div className="form-check form-switch">
@@ -3993,7 +4135,15 @@ export default function BusinessAutopilotUsersPage() {
                   {section.label}: {selectedRoleAccess.sections?.[section.key]}
                 </span>
               ))}
-              {!visibleRoleAccessSections.some((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access") ? (
+              {USER_SUB_ACCESS_OPTIONS
+                .filter((item) => Boolean(selectedRoleAccess.user_sub_sections?.[item.key]?.enabled))
+                .map((item) => (
+                  <span key={`rbac-sub-preview-${item.key}`} className="badge text-bg-primary">
+                    Users/{item.label}: {selectedRoleAccess.user_sub_sections?.[item.key]?.access_level || "No Access"}
+                  </span>
+                ))}
+              {!visibleRoleAccessSections.some((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access")
+              && !USER_SUB_ACCESS_OPTIONS.some((item) => Boolean(selectedRoleAccess.user_sub_sections?.[item.key]?.enabled)) ? (
                 <span className="text-secondary small">No access sections configured.</span>
               ) : null}
             </div>
@@ -4221,7 +4371,7 @@ export default function BusinessAutopilotUsersPage() {
                 ) : null}
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={editingClientId ? !canEditClientVendorTabs : !canCreateClientVendorTabs}>{editingClientId ? "Update Client" : "Create Client"}</button>
+                <button type="submit" className="btn btn-success btn-sm" disabled={editingClientId ? !canEditClientsTab : !canCreateClientsTab}>{editingClientId ? "Update Client" : "Create Client"}</button>
                 {editingClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetClientForm}>Cancel</button> : null}
               </div>
             </form>
@@ -4238,7 +4388,7 @@ export default function BusinessAutopilotUsersPage() {
                   className="d-none"
                   onChange={onClientImportFileChange}
                 />
-                <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canCreateClientVendorTabs}>
+                <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerClientImportPicker} disabled={!canCreateClientsTab}>
                   <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
                   Import
                 </button>
@@ -4281,8 +4431,8 @@ export default function BusinessAutopilotUsersPage() {
                         <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
                         <td>
                           <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientVendorTabs} onClick={() => editClient(row)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientVendorTabs} onClick={() => deleteClient(row.id)}>Delete</button>
+                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientsTab} onClick={() => editClient(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientsTab} onClick={() => deleteClient(row.id)}>Delete</button>
                           </div>
                         </td>
                       </tr>
@@ -4483,7 +4633,7 @@ export default function BusinessAutopilotUsersPage() {
                 ) : null}
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={editingVendorId ? !canEditClientVendorTabs : !canCreateClientVendorTabs}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
+                <button type="submit" className="btn btn-success btn-sm" disabled={editingVendorId ? !canEditVendorsTab : !canCreateVendorsTab}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
                 {editingVendorId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetVendorForm}>Cancel</button> : null}
               </div>
             </form>
@@ -4500,7 +4650,7 @@ export default function BusinessAutopilotUsersPage() {
                 className="d-none"
                 onChange={onVendorImportFileChange}
               />
-              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerVendorImportPicker} disabled={!canCreateClientVendorTabs}>
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={triggerVendorImportPicker} disabled={!canCreateVendorsTab}>
                 <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
                 Import
               </button>
@@ -4542,8 +4692,8 @@ export default function BusinessAutopilotUsersPage() {
                         <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
                         <td>
                           <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientVendorTabs} onClick={() => editVendor(row)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientVendorTabs} onClick={() => deleteVendor(row.id)}>Delete</button>
+                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditVendorsTab} onClick={() => editVendor(row)}>Edit</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteVendorsTab} onClick={() => deleteVendor(row.id)}>Delete</button>
                           </div>
                         </td>
                       </tr>

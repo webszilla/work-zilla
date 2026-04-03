@@ -18,8 +18,10 @@ import {
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
+const CRM_ACTIVE_SECTION_KEY = "wz_business_autopilot_crm_active_section";
 const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
 const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
+const CRM_SHARED_CONTACTS_GLOBAL_KEY = `${CRM_SHARED_CONTACTS_KEY_PREFIX}__global`;
 const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
@@ -995,12 +997,31 @@ function createEmptyDocLine() {
   };
 }
 
-function createEmptyBillingDocument(kind = "invoice") {
+function getNextBillingDocNo(kind = "invoice", existingRows = []) {
   const prefix = kind === "estimate" ? "EST" : "INV";
+  const now = new Date();
+  const dayKey = `${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear())}`;
+  const pattern = new RegExp(`^${prefix}-${dayKey}-(\\d{3})$`);
+  let maxSeq = 0;
+  (Array.isArray(existingRows) ? existingRows : []).forEach((row) => {
+    const rawDocNo = String(row?.docNo || row?.doc_no || "").trim();
+    const match = pattern.exec(rawDocNo);
+    if (!match) {
+      return;
+    }
+    const seq = Number.parseInt(match[1], 10);
+    if (Number.isFinite(seq) && seq > maxSeq) {
+      maxSeq = seq;
+    }
+  });
+  return `${prefix}-${dayKey}-${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
   const today = new Date().toISOString().slice(0, 10);
   return {
     id: "",
-    docNo: `${prefix}-${Date.now().toString().slice(-6)}`,
+    docNo: getNextBillingDocNo(kind, existingRows),
     customerName: "",
     customerGstin: "",
     issueDate: today,
@@ -1870,22 +1891,48 @@ function normalizeCrmData(value) {
 }
 
 function buildScopedCrmStorageKey(authData = {}) {
-  const userId = String(authData?.user?.id || "").trim();
   const orgId = String(
     authData?.organization_id
     || authData?.profile?.organization_id
     || authData?.profile?.org_id
     || authData?.profile?.company_id
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId()
     || ""
   ).trim();
+  if (orgId) {
+    return `${CRM_STORAGE_KEY_PREFIX}__${String(orgId).replace(/[^a-z0-9_.-]/gi, "_")}`;
+  }
+  const userId = String(authData?.user?.id || "").trim();
   const email = String(authData?.user?.email || "").trim().toLowerCase();
-  const parts = [orgId, userId, email].filter(Boolean).map((part) =>
+  const fallbackParts = [userId, email].filter(Boolean).map((part) =>
     String(part).replace(/[^a-z0-9_.-]/gi, "_")
   );
-  if (!parts.length) {
+  if (!fallbackParts.length) {
     return CRM_STORAGE_KEY;
   }
-  return `${CRM_STORAGE_KEY_PREFIX}__${parts.join("__")}`;
+  return `${CRM_STORAGE_KEY_PREFIX}__${fallbackParts.join("__")}`;
+}
+
+function buildScopedCrmActiveSectionKey(storageKey = "") {
+  const normalizedStorageKey = String(storageKey || "").trim();
+  return normalizedStorageKey
+    ? `${CRM_ACTIVE_SECTION_KEY}__${normalizedStorageKey}`
+    : CRM_ACTIVE_SECTION_KEY;
+}
+
+function getStoredCrmActiveSection(sectionOrder = [], storageKey = "") {
+  const allowedSections = Array.isArray(sectionOrder) ? sectionOrder : [];
+  const scopedSectionKey = buildScopedCrmActiveSectionKey(storageKey);
+  const scopedSection = String(window.localStorage.getItem(scopedSectionKey) || "").trim();
+  if (scopedSection && allowedSections.includes(scopedSection)) {
+    return scopedSection;
+  }
+  const genericSection = String(window.localStorage.getItem(CRM_ACTIVE_SECTION_KEY) || "").trim();
+  if (genericSection && allowedSections.includes(genericSection)) {
+    return genericSection;
+  }
+  return String(allowedSections[0] || "leads").trim() || "leads";
 }
 
 function getOrganizationIdFromAuth(authData = {}) {
@@ -1917,6 +1964,13 @@ function buildScopedAccountsStorageKey(orgId = "") {
     : ACCOUNTS_STORAGE_KEY;
 }
 
+function resolveScopedAccountsStorageKey(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  return buildScopedAccountsStorageKey(resolvedOrgId);
+}
+
 function getActiveCrmScopeOrgId() {
   const activeKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
   if (!activeKey.startsWith(`${CRM_STORAGE_KEY_PREFIX}__`)) {
@@ -1934,7 +1988,7 @@ function buildScopedCrmContactsStorageKey(authData = {}) {
   const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
   return normalizedOrgId
     ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${normalizedOrgId}`
-    : CRM_STORAGE_KEY;
+    : CRM_SHARED_CONTACTS_GLOBAL_KEY;
 }
 
 function getOrgScopedCrmStorageKeys(orgId = "") {
@@ -1942,8 +1996,84 @@ function getOrgScopedCrmStorageKeys(orgId = "") {
   if (!normalizedOrgId || typeof window === "undefined") {
     return [];
   }
+  const exactKey = `${CRM_STORAGE_KEY_PREFIX}__${normalizedOrgId}`;
   const prefix = `${CRM_STORAGE_KEY_PREFIX}__${normalizedOrgId}__`;
-  return Object.keys(window.localStorage || {}).filter((key) => String(key || "").startsWith(prefix));
+  return Object.keys(window.localStorage || {}).filter((key) => {
+    const normalizedKey = String(key || "").trim();
+    return normalizedKey === exactKey || normalizedKey.startsWith(prefix);
+  });
+}
+
+function getCrmOrgIdFromStorageKey(storageKey = "") {
+  const normalizedKey = String(storageKey || "").trim();
+  if (!normalizedKey.startsWith(`${CRM_STORAGE_KEY_PREFIX}__`)) {
+    return "";
+  }
+  const suffix = normalizedKey.replace(`${CRM_STORAGE_KEY_PREFIX}__`, "");
+  const parts = suffix.split("__").filter(Boolean);
+  return String(parts[0] || "").trim();
+}
+
+function mergeCrmRowsForSection(sectionKey, ...sources) {
+  const merged = [];
+  const seen = new Set();
+  sources.forEach((source) => {
+    const rows = Array.isArray(source) ? source : [];
+    rows.forEach((row) => {
+      const normalizedRow = sectionKey === "leads"
+        ? normalizeCrmLeadRecord(row)
+        : sectionKey === "contacts"
+        ? normalizeCrmContactRecord(row)
+        : sectionKey === "deals"
+        ? normalizeCrmDealRecord(row)
+        : sectionKey === "meetings"
+        ? normalizeCrmMeetingRecord(row)
+        : sectionKey === "teams"
+        ? normalizeCrmTeamRecord(row)
+        : row;
+      const dedupKey = buildCrmImportDedupKey(sectionKey, normalizedRow)
+        || String(normalizedRow?.serverMeetingId || normalizedRow?.id || "").trim()
+        || JSON.stringify(normalizedRow);
+      if (!dedupKey || seen.has(dedupKey)) {
+        return;
+      }
+      seen.add(dedupKey);
+      merged.push(normalizedRow);
+    });
+  });
+  return merged;
+}
+
+function collectOrgScopedCrmData(orgId = "") {
+  const normalizedOrgId = String(orgId || "").trim();
+  const scopedKeys = getOrgScopedCrmStorageKeys(normalizedOrgId);
+  const snapshots = [];
+  scopedKeys.forEach((key) => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!isValidCrmData(parsed)) {
+        return;
+      }
+      snapshots.push(stripLegacyDemoCrmData(parsed));
+    } catch (_error) {
+      // noop
+    }
+  });
+  if (!snapshots.length) {
+    return normalizeCrmData(null);
+  }
+  const merged = {};
+  Object.keys(CRM_SECTION_CONFIG).forEach((sectionKey) => {
+    merged[sectionKey] = mergeCrmRowsForSection(
+      sectionKey,
+      ...snapshots.map((snapshot) => snapshot[sectionKey] || [])
+    );
+  });
+  return normalizeCrmData(merged);
 }
 
 function collectOrgScopedCrmContacts(orgId = "") {
@@ -2062,11 +2192,19 @@ function stripLegacyDemoCrmData(value) {
 function readCrmDataFromStorage() {
   try {
     const activeKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
-    if (!activeKey) {
-      return normalizeCrmData(null);
+    const activeOrgId = getActiveCrmScopeOrgId() || getActiveBusinessAutopilotOrgId();
+    const keysToTry = [];
+    if (activeKey) {
+      keysToTry.push(activeKey);
     }
-    const keysToTry = [activeKey];
+    if (activeOrgId) {
+      keysToTry.push(buildScopedCrmStorageKey({ organization_id: activeOrgId }));
+    }
+    keysToTry.push(CRM_STORAGE_KEY);
     for (const key of keysToTry) {
+      if (!key) {
+        continue;
+      }
       const raw = window.localStorage.getItem(key);
       if (!raw) {
         continue;
@@ -2076,6 +2214,15 @@ function readCrmDataFromStorage() {
         continue;
       }
       return stripLegacyDemoCrmData(parsed);
+    }
+    if (activeOrgId) {
+      const mergedOrgData = collectOrgScopedCrmData(activeOrgId);
+      const hasAnyRows = Object.keys(CRM_SECTION_CONFIG).some((sectionKey) => (
+        Array.isArray(mergedOrgData?.[sectionKey]) && mergedOrgData[sectionKey].length
+      ));
+      if (hasAnyRows) {
+        return mergedOrgData;
+      }
     }
     return normalizeCrmData(null);
   } catch (_error) {
@@ -2098,9 +2245,24 @@ function normalizeCrmContactTag(value) {
 }
 
 function normalizeCrmContactRecord(row = {}) {
+  const phoneCountryCode = String(row.phoneCountryCode || row.phone_country_code || "+91").trim() || "+91";
+  const isDeleted = Boolean(row.isDeleted || row.is_deleted);
+  const deletedAt = String(row.deletedAt || row.deleted_at || "").trim();
   return {
     ...row,
+    name: String(row.name || row.contact_name || "").trim(),
+    company: String(row.company || "").trim(),
+    email: String(row.email || "").trim(),
+    phoneCountryCode,
+    phone: String(row.phone || "").trim(),
     tag: normalizeCrmContactTag(row.tag),
+    isDeleted,
+    is_deleted: isDeleted,
+    deletedAt,
+    deleted_at: deletedAt,
+    createdAt: String(row.createdAt || row.created_at || "").trim(),
+    updatedAt: String(row.updatedAt || row.updated_at || "").trim(),
+    createdBy: String(row.createdBy || row.created_by_name || "").trim(),
   };
 }
 
@@ -2284,6 +2446,10 @@ function isTemporaryCrmRowId(sectionKey, rowId) {
     return false;
   }
   return normalizedRowId.startsWith(`${normalizedSectionKey}_`);
+}
+
+function isBackendRowId(value) {
+  return /^\d+$/.test(String(value || "").trim());
 }
 
 function normalizeCrmMeetingRecord(row = {}) {
@@ -2606,7 +2772,7 @@ function readLegacyAccountsData() {
 
 function readSharedAccountsData(storageKey = "") {
   try {
-    const resolvedKey = String(storageKey || "").trim() || buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    const resolvedKey = String(storageKey || "").trim() || resolveScopedAccountsStorageKey();
     const raw = window.localStorage.getItem(resolvedKey);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -2650,11 +2816,16 @@ function readSharedAccountsVendors(storageKey = "") {
 function readSharedCrmContacts(storageKey = "") {
   try {
     const resolvedKey = String(storageKey || "").trim() || buildScopedCrmContactsStorageKey();
+    const fallbackKey = resolvedKey === CRM_SHARED_CONTACTS_GLOBAL_KEY ? "" : CRM_SHARED_CONTACTS_GLOBAL_KEY;
     const orgId = resolvedKey.startsWith(`${CRM_SHARED_CONTACTS_KEY_PREFIX}__`)
       ? resolvedKey.replace(`${CRM_SHARED_CONTACTS_KEY_PREFIX}__`, "").split("__")[0]
       : getActiveCrmScopeOrgId();
-    const raw = window.localStorage.getItem(resolvedKey);
-    if (raw) {
+    const keysToTry = [resolvedKey, fallbackKey].filter(Boolean);
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
       const parsed = JSON.parse(raw);
       const contacts = Array.isArray(parsed)
         ? parsed
@@ -2684,6 +2855,12 @@ function writeSharedCrmContacts(storageKey = "", rows = []) {
     }
     const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => normalizeCrmContactRecord(row));
     window.localStorage.setItem(resolvedKey, JSON.stringify(normalizedRows));
+    window.localStorage.setItem(CRM_SHARED_CONTACTS_GLOBAL_KEY, JSON.stringify(normalizedRows));
+    const existingCrmData = readCrmDataFromStorage();
+    window.localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify({
+      ...normalizeCrmData(existingCrmData),
+      contacts: normalizedRows,
+    }));
   } catch (_error) {
     // noop
   }
@@ -5015,7 +5192,7 @@ function SearchablePaginatedTableCard({
 function CrmOnePageModule() {
   const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"];
   const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
-  const [activeSection, setActiveSection] = useState(sectionOrder[0]);
+  const [activeSection, setActiveSection] = useState(() => getStoredCrmActiveSection(sectionOrder));
   const [calendarMonthDate, setCalendarMonthDate] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -5053,6 +5230,8 @@ function CrmOnePageModule() {
   const [crmStorageKey, setCrmStorageKey] = useState("");
   const [crmSharedContactsKey, setCrmSharedContactsKey] = useState("");
   const crmStorageHydratedRef = useRef(false);
+  const crmActiveSectionHydratedKeyRef = useRef("");
+  const crmContactsBackfilledKeyRef = useRef("");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
   const [teamMembersPopup, setTeamMembersPopup] = useState(null);
@@ -5343,20 +5522,45 @@ function CrmOnePageModule() {
       return;
     }
     crmStorageHydratedRef.current = false;
+    const scopedOrgId = getCrmOrgIdFromStorageKey(crmStorageKey) || getActiveBusinessAutopilotOrgId();
+    const mergeContactRows = (...sources) => {
+      const seen = new Set();
+      const merged = [];
+      sources.forEach((source) => {
+        const rows = Array.isArray(source) ? source : [];
+        rows.forEach((row) => {
+          const normalizedRow = normalizeCrmContactRecord(row);
+          const dedupKey = buildCrmImportDedupKey("contacts", normalizedRow) || String(normalizedRow.id || "").trim();
+          if (!dedupKey || seen.has(dedupKey)) {
+            return;
+          }
+          seen.add(dedupKey);
+          merged.push(normalizedRow);
+        });
+      });
+      return merged;
+    };
     const mergeHydratedWithInMemory = (incomingData, sharedContacts) => {
       const incoming = normalizeCrmData(incomingData);
       const shared = Array.isArray(sharedContacts) ? sharedContacts : [];
       return (previousState) => {
         const prev = normalizeCrmData(previousState);
         const merged = { ...incoming };
-        ["leads", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"].forEach((sectionKey) => {
+        ["teams", "followUps", "activities"].forEach((sectionKey) => {
           const incomingRows = Array.isArray(incoming[sectionKey]) ? incoming[sectionKey] : [];
           const prevRows = Array.isArray(prev[sectionKey]) ? prev[sectionKey] : [];
           merged[sectionKey] = incomingRows.length ? incomingRows : prevRows;
         });
+        ["leads", "deals", "salesOrders", "meetings"].forEach((sectionKey) => {
+          const incomingRows = Array.isArray(incoming[sectionKey]) ? incoming[sectionKey] : [];
+          const prevRows = Array.isArray(prev[sectionKey]) ? prev[sectionKey] : [];
+          // Backend refresh is the source of truth for these sections.
+          // Do not allow stale hydrated local rows to overwrite already-fetched rows.
+          merged[sectionKey] = prevRows.length ? prevRows : incomingRows;
+        });
         const incomingContacts = Array.isArray(incoming.contacts) ? incoming.contacts : [];
         const prevContacts = Array.isArray(prev.contacts) ? prev.contacts : [];
-        merged.contacts = shared.length ? shared : (incomingContacts.length ? incomingContacts : prevContacts);
+        merged.contacts = mergeContactRows(shared, incomingContacts, prevContacts);
         return merged;
       };
     };
@@ -5376,6 +5580,23 @@ function CrmOnePageModule() {
           crmStorageHydratedRef.current = true;
           return;
         }
+      }
+
+      const orgScopedData = collectOrgScopedCrmData(scopedOrgId);
+      const hasOrgScopedRows = Object.keys(CRM_SECTION_CONFIG).some((sectionKey) => (
+        Array.isArray(orgScopedData?.[sectionKey]) && orgScopedData[sectionKey].length
+      ));
+      if (hasOrgScopedRows) {
+        const nextContacts = sharedContacts.length ? sharedContacts : (orgScopedData.contacts || []);
+        const migratedData = { ...orgScopedData, contacts: nextContacts };
+        setModuleData(mergeHydratedWithInMemory(migratedData, sharedContacts));
+        if (!sharedContacts.length && nextContacts.length) {
+          writeSharedCrmContacts(crmSharedContactsKey, nextContacts);
+        }
+        window.localStorage.setItem(crmStorageKey, JSON.stringify(orgScopedData));
+        window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+        crmStorageHydratedRef.current = true;
+        return;
       }
 
       const legacyRaw = window.localStorage.getItem(CRM_STORAGE_KEY);
@@ -5406,6 +5627,34 @@ function CrmOnePageModule() {
   }, [crmStorageKey, crmSharedContactsKey]);
 
   useEffect(() => {
+    if (!crmStorageKey) {
+      return;
+    }
+    if (crmActiveSectionHydratedKeyRef.current === crmStorageKey) {
+      return;
+    }
+    crmActiveSectionHydratedKeyRef.current = crmStorageKey;
+    const storedSection = getStoredCrmActiveSection(sectionOrder, crmStorageKey);
+    if (storedSection && storedSection !== activeSection && sectionOrder.includes(storedSection)) {
+      setActiveSection(storedSection);
+    }
+  }, [crmStorageKey]);
+
+  useEffect(() => {
+    if (!sectionOrder.includes(activeSection)) {
+      return;
+    }
+    window.localStorage.setItem(CRM_ACTIVE_SECTION_KEY, activeSection);
+    if (!crmStorageKey) {
+      return;
+    }
+    window.localStorage.setItem(
+      buildScopedCrmActiveSectionKey(crmStorageKey),
+      activeSection
+    );
+  }, [activeSection, crmStorageKey]);
+
+  useEffect(() => {
     if (!crmStorageKey || !crmSharedContactsKey) {
       return;
     }
@@ -5415,6 +5664,7 @@ function CrmOnePageModule() {
     const cleaned = stripLegacyDemoCrmData(moduleData);
     window.localStorage.setItem(crmStorageKey, JSON.stringify(cleaned));
     window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, crmStorageKey);
+    window.localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(cleaned));
     writeSharedCrmContacts(crmSharedContactsKey, cleaned.contacts || []);
   }, [moduleData, crmStorageKey, crmSharedContactsKey]);
 
@@ -5422,16 +5672,34 @@ function CrmOnePageModule() {
     if (!crmSharedContactsKey) {
       return;
     }
+    const mergeContactRows = (...sources) => {
+      const seen = new Set();
+      const merged = [];
+      sources.forEach((source) => {
+        const rows = Array.isArray(source) ? source : [];
+        rows.forEach((row) => {
+          const normalizedRow = normalizeCrmContactRecord(row);
+          const dedupKey = buildCrmImportDedupKey("contacts", normalizedRow) || String(normalizedRow.id || "").trim();
+          if (!dedupKey || seen.has(dedupKey)) {
+            return;
+          }
+          seen.add(dedupKey);
+          merged.push(normalizedRow);
+        });
+      });
+      return merged;
+    };
     function syncSharedContactsIntoModule() {
       const nextContacts = readSharedCrmContacts(crmSharedContactsKey);
       setModuleData((prev) => {
         const previousContacts = Array.isArray(prev?.contacts) ? prev.contacts : [];
-        if (JSON.stringify(previousContacts) === JSON.stringify(nextContacts)) {
+        const mergedContacts = mergeContactRows(nextContacts, previousContacts);
+        if (JSON.stringify(previousContacts) === JSON.stringify(mergedContacts)) {
           return prev;
         }
         return {
           ...prev,
-          contacts: nextContacts,
+          contacts: mergedContacts,
         };
       });
     }
@@ -5443,6 +5711,124 @@ function CrmOnePageModule() {
       window.removeEventListener("focus", syncSharedContactsIntoModule);
     };
   }, [crmSharedContactsKey]);
+
+  useEffect(() => {
+    if (!crmStorageKey || !crmSharedContactsKey) {
+      return;
+    }
+    if (crmContactsBackfilledKeyRef.current === crmStorageKey) {
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const backendData = await apiFetch("/api/business-autopilot/contacts").catch(() => null);
+        if (!active) {
+          return;
+        }
+        const backendContacts = Array.isArray(backendData?.contacts)
+          ? backendData.contacts.map((row) => normalizeCrmContactRecord(row))
+          : [];
+        if (backendContacts.length) {
+          crmContactsBackfilledKeyRef.current = crmStorageKey;
+          return;
+        }
+        let localContacts = (readSharedCrmContacts(crmSharedContactsKey) || [])
+          .map((row) => normalizeCrmContactRecord(row))
+          .filter((row) => {
+            const name = String(row?.name || "").trim();
+            const company = String(row?.company || "").trim();
+            const email = String(row?.email || "").trim();
+            const phone = String(row?.phone || "").trim();
+            return Boolean(name || company || email || phone);
+          });
+        if (!localContacts.length) {
+          const accountsWorkspace = await apiFetch("/api/business-autopilot/accounts/workspace").catch(() => null);
+          const customers = Array.isArray(accountsWorkspace?.data?.customers) ? accountsWorkspace.data.customers : [];
+          localContacts = customers.map((customer) => {
+            const companyName = String(customer?.companyName || customer?.name || "").trim();
+            const clientName = String(customer?.clientName || "").trim();
+            const displayName = clientName || companyName;
+            const phoneRaw = String(customer?.phone || customer?.mobile || "").trim();
+            const phoneCountryCode = String(customer?.phoneCountryCode || "+91").trim() || "+91";
+            return normalizeCrmContactRecord({
+              name: displayName,
+              company: companyName,
+              email: String(customer?.email || "").trim(),
+              phoneCountryCode,
+              phone: phoneRaw,
+              tag: "Client",
+            });
+          }).filter((row) => {
+            const name = String(row?.name || "").trim();
+            const company = String(row?.company || "").trim();
+            const email = String(row?.email || "").trim();
+            const phone = String(row?.phone || "").trim();
+            return Boolean(name || company || email || phone);
+          });
+        }
+        if (!localContacts.length) {
+          const leadsData = await apiFetch("/api/business-autopilot/leads").catch(() => null);
+          const leadRows = Array.isArray(leadsData?.leads) ? leadsData.leads : [];
+          localContacts = leadRows.map((lead) => {
+            const companyName = String(lead?.company || "").trim();
+            const leadName = String(lead?.lead_name || lead?.name || "").trim();
+            const phoneRaw = String(lead?.phone || "").trim();
+            const displayName = leadName || companyName || "Client";
+            return normalizeCrmContactRecord({
+              name: displayName,
+              company: companyName,
+              email: "",
+              phoneCountryCode: "+91",
+              phone: phoneRaw,
+              tag: "Client",
+            });
+          }).filter((row) => {
+            const name = String(row?.name || "").trim();
+            const company = String(row?.company || "").trim();
+            const phone = String(row?.phone || "").trim();
+            return Boolean(name || company || phone);
+          });
+        }
+        if (!localContacts.length) {
+          crmContactsBackfilledKeyRef.current = crmStorageKey;
+          return;
+        }
+        const seen = new Set();
+        const dedupedLocalContacts = localContacts.filter((row) => {
+          const key = [
+            String(row?.name || "").trim().toLowerCase(),
+            String(row?.company || "").trim().toLowerCase(),
+            String(row?.email || "").trim().toLowerCase(),
+            String(row?.phone || "").trim().toLowerCase(),
+            String(row?.tag || "").trim().toLowerCase(),
+          ].join("|");
+          if (!key || seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        });
+        await Promise.all(dedupedLocalContacts.map((row) => apiFetch("/api/business-autopilot/contacts", {
+          method: "POST",
+          body: JSON.stringify({
+            name: String(row?.name || "").trim(),
+            company: String(row?.company || "").trim(),
+            email: String(row?.email || "").trim(),
+            phone_country_code: String(row?.phoneCountryCode || "+91").trim() || "+91",
+            phone: String(row?.phone || "").trim(),
+            tag: normalizeCrmContactTag(row?.tag) || "Client",
+          }),
+        }).catch(() => null)));
+        await refreshCrmRowsFromBackend();
+      } finally {
+        crmContactsBackfilledKeyRef.current = crmStorageKey;
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [crmStorageKey, crmSharedContactsKey]);
 
   useEffect(() => {
     let active = true;
@@ -5495,8 +5881,6 @@ function CrmOnePageModule() {
       if (activeOrgId) {
         setActiveBusinessAutopilotOrgId(activeOrgId);
       }
-      setSharedCustomers(readSharedAccountsCustomers(buildScopedAccountsStorageKey(activeOrgId)));
-      setAccountsVendors(readSharedAccountsVendors(buildScopedAccountsStorageKey(activeOrgId)));
       const scopedAuthData = {
         ...authData,
         organization_id: activeOrgId,
@@ -5722,30 +6106,36 @@ function CrmOnePageModule() {
   }
 
   async function refreshCrmRowsFromBackend() {
-    try {
-      const [leadsData, dealsData, salesOrdersData] = await Promise.all([
-        apiFetch("/api/business-autopilot/leads"),
-        apiFetch("/api/business-autopilot/deals"),
-        apiFetch("/api/business-autopilot/sales-orders"),
-      ]);
-      const leads = Array.isArray(leadsData?.leads)
-        ? leadsData.leads.map((row) => normalizeCrmLeadRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
-        : [];
-      const deals = Array.isArray(dealsData?.deals)
-        ? dealsData.deals.map((row) => normalizeCrmDealRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
-        : [];
-      const salesOrders = Array.isArray(salesOrdersData?.sales_orders)
-        ? salesOrdersData.sales_orders.map((row) => normalizeCrmSalesOrderRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
-        : [];
-      setModuleData((prev) => ({
-        ...prev,
-        leads,
-        deals,
-        salesOrders,
-      }));
-    } catch (_error) {
-      // Keep local rows when backend is unavailable.
-    }
+    const [leadsResult, contactsResult, dealsResult, salesOrdersResult] = await Promise.allSettled([
+      apiFetch("/api/business-autopilot/leads"),
+      apiFetch("/api/business-autopilot/contacts"),
+      apiFetch("/api/business-autopilot/deals"),
+      apiFetch("/api/business-autopilot/sales-orders"),
+    ]);
+    setModuleData((prev) => {
+      const next = { ...prev };
+      if (leadsResult.status === "fulfilled") {
+        next.leads = Array.isArray(leadsResult.value?.leads)
+          ? leadsResult.value.leads.map((row) => normalizeCrmLeadRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+          : [];
+      }
+      if (contactsResult.status === "fulfilled") {
+        next.contacts = Array.isArray(contactsResult.value?.contacts)
+          ? contactsResult.value.contacts.map((row) => normalizeCrmContactRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+          : [];
+      }
+      if (dealsResult.status === "fulfilled") {
+        next.deals = Array.isArray(dealsResult.value?.deals)
+          ? dealsResult.value.deals.map((row) => normalizeCrmDealRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+          : [];
+      }
+      if (salesOrdersResult.status === "fulfilled") {
+        next.salesOrders = Array.isArray(salesOrdersResult.value?.sales_orders)
+          ? salesOrdersResult.value.sales_orders.map((row) => normalizeCrmSalesOrderRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+          : [];
+      }
+      return next;
+    });
   }
 
   async function refreshCrmMeetingsFromBackend() {
@@ -5786,10 +6176,12 @@ function CrmOnePageModule() {
     const isEmailInput = normalizedFieldKey.includes("email");
     const trimmedValue = String(normalizedValue || "").trim();
     const hasInvalidEmail = isEmailInput && trimmedValue && !EMAIL_ADDRESS_RE.test(trimmedValue);
-    setSectionFormErrors((prev) => ({
-      ...prev,
-      [sectionKey]: hasInvalidEmail ? "Please enter a valid email address." : "",
-    }));
+    if (!hasInvalidEmail) {
+      setSectionFormErrors((prev) => ({
+        ...prev,
+        [sectionKey]: "",
+      }));
+    }
     setSectionFieldErrors((prev) => ({
       ...prev,
       [sectionKey]: {
@@ -6060,9 +6452,15 @@ function CrmOnePageModule() {
     if (!eligibleIds.length) {
       return;
     }
-    if (normalizedSection === "leads") {
+    if (normalizedSection === "leads" || normalizedSection === "contacts") {
+      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = eligibleIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
-      const backendIds = eligibleIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = eligibleIds.filter((rowId) => {
+        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
+          return false;
+        }
+        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+      });
       if (tempIds.length) {
         const tempIdSet = new Set(tempIds);
         const nowIso = new Date().toISOString();
@@ -6084,7 +6482,7 @@ function CrmOnePageModule() {
       }
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
             method: "DELETE",
           })));
           await refreshCrmRowsFromBackend();
@@ -6135,9 +6533,15 @@ function CrmOnePageModule() {
     if (!normalizedSection || !normalizedIds.length) {
       return;
     }
-    if (normalizedSection === "leads") {
+    if (normalizedSection === "leads" || normalizedSection === "contacts") {
+      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
-      const backendIds = normalizedIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = normalizedIds.filter((rowId) => {
+        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
+          return false;
+        }
+        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+      });
       if (tempIds.length) {
         const tempIdSet = new Set(tempIds);
         setModuleData((prev) => ({
@@ -6158,7 +6562,7 @@ function CrmOnePageModule() {
       }
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
             method: "PATCH",
             body: JSON.stringify({ is_deleted: false }),
           })));
@@ -6206,12 +6610,18 @@ function CrmOnePageModule() {
     if (!normalizedSection || !normalizedIds.length) {
       return;
     }
-    if (normalizedSection === "leads") {
+    if (normalizedSection === "leads" || normalizedSection === "contacts") {
+      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
-      const backendIds = normalizedIds.filter((rowId) => !isTemporaryCrmRowId(normalizedSection, rowId));
+      const backendIds = normalizedIds.filter((rowId) => {
+        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
+          return false;
+        }
+        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+      });
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}?permanent=1`, {
+          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}?permanent=1`, {
             method: "DELETE",
           })));
           await refreshCrmRowsFromBackend();
@@ -6292,14 +6702,15 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} deleted: ${primaryName}`
       : `${rowLabel} deleted (ID: ${rowId})`;
-    if (sectionKey === "leads") {
-      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+    if (sectionKey === "leads" || sectionKey === "contacts") {
+      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
+      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
         performLocalDelete();
         toggleCrmRowSelection(sectionKey, rowId, false);
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
           method: "DELETE",
         });
         await refreshCrmRowsFromBackend();
@@ -6379,14 +6790,15 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} restored: ${primaryName}`
       : `${rowLabel} restored (ID: ${rowId})`;
-    if (sectionKey === "leads") {
-      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+    if (sectionKey === "leads" || sectionKey === "contacts") {
+      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
+      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
         performLocalRestore();
         toggleCrmRowSelection(sectionKey, rowId, false);
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}`, {
+        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
           method: "PATCH",
           body: JSON.stringify({ is_deleted: false }),
         });
@@ -6427,8 +6839,9 @@ function CrmOnePageModule() {
       return;
     }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
-    if (sectionKey === "leads") {
-      if (isTemporaryCrmRowId(sectionKey, rowId)) {
+    if (sectionKey === "leads" || sectionKey === "contacts") {
+      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
+      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
         setModuleData((prev) => ({
           ...prev,
           [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
@@ -6437,7 +6850,7 @@ function CrmOnePageModule() {
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(rowId)}?permanent=1`, {
+        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}?permanent=1`, {
           method: "DELETE",
         });
         await refreshCrmRowsFromBackend();
@@ -6494,12 +6907,32 @@ function CrmOnePageModule() {
     if (!leadId) {
       return;
     }
+    const leadAmountValue = parseNumber(leadRow?.leadAmount ?? leadRow?.lead_amount ?? "");
+    if (leadAmountValue <= 0) {
+      setCrmActionPopup({
+        open: true,
+        title: "Lead Amount Required",
+        message: "Please enter lead amount before converting this lead to a deal.",
+        isError: true,
+      });
+      return;
+    }
     try {
       await apiFetch(`/api/business-autopilot/convert-to-deal/${encodeURIComponent(leadId)}`, {
         method: "POST",
       });
       await refreshCrmRowsFromBackend();
-    } catch {
+    } catch (error) {
+      const detail = String(error?.data?.detail || error?.message || "").trim();
+      const message = detail === "lead_amount_required_for_conversion"
+        ? "Please enter lead amount before converting this lead to a deal."
+        : "Unable to convert this lead to a deal. Please try again.";
+      setCrmActionPopup({
+        open: true,
+        title: "Convert Failed",
+        message,
+        isError: true,
+      });
       return;
     }
     setActiveSection("deals");
@@ -6535,12 +6968,33 @@ function CrmOnePageModule() {
     if (!dealId) {
       return;
     }
+    const normalizedStatus = String(dealRow?.status || "").trim().toLowerCase();
+    const normalizedStage = String(dealRow?.stage || "").trim().toLowerCase();
+    if (normalizedStatus !== "won" && normalizedStage !== "won") {
+      setCrmActionPopup({
+        open: true,
+        title: "Deal Not Won",
+        message: "Please mark this deal as Won, then convert to Sales Order.",
+        isError: true,
+      });
+      return;
+    }
     try {
       await apiFetch(`/api/business-autopilot/convert-to-sales-order/${encodeURIComponent(dealId)}`, {
         method: "POST",
       });
       await refreshCrmRowsFromBackend();
-    } catch {
+    } catch (error) {
+      const detail = String(error?.data?.detail || error?.message || "").trim();
+      const message = detail === "deal_not_won"
+        ? "Please mark this deal as Won, then convert to Sales Order."
+        : "Unable to convert this deal to Sales Order. Please try again.";
+      setCrmActionPopup({
+        open: true,
+        title: "Convert Failed",
+        message,
+        isError: true,
+      });
       return;
     }
     setActiveSection("salesOrders");
@@ -6605,7 +7059,7 @@ function CrmOnePageModule() {
       if (missingFields.length) {
         formErrors.push(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       }
-      if (invalidEmailFields.length) {
+      if (invalidEmailFields.length && missingFields.length) {
         formErrors.push(`Please enter valid email in: ${invalidEmailFields.map((field) => field.label).join(", ")}`);
       }
       setSectionFieldErrors((prev) => ({ ...prev, [sectionKey]: missingFieldMap }));
@@ -6791,6 +7245,57 @@ function CrmOnePageModule() {
     }
     if (sectionKey === "contacts") {
       payload = normalizeCrmContactRecord(payload);
+    }
+    if (sectionKey === "contacts") {
+      try {
+        const contactId = String(editingId || "").trim();
+        const canPatchContact = Boolean(contactId && isBackendRowId(contactId));
+        const response = await apiFetch(
+          canPatchContact
+            ? `/api/business-autopilot/contacts/${encodeURIComponent(contactId)}`
+            : "/api/business-autopilot/contacts",
+          {
+            method: canPatchContact ? "PATCH" : "POST",
+            body: JSON.stringify({
+              name: payload.name || "",
+              company: payload.company || "",
+              email: payload.email || "",
+              phone_country_code: payload.phoneCountryCode || "+91",
+              phone: payload.phone || "",
+              tag: payload.tag || "Client",
+            }),
+          },
+        );
+        const backendContact = response?.contact ? normalizeCrmContactRecord(response.contact) : null;
+        if (backendContact) {
+          setModuleData((prev) => ({
+            ...prev,
+            contacts: canPatchContact
+              ? (prev.contacts || []).map((row) => (
+                  String(row.id || "") === String(contactId)
+                    ? { ...row, ...backendContact }
+                    : row
+                ))
+              : [backendContact, ...(prev.contacts || []).filter((row) => String(row.id || "") !== String(backendContact.id || ""))],
+          }));
+        }
+        await refreshCrmRowsFromBackend();
+        resetSectionForm(sectionKey);
+        setCrmActionPopup({
+          open: true,
+          title: "Successful",
+          message: canPatchContact
+            ? `${config.itemLabel} updated successfully.`
+            : `${config.itemLabel} created successfully.`,
+        });
+        return;
+      } catch (_error) {
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          [sectionKey]: "Unable to save CRM contact. Please try again.",
+        }));
+        return;
+      }
     }
     if (sectionKey === "teams") {
       payload.createdBy = String(currentUserName || "Current User").trim();
@@ -7690,7 +8195,7 @@ function CrmOnePageModule() {
     setDealQuickEditPopup(null);
   }
 
-  function saveDealQuickEditPopup(event) {
+  async function saveDealQuickEditPopup(event) {
     event.preventDefault();
     if (!dealQuickEditPopup?.id) {
       setDealQuickEditPopup((prev) => (prev ? { ...prev, error: "Invalid deal selected." } : prev));
@@ -7718,25 +8223,53 @@ function CrmOnePageModule() {
       setDealQuickEditPopup((prev) => (prev ? { ...prev, error: "Status is required." } : prev));
       return;
     }
-    setModuleData((prev) => ({
-      ...prev,
-      deals: (prev.deals || []).map((row) => (
-        String(row.id || "").trim() === dealQuickEditPopup.id
+    const nextStage = nextStatus.toLowerCase() === "won"
+      ? "Won"
+      : nextStatus.toLowerCase() === "lost"
+        ? "Lost"
+        : "Qualified";
+    try {
+      const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealQuickEditPopup.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: nextStatus,
+          stage: nextStage,
+          deal_value: dealQuickEditPopup.dealValueExpected || 0,
+        }),
+      });
+      const backendDeal = response?.deal ? normalizeCrmDealRecord(response.deal) : null;
+      if (backendDeal) {
+        setModuleData((prev) => ({
+          ...prev,
+          deals: (prev.deals || []).map((row) => (
+            String(row.id || "").trim() === dealQuickEditPopup.id
+              ? {
+                  ...row,
+                  ...backendDeal,
+                  wonAmountFinal: normalizedWonAmount,
+                  updatedAt: new Date().toISOString(),
+                }
+              : row
+          )),
+        }));
+      }
+      await refreshCrmRowsFromBackend();
+      setDealQuickEditPopup(null);
+      setCrmActionPopup({
+        open: true,
+        title: "Successful",
+        message: "Deal updated successfully.",
+      });
+    } catch (_error) {
+      setDealQuickEditPopup((prev) => (
+        prev
           ? {
-              ...row,
-              wonAmountFinal: normalizedWonAmount,
-              status: nextStatus,
-              updatedAt: new Date().toISOString(),
+              ...prev,
+              error: "Unable to update deal. Please try again.",
             }
-          : row
-      )),
-    }));
-    setDealQuickEditPopup(null);
-    setCrmActionPopup({
-      open: true,
-      title: "Successful",
-      message: "Deal updated successfully.",
-    });
+          : prev
+      ));
+    }
   }
 
   return (
@@ -14772,8 +15305,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     status: "Active"
   });
   const [editingTemplateId, setEditingTemplateId] = useState("");
-  const [estimateForm, setEstimateForm] = useState(createEmptyBillingDocument("estimate"));
-  const [invoiceForm, setInvoiceForm] = useState(createEmptyBillingDocument("invoice"));
+  const [estimateForm, setEstimateForm] = useState(createEmptyBillingDocument("estimate", []));
+  const [invoiceForm, setInvoiceForm] = useState(createEmptyBillingDocument("invoice", []));
   const [editingEstimateId, setEditingEstimateId] = useState("");
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [customerForm, setCustomerForm] = useState({
@@ -14804,7 +15337,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     itemType: "Product",
     sku: "",
     hsnSacCode: "",
-    unit: "Nos",
+    unit: "",
     defaultRate: "",
     taxPercent: ""
   });
@@ -14843,6 +15376,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionAssignSearch, setSubscriptionAssignSearch] = useState("");
   const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
   const [accountsFormNotice, setAccountsFormNotice] = useState("");
+  const [activeBillingItemLineId, setActiveBillingItemLineId] = useState("");
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
   const isValidAccountsTab = new Set([
@@ -16267,7 +16801,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       itemType: "Product",
       sku: "",
       hsnSacCode: "",
-      unit: "Nos",
+      unit: "",
       defaultRate: "",
       taxPercent: ""
     });
@@ -16348,6 +16882,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           ? {
               ...row,
               itemMasterId: selected.id,
+              inventoryItemId: "",
               description: selected.name || row.description,
               rate: String(selected.defaultRate || row.rate || ""),
               taxPercent: String(selected.taxPercent || row.taxPercent || "")
@@ -16422,6 +16957,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           ? {
               ...row,
               inventoryItemId: selected.id,
+              itemMasterId: "",
               description: selected.itemName || row.description || "",
             }
           : row
@@ -16576,10 +17112,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setAccountsFormNotice("");
     if (kind === "estimate") {
       setEditingEstimateId("");
-      setEstimateForm(createEmptyBillingDocument("estimate"));
+      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
     } else {
       setEditingInvoiceId("");
-      setInvoiceForm(createEmptyBillingDocument("invoice"));
+      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
     }
   }
 
@@ -16625,11 +17161,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }));
     if (kind === "estimate" && editingEstimateId === id) {
       setEditingEstimateId("");
-      setEstimateForm(createEmptyBillingDocument("estimate"));
+      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
     }
     if (kind === "invoice" && editingInvoiceId === id) {
       setEditingInvoiceId("");
-      setInvoiceForm(createEmptyBillingDocument("invoice"));
+      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
     }
   }
 
@@ -16768,7 +17304,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
               <div className="col-12 col-xl-1">
                 <label className="form-label small text-secondary mb-1">{kindLabel} No</label>
-                <input className="form-control" value={form.docNo || ""} onChange={(e) => setField("docNo", e.target.value)} placeholder={kind === "estimate" ? "EST-1001" : "INV-1001"} />
+                <input className="form-control" value={form.docNo || ""} onChange={(e) => setField("docNo", e.target.value)} placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : "INV-DDMMYYYY-001"} />
               </div>
               <div className="col-12 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Sales Person</label>
@@ -16883,7 +17419,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 Add Row
               </button>
             </div>
-            <div className="table-responsive">
+            <div className="table-responsive wz-accounts-item-table">
               <table className="table table-dark table-borderless align-middle mb-0">
                 <thead>
                   <tr>
@@ -16898,34 +17434,127 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <tbody>
                   {(form.items || []).map((line, rowIndex) => {
                     const lineAmount = parseNumber(line.qty) * parseNumber(line.rate);
+                    const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
+                      id: String(item?.id || "").trim(),
+                      name: String(item?.itemName || "").trim(),
+                      source: "inventory",
+                    })).filter((item) => item.id && item.name);
+                    const masterSource = (Array.isArray(itemMasterOptions) ? itemMasterOptions : []).map((item) => ({
+                      id: String(item?.id || "").trim(),
+                      name: String(item?.name || "").trim(),
+                      source: "itemMaster",
+                    })).filter((item) => item.name);
+                    const mergedSource = [...inventorySource, ...masterSource];
+                    const seenLineItemKeys = new Set();
+                    const lineItemSource = mergedSource.filter((item) => {
+                      const uniqueKey = `${item.source}:${item.id || item.name.toLowerCase()}`;
+                      if (seenLineItemKeys.has(uniqueKey)) return false;
+                      seenLineItemKeys.add(uniqueKey);
+                      return true;
+                    });
+                    const lineQuery = String(line.description || "").trim();
+                    const lineQueryLower = lineQuery.toLowerCase();
+                    const lineItemMatches = lineItemSource
+                      .filter((item) => {
+                        if (!lineQueryLower) return true;
+                        const haystack = `${item.name || ""} ${item.id || ""}`.toLowerCase();
+                        return haystack.includes(lineQueryLower);
+                      })
+                      .slice(0, 8);
+                    const canUseCustomText = Boolean(lineQuery)
+                      && !lineItemMatches.some((item) => String(item.name || "").toLowerCase() === lineQueryLower);
                     return (
                       <tr key={line.id}>
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
-                          <input
-                            className="form-control datalist-readable-input"
-                            list={`${kind}-inventory-item-list-${line.id}`}
-                            value={line.description || ""}
-                            onChange={(e) => {
-                              const nextValue = e.target.value;
-                              updateDocLine(kind, line.id, "description", nextValue);
-                              const matched = inventoryItems.find((item) => {
-                                const label = `${item.itemName || ""} (Available: ${availableInventoryQty(item.id, form, line.id)})`;
-                                return label === nextValue || String(item.itemName || "") === nextValue;
-                              });
-                              if (matched) {
-                                applyInventoryItemToLine(kind, line.id, matched.id);
-                              }
-                            }}
-                            placeholder="Type or click to select an item"
-                          />
-                          <datalist id={`${kind}-inventory-item-list-${line.id}`}>
-                            {inventoryItems.map((item) => (
-                              <option
-                                key={`${kind}-inventory-${item.id}`}
-                                value={`${item.itemName || ""} (Available: ${availableInventoryQty(item.id, form, line.id)})`}
-                              />
-                            ))}
-                          </datalist>
+                          <div className="crm-inline-suggestions-wrap">
+                            <input
+                              className="form-control"
+                              value={line.description || ""}
+                              onFocus={() => setActiveBillingItemLineId(line.id)}
+                              onClick={() => setActiveBillingItemLineId(line.id)}
+                              onBlur={() => window.setTimeout(() => setActiveBillingItemLineId(""), 180)}
+                              onChange={(e) => {
+                                const nextValue = e.target.value;
+                                const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
+                                setter((prev) => ({
+                                  ...prev,
+                                  items: (prev.items || []).map((row) => (
+                                    row.id === line.id
+                                      ? {
+                                          ...row,
+                                          description: nextValue,
+                                          itemMasterId: "",
+                                          inventoryItemId: "",
+                                        }
+                                      : row
+                                  ))
+                                }));
+                                setActiveBillingItemLineId(line.id);
+                              }}
+                              placeholder="Type or click to select an item"
+                            />
+                            {activeBillingItemLineId === line.id ? (
+                              <div className="crm-inline-suggestions">
+                                <div className="crm-inline-suggestions__group">
+                                  <div className="crm-inline-suggestions__title">Products</div>
+                                  {canUseCustomText ? (
+                                    <button
+                                      type="button"
+                                      className="crm-inline-suggestions__item"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
+                                        setter((prev) => ({
+                                          ...prev,
+                                          items: (prev.items || []).map((row) => (
+                                            row.id === line.id
+                                              ? {
+                                                  ...row,
+                                                  description: lineQuery,
+                                                  itemMasterId: "",
+                                                  inventoryItemId: "",
+                                                }
+                                              : row
+                                          ))
+                                        }));
+                                        setActiveBillingItemLineId("");
+                                      }}
+                                    >
+                                      <span className="crm-inline-suggestions__item-main">Use custom text: {lineQuery}</span>
+                                      <span className="crm-inline-suggestions__item-sub">Custom item (manual entry)</span>
+                                    </button>
+                                  ) : null}
+                                  {lineItemMatches.length ? lineItemMatches.map((item) => (
+                                    <button
+                                      key={`${kind}-item-${line.id}-${item.source}-${item.id || item.name}`}
+                                      type="button"
+                                      className="crm-inline-suggestions__item"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        if (item.source === "inventory") {
+                                          applyInventoryItemToLine(kind, line.id, item.id);
+                                        } else {
+                                          applyItemMasterToLine(kind, line.id, item.id);
+                                        }
+                                        setActiveBillingItemLineId("");
+                                      }}
+                                    >
+                                      <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                      <span className="crm-inline-suggestions__item-sub">
+                                        {item.source === "inventory"
+                                          ? `Available: ${availableInventoryQty(item.id, form, line.id)}`
+                                          : "Item Master"}
+                                      </span>
+                                    </button>
+                                  )) : (
+                                    <div className="crm-inline-suggestions__item">
+                                      <span className="crm-inline-suggestions__item-main">No products found</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
                           {line.inventoryItemId ? (
                             <div className="small text-secondary mt-1">
                               Available Qty: {availableInventoryQty(line.inventoryItemId, form, line.id)}
@@ -17644,7 +18273,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 ) : null}
                 <div className="col-12 col-xl-1">
                   <label className="form-label small text-secondary mb-1">Unit</label>
-                  <input className="form-control" value={itemMasterForm.unit || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, unit: e.target.value }))} placeholder="Nos" />
+                  <input className="form-control" value={itemMasterForm.unit || ""} onChange={(e) => setItemMasterForm((p) => ({ ...p, unit: e.target.value }))} placeholder="Unit" />
                 </div>
                 <div className="col-12 col-xl-1">
                   <label className="form-label small text-secondary mb-1">Default Rate</label>
@@ -17895,7 +18524,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             onSave={(event) => saveDocument("estimate", event)}
             onCancelEdit={() => {
               setEditingEstimateId("");
-              setEstimateForm(createEmptyBillingDocument("estimate"));
+              setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
             }}
             editingId={editingEstimateId}
           />
@@ -17912,7 +18541,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             onSave={(event) => saveDocument("invoice", event)}
             onCancelEdit={() => {
               setEditingInvoiceId("");
-              setInvoiceForm(createEmptyBillingDocument("invoice"));
+              setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
             }}
             editingId={editingInvoiceId}
           />

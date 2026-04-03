@@ -475,6 +475,57 @@ class CrmLead(models.Model):
         return f"Lead({self.organization_id} - {self.lead_name})"
 
 
+class CrmContact(models.Model):
+    TAG_CHOICES = (
+        ("Client", "Client"),
+        ("Prospect", "Prospect"),
+        ("Vendor", "Vendor"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_contacts",
+    )
+    name = models.CharField(max_length=180)
+    company = models.CharField(max_length=180, blank=True, default="")
+    email = models.CharField(max_length=180, blank=True, default="")
+    phone_country_code = models.CharField(max_length=10, blank=True, default="+91")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    tag = models.CharField(max_length=30, choices=TAG_CHOICES, default="Client")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_created_contacts",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_updated_contacts",
+    )
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_deleted_contacts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"Contact({self.organization_id} - {self.name})"
+
+
 class CrmDeal(models.Model):
     STAGE_CHOICES = (
         ("Qualified", "Qualified"),

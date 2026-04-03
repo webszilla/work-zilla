@@ -6016,6 +6016,11 @@ html[data-theme="dark"] .wz-country-picker__search {
   position: relative;
 }
 
+.wz-accounts-item-table {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+
 .crm-inline-suggestions {
   position: absolute;
   top: calc(100% + 0.45rem);
