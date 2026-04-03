@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.backend.business_autopilot.models import OrganizationUser
+from apps.backend.business_autopilot.models import OrganizationDepartment, OrganizationUser
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -286,3 +286,43 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(profile.phone_number, "+919900000009")
         self.assertEqual(membership.department, "Marketing")
         self.assertEqual(membership.employee_role, "Lead")
+
+    def test_department_update_updates_assigned_users_department_text(self):
+        department = OrganizationDepartment.objects.create(
+            organization=self.org,
+            name="Design Team",
+            is_active=True,
+        )
+        assigned_user = User.objects.create_user(
+            username="assigned@gmail.com",
+            email="assigned@gmail.com",
+            password="pw123456",
+            first_name="Assigned",
+            last_name="User",
+        )
+        UserProfile.objects.create(
+            user=assigned_user,
+            organization=self.org,
+            role="org_user",
+        )
+        membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=assigned_user,
+            role="org_user",
+            is_active=True,
+            department="Design Team",
+            employee_role="Graphic Designer",
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            f"/api/business-autopilot/departments/{department.id}",
+            data={"action": "update", "name": "Creative Team"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        department.refresh_from_db()
+        membership.refresh_from_db()
+        self.assertEqual(department.name, "Creative Team")
+        self.assertEqual(membership.department, "Creative Team")

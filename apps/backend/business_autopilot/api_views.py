@@ -2569,6 +2569,7 @@ def org_department_detail(request, department_id: int):
         name = (payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        previous_name = str(department.name or "").strip()
         conflicting_role_exists = (
             OrganizationEmployeeRole.objects
             .filter(organization=org, name__iexact=name, is_active=True)
@@ -2590,6 +2591,12 @@ def org_department_detail(request, department_id: int):
             department.save(update_fields=["name", "is_active", "updated_at"])
         except IntegrityError:
             return JsonResponse({"detail": "department_exists"}, status=400)
+        if previous_name and previous_name.lower() != name.lower():
+            OrganizationUser.objects.filter(
+                organization=org,
+                department__iexact=previous_name,
+                role__in=ERP_EMPLOYEE_ROLES,
+            ).update(department=name, updated_at=timezone.now())
     else:
         if department.is_active:
             if assigned_memberships:

@@ -1890,6 +1890,9 @@ export default function BusinessAutopilotUsersPage() {
       if (data.employee_roles) {
         setEmployeeRoles(data.employee_roles || []);
       }
+      if (data.users || data.deleted_users) {
+        applyUsersResponse(data, { preserveDeletedUsers: !Array.isArray(data?.deleted_users) });
+      }
       cancelEditDepartment();
       setNotice("Department updated.");
       await openAlertDialog("Department updated successfully.", { title: "Updated" });
