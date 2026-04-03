@@ -3781,9 +3781,19 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         qty = _to_decimal(row.get("qty"))
         rate = _to_decimal(row.get("rate"))
         amount = qty * rate
+        raw_description = str(row.get("description") or "").replace("\r\n", "\n")
+        raw_custom_text = str(row.get("customText") or "").strip()
+        if raw_custom_text:
+            description_main = raw_description.strip()
+            description_custom = raw_custom_text
+        else:
+            first_line, _, remaining = raw_description.partition("\n")
+            description_main = first_line.strip()
+            description_custom = remaining.strip()
         line_rows.append(
             {
-                "description": row.get("description") or "-",
+                "description": description_main,
+                "description_custom": description_custom,
                 "qty": str(row.get("qty") or ""),
                 "rate": float(rate),
                 "tax_percent": float(_to_decimal(row.get("taxPercent"))),

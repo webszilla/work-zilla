@@ -19,6 +19,8 @@
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
     th { background: #f8fafc; font-size: 12px; text-transform: uppercase; color: #475569; }
+    .line-main { font-size: 13px; font-weight: 500; line-height: 1.3; }
+    .line-custom { font-size: 17px; font-weight: 700; line-height: 1.25; margin-top: 2px; white-space: pre-wrap; }
     .text-right { text-align: right; }
     .totals { width: 340px; margin-left: auto; }
     .totals td { border: none; padding: 6px 0; }
@@ -90,7 +92,17 @@
         <tbody>
           {% for row in items %}
           <tr>
-            <td>{{ row.description }}</td>
+            <td>
+              {% if row.description_custom %}
+              <div class="line-custom">{{ row.description_custom }}</div>
+              {% endif %}
+              {% if row.description %}
+              <div class="line-main">{{ row.description }}</div>
+              {% endif %}
+              {% if not row.description and not row.description_custom %}
+              <div class="line-main">-</div>
+              {% endif %}
+            </td>
             <td class="text-right">{{ row.qty }}</td>
             <td class="text-right">{{ row.rate }}</td>
             <td class="text-right">{{ row.tax_percent }}</td>
