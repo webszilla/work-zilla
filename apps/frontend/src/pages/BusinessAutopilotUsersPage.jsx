@@ -74,6 +74,9 @@ const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
 const CRM_STORAGE_KEY_ACTIVE = "wz_business_autopilot_crm_active_key";
 const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
 const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
+const CRM_SHARED_CONTACTS_GLOBAL_KEY = `${CRM_SHARED_CONTACTS_KEY_PREFIX}__global`;
+const CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_contact_to_client_scope";
+const CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY = `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__global`;
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: option.value,
   label: option.label,
@@ -705,7 +708,7 @@ function readSharedCrmContacts() {
   try {
     const orgId = getActiveCrmScopeOrgId();
     const sharedKey = orgId ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${String(orgId).replace(/[^a-z0-9_.-]/gi, "_")}` : "";
-    const keysToTry = [sharedKey, CRM_STORAGE_KEY].filter(Boolean);
+    const keysToTry = [sharedKey, CRM_SHARED_CONTACTS_GLOBAL_KEY, CRM_STORAGE_KEY].filter(Boolean);
     for (const key of keysToTry) {
       const raw = window.localStorage.getItem(key);
       if (!raw) {
@@ -730,6 +733,78 @@ function readSharedCrmContacts() {
   }
 }
 
+function sanitizeScopedStorageKeyPart(value = "") {
+  return String(value || "").replace(/[^a-z0-9_.-]/gi, "_");
+}
+
+function buildScopedCrmContactToClientDraftStorageKey(orgId = "") {
+  const normalizedOrgId = sanitizeScopedStorageKeyPart(orgId);
+  return normalizedOrgId
+    ? `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY;
+}
+
+function resolveCrmContactToClientDraftStorageKeys(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  const scopedKey = buildScopedCrmContactToClientDraftStorageKey(resolvedOrgId);
+  return Array.from(new Set([scopedKey, CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY].filter(Boolean)));
+}
+
+function normalizeCrmContactConversionDraft(value = {}) {
+  const normalizedContact = normalizeCrmContactRecord(value);
+  const sourceContactId = String(value?.sourceContactId || normalizedContact.id || "").trim();
+  const hasContactData = sourceContactId
+    || normalizedContact.name
+    || normalizedContact.company
+    || normalizedContact.email
+    || normalizedContact.phone;
+  if (!hasContactData) {
+    return null;
+  }
+  return {
+    sourceContactId,
+    orgId: String(value?.orgId || "").trim(),
+    id: sourceContactId || normalizedContact.id,
+    name: normalizedContact.name,
+    company: normalizedContact.company,
+    email: normalizedContact.email,
+    phoneCountryCode: normalizedContact.phoneCountryCode || "+91",
+    phone: normalizedContact.phone,
+  };
+}
+
+function readCrmContactToClientDraft(preferredOrgId = "") {
+  try {
+    const keysToTry = resolveCrmContactToClientDraftStorageKeys(preferredOrgId);
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      const normalizedDraft = normalizeCrmContactConversionDraft(parsed);
+      if (normalizedDraft) {
+        return normalizedDraft;
+      }
+    }
+  } catch {
+    // Ignore invalid draft payload and continue with standard flow.
+  }
+  return null;
+}
+
+function clearCrmContactToClientDraft(preferredOrgId = "") {
+  try {
+    resolveCrmContactToClientDraftStorageKeys(preferredOrgId).forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Ignore storage clear failures.
+  }
+}
+
 function writeBusinessAutopilotUserDirectory(users) {
   if (typeof window === "undefined") {
     return;
@@ -745,6 +820,29 @@ function writeBusinessAutopilotUserDirectory(users) {
   window.dispatchEvent(new CustomEvent("wz:business-autopilot-user-directory-changed"));
 }
 
+function readBusinessAutopilotUserDirectoryRole(email = "") {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const lookupEmail = String(email || "").trim().toLowerCase();
+  if (!lookupEmail) {
+    return "";
+  }
+  try {
+    const raw = window.localStorage.getItem(USER_DIRECTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return "";
+    }
+    const matched = parsed.find(
+      (row) => String(row?.email || "").trim().toLowerCase() === lookupEmail
+    );
+    return String(matched?.employee_role || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function writeSharedHrEmployees(rows = []) {
   try {
     const existingRaw = window.localStorage.getItem(HR_STORAGE_KEY);
@@ -753,7 +851,6 @@ function writeSharedHrEmployees(rows = []) {
       ? { ...existingData, employees: Array.isArray(rows) ? rows : [] }
       : { employees: Array.isArray(rows) ? rows : [] };
     window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(nextData));
-    window.dispatchEvent(new Event("storage"));
   } catch {
     // Ignore local sync failures.
   }
@@ -957,6 +1054,8 @@ export default function BusinessAutopilotUsersPage() {
   const [enabledModuleSlugs, setEnabledModuleSlugs] = useState([]);
   const [hasResolvedEnabledModules, setHasResolvedEnabledModules] = useState(false);
   const [currentProfileRole, setCurrentProfileRole] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUserDisplayName, setCurrentUserDisplayName] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
   const [currentUserMembershipRole, setCurrentUserMembershipRole] = useState("");
@@ -970,6 +1069,7 @@ export default function BusinessAutopilotUsersPage() {
   const [createEmailCheck, setCreateEmailCheck] = useState(defaultEmailCheckState);
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [crmContacts, setCrmContacts] = useState(() => readSharedCrmContacts());
+  const [crmContactToClientDraft, setCrmContactToClientDraft] = useState(() => readCrmContactToClientDraft());
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
@@ -1000,6 +1100,7 @@ export default function BusinessAutopilotUsersPage() {
   const vendorImportInputRef = useRef(null);
   const userFormRef = useRef(null);
   const createPasswordInputRef = useRef(null);
+  const crmContactToClientDraftAppliedRef = useRef(false);
   const pageSize = 5;
   const isEditingUser = Boolean(editForm.membership_id);
 
@@ -1126,11 +1227,27 @@ export default function BusinessAutopilotUsersPage() {
   async function loadCurrentUserProfile() {
     try {
       const data = await apiFetch("/api/auth/me");
+      const userId = String(data?.user?.id || "").trim();
+      const firstName = String(data?.user?.first_name || "").trim();
+      const lastName = String(data?.user?.last_name || "").trim();
+      const displayName = [firstName, lastName].filter(Boolean).join(" ").trim();
       const email = String(data?.user?.email || "").trim();
       const profileRole = String(data?.profile?.role || data?.user?.role || "").trim();
+      const hintedEmployeeRole = String(data?.profile?.employee_role || data?.user?.employee_role || "").trim();
+      const hintedMembershipRole = String(data?.profile?.membership_role || data?.user?.membership_role || "").trim();
+      setCurrentUserId(userId);
+      setCurrentUserDisplayName(displayName);
       setCurrentUserEmail(email);
       setCurrentProfileRole(profileRole);
+      if (hintedEmployeeRole) {
+        setCurrentUserEmployeeRole(hintedEmployeeRole);
+      }
+      if (hintedMembershipRole) {
+        setCurrentUserMembershipRole(hintedMembershipRole);
+      }
     } catch {
+      setCurrentUserId("");
+      setCurrentUserDisplayName("");
       setCurrentUserEmail("");
       setCurrentProfileRole("");
     }
@@ -2216,17 +2333,46 @@ export default function BusinessAutopilotUsersPage() {
   }, [roleAccessRoleOptions, selectedRoleAccessKey]);
 
   useEffect(() => {
-    if (!currentUserEmail) {
-      setCurrentUserEmployeeRole("");
-      setCurrentUserMembershipRole("");
-      return;
-    }
-    const matchedUser = (users || []).find(
-      (user) => String(user?.email || "").trim().toLowerCase() === String(currentUserEmail || "").trim().toLowerCase()
+    const normalizedCurrentEmail = String(currentUserEmail || "").trim().toLowerCase();
+    const normalizedCurrentId = String(currentUserId || "").trim();
+    const normalizedCurrentName = String(currentUserDisplayName || "").trim().toLowerCase();
+    const normalizedProfileRole = normalizeRoleToken(currentProfileRole);
+
+    const matchedUser = (users || []).find((user) => {
+      const userId = String(user?.id || "").trim();
+      const userEmail = String(user?.email || "").trim().toLowerCase();
+      const userName = String(user?.name || "").trim().toLowerCase();
+      if (normalizedCurrentId && userId && userId === normalizedCurrentId) {
+        return true;
+      }
+      if (normalizedCurrentEmail && userEmail && userEmail === normalizedCurrentEmail) {
+        return true;
+      }
+      if (normalizedCurrentName && userName && userName === normalizedCurrentName) {
+        return true;
+      }
+      return false;
+    });
+
+    const roleCandidates = Array.from(
+      new Set(
+        (users || [])
+          .map((row) => String(row?.employee_role || "").trim())
+          .filter(Boolean)
+      )
     );
-    setCurrentUserEmployeeRole(String(matchedUser?.employee_role || "").trim());
+    const inferredOrgRole =
+      !matchedUser
+      && roleCandidates.length === 1
+      && normalizedProfileRole === "org_user"
+        ? roleCandidates[0]
+        : "";
+    const fallbackEmployeeRole = readBusinessAutopilotUserDirectoryRole(currentUserEmail) || inferredOrgRole;
+    setCurrentUserEmployeeRole(
+      String(matchedUser?.employee_role || fallbackEmployeeRole || "").trim()
+    );
     setCurrentUserMembershipRole(String(matchedUser?.role || "").trim());
-  }, [currentUserEmail, users]);
+  }, [currentProfileRole, currentUserDisplayName, currentUserEmail, currentUserId, users]);
 
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
   const normalizedCurrentProfileRole = normalizeRoleToken(currentProfileRole);
@@ -2307,6 +2453,44 @@ export default function BusinessAutopilotUsersPage() {
       setActiveTopTab(allowedTabs[0]);
     }
   }, [activeTopTab, canManageUsersTab, canViewClientsTab, canViewEmployeeTab, canViewVendorsTab]);
+
+  useEffect(() => {
+    if (!crmContactToClientDraft) {
+      crmContactToClientDraftAppliedRef.current = false;
+      return;
+    }
+    if (!canViewClientsTab || crmContactToClientDraftAppliedRef.current) {
+      return;
+    }
+    const normalizedContact = normalizeCrmContactRecord(crmContactToClientDraft);
+    const hasContactData = [
+      normalizedContact.company,
+      normalizedContact.name,
+      normalizedContact.email,
+      normalizedContact.phone,
+    ].some((value) => String(value || "").trim());
+    if (!hasContactData) {
+      clearCrmContactToClientDraft(crmContactToClientDraft.orgId);
+      setCrmContactToClientDraft(null);
+      crmContactToClientDraftAppliedRef.current = false;
+      return;
+    }
+    crmContactToClientDraftAppliedRef.current = true;
+    const companyName = normalizedContact.company || normalizedContact.name || "";
+    setActiveTopTab("clients");
+    setEditingClientId("");
+    setClientForm({
+      ...createEmptySharedPartyForm(),
+      companyName,
+      name: companyName,
+      clientName: normalizedContact.name || "",
+      phoneCountryCode: normalizedContact.phoneCountryCode || "+91",
+      phone: normalizedContact.phone || "",
+      email: normalizedContact.email || "",
+    });
+    setClientCompanySearchOpen(false);
+    setNotice("CRM contact loaded in client form. Complete remaining fields and create client.");
+  }, [canViewClientsTab, crmContactToClientDraft]);
 
   useEffect(() => {
     setNotice("");
@@ -2443,6 +2627,114 @@ export default function BusinessAutopilotUsersPage() {
     setVendorForm(createEmptySharedPartyForm());
   }
 
+  function clearActiveCrmContactToClientDraft() {
+    if (!crmContactToClientDraft) {
+      return;
+    }
+    clearCrmContactToClientDraft(crmContactToClientDraft.orgId);
+    setCrmContactToClientDraft(null);
+    crmContactToClientDraftAppliedRef.current = false;
+  }
+
+  async function removeConvertedCrmContact(sourceDraft = null) {
+    const normalizedSource = normalizeCrmContactConversionDraft(sourceDraft || {});
+    if (!normalizedSource) {
+      return { localRemoved: false, serverRemoved: false };
+    }
+    const sourceContactId = String(normalizedSource.sourceContactId || normalizedSource.id || "").trim();
+    const sourceCompany = String(normalizedSource.company || "").trim().toLowerCase();
+    const sourceName = String(normalizedSource.name || "").trim().toLowerCase();
+    const sourceEmail = String(normalizedSource.email || "").trim().toLowerCase();
+    const sourcePhoneCode = String(normalizedSource.phoneCountryCode || "+91").trim() || "+91";
+    const sourcePhone = String(normalizedSource.phone || "").trim();
+    const matchesSourceContact = (row) => {
+      const normalizedRow = normalizeCrmContactRecord(row);
+      const rowId = String(normalizedRow.id || "").trim();
+      if (sourceContactId && rowId && rowId === sourceContactId) {
+        return true;
+      }
+      const rowCompany = String(normalizedRow.company || "").trim().toLowerCase();
+      const rowName = String(normalizedRow.name || "").trim().toLowerCase();
+      const rowEmail = String(normalizedRow.email || "").trim().toLowerCase();
+      const rowPhoneCode = String(normalizedRow.phoneCountryCode || "+91").trim() || "+91";
+      const rowPhone = String(normalizedRow.phone || "").trim();
+      if (sourceEmail && rowEmail && rowEmail === sourceEmail) {
+        return true;
+      }
+      if (sourcePhone && rowPhone && sourcePhone === rowPhone && sourcePhoneCode === rowPhoneCode) {
+        return true;
+      }
+      if (sourceCompany && sourceName && rowCompany === sourceCompany && rowName === sourceName) {
+        return true;
+      }
+      return false;
+    };
+
+    let localRemoved = false;
+    const removeFromStorageKey = (storageKey, contactsOnly = false) => {
+      const normalizedKey = String(storageKey || "").trim();
+      if (!normalizedKey) {
+        return;
+      }
+      const raw = window.localStorage.getItem(normalizedKey);
+      if (!raw) {
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (contactsOnly || Array.isArray(parsed)) {
+          const rows = Array.isArray(parsed) ? parsed.map((row) => normalizeCrmContactRecord(row)) : [];
+          const filteredRows = rows.filter((row) => !matchesSourceContact(row));
+          if (filteredRows.length !== rows.length) {
+            localRemoved = true;
+            window.localStorage.setItem(normalizedKey, JSON.stringify(filteredRows));
+          }
+          return;
+        }
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.contacts)) {
+          const rows = parsed.contacts.map((row) => normalizeCrmContactRecord(row));
+          const filteredRows = rows.filter((row) => !matchesSourceContact(row));
+          if (filteredRows.length !== rows.length) {
+            localRemoved = true;
+            window.localStorage.setItem(normalizedKey, JSON.stringify({
+              ...parsed,
+              contacts: filteredRows,
+            }));
+          }
+        }
+      } catch {
+        // Ignore malformed CRM cache entries.
+      }
+    };
+
+    const orgIdForDraft = sanitizeScopedStorageKeyPart(
+      normalizedSource.orgId || getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId()
+    );
+    const scopedCrmContactsKey = orgIdForDraft ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${orgIdForDraft}` : "";
+    const activeCrmStorageKey = String(window.localStorage.getItem(CRM_STORAGE_KEY_ACTIVE) || "").trim();
+    const activeScopedCrmStorageKey = activeCrmStorageKey.startsWith(`${CRM_STORAGE_KEY_PREFIX}__`) ? activeCrmStorageKey : "";
+    [scopedCrmContactsKey, CRM_SHARED_CONTACTS_GLOBAL_KEY].forEach((key) => removeFromStorageKey(key, true));
+    [activeScopedCrmStorageKey, CRM_STORAGE_KEY].forEach((key) => removeFromStorageKey(key, false));
+
+    let serverRemoved = false;
+    if (/^\d+$/.test(sourceContactId)) {
+      try {
+        await apiFetch(`/api/business-autopilot/contacts/${encodeURIComponent(sourceContactId)}`, {
+          method: "DELETE",
+        });
+        serverRemoved = true;
+      } catch {
+        // Keep client creation success even if contact API delete fails.
+      }
+    }
+
+    if (localRemoved || serverRemoved) {
+      window.dispatchEvent(new Event("storage"));
+    }
+    setCrmContacts(readSharedCrmContacts());
+    return { localRemoved, serverRemoved };
+  }
+
   async function saveClient(event) {
     event.preventDefault();
     if (editingClientId ? !canEditClientsTab : !canCreateClientsTab) {
@@ -2510,13 +2802,23 @@ export default function BusinessAutopilotUsersPage() {
     const nextCustomers = editingClientId
       ? sharedCustomers.map((row) => (row.id === editingClientId ? { ...row, ...payload } : row))
       : [payload, ...sharedCustomers];
+    const conversionDraftForThisSave = editingClientId ? null : crmContactToClientDraft;
     setSharedCustomers(nextCustomers);
     await persistSharedAccountsCustomers(nextCustomers);
-    setNotice(editingClientId ? "Client updated successfully." : "Client created successfully.");
+    let successMessage = editingClientId ? "Client updated successfully." : "Client created successfully.";
+    if (conversionDraftForThisSave) {
+      const conversionResult = await removeConvertedCrmContact(conversionDraftForThisSave);
+      clearActiveCrmContactToClientDraft();
+      if (conversionResult.localRemoved || conversionResult.serverRemoved) {
+        successMessage = "Client created successfully and contact converted from CRM.";
+      }
+    }
+    setNotice(successMessage);
     resetClientForm();
   }
 
   function editClient(row) {
+    clearActiveCrmContactToClientDraft();
     const normalized = normalizeSharedCustomerRecord(row);
     setEditingClientId(normalized.id);
     setClientForm({
@@ -4151,9 +4453,10 @@ export default function BusinessAutopilotUsersPage() {
         </div>
       ) : activeTopTab === "clients" ? (
         <>
-          <div className="card p-3">
-            <h6 className="mb-3">{editingClientId ? "Edit Client" : "Create Client"}</h6>
-            <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
+          {canCreateClientsTab || editingClientId ? (
+            <div className="card p-3">
+              <h6 className="mb-3">{editingClientId ? "Edit Client" : "Create Client"}</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
@@ -4370,12 +4673,13 @@ export default function BusinessAutopilotUsersPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={editingClientId ? !canEditClientsTab : !canCreateClientsTab}>{editingClientId ? "Update Client" : "Create Client"}</button>
-                {editingClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetClientForm}>Cancel</button> : null}
-              </div>
-            </form>
-          </div>
+                <div className="d-flex gap-2">
+                  <button type="submit" className="btn btn-success btn-sm" disabled={editingClientId ? !canEditClientsTab : !canCreateClientsTab}>{editingClientId ? "Update Client" : "Create Client"}</button>
+                  {editingClientId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetClientForm}>Cancel</button> : null}
+                </div>
+              </form>
+            </div>
+          ) : null}
 
           <div style={{ paddingTop: "25px" }}>
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
@@ -4453,9 +4757,10 @@ export default function BusinessAutopilotUsersPage() {
         </>
       ) : (
         <>
-          <div className="card p-3">
-            <h6 className="mb-3">{editingVendorId ? "Edit Vendor" : "Create Vendor"}</h6>
-            <form className="d-flex flex-column gap-3" onSubmit={saveVendor}>
+          {canCreateVendorsTab || editingVendorId ? (
+            <div className="card p-3">
+              <h6 className="mb-3">{editingVendorId ? "Edit Vendor" : "Create Vendor"}</h6>
+              <form className="d-flex flex-column gap-3" onSubmit={saveVendor}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">Company Name</label>
@@ -4632,12 +4937,13 @@ export default function BusinessAutopilotUsersPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm" disabled={editingVendorId ? !canEditVendorsTab : !canCreateVendorsTab}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
-                {editingVendorId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetVendorForm}>Cancel</button> : null}
-              </div>
-            </form>
-          </div>
+                <div className="d-flex gap-2">
+                  <button type="submit" className="btn btn-success btn-sm" disabled={editingVendorId ? !canEditVendorsTab : !canCreateVendorsTab}>{editingVendorId ? "Update Vendor" : "Create Vendor"}</button>
+                  {editingVendorId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetVendorForm}>Cancel</button> : null}
+                </div>
+              </form>
+            </div>
+          ) : null}
 
           <div>
             <h6 className="mb-3">Vendor Registration List</h6>

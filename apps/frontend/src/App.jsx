@@ -238,6 +238,32 @@ function normalizeBusinessAutopilotRoleToken(value) {
     .replace(/[\s-]+/g, "_");
 }
 
+function normalizeBusinessAutopilotAccessLevel(value) {
+  const normalized = String(value || "").trim();
+  if (normalized === "Create/Edit") {
+    return "View and Edit";
+  }
+  return normalized;
+}
+
+function hasBusinessAutopilotUsersSubSectionAccess(accessRecord) {
+  const subSections = accessRecord?.user_sub_sections;
+  if (!subSections || typeof subSections !== "object") {
+    return false;
+  }
+  const subKeys = ["employee", "clients", "vendors"];
+  return subKeys.some((key) => {
+    const row = subSections[key];
+    if (!row || typeof row !== "object") {
+      return false;
+    }
+    if (!Boolean(row.enabled)) {
+      return false;
+    }
+    return normalizeBusinessAutopilotAccessLevel(row.access_level || "No Access") !== "No Access";
+  });
+}
+
 function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
   if (isAdmin) {
     return true;
@@ -249,7 +275,10 @@ function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
   const rawValue = sectionKey === "subscriptions"
     ? (sections.subscriptions || sections.accounts || "No Access")
     : (sections[sectionKey] || "No Access");
-  const value = String(rawValue).trim();
+  const value = normalizeBusinessAutopilotAccessLevel(rawValue);
+  if (sectionKey === "users" && value === "No Access") {
+    return hasBusinessAutopilotUsersSubSectionAccess(accessRecord);
+  }
   return value && value !== "No Access";
 }
 
@@ -791,8 +820,11 @@ function AppShell({ state, productPrefix, productSlug }) {
       return () => {};
     }
     let active = true;
-    async function loadBusinessAutopilotAccess() {
-      setAutopilotAccessResolved(false);
+    async function loadBusinessAutopilotAccess(options = {}) {
+      const showPending = Boolean(options.showPending);
+      if (showPending) {
+        setAutopilotAccessResolved(false);
+      }
       try {
         let roleAccessMap = readBusinessAutopilotRoleAccessMap();
         try {
@@ -838,20 +870,16 @@ function AppShell({ state, productPrefix, productSlug }) {
         }
       }
     }
-    loadBusinessAutopilotAccess();
+    loadBusinessAutopilotAccess({ showPending: true });
     const refreshAccess = () => {
-      loadBusinessAutopilotAccess();
+      loadBusinessAutopilotAccess({ showPending: false });
     };
-    window.addEventListener("storage", refreshAccess);
     window.addEventListener("focus", refreshAccess);
     window.addEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
-    window.addEventListener("wz:business-autopilot-user-directory-changed", refreshAccess);
     return () => {
       active = false;
-      window.removeEventListener("storage", refreshAccess);
       window.removeEventListener("focus", refreshAccess);
       window.removeEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
-      window.removeEventListener("wz:business-autopilot-user-directory-changed", refreshAccess);
     };
   }, [businessAutopilotIsAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username, state.user?.employee_role]);
 

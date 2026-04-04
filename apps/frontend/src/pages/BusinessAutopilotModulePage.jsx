@@ -22,6 +22,8 @@ const CRM_ACTIVE_SECTION_KEY = "wz_business_autopilot_crm_active_section";
 const CRM_STORAGE_KEY_PREFIX = "wz_business_autopilot_crm_module_scope";
 const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope";
 const CRM_SHARED_CONTACTS_GLOBAL_KEY = `${CRM_SHARED_CONTACTS_KEY_PREFIX}__global`;
+const CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_contact_to_client_scope";
+const CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY = `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__global`;
 const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
@@ -2015,6 +2017,13 @@ function buildScopedCrmContactsStorageKey(authData = {}) {
   return normalizedOrgId
     ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${normalizedOrgId}`
     : CRM_SHARED_CONTACTS_GLOBAL_KEY;
+}
+
+function buildScopedCrmContactToClientDraftStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY;
 }
 
 function getOrgScopedCrmStorageKeys(orgId = "") {
@@ -5216,6 +5225,7 @@ function SearchablePaginatedTableCard({
 }
 
 function CrmOnePageModule() {
+  const navigate = useNavigate();
   const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"];
   const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
   const [activeSection, setActiveSection] = useState(() => getStoredCrmActiveSection(sectionOrder));
@@ -6926,6 +6936,43 @@ function CrmOnePageModule() {
     } else if (normalizedSection === "followUps") {
       setFollowUpStatusTab("all");
     }
+  }
+
+  function onConvertContactToClient(contactRow) {
+    const normalizedContact = normalizeCrmContactRecord(contactRow);
+    const sourceContactId = String(normalizedContact.id || "").trim();
+    const hasContactData = [
+      normalizedContact.company,
+      normalizedContact.name,
+      normalizedContact.email,
+      normalizedContact.phone,
+    ].some((value) => String(value || "").trim());
+    if (!sourceContactId && !hasContactData) {
+      return;
+    }
+    const activeOrgId = getCrmOrgIdFromStorageKey(crmStorageKey)
+      || getCrmOrgIdFromStorageKey(crmSharedContactsKey)
+      || getActiveBusinessAutopilotOrgId()
+      || getActiveCrmScopeOrgId();
+    const scopedDraftKey = buildScopedCrmContactToClientDraftStorageKey(activeOrgId);
+    const payload = {
+      sourceContactId,
+      id: sourceContactId || normalizedContact.id,
+      name: normalizedContact.name,
+      company: normalizedContact.company,
+      email: normalizedContact.email,
+      phoneCountryCode: normalizedContact.phoneCountryCode || "+91",
+      phone: normalizedContact.phone,
+      orgId: String(activeOrgId || "").trim(),
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      window.localStorage.setItem(scopedDraftKey, JSON.stringify(payload));
+      window.localStorage.setItem(CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY, JSON.stringify(payload));
+    } catch {
+      // Continue to users page even if browser storage write fails.
+    }
+    navigate("/app/business-autopilot/users");
   }
 
   async function onConvertLeadToDeal(leadRow) {
@@ -10640,6 +10687,16 @@ function CrmOnePageModule() {
                         )}
                       >
                         Edit
+                      </button>
+                    ) : null}
+                    {sectionKey === "contacts" && canEditCrmRow(sectionKey, row) ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-success"
+                        onClick={() => onConvertContactToClient(row)}
+                        title="Create client from contact"
+                      >
+                        Convert to Client
                       </button>
                     ) : null}
                     {canDeleteCrmRow(sectionKey, row) ? (
