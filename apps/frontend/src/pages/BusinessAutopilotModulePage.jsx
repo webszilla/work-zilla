@@ -17500,6 +17500,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       const seed = String(line?.description || "").trim();
       setItemPickerSearch(seed);
       setItemPickerState({ open: true, lineId: String(line?.id || "").trim() });
+      setLineItemSearchOpenById((prev) => ({ ...prev, [String(line?.id || "").trim()]: false }));
     };
     const closeItemPicker = () => {
       setItemPickerState({ open: false, lineId: "" });
@@ -17753,8 +17754,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                 <input
                                   className="form-control wz-item-primary-input"
                                   value={line.description || ""}
-                                  onFocus={() => setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: true }))}
-                                  onClick={() => setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: true }))}
+                                  onFocus={() => openItemPicker(line)}
+                                  onClick={() => openItemPicker(line)}
                                   onBlur={() => window.setTimeout(() => {
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
                                   }, 140)}
@@ -17762,7 +17763,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                     setPrimaryItemText(line.id, e.target.value);
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: true }));
                                   }}
-                                  onDoubleClick={() => openItemPicker(line)}
                                   placeholder="Type or search item"
                                 />
                                 {showLineSearchDropdown ? (
