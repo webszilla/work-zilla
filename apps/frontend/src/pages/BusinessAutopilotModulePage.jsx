@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
@@ -24,6 +24,8 @@ const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope
 const CRM_SHARED_CONTACTS_GLOBAL_KEY = `${CRM_SHARED_CONTACTS_KEY_PREFIX}__global`;
 const CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_contact_to_client_scope";
 const CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY = `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__global`;
+const CRM_SALES_ORDER_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_sales_order_scope";
+const CRM_SALES_ORDER_DRAFT_GLOBAL_KEY = `${CRM_SALES_ORDER_DRAFT_KEY_PREFIX}__global`;
 const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
@@ -820,7 +822,10 @@ const DEFAULT_STOCKS_DATA = {
   items: [
     { id: "si1", itemName: "Dell Latitude 5440", sku: "DL5440", category: "Electronics / Laptops", qty: "12" },
     { id: "si2", itemName: "HP LaserJet Pro", sku: "HPLJPRO", category: "Electronics / Printers", qty: "4" }
-  ]
+  ],
+  settings: {
+    stockAlerts: createDefaultStockAlertSettings(),
+  }
 };
 
 const GST_STATUS_OPTIONS = ["Active", "Inactive"];
@@ -1011,6 +1016,38 @@ function composeDocumentLineDescription(description = "", customText = "") {
   return `${primary}\n${custom}`;
 }
 
+function normalizeHsnSacType(value = "", fallback = "HSN") {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "SAC") {
+    return "SAC";
+  }
+  if (normalized === "HSN") {
+    return "HSN";
+  }
+  return fallback === "SAC" ? "SAC" : "HSN";
+}
+
+function inferHsnSacTypeFromItem(item = {}, fallback = "HSN") {
+  const explicitType = String(item?.hsnSacType || item?.hsn_sac_type || "").trim();
+  if (explicitType) {
+    return normalizeHsnSacType(explicitType, fallback);
+  }
+  const itemType = String(item?.itemType || item?.type || "").trim().toLowerCase();
+  if (itemType === "service") {
+    return "SAC";
+  }
+  if (itemType === "product") {
+    return "HSN";
+  }
+  if (String(item?.sacCode || "").trim()) {
+    return "SAC";
+  }
+  if (String(item?.hsnCode || "").trim() || String(item?.hsnSacCode || "").trim()) {
+    return "HSN";
+  }
+  return normalizeHsnSacType(fallback, "HSN");
+}
+
 function createEmptyDocLine() {
   return {
     id: `line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -1018,6 +1055,7 @@ function createEmptyDocLine() {
     inventoryItemId: "",
     description: "",
     customText: "",
+    hsnSacType: "HSN",
     hsnSacCode: "",
     qty: "1",
     rate: "",
@@ -1049,6 +1087,7 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
   const today = new Date().toISOString().slice(0, 10);
   return {
     id: "",
+    sourceEstimateId: "",
     docNo: getNextBillingDocNo(kind, existingRows),
     customerName: "",
     customerGstin: "",
@@ -1061,11 +1100,103 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
     billingAddress: "",
     notes: "Thank you for your business.",
     termsText: "Payment due within 7 days. Please contact your org admin for support.",
+    paymentStatusNotes: "",
     paymentStatus: kind === "invoice" ? "Pending" : "",
     deliveryStatus: kind === "invoice" ? "Pending" : "",
     inventoryCommitted: false,
     items: [createEmptyDocLine()]
   };
+}
+
+function getNextCrmSalesOrderNo(existingRows = []) {
+  const prefix = "SO";
+  const now = new Date();
+  const dayKey = `${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear())}`;
+  const pattern = new RegExp(`^${prefix}-${dayKey}-(\\d{3})$`);
+  let maxSeq = 0;
+  (Array.isArray(existingRows) ? existingRows : []).forEach((row) => {
+    const rawDocNo = String(row?.orderId || row?.order_id || "").trim();
+    const match = pattern.exec(rawDocNo);
+    if (!match) {
+      return;
+    }
+    const seq = Number.parseInt(match[1], 10);
+    if (Number.isFinite(seq) && seq > maxSeq) {
+      maxSeq = seq;
+    }
+  });
+  return `${prefix}-${dayKey}-${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+function createEmptyCrmSalesOrder(existingRows = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  const nextOrderId = getNextCrmSalesOrderNo(existingRows);
+  return {
+    id: "",
+    sourceDealId: "",
+    orderId: nextOrderId,
+    docNo: nextOrderId,
+    customerName: "",
+    customerGstin: "",
+    issueDate: today,
+    dueDate: today,
+    status: "Pending",
+    gstTemplateId: "",
+    billingTemplateId: "",
+    salesperson: [],
+    billingAddress: "",
+    notes: "Thank you for your business.",
+    termsText: "Payment due within 7 days. Please contact your org admin for support.",
+    paymentStatusNotes: "",
+    company: "",
+    phone: "",
+    items: [createEmptyDocLine()],
+    convertedToInvoice: false,
+    convertedInvoiceId: "",
+  };
+}
+
+function isCancelledInvoiceStatus(status) {
+  return String(status || "").trim().toLowerCase() === "cancelled";
+}
+
+function isInventoryCommittedDeliveryStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "shipped" || normalized === "completed" || normalized === "delivered";
+}
+
+function getInvoiceInventoryQtyMap(invoice) {
+  const map = new Map();
+  (invoice?.items || []).forEach((line) => {
+    const itemId = String(line?.inventoryItemId || "").trim();
+    if (!itemId) return;
+    const qty = parseNumber(line?.qty);
+    if (qty <= 0) return;
+    map.set(itemId, (map.get(itemId) || 0) + qty);
+  });
+  return map;
+}
+
+function getInventoryHistoryRowsForItem(itemId, invoices = []) {
+  return (invoices || [])
+    .map((invoice) => {
+      const qty = parseNumber(getInvoiceInventoryQtyMap(invoice).get(String(itemId || "").trim()) || 0);
+      if (qty <= 0 || isCancelledInvoiceStatus(invoice?.status)) {
+        return null;
+      }
+      const historyType = isInventoryCommittedDeliveryStatus(invoice?.deliveryStatus) ? "invoiced" : "locked";
+      return {
+        id: `${invoice?.id || invoice?.docNo || "invoice"}-${historyType}`,
+        invoiceId: String(invoice?.id || ""),
+        invoiceNo: String(invoice?.docNo || "-"),
+        createdDate: String(invoice?.issueDate || invoice?.createdAt || ""),
+        usedQty: qty,
+        historyType,
+        deliveryStatus: String(invoice?.deliveryStatus || "Pending"),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => String(right.createdDate || "").localeCompare(String(left.createdDate || "")));
 }
 
 function createEmptySubscriptionCategory() {
@@ -1082,6 +1213,19 @@ function createEmptySubscriptionSubCategory() {
     categoryId: "",
     name: "",
     description: ""
+  };
+}
+
+function createDefaultStockAlertSettings() {
+  return {
+    lowStockThreshold: "5",
+    notifications: {
+      email: true,
+      whatsapp: false,
+      portalInbox: true,
+    },
+    departments: [],
+    users: [],
   };
 }
 
@@ -1451,10 +1595,11 @@ function formatCurrencyAmount(amount, currency = "INR", locale = getCurrencyLoca
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: String(currency || "INR").trim().toUpperCase(),
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(numericValue);
   } catch (_error) {
-    return `${String(currency || "INR").trim().toUpperCase()} ${numericValue.toLocaleString(locale, { maximumFractionDigits: 2 })}`;
+    return `${String(currency || "INR").trim().toUpperCase()} ${numericValue.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 }
 
@@ -2026,6 +2171,65 @@ function buildScopedCrmContactToClientDraftStorageKey(orgId = "") {
     : CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY;
 }
 
+function buildScopedCrmSalesOrderDraftStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${CRM_SALES_ORDER_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : CRM_SALES_ORDER_DRAFT_GLOBAL_KEY;
+}
+
+function resolveCrmSalesOrderDraftStorageKeys(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  const scopedKey = buildScopedCrmSalesOrderDraftStorageKey(resolvedOrgId);
+  return Array.from(new Set([scopedKey, CRM_SALES_ORDER_DRAFT_GLOBAL_KEY].filter(Boolean)));
+}
+
+function normalizePendingCrmSalesOrderDraft(value = {}) {
+  const sourceDeal = value?.sourceDeal && typeof value.sourceDeal === "object"
+    ? normalizeCrmDealRecord(value.sourceDeal)
+    : null;
+  if (!sourceDeal?.id) {
+    return null;
+  }
+  return {
+    sourceDeal,
+    orgId: String(value?.orgId || "").trim(),
+    createdAt: String(value?.createdAt || "").trim(),
+  };
+}
+
+function readPendingCrmSalesOrderDraft(preferredOrgId = "") {
+  try {
+    const keysToTry = resolveCrmSalesOrderDraftStorageKeys(preferredOrgId);
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      const normalizedDraft = normalizePendingCrmSalesOrderDraft(parsed);
+      if (normalizedDraft) {
+        return normalizedDraft;
+      }
+    }
+  } catch {
+    // Ignore invalid drafts and continue with standard flow.
+  }
+  return null;
+}
+
+function clearPendingCrmSalesOrderDraft(preferredOrgId = "") {
+  try {
+    resolveCrmSalesOrderDraftStorageKeys(preferredOrgId).forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Ignore storage clear failures.
+  }
+}
+
 function getOrgScopedCrmStorageKeys(orgId = "") {
   const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
   if (!normalizedOrgId || typeof window === "undefined") {
@@ -2381,6 +2585,32 @@ function normalizeCrmDealRecord(row = {}) {
 }
 
 function normalizeCrmSalesOrderRecord(row = {}) {
+  const payload = row.products && typeof row.products === "object" && !Array.isArray(row.products)
+    ? row.products
+    : {};
+  const rawItems = Array.isArray(row.items)
+    ? row.items
+    : Array.isArray(payload.items)
+      ? payload.items
+      : Array.isArray(row.products)
+        ? row.products
+        : [];
+  const normalizedItems = rawItems.length
+    ? rawItems.map((item) => ({
+      ...splitDocumentLineDescription(item?.description, item?.customText),
+      id: String(item?.id || createEmptyDocLine().id).trim(),
+      itemMasterId: String(item?.itemMasterId || "").trim(),
+      inventoryItemId: String(item?.inventoryItemId || "").trim(),
+      hsnSacType: normalizeHsnSacType(
+        item?.hsnSacType || item?.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+        "HSN"
+      ),
+      hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
+      qty: String(item?.qty ?? "").trim(),
+      rate: String(item?.rate ?? "").trim(),
+      taxPercent: String(item?.taxPercent ?? item?.tax_percent ?? "").trim(),
+    }))
+    : [createEmptyDocLine()];
   const assignType = "Users";
   const assignedUser = Array.isArray(row.assignedUser)
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
@@ -2397,6 +2627,7 @@ function normalizeCrmSalesOrderRecord(row = {}) {
   return {
     ...row,
     orderId: String(row.orderId || row.order_id || "").trim(),
+    docNo: String(row.orderId || row.order_id || row.docNo || row.doc_no || "").trim(),
     customerName: String(row.customerName || row.customer_name || "").trim(),
     company: String(row.company || "").trim(),
     phone: String(row.phone || "").trim(),
@@ -2405,6 +2636,28 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     price: String(row.price ?? "").trim(),
     tax: String(row.tax ?? "").trim(),
     status: String(row.status || "Pending").trim(),
+    issueDate: String(row.issueDate || row.issue_date || payload.issueDate || payload.issue_date || "").trim(),
+    dueDate: String(row.dueDate || row.due_date || payload.dueDate || payload.due_date || "").trim(),
+    gstTemplateId: String(row.gstTemplateId || row.gst_template_id || payload.gstTemplateId || payload.gst_template_id || "").trim(),
+    billingTemplateId: String(row.billingTemplateId || row.billing_template_id || payload.billingTemplateId || payload.billing_template_id || "").trim(),
+    salesperson: Array.isArray(row.salesperson)
+      ? row.salesperson.map((item) => String(item || "").trim()).filter(Boolean)
+      : String(row.salesperson || payload.salesperson || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    customerGstin: String(row.customerGstin || row.customer_gstin || payload.customerGstin || payload.customer_gstin || "").trim(),
+    billingAddress: String(row.billingAddress || row.billing_address || payload.billingAddress || payload.billing_address || "").trim(),
+    notes: String(row.notes || payload.notes || "Thank you for your business.").trim(),
+    termsText: String(row.termsText || row.terms_text || payload.termsText || payload.terms_text || "Payment due within 7 days. Please contact your org admin for support.").trim(),
+    paymentStatusNotes: String(row.paymentStatusNotes || row.payment_status_notes || payload.paymentStatusNotes || payload.payment_status_notes || "").trim(),
+    sourceDealId: String(row.sourceDealId || row.source_deal_id || payload.sourceDealId || payload.source_deal_id || row.deal_id || "").trim(),
+    convertedToInvoice: Boolean(row.convertedToInvoice || row.converted_to_invoice || payload.convertedToInvoice || payload.converted_to_invoice),
+    convertedInvoiceId: String(row.convertedInvoiceId || row.converted_invoice_id || payload.convertedInvoiceId || payload.converted_invoice_id || "").trim(),
+    subtotal: String(row.subtotal ?? payload.subtotal ?? "").trim(),
+    taxTotal: String(row.taxTotal ?? row.tax_total ?? payload.taxTotal ?? payload.tax_total ?? "").trim(),
+    grandTotal: String(row.grandTotal ?? row.grand_total ?? payload.grandTotal ?? payload.grand_total ?? row.total_amount ?? "").trim(),
+    items: normalizedItems,
     assignType,
     assignedUser,
     assignedTo: assignedUser.join(", "),
@@ -2790,6 +3043,21 @@ function sanitizeAccountsWorkspaceData(data = DEFAULT_ACCOUNTS_DATA) {
     ...base,
     customers: (Array.isArray(base.customers) ? base.customers : []).filter((row) => !isLegacyDemoAccountCustomer(row)),
   };
+}
+
+function _normalizeAccountsWorkspacePayload(data = DEFAULT_ACCOUNTS_DATA) {
+  const source = data && typeof data === "object" ? data : DEFAULT_ACCOUNTS_DATA;
+  return sanitizeAccountsWorkspaceData({
+    ...DEFAULT_ACCOUNTS_DATA,
+    ...source,
+    customers: Array.isArray(source.customers) ? source.customers : [],
+    vendors: Array.isArray(source.vendors) ? source.vendors : [],
+    itemMasters: Array.isArray(source.itemMasters) ? source.itemMasters : [],
+    gstTemplates: Array.isArray(source.gstTemplates) ? source.gstTemplates : [],
+    billingTemplates: Array.isArray(source.billingTemplates) ? source.billingTemplates : [],
+    estimates: Array.isArray(source.estimates) ? source.estimates : [],
+    invoices: Array.isArray(source.invoices) ? source.invoices : [],
+  });
 }
 
 function readLegacyAccountsData() {
@@ -5224,7 +5492,786 @@ function SearchablePaginatedTableCard({
   );
 }
 
+function BillingDocumentEditor({
+    kind,
+    form,
+    setField,
+    totals,
+    onSave,
+    onCancelEdit,
+    editingId,
+    moduleData,
+    erpUsersForSales,
+    customerOptions,
+    taxUi,
+    inventoryItems,
+    itemMasterOptions,
+    enableItemPicker = true,
+    applyBillingTemplateToDocument,
+    addDocLine,
+    updateDocLineDescription,
+    applyInventoryItemToLine,
+    applyItemMasterToLine,
+    selectRecentItemForLine,
+    availableInventoryQty,
+    updateDocLine,
+    removeDocLine,
+  }) {
+    const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
+    const requireCustomer = kind !== "estimate";
+    const requireIssueDate = kind !== "estimate";
+    const customerLocked = kind === "salesOrder";
+    const customerLockedMessage = "This sales order is linked to the customer from the lead or deal pipeline. To change the customer, update the original lead or deal first.";
+    const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+    const [salesSearchOpen, setSalesSearchOpen] = useState(false);
+    const [salesSearchText, setSalesSearchText] = useState("");
+    const [itemPickerState, setItemPickerState] = useState({ open: false, lineId: "" });
+    const [itemPickerSearch, setItemPickerSearch] = useState("");
+    const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
+    const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
+    const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
+      const docType = String(row.docType || "").trim().toLowerCase();
+      if (!docType) return true;
+      if (docType === kindLabel.toLowerCase()) return true;
+      // Estimates can reuse invoice billing templates unless a dedicated estimate template exists.
+      if (kind === "estimate" && docType === "invoice") return true;
+      if (kind === "salesOrder" && (docType === "invoice" || docType === "estimate" || docType === "sales order")) return true;
+      return false;
+    });
+    const salesPeople = Array.from(new Set((erpUsersForSales || [])
+      .filter((user) => Boolean(user?.name))
+      .map((user) => String(user.name || "").trim())
+      .filter(Boolean)));
+    const selectedSalesPeople = Array.isArray(form.salesperson)
+      ? form.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : String(form.salesperson || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    const customerSearchValue = String(form.customerName || "").trim().toLowerCase();
+    const customerMatches = (customerOptions || []).filter((row) => {
+      if (!customerSearchValue) return true;
+      const haystack = `${row.companyName || ""} ${row.name || ""} ${row.clientName || ""} ${row.email || ""}`.toLowerCase();
+      return haystack.includes(customerSearchValue);
+    }).slice(0, 8);
+    const salesMatches = salesPeople.filter((name) => {
+      const q = String(salesSearchText || "").trim().toLowerCase();
+      if (!q) return true;
+      return name.toLowerCase().includes(q);
+    }).slice(0, 8);
+    const billingItemSource = useMemo(() => {
+      const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
+        id: String(item?.id || "").trim(),
+        name: String(item?.itemName || "").trim(),
+        source: "inventory",
+        onHandQty: parseNumber(item?.qty),
+        sku: String(item?.sku || "").trim(),
+        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
+        hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
+      })).filter((item) => item.id && item.name);
+      const masterSource = (Array.isArray(itemMasterOptions) ? itemMasterOptions : []).map((item) => ({
+        id: String(item?.id || "").trim(),
+        name: String(item?.name || "").trim(),
+        source: "itemMaster",
+        itemType: String(item?.itemType || "Product").trim(),
+        defaultRate: String(item?.defaultRate || "").trim(),
+        taxPercent: String(item?.taxPercent || "").trim(),
+        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
+        hsnSacCode: String(item?.hsnSacCode || "").trim(),
+      })).filter((item) => item.name);
+      const recentSource = [...(moduleData.invoices || []), ...(moduleData.estimates || []), ...(moduleData.salesOrders || [])]
+        .flatMap((doc) => (Array.isArray(doc?.items) ? doc.items : []))
+        .map((item) => {
+          const lineData = splitDocumentLineDescription(item?.description, item?.customText);
+          return {
+            id: "",
+            name: String(lineData.description || "").trim(),
+            source: "recent",
+            recentQty: String(item?.qty || "").trim(),
+            recentRate: String(item?.rate || "").trim(),
+            hsnSacType: normalizeHsnSacType(item?.hsnSacType || item?.hsn_sac_type || "HSN"),
+            hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
+          };
+        })
+        .filter((item) => item.name);
+      const seenNames = new Set();
+      return [...inventorySource, ...masterSource, ...recentSource].filter((item) => {
+        const key = item.name.toLowerCase();
+        if (seenNames.has(key)) return false;
+        seenNames.add(key);
+        return true;
+      });
+    }, [inventoryItems, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
+    const resolveLineItemByName = (value) => {
+      const normalizedValue = String(value || "").trim().toLowerCase();
+      if (!normalizedValue) return null;
+      return billingItemSource.find((item) => String(item?.name || "").trim().toLowerCase() === normalizedValue) || null;
+    };
+    const setPrimaryItemText = (lineId, rawValue) => {
+      const nextValue = String(rawValue || "");
+      const matched = resolveLineItemByName(nextValue);
+      if (matched?.source === "inventory") {
+        applyInventoryItemToLine(kind, lineId, matched.id);
+        return;
+      }
+      if (matched?.source === "itemMaster") {
+        applyItemMasterToLine(kind, lineId, matched.id);
+        return;
+      }
+      if (matched?.source === "recent") {
+        selectRecentItemForLine(kind, lineId, matched.name || "");
+        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(matched.hsnSacType || "HSN"));
+        if (matched.hsnSacCode) {
+          updateDocLine(kind, lineId, "hsnSacCode", matched.hsnSacCode);
+        }
+        return;
+      }
+      updateDocLineDescription(kind, lineId, nextValue);
+    };
+    const applyLineItemFromSearch = (lineId, item) => {
+      if (!item || !lineId) return;
+      if (item.source === "inventory") {
+        applyInventoryItemToLine(kind, lineId, item.id);
+      } else if (item.source === "itemMaster") {
+        applyItemMasterToLine(kind, lineId, item.id);
+      } else {
+        selectRecentItemForLine(kind, lineId, item.name || "");
+        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(item.hsnSacType || "HSN"));
+        if (item.hsnSacCode) {
+          updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
+        }
+      }
+      setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
+    };
+    const applyLineCustomTextFromSearch = (lineId, rawValue) => {
+      const nextValue = String(rawValue || "");
+      updateDocLineDescription(kind, lineId, nextValue);
+      setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
+    };
+    const toggleSalesPerson = (name) => {
+      const normalized = String(name || "").trim();
+      if (!normalized) return;
+      const nextSelected = selectedSalesPeople.includes(normalized)
+        ? selectedSalesPeople.filter((entry) => entry !== normalized)
+        : [...selectedSalesPeople, normalized];
+      setField("salesperson", nextSelected.join(", "));
+      setSalesSearchText("");
+    };
+    const itemPickerQuery = String(itemPickerSearch || "").trim();
+    const itemPickerQueryLower = itemPickerQuery.toLowerCase();
+    const itemPickerLine = (form.items || []).find((row) => row.id === itemPickerState.lineId) || null;
+    const itemPickerMatches = billingItemSource
+      .filter((item) => {
+        if (!itemPickerQueryLower) return true;
+        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+        return haystack.includes(itemPickerQueryLower);
+      })
+      .slice(0, 40);
+    const itemPickerInventoryMatches = itemPickerMatches.filter((item) => item.source === "inventory");
+    const itemPickerMasterMatches = itemPickerMatches.filter((item) => item.source === "itemMaster");
+    const itemPickerRecentMatches = itemPickerMatches.filter((item) => item.source === "recent");
+    const itemPickerCanUseCustom = Boolean(itemPickerQuery)
+      && !itemPickerMatches.some((item) => String(item.name || "").toLowerCase() === itemPickerQueryLower);
+    const openItemPicker = (line) => {
+      if (!enableItemPicker) return;
+      const seed = String(line?.description || "").trim();
+      setItemPickerSearch(seed);
+      setItemPickerState({ open: true, lineId: String(line?.id || "").trim() });
+      setLineItemSearchOpenById((prev) => ({ ...prev, [String(line?.id || "").trim()]: false }));
+    };
+    const closeItemPicker = () => {
+      setItemPickerState({ open: false, lineId: "" });
+      setItemPickerSearch("");
+    };
+    const applyPickedItem = (item) => {
+      const lineId = String(itemPickerState.lineId || "").trim();
+      if (!lineId) return;
+      if (item.source === "inventory") {
+        applyInventoryItemToLine(kind, lineId, item.id);
+      } else if (item.source === "itemMaster") {
+        applyItemMasterToLine(kind, lineId, item.id);
+      } else {
+        selectRecentItemForLine(kind, lineId, item.name || "");
+        if (item.hsnSacCode) {
+          updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
+        }
+      }
+      closeItemPicker();
+    };
+    const applyCustomPickedText = () => {
+      const lineId = String(itemPickerState.lineId || "").trim();
+      if (!lineId || !itemPickerQuery) return;
+      updateDocLineDescription(kind, lineId, itemPickerQuery);
+      closeItemPicker();
+    };
+    useEffect(() => {
+      if (!itemPickerState.open) return;
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+          closeItemPicker();
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [itemPickerState.open]);
+    useEffect(() => {
+      if (!itemPickerState.open) return;
+      if (!itemPickerLine) {
+        closeItemPicker();
+      }
+    }, [itemPickerState.open, itemPickerLine]);
+    return (
+      <div>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+          <h6 className="mb-0">{editingId ? `Edit ${kindLabel}` : `Create ${kindLabel}`}</h6>
+        </div>
+        <form className="d-flex flex-column gap-3" onSubmit={onSave}>
+          <div className="p-0">
+            <div className="row g-3">
+              <div className="col-12 col-xl-3">
+                <label className="form-label small text-secondary mb-1">
+                  Client / Company Name{requireCustomer ? " *" : ""}
+                </label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    className="form-control"
+                    required={requireCustomer}
+                    value={form.customerName || ""}
+                    readOnly={customerLocked}
+                    onFocus={() => {
+                      if (customerLocked) {
+                        setCustomerLockedPopupOpen(true);
+                        return;
+                      }
+                      setCustomerSearchOpen(true);
+                    }}
+                    onClick={() => {
+                      if (customerLocked) {
+                        setCustomerLockedPopupOpen(true);
+                        return;
+                      }
+                      setCustomerSearchOpen(true);
+                    }}
+                    onBlur={() => window.setTimeout(() => setCustomerSearchOpen(false), 120)}
+                    onChange={(e) => {
+                      if (customerLocked) return;
+                      const nextValue = e.target.value;
+                      setField("customerName", nextValue);
+                      setCustomerSearchOpen(true);
+                    }}
+                    placeholder={customerLocked ? "Customer locked from pipeline" : "Search client / company"}
+                  />
+                  {!customerLocked && customerSearchOpen ? (
+                    <div className="crm-inline-suggestions">
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Clients</div>
+                        {customerMatches.length ? customerMatches.map((row) => (
+                          <button
+                            key={`${kind}-cust-match-${row.id}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onClick={() => {
+                              setField("customerName", row.companyName || row.name || "");
+                              setField("customerGstin", row.gstin || "");
+                              setField("billingAddress", row.billingAddress || "");
+                              setCustomerSearchOpen(false);
+                            }}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{row.companyName || row.name || "-"}</span>
+                            <span className="crm-inline-suggestions__item-sub">{row.clientName || row.email || "-"}</span>
+                          </button>
+                        )) : (
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No clients found</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="col-12 col-xl-1">
+                <label className="form-label small text-secondary mb-1">{kindLabel} No</label>
+                <input
+                  className="form-control"
+                  value={form.docNo || ""}
+                  onChange={(e) => setField("docNo", e.target.value)}
+                  placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DDMMYYYY-001"}
+                />
+              </div>
+              <div className="col-12 col-xl-2">
+                <label className="form-label small text-secondary mb-1">Sales Person</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    className="form-control"
+                    value={salesSearchText}
+                    onFocus={() => setSalesSearchOpen(true)}
+                    onClick={() => setSalesSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setSalesSearchOpen(false), 120)}
+                    onChange={(e) => {
+                      setSalesSearchText(e.target.value);
+                      setSalesSearchOpen(true);
+                    }}
+                    placeholder="Search sales person"
+                  />
+                  {salesSearchOpen ? (
+                    <div className="crm-inline-suggestions">
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Users</div>
+                        {salesMatches.length ? salesMatches.map((name) => (
+                          <button
+                            key={`${kind}-sales-match-${name}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onClick={() => toggleSalesPerson(name)}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{name}</span>
+                          </button>
+                        )) : (
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No users found</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="d-flex flex-wrap gap-2 mt-2">
+                  {selectedSalesPeople.length ? selectedSalesPeople.map((name) => (
+                    <span key={`${kind}-sales-chip-${name}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                      <button
+                        type="button"
+                        className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                        aria-label={`Remove ${name}`}
+                        onClick={() => toggleSalesPerson(name)}
+                      >
+                        &times;
+                      </button>
+                      <span>{name}</span>
+                    </span>
+                  )) : (
+                    <span className="small text-secondary">No sales person selected</span>
+                  )}
+                </div>
+              </div>
+              <div className="col-12 col-md-6 col-xl-1">
+                <label className="form-label small text-secondary mb-1">
+                  Issue Date{requireIssueDate ? " *" : ""}
+                </label>
+                <input type="date" className="form-control" required={requireIssueDate} value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
+              </div>
+              <div className="col-12 col-md-6 col-xl-1">
+                <label className="form-label small text-secondary mb-1">Due Date</label>
+                <input type="date" className="form-control" value={form.dueDate || ""} onChange={(e) => setField("dueDate", e.target.value)} />
+              </div>
+              <div className="col-12 col-md-6 col-xl-2">
+                <label className="form-label small text-secondary mb-1">{taxUi.templateSingular} *</label>
+                <select className="form-select" required value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
+                  <option value="">{`Select ${taxUi.templateSingular}`}</option>
+                  {(moduleData.gstTemplates || []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name} ({gstTemplateTotalPercent(row)}%)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-6 col-xl-2">
+                <label className="form-label small text-secondary mb-1">Billing Template *</label>
+                <select className="form-select" required value={form.billingTemplateId || ""} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                  <option value="">Select Billing Template</option>
+                  {billingTemplates.map((row) => (
+                    <option key={row.id} value={row.id}>{row.name}</option>
+                  ))}
+                </select>
+              </div>
+              {kind === "invoice" ? (
+                <>
+                  <div className="col-12 col-md-6 col-xl-3">
+                    <label className="form-label small text-secondary mb-1">Payment Status</label>
+                    <select className="form-select" value={form.paymentStatus || "Pending"} onChange={(e) => setField("paymentStatus", e.target.value)}>
+                      {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
+                        <option key={`inv-pay-${status}`} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-3">
+                    <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                    <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                      {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                        <option key={`inv-del-${status}`} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="p-0">
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <h6 className="mb-0">Item Table</h6>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addDocLine(kind)}>
+                Add Row
+              </button>
+            </div>
+            <div className="table-responsive wz-accounts-item-table">
+              <table className="table table-dark table-borderless align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th className="wz-item-details-col" style={{ minWidth: 220 }}>Item Details</th>
+                    <th style={{ width: 110 }}>Qty</th>
+                    <th style={{ width: 140 }}>Rate</th>
+                    <th style={{ width: 130 }}>Tax %</th>
+                    <th style={{ width: 160 }}>Amount</th>
+                    <th className="text-end" style={{ width: 100 }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.items || []).map((line, rowIndex) => {
+                    const lineAmount = parseNumber(line.qty) * parseNumber(line.rate);
+                    const lineQuery = String(line.description || "").trim().toLowerCase();
+                    const lineMatches = billingItemSource
+                      .filter((item) => {
+                        if (!lineQuery) return true;
+                        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+                        return haystack.includes(lineQuery);
+                      })
+                      .slice(0, 8);
+                    const canUseCustomLine = Boolean(lineQuery)
+                      && !lineMatches.some((item) => String(item.name || "").toLowerCase() === lineQuery);
+                    const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
+                    return (
+                      <tr key={line.id}>
+                        <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                          <input
+                            className="form-control mb-2 wz-item-custom-input"
+                            required={kind === "invoice"}
+                            value={line.customText || ""}
+                            onChange={(e) => updateDocLine(kind, line.id, "customText", e.target.value)}
+                            placeholder="Custom Text (Bill Line 1)"
+                          />
+                          <div className="row g-2">
+                            <div className="col-8">
+                              <div className="crm-inline-suggestions-wrap">
+                                <input
+                                  className="form-control wz-item-primary-input"
+                                  value={line.description || ""}
+                                  onFocus={() => openItemPicker(line)}
+                                  onClick={() => openItemPicker(line)}
+                                  onBlur={() => window.setTimeout(() => {
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
+                                  }, 140)}
+                                  onChange={(e) => {
+                                    setPrimaryItemText(line.id, e.target.value);
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                  }}
+                                  placeholder={enableItemPicker ? "Type or search item" : "Type item"}
+                                />
+                                {showLineSearchDropdown ? (
+                                  <div className="wz-item-details-suggestions">
+                                    <div className="crm-inline-suggestions__group">
+                                      <div className="crm-inline-suggestions__title">Item Suggestions</div>
+                                      {canUseCustomLine ? (
+                                        <button
+                                          type="button"
+                                          className="crm-inline-suggestions__item"
+                                          onMouseDown={() => applyLineCustomTextFromSearch(line.id, line.description || "")}
+                                        >
+                                          <span className="crm-inline-suggestions__item-main">Add your custom text: {line.description || ""}</span>
+                                          <span className="crm-inline-suggestions__item-sub">Manual entry</span>
+                                        </button>
+                                      ) : null}
+                                      {lineMatches.map((item) => (
+                                        <button
+                                          key={`${kind}-line-search-${line.id}-${item.source}-${item.id || item.name}`}
+                                          type="button"
+                                          className="crm-inline-suggestions__item"
+                                          onMouseDown={() => applyLineItemFromSearch(line.id, item)}
+                                        >
+                                          <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                          <span className="crm-inline-suggestions__item-sub">
+                                            {[
+                                              item.source,
+                                              item.sku ? `SKU: ${item.sku}` : "",
+                                              item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : "",
+                                            ].filter(Boolean).join(" | ")}
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="col-4">
+                              <div className="d-flex gap-2">
+                                <select
+                                  className="form-select wz-item-hsn-type-select"
+                                  value={normalizeHsnSacType(line.hsnSacType || "HSN")}
+                                  onChange={(e) => updateDocLine(kind, line.id, "hsnSacType", normalizeHsnSacType(e.target.value, "HSN"))}
+                                >
+                                  <option value="HSN">HSN</option>
+                                  <option value="SAC">SAC</option>
+                                </select>
+                                <input
+                                  className="form-control"
+                                  value={line.hsnSacCode || ""}
+                                  onChange={(e) => updateDocLine(kind, line.id, "hsnSacCode", e.target.value)}
+                                  placeholder={normalizeHsnSacType(line.hsnSacType || "HSN") === "SAC" ? "SAC Code" : "HSN Code"}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          {line.inventoryItemId ? (
+                            <div className="small text-secondary mt-1">
+                              Available Qty: {availableInventoryQty(line.inventoryItemId, form, line.id)}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                          <input
+                            className="form-control"
+                            required
+                            value={line.qty || ""}
+                            onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
+                            placeholder="1"
+                          />
+                        </td>
+                        <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                          <input
+                            className="form-control"
+                            required
+                            value={line.rate || ""}
+                            onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
+                            placeholder="0.00"
+                          />
+                        </td>
+                        <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                          <input
+                            className="form-control"
+                            required
+                            value={line.taxPercent || ""}
+                            onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
+                            placeholder="Auto"
+                          />
+                        </td>
+                        <td className="fw-semibold" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>{formatInr(lineAmount)}</td>
+                        <td className="text-end" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => removeDocLine(kind, line.id)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {enableItemPicker && itemPickerState.open ? (
+              <div className="wz-item-picker-backdrop" onMouseDown={closeItemPicker}>
+                <div className="wz-item-picker-modal" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="wz-item-picker-modal__header">
+                    <h6 className="mb-0">Select Item</h6>
+                    <button type="button" className="btn btn-sm btn-outline-light" onClick={closeItemPicker}>
+                      Close
+                    </button>
+                  </div>
+                  <div className="wz-item-picker-modal__search">
+                    <input
+                      className="form-control"
+                      autoFocus
+                      value={itemPickerSearch}
+                      onChange={(e) => setItemPickerSearch(e.target.value)}
+                      placeholder="Search inventory or item master"
+                    />
+                    {itemPickerLine ? (
+                      <div className="small text-secondary mt-1">
+                        Selected row qty: {String(itemPickerLine.qty || "1")}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="wz-item-picker-modal__body">
+                    {itemPickerCanUseCustom ? (
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Custom</div>
+                        <button type="button" className="crm-inline-suggestions__item" onClick={applyCustomPickedText}>
+                          <span className="crm-inline-suggestions__item-main">Add your custom text: {itemPickerQuery}</span>
+                          <span className="crm-inline-suggestions__item-sub">Manual entry</span>
+                        </button>
+                      </div>
+                    ) : null}
+                    {itemPickerInventoryMatches.length ? (
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Inventory Items</div>
+                        {itemPickerInventoryMatches.map((item) => (
+                          <button
+                            key={`${kind}-picker-inv-${item.id || item.name}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onClick={() => applyPickedItem(item)}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                            <span className="crm-inline-suggestions__item-sub">
+                              Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
+                              {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
+                              {item.sku ? ` | SKU: ${item.sku}` : ""}
+                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {itemPickerMasterMatches.length ? (
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Item Masters</div>
+                        <div className="row g-3">
+                          <div className="col-12 col-md-6">
+                            <div className="crm-inline-suggestions__title mb-2">Products</div>
+                            {itemPickerMasterMatches
+                              .filter((item) => String(item.itemType || "Product").trim().toLowerCase() !== "service")
+                              .map((item) => (
+                                <button
+                                  key={`${kind}-picker-master-product-${item.id || item.name}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onClick={() => applyPickedItem(item)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {item.itemType || "Product"}
+                                    {item.defaultRate ? ` | Rate: ${item.defaultRate}` : ""}
+                                    {item.taxPercent ? ` | Tax: ${item.taxPercent}%` : ""}
+                                    {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                          <div className="col-12 col-md-6">
+                            <div className="crm-inline-suggestions__title mb-2">Services</div>
+                            {itemPickerMasterMatches
+                              .filter((item) => String(item.itemType || "").trim().toLowerCase() === "service")
+                              .map((item) => (
+                                <button
+                                  key={`${kind}-picker-master-service-${item.id || item.name}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onClick={() => applyPickedItem(item)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {item.itemType || "Service"}
+                                    {item.defaultRate ? ` | Rate: ${item.defaultRate}` : ""}
+                                    {item.taxPercent ? ` | Tax: ${item.taxPercent}%` : ""}
+                                    {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                    {itemPickerRecentMatches.length ? (
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Recent Items</div>
+                        {itemPickerRecentMatches.map((item) => (
+                          <button
+                            key={`${kind}-picker-recent-${item.id || item.name}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onClick={() => applyPickedItem(item)}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                            <span className="crm-inline-suggestions__item-sub">
+                              Recent usage
+                              {item.recentQty ? ` | Qty: ${item.recentQty}` : ""}
+                              {item.recentRate ? ` | Rate: ${item.recentRate}` : ""}
+                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!itemPickerCanUseCustom && !itemPickerInventoryMatches.length && !itemPickerMasterMatches.length && !itemPickerRecentMatches.length ? (
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__item">
+                          <span className="crm-inline-suggestions__item-main">No items found</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="row g-3">
+            <div className="col-12 col-xl-7">
+              <div className="h-100">
+                <label className="form-label small text-secondary mb-1">Customer Notes</label>
+                <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
+                <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
+                <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
+                <label className="form-label small text-secondary mb-1">Payment Status Notes</label>
+                <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+              </div>
+            </div>
+            <div className="col-12 col-xl-5">
+              <div className="card p-3 h-100 border">
+                <h6 className="mb-3">Summary</h6>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">GST / Tax</span><strong>{formatInr(totals.taxTotal)}</strong></div>
+                <div className="d-flex justify-content-between pt-2 border-top">
+                  <span className="fw-semibold">Total</span>
+                  <strong>{formatInr(totals.grandTotal)}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="d-flex flex-wrap gap-2">
+            <button type="submit" className="btn btn-success btn-sm">
+              {editingId ? `Update ${kindLabel}` : `Create ${kindLabel}`}
+            </button>
+            {editingId ? (
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                Cancel Edit
+              </button>
+            ) : null}
+          </div>
+        </form>
+        {customerLockedPopupOpen ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="modal-overlay wz-crm-popup-overlay"
+            onClick={() => setCustomerLockedPopupOpen(false)}
+          >
+            <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+              <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+                <h5 className="mb-0">Customer Locked</h5>
+                <button
+                  type="button"
+                  className="btn btn-sm wz-crm-popup-close"
+                  onClick={() => setCustomerLockedPopupOpen(false)}
+                >
+                  <i className="bi bi-x-lg" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="text-secondary mb-3">{customerLockedMessage}</div>
+              <div className="d-flex justify-content-end">
+                <button type="button" className="btn btn-success btn-sm" onClick={() => setCustomerLockedPopupOpen(false)}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
 function CrmOnePageModule() {
+  const location = useLocation();
   const navigate = useNavigate();
   const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"];
   const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
@@ -5303,7 +6350,35 @@ function CrmOnePageModule() {
   );
   const [deletedViewSection, setDeletedViewSection] = useState("");
   const [crmActionPopup, setCrmActionPopup] = useState({ open: false, title: "", message: "" });
+  const [crmAccountsWorkspace, setCrmAccountsWorkspace] = useState(() => DEFAULT_ACCOUNTS_DATA);
+  const [crmInventoryWorkspace, setCrmInventoryWorkspace] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA;
+    } catch {
+      return DEFAULT_STOCKS_DATA;
+    }
+  });
+  const [crmSalesOrderTab, setCrmSalesOrderTab] = useState("list");
+  const [crmSalesOrderForm, setCrmSalesOrderForm] = useState(() => createEmptyCrmSalesOrder([]));
+  const [editingCrmSalesOrderId, setEditingCrmSalesOrderId] = useState("");
+  const [crmSalesOrderEditorOpen, setCrmSalesOrderEditorOpen] = useState(false);
+  const [crmSalesOrderNotice, setCrmSalesOrderNotice] = useState("");
+  const [crmGstForm, setCrmGstForm] = useState({
+    id: "",
+    name: "",
+    taxScope: "Intra State",
+    cgst: "",
+    sgst: "",
+    igst: "",
+    cess: "",
+    status: "Active",
+    notes: "",
+  });
+  const [editingCrmGstId, setEditingCrmGstId] = useState("");
   const sectionFormRef = useRef(null);
+  const crmSalesOrderResumeSearchRef = useRef("");
   const crmCurrencyCode = String(getOrgCurrency() || "INR").trim().toUpperCase() || "INR";
   const crmCurrencySymbol = getCurrencySymbol(crmCurrencyCode);
 
@@ -5354,6 +6429,11 @@ function CrmOnePageModule() {
   function isSoftDeletedCrmRow(row) {
     return Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at);
   }
+
+  const activeCrmContacts = useMemo(
+    () => (moduleData.contacts || []).filter((row) => !isSoftDeletedCrmRow(row)),
+    [moduleData.contacts]
+  );
 
   function parseOwnerNames(value) {
     if (Array.isArray(value)) {
@@ -5925,10 +7005,23 @@ function CrmOnePageModule() {
       setCrmSharedContactsKey(buildScopedCrmContactsStorageKey(scopedAuthData));
       await refreshCrmRowsFromBackend();
       await refreshCrmMeetingsFromBackend();
+      await refreshCrmAccountsWorkspace();
+      refreshCrmInventoryWorkspaceFromStorage();
     })();
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    function handleStorage(event) {
+      if (event.key !== STOCKS_STORAGE_KEY) {
+        return;
+      }
+      refreshCrmInventoryWorkspaceFromStorage();
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   useEffect(() => {
@@ -6088,6 +7181,153 @@ function CrmOnePageModule() {
     [crmDirectoryOptions, crmEmployeeRoleDirectory]
   );
   const sharedCustomerOptions = useMemo(() => readSharedAccountsCustomers(), [activeSection, moduleData.contacts, moduleData.teams, crmUserDirectory]);
+  const crmSalesOrderCustomerOptions = useMemo(
+    () => Array.isArray(crmAccountsWorkspace?.customers) ? crmAccountsWorkspace.customers : [],
+    [crmAccountsWorkspace]
+  );
+  const crmSalesOrderItemMasterOptions = useMemo(
+    () => Array.isArray(crmAccountsWorkspace?.itemMasters) ? crmAccountsWorkspace.itemMasters : [],
+    [crmAccountsWorkspace]
+  );
+  const crmSalesOrderInventoryItems = useMemo(
+    () => Array.isArray(crmInventoryWorkspace?.items) ? crmInventoryWorkspace.items : [],
+    [crmInventoryWorkspace]
+  );
+  const crmSalesOrderGstTemplates = useMemo(
+    () => Array.isArray(crmAccountsWorkspace?.gstTemplates) ? crmAccountsWorkspace.gstTemplates : [],
+    [crmAccountsWorkspace]
+  );
+  const crmSalesOrderBillingTemplates = useMemo(
+    () => Array.isArray(crmAccountsWorkspace?.billingTemplates) ? crmAccountsWorkspace.billingTemplates : [],
+    [crmAccountsWorkspace]
+  );
+  const crmSalesOrderTaxUi = useMemo(
+    () => getAccountsTaxUiConfig(
+      String(
+        crmAccountsWorkspace?.orgBillingCountry
+        || crmAccountsWorkspace?.organizationProfile?.country
+        || "India"
+      )
+    ),
+    [crmAccountsWorkspace]
+  );
+  const crmSalesOrderErpUsers = useMemo(
+    () => crmDirectoryPool.map((row) => ({ name: row.name })).filter((row) => String(row.name || "").trim()),
+    [crmDirectoryPool]
+  );
+  const crmSalesOrderTotals = useMemo(
+    () => computeDocumentTotals(crmSalesOrderForm, crmSalesOrderGstTemplates || []),
+    [crmSalesOrderForm, crmSalesOrderGstTemplates]
+  );
+
+  function resetCrmGstForm() {
+    setEditingCrmGstId("");
+    setCrmSalesOrderNotice("");
+    setCrmGstForm({
+      id: "",
+      name: "",
+      taxScope: crmSalesOrderTaxUi.defaultScope,
+      cgst: "",
+      sgst: "",
+      igst: "",
+      cess: "",
+      status: "Active",
+      notes: "",
+    });
+  }
+
+  async function persistCrmAccountsWorkspace(nextWorkspace) {
+    const normalizedWorkspace = _normalizeAccountsWorkspacePayload(nextWorkspace);
+    setCrmAccountsWorkspace(normalizedWorkspace);
+    const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
+    window.localStorage.setItem(accountsStorageKey, JSON.stringify(normalizedWorkspace));
+    await apiFetch("/api/business-autopilot/accounts/workspace", {
+      method: "PUT",
+      body: JSON.stringify({ data: normalizedWorkspace }),
+    });
+  }
+
+  async function saveCrmGstTemplate(event) {
+    event.preventDefault();
+    if (!String(crmGstForm.name || "").trim()) {
+      setCrmSalesOrderNotice("GST template name is required.");
+      return;
+    }
+    const payload = {
+      ...crmGstForm,
+      id: editingCrmGstId || crmGstForm.id || `gst_${Date.now()}`,
+      name: String(crmGstForm.name || "").trim(),
+      taxScope: String(crmGstForm.taxScope || crmSalesOrderTaxUi.defaultScope).trim(),
+      notes: String(crmGstForm.notes || "").trim(),
+      status: String(crmGstForm.status || "Active").trim() || "Active",
+    };
+    const rows = crmSalesOrderGstTemplates || [];
+    const nextRows = editingCrmGstId
+      ? rows.map((row) => (String(row.id || "") === String(editingCrmGstId) ? { ...row, ...payload } : row))
+      : [payload, ...rows];
+    try {
+      await persistCrmAccountsWorkspace({ ...crmAccountsWorkspace, gstTemplates: nextRows });
+      resetCrmGstForm();
+    } catch (error) {
+      setCrmSalesOrderNotice(error?.message || "Unable to save GST template.");
+    }
+  }
+
+  function editCrmGstTemplate(row) {
+    setEditingCrmGstId(String(row?.id || "").trim());
+    setCrmSalesOrderNotice("");
+    setCrmGstForm({
+      id: String(row?.id || "").trim(),
+      name: String(row?.name || "").trim(),
+      taxScope: String(row?.taxScope || row?.scope || row?.scopeLabel || crmSalesOrderTaxUi.defaultScope).trim(),
+      cgst: String(row?.cgst || "").trim(),
+      sgst: String(row?.sgst || "").trim(),
+      igst: String(row?.igst || "").trim(),
+      cess: String(row?.cess || "").trim(),
+      status: String(row?.status || "Active").trim() || "Active",
+      notes: String(row?.notes || "").trim(),
+    });
+  }
+
+  async function deleteCrmGstTemplate(id) {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) return;
+    const nextWorkspace = {
+      ...crmAccountsWorkspace,
+      gstTemplates: (crmAccountsWorkspace.gstTemplates || []).filter((row) => String(row.id || "") !== normalizedId),
+      billingTemplates: (crmAccountsWorkspace.billingTemplates || []).map((row) =>
+        String(row.gstTemplateId || "") === normalizedId ? { ...row, gstTemplateId: "" } : row
+      ),
+      estimates: (crmAccountsWorkspace.estimates || []).map((row) =>
+        String(row.gstTemplateId || "") === normalizedId ? { ...row, gstTemplateId: "" } : row
+      ),
+      invoices: (crmAccountsWorkspace.invoices || []).map((row) =>
+        String(row.gstTemplateId || "") === normalizedId ? { ...row, gstTemplateId: "" } : row
+      ),
+    };
+    try {
+      await persistCrmAccountsWorkspace(nextWorkspace);
+      if (editingCrmGstId === normalizedId) {
+        resetCrmGstForm();
+      }
+    } catch (error) {
+      setCrmSalesOrderNotice(error?.message || "Unable to delete GST template.");
+    }
+  }
+
+  async function updateCrmGstStatus(id, status) {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) return;
+    const nextRows = (crmAccountsWorkspace.gstTemplates || []).map((row) =>
+      String(row.id || "") === normalizedId ? { ...row, status } : row
+    );
+    try {
+      await persistCrmAccountsWorkspace({ ...crmAccountsWorkspace, gstTemplates: nextRows });
+    } catch (error) {
+      setCrmSalesOrderNotice(error?.message || "Unable to update GST template status.");
+    }
+  }
+
   const sharedCustomerDatalistOptions = useMemo(
     () => sharedCustomerOptions
       .flatMap((row) => [
@@ -6172,6 +7412,25 @@ function CrmOnePageModule() {
       }
       return next;
     });
+  }
+
+  async function refreshCrmAccountsWorkspace() {
+    const accountsWorkspace = await apiFetch("/api/business-autopilot/accounts/workspace").catch(() => null);
+    if (accountsWorkspace?.data && typeof accountsWorkspace.data === "object") {
+      setCrmAccountsWorkspace(_normalizeAccountsWorkspacePayload(accountsWorkspace.data));
+      return;
+    }
+    setCrmAccountsWorkspace(DEFAULT_ACCOUNTS_DATA);
+  }
+
+  function refreshCrmInventoryWorkspaceFromStorage() {
+    try {
+      const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      setCrmInventoryWorkspace(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA);
+    } catch {
+      setCrmInventoryWorkspace(DEFAULT_STOCKS_DATA);
+    }
   }
 
   async function refreshCrmMeetingsFromBackend() {
@@ -6972,7 +8231,7 @@ function CrmOnePageModule() {
     } catch {
       // Continue to users page even if browser storage write fails.
     }
-    navigate("/app/business-autopilot/users");
+    navigate("../users?tab=clients&source=crm-contact", { relative: "path" });
   }
 
   async function onConvertLeadToDeal(leadRow) {
@@ -7036,6 +8295,369 @@ function CrmOnePageModule() {
     };
   }
 
+  function getCrmSalesOrderInventoryAvailableQty(itemId) {
+    const matched = crmSalesOrderInventoryItems.find((row) => String(row?.id || "").trim() === String(itemId || "").trim());
+    return parseNumber(matched?.qty);
+  }
+
+  function setCrmSalesOrderField(key, value) {
+    setCrmSalesOrderForm((prev) => {
+      if (key === "docNo" || key === "orderId") {
+        const nextOrderId = String(value || "").trim();
+        return {
+          ...prev,
+          docNo: nextOrderId,
+          orderId: nextOrderId,
+        };
+      }
+      return { ...prev, [key]: value };
+    });
+  }
+
+  function applyCrmSalesOrderBillingTemplate(templateId) {
+    const selectedTemplate = crmSalesOrderBillingTemplates.find((row) => String(row?.id || "").trim() === String(templateId || "").trim());
+    setCrmSalesOrderForm((prev) => ({
+      ...prev,
+      billingTemplateId: String(templateId || "").trim(),
+      notes: String(selectedTemplate?.footerNote || prev.notes || "").trim(),
+      termsText: String(selectedTemplate?.termsText || prev.termsText || "").trim(),
+    }));
+  }
+
+  function addCrmSalesOrderLine() {
+    setCrmSalesOrderForm((prev) => ({ ...prev, items: [...(prev.items || []), createEmptyDocLine()] }));
+  }
+
+  function updateCrmSalesOrderLine(lineId, key, value) {
+    const normalizedValue = key === "rate"
+      ? formatCurrencyNumberInput(sanitizeCurrencyInput(value), crmCurrencyCode)
+      : value;
+    setCrmSalesOrderForm((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row)),
+    }));
+  }
+
+  function updateCrmSalesOrderLineDescription(lineId, value) {
+    setCrmSalesOrderForm((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (
+        row.id === lineId
+          ? {
+              ...row,
+              description: value,
+              itemMasterId: "",
+              inventoryItemId: "",
+            }
+          : row
+      )),
+    }));
+  }
+
+  function removeCrmSalesOrderLine(lineId) {
+    setCrmSalesOrderForm((prev) => {
+      const rows = (prev.items || []).filter((row) => row.id !== lineId);
+      return { ...prev, items: rows.length ? rows : [createEmptyDocLine()] };
+    });
+  }
+
+  function applyCrmSalesOrderItemMasterToLine(lineId, itemId) {
+    const selected = crmSalesOrderItemMasterOptions.find((row) => String(row?.id || "").trim() === String(itemId || "").trim());
+    if (!selected) {
+      return;
+    }
+    setCrmSalesOrderForm((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (
+        row.id === lineId
+          ? {
+              ...row,
+              itemMasterId: selected.id,
+              inventoryItemId: "",
+              description: selected.name || row.description,
+              hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
+              hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
+              rate: formatCurrencyNumberInput(
+                sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
+                crmCurrencyCode
+              ),
+              taxPercent: String(selected.taxPercent || row.taxPercent || ""),
+            }
+          : row
+      )),
+    }));
+  }
+
+  function applyCrmSalesOrderInventoryItemToLine(lineId, selectedValue) {
+    const normalizedValue = String(selectedValue || "").trim();
+    if (!normalizedValue) {
+      updateCrmSalesOrderLine(lineId, "inventoryItemId", "");
+      return;
+    }
+    const selected = crmSalesOrderInventoryItems.find((row) => (
+      String(row?.id || "") === normalizedValue
+      || String(row?.itemName || "").trim() === normalizedValue
+    ));
+    if (!selected) return;
+    const linkedItemMaster = crmSalesOrderItemMasterOptions.find((itemMaster) =>
+      String(itemMaster?.name || "").trim().toLowerCase() === String(selected?.itemName || "").trim().toLowerCase()
+    );
+    const resolvedHsnSacType = inferHsnSacTypeFromItem(
+      selected,
+      inferHsnSacTypeFromItem(linkedItemMaster, "HSN")
+    );
+    setCrmSalesOrderForm((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (
+        row.id === lineId
+          ? {
+              ...row,
+              inventoryItemId: selected.id,
+              itemMasterId: "",
+              description: selected.itemName || row.description || "",
+              hsnSacType: resolvedHsnSacType,
+              hsnSacCode: String(
+                selected.hsnSacCode
+                || selected.hsnCode
+                || selected.sacCode
+                || linkedItemMaster?.hsnSacCode
+                || row.hsnSacCode
+                || ""
+              ),
+            }
+          : row
+      )),
+    }));
+  }
+
+  function selectRecentCrmSalesOrderItemForLine(lineId, value) {
+    updateCrmSalesOrderLineDescription(lineId, value);
+  }
+
+  function closeCrmSalesOrderEditor() {
+    setEditingCrmSalesOrderId("");
+    setCrmSalesOrderEditorOpen(false);
+    setCrmSalesOrderNotice("");
+    setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || []));
+  }
+
+  function openCrmSalesOrderCreate(prefill = null) {
+    setCrmSalesOrderNotice("");
+    setEditingCrmSalesOrderId("");
+    setCrmSalesOrderEditorOpen(true);
+    setCrmSalesOrderTab("list");
+    setCrmSalesOrderForm(prefill ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || []), ...prefill } : createEmptyCrmSalesOrder(moduleData.salesOrders || []));
+  }
+
+  function buildCrmSalesOrderFromDeal(dealRow = {}) {
+    const companyName = String(dealRow?.company || "").trim();
+    const matchedCustomer = [...crmSalesOrderCustomerOptions, ...sharedCustomerOptions].find((row) => {
+      const haystack = [
+        row?.companyName,
+        row?.name,
+        row?.clientName,
+      ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+      return companyName && haystack.includes(companyName.toLowerCase());
+    }) || null;
+    const parsedSalespeople = Array.isArray(dealRow?.assignedUser)
+      ? dealRow.assignedUser.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : String(dealRow?.assignedTo || dealRow?.assignedUser || "")
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean);
+    return {
+      sourceDealId: String(dealRow?.id || "").trim(),
+      docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
+      customerName: matchedCustomer?.companyName || matchedCustomer?.name || companyName || String(dealRow?.dealName || "").trim(),
+      customerGstin: String(matchedCustomer?.gstin || "").trim(),
+      billingAddress: String(matchedCustomer?.billingAddress || "").trim(),
+      company: companyName,
+      phone: String(dealRow?.phone || "").trim(),
+      salesperson: parsedSalespeople,
+      items: [createEmptyDocLine()],
+      status: "Pending",
+    };
+  }
+
+  function findExistingSalesOrderCustomerForDeal(dealRow = {}) {
+    const companyName = String(dealRow?.company || "").trim().toLowerCase();
+    const dealName = String(dealRow?.dealName || dealRow?.name || "").trim().toLowerCase();
+    return [...crmSalesOrderCustomerOptions, ...sharedCustomerOptions].find((row) => {
+      const normalizedCustomer = normalizeSharedCustomerRecord(row);
+      const customerCompany = String(normalizedCustomer.companyName || "").trim().toLowerCase();
+      const customerClient = String(normalizedCustomer.clientName || "").trim().toLowerCase();
+      const customerName = String(normalizedCustomer.name || "").trim().toLowerCase();
+      return Boolean(
+        (companyName && (customerCompany === companyName || customerClient === companyName || customerName === companyName))
+        || (dealName && (customerClient === dealName || customerName === dealName || customerCompany === dealName))
+      );
+    }) || null;
+  }
+
+  function findConvertibleCrmContactForDeal(dealRow = {}) {
+    const companyName = String(dealRow?.company || "").trim().toLowerCase();
+    const dealName = String(dealRow?.dealName || dealRow?.name || "").trim().toLowerCase();
+    return activeCrmContacts.find((row) => {
+      const normalizedContact = normalizeCrmContactRecord(row);
+      const contactCompany = String(normalizedContact.company || "").trim().toLowerCase();
+      const contactName = String(normalizedContact.name || "").trim().toLowerCase();
+      return Boolean(
+        (companyName && (contactCompany === companyName || contactName === companyName))
+        || (dealName && (contactName === dealName || contactCompany === dealName))
+      );
+    }) || null;
+  }
+
+  function writePendingCrmSalesOrderDraft(dealRow = {}) {
+    const sourceDeal = normalizeCrmDealRecord(dealRow);
+    const sourceDealId = String(sourceDeal.id || "").trim();
+    if (!sourceDealId) {
+      return;
+    }
+    const activeOrgId = getCrmOrgIdFromStorageKey(crmStorageKey)
+      || getCrmOrgIdFromStorageKey(crmSharedContactsKey)
+      || getActiveBusinessAutopilotOrgId()
+      || getActiveCrmScopeOrgId();
+    const scopedDraftKey = buildScopedCrmSalesOrderDraftStorageKey(activeOrgId);
+    const payload = {
+      sourceDeal,
+      orgId: String(activeOrgId || "").trim(),
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      window.localStorage.setItem(scopedDraftKey, JSON.stringify(payload));
+      window.localStorage.setItem(CRM_SALES_ORDER_DRAFT_GLOBAL_KEY, JSON.stringify(payload));
+    } catch {
+      // Continue with client conversion flow even if storage write fails.
+    }
+  }
+
+  function clearCrmActionPopup() {
+    setCrmActionPopup({ open: false, title: "", message: "" });
+  }
+
+  function editCrmSalesOrder(row) {
+    setCrmSalesOrderNotice("");
+    setEditingCrmSalesOrderId(String(row?.id || "").trim());
+    setCrmSalesOrderEditorOpen(true);
+    setCrmSalesOrderTab("list");
+    setCrmSalesOrderForm({
+      ...createEmptyCrmSalesOrder(moduleData.salesOrders || []),
+      ...row,
+      orderId: String(row?.orderId || row?.order_id || "").trim(),
+      docNo: String(row?.orderId || row?.order_id || row?.docNo || row?.doc_no || "").trim(),
+      salesperson: Array.isArray(row?.salesperson)
+        ? row.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean)
+        : String(row?.salesperson || "")
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean),
+      items: (row?.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
+        ...createEmptyDocLine(),
+        ...item,
+        ...splitDocumentLineDescription(item.description, item.customText),
+        id: item.id || createEmptyDocLine().id,
+        itemMasterId: item.itemMasterId || "",
+        inventoryItemId: item.inventoryItemId || "",
+        hsnSacType: normalizeHsnSacType(item.hsnSacType || inferHsnSacTypeFromItem(item, "HSN"), "HSN"),
+        hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
+        qty: String(item.qty ?? "1"),
+        rate: formatCurrencyNumberInput(sanitizeCurrencyInput(String(item.rate ?? "")), crmCurrencyCode),
+        taxPercent: String(item.taxPercent ?? ""),
+      })),
+    });
+  }
+
+  async function saveCrmSalesOrder(event) {
+    event.preventDefault();
+    const form = crmSalesOrderForm;
+    if (!String(form.customerName || "").trim()) {
+      setCrmSalesOrderNotice("Customer / Company name is required.");
+      return;
+    }
+    if (!String(form.issueDate || "").trim()) {
+      setCrmSalesOrderNotice("Issue date is required.");
+      return;
+    }
+    if (!String(form.gstTemplateId || "").trim()) {
+      setCrmSalesOrderNotice("GST template is required.");
+      return;
+    }
+    if (!String(form.billingTemplateId || "").trim()) {
+      setCrmSalesOrderNotice("Billing template is required.");
+      return;
+    }
+    const lineValidationError = (form.items || []).reduce((message, row, index) => {
+      if (message) return message;
+      const lineNumber = index + 1;
+      if (!String(row.qty || "").trim()) return `Qty is required in row ${lineNumber}.`;
+      if (!String(row.rate || "").trim()) return `Rate is required in row ${lineNumber}.`;
+      if (!String(row.taxPercent || "").trim()) return `Tax is required in row ${lineNumber}.`;
+      if (!String(row.hsnSacCode || "").trim()) {
+        const codeLabel = normalizeHsnSacType(row.hsnSacType || "HSN") === "SAC" ? "SAC code" : "HSN code";
+        return `${codeLabel} is required in row ${lineNumber}.`;
+      }
+      return "";
+    }, "");
+    if (lineValidationError) {
+      setCrmSalesOrderNotice(lineValidationError);
+      return;
+    }
+    const payload = {
+      customer_name: String(form.customerName || "").trim(),
+      company: String(form.company || form.customerName || "").trim(),
+      phone: String(form.phone || "").trim(),
+      issue_date: String(form.issueDate || "").trim(),
+      due_date: String(form.dueDate || "").trim(),
+      gst_template_id: String(form.gstTemplateId || "").trim(),
+      billing_template_id: String(form.billingTemplateId || "").trim(),
+      salesperson: Array.isArray(form.salesperson)
+        ? form.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
+        : String(form.salesperson || "").trim(),
+      customer_gstin: String(form.customerGstin || "").trim(),
+      billing_address: String(form.billingAddress || "").trim(),
+      notes: String(form.notes || "").trim(),
+      terms_text: String(form.termsText || "").trim(),
+      payment_status_notes: String(form.paymentStatusNotes || "").trim(),
+      source_deal_id: String(form.sourceDealId || "").trim(),
+      order_id: String(form.orderId || form.docNo || "").trim(),
+      status: String(form.status || "Pending").trim(),
+      items: (form.items || []).map((row) => ({
+        ...row,
+        description: composeDocumentLineDescription(row.description, row.customText),
+        customText: String(row.customText || "").trim(),
+        hsnSacType: normalizeHsnSacType(row.hsnSacType || "HSN"),
+        hsnSacCode: String(row.hsnSacCode || "").trim(),
+        qty: String(row.qty || "").trim(),
+        rate: String(row.rate || "").trim(),
+        taxPercent: String(row.taxPercent || "").trim(),
+      })),
+    };
+    try {
+      if (editingCrmSalesOrderId) {
+        await apiFetch(`/api/business-autopilot/sales-orders/${encodeURIComponent(editingCrmSalesOrderId)}`, {
+          method: "POST",
+          headers: { "X-HTTP-Method-Override": "PATCH" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch("/api/business-autopilot/sales-orders", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+      await refreshCrmRowsFromBackend();
+      setCrmActionPopup({
+        open: true,
+        title: "Successful",
+        message: editingCrmSalesOrderId ? "Sales Order updated successfully." : "Sales Order created successfully.",
+      });
+      closeCrmSalesOrderEditor();
+    } catch (_error) {
+      setCrmSalesOrderNotice("Unable to save Sales Order. Please try again.");
+    }
+  }
+
   async function onConvertDealToSalesOrder(dealRow) {
     const dealId = String(dealRow?.id || "").trim();
     if (!dealId) {
@@ -7052,26 +8674,58 @@ function CrmOnePageModule() {
       });
       return;
     }
-    try {
-      await apiFetch(`/api/business-autopilot/convert-to-sales-order/${encodeURIComponent(dealId)}`, {
-        method: "POST",
-      });
-      await refreshCrmRowsFromBackend();
-    } catch (error) {
-      const detail = String(error?.data?.detail || error?.message || "").trim();
-      const message = detail === "deal_not_won"
-        ? "Please mark this deal as Won, then convert to Sales Order."
-        : "Unable to convert this deal to Sales Order. Please try again.";
+    const matchedCustomer = findExistingSalesOrderCustomerForDeal(dealRow);
+    if (!matchedCustomer) {
+      const matchedContact = findConvertibleCrmContactForDeal(dealRow);
+      if (!matchedContact) {
+        setCrmActionPopup({
+          open: true,
+          title: "Client Required",
+          message: "Convert the related CRM contact into a client first. Client billing details are required before creating a Sales Order.",
+          isError: true,
+        });
+        return;
+      }
+      writePendingCrmSalesOrderDraft(dealRow);
       setCrmActionPopup({
         open: true,
-        title: "Convert Failed",
-        message,
-        isError: true,
+        title: "Convert to Client",
+        message: "This deal is linked to a CRM contact. Convert that contact into a client first, complete billing details, and then continue Sales Order creation.",
+        confirmText: "Convert to Client",
+        cancelText: "Cancel",
+        onConfirm: () => onConvertContactToClient(matchedContact),
       });
       return;
     }
+    openCrmSalesOrderCreate(buildCrmSalesOrderFromDeal(dealRow));
     setActiveSection("salesOrders");
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(String(location.search || ""));
+    const shouldResume = String(params.get("resume-sales-order") || "").trim() === "1";
+    if (!shouldResume) {
+      crmSalesOrderResumeSearchRef.current = "";
+      return;
+    }
+    if (crmSalesOrderResumeSearchRef.current === location.search) {
+      return;
+    }
+    const pendingDraft = readPendingCrmSalesOrderDraft();
+    if (!pendingDraft?.sourceDeal?.id) {
+      crmSalesOrderResumeSearchRef.current = location.search;
+      return;
+    }
+    crmSalesOrderResumeSearchRef.current = location.search;
+    clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
+    openCrmSalesOrderCreate(buildCrmSalesOrderFromDeal(pendingDraft.sourceDeal));
+    setActiveSection("salesOrders");
+    setCrmActionPopup({
+      open: true,
+      title: "Client Created",
+      message: "Client created successfully. Continue with Sales Order creation.",
+    });
+  }, [location.search, crmSalesOrderCustomerOptions, sharedCustomerOptions, activeCrmContacts]);
 
   async function onSubmit(sectionKey, event) {
     event.preventDefault();
@@ -8599,7 +10253,7 @@ function CrmOnePageModule() {
         const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
         const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads"
-          ? (moduleData.contacts || []).filter((contact) => {
+          ? activeCrmContacts.filter((contact) => {
               if (!leadCompanyQuery) {
                 return true;
               }
@@ -8608,7 +10262,7 @@ function CrmOnePageModule() {
             }).slice(0, 6)
           : [];
         const dealCrmContactMatches = sectionKey === "deals"
-          ? (moduleData.contacts || []).filter((contact) => {
+          ? activeCrmContacts.filter((contact) => {
               if (!dealCompanyQuery) {
                 return true;
               }
@@ -8630,7 +10284,7 @@ function CrmOnePageModule() {
               .filter((lead) => !hasFollowUpRelatedToQuery || lead.haystack.includes(followUpRelatedToQuery))
               .slice(0, 6)
             : followUpRelatedToType === CRM_FOLLOWUP_RELATED_TO_TYPES[1]
-              ? (moduleData.contacts || []).map((contact) => ({
+              ? activeCrmContacts.map((contact) => ({
                 id: contact.id,
                 label: String(contact.name || "").trim() || "Unnamed Contact",
                 subText: String(contact.company || contact.email || "").trim() || "-",
@@ -8670,7 +10324,7 @@ function CrmOnePageModule() {
         const showLeadCompanySuggestions = sectionKey === "leads" && leadCompanySearchOpen;
         const showDealCompanySuggestions = sectionKey === "deals" && dealCompanySearchOpen;
         const meetingCrmContactMatches = sectionKey === "meetings"
-          ? (moduleData.contacts || []).filter((contact) => {
+          ? activeCrmContacts.filter((contact) => {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
               if (!meetingCompanyQuery) {
                 return true;
@@ -8855,6 +10509,310 @@ function CrmOnePageModule() {
         const selectedTeamMemberCards = sectionKey === "teams"
           ? selectedTeamMembers.map((member) => ({ name: member }))
           : [];
+        if (sectionKey === "salesOrders") {
+          const salesOrderRows = filteredRows.map((row) => {
+            const totals = computeDocumentTotals(row, crmSalesOrderGstTemplates || []);
+            return {
+              ...row,
+              orderId: String(row.orderId || row.order_id || "").trim() || "-",
+              customerName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
+              issueDate: String(row.issueDate || row.issue_date || "").trim(),
+              dueDate: String(row.dueDate || row.due_date || "").trim(),
+              amountDisplay: totals.grandTotal > 0 ? formatCurrencyAmount(totals.grandTotal, crmCurrencyCode) : "-",
+              gstTemplateName: crmSalesOrderGstTemplates.find((template) => String(template?.id || "") === String(row.gstTemplateId || row.gst_template_id || ""))?.name || "-",
+              billingTemplateName: crmSalesOrderBillingTemplates.find((template) => String(template?.id || "") === String(row.billingTemplateId || row.billing_template_id || ""))?.name || "-",
+            };
+          });
+          const crmSalesOrderEditorModuleData = {
+            gstTemplates: crmSalesOrderGstTemplates,
+            billingTemplates: crmSalesOrderBillingTemplates,
+            invoices: crmAccountsWorkspace.invoices || [],
+            estimates: crmAccountsWorkspace.estimates || [],
+            salesOrders: moduleData.salesOrders || [],
+          };
+          return (
+            <div key={sectionKey} className="d-flex flex-column gap-3">
+              <div className="d-flex flex-wrap gap-2">
+                {[
+                  { key: "list", label: "SO List" },
+                  { key: "gst", label: "GST Templates" },
+                  { key: "billing", label: "Billing Templates" },
+                ].map((tab) => (
+                  <button
+                    key={`crm-sales-order-tab-${tab.key}`}
+                    type="button"
+                    className={`btn btn-sm ${crmSalesOrderTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                    onClick={() => {
+                      setCrmSalesOrderTab(tab.key);
+                      if (tab.key !== "list") {
+                        setCrmSalesOrderEditorOpen(false);
+                        setCrmSalesOrderNotice("");
+                      }
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {crmSalesOrderTab === "list" ? (
+                crmSalesOrderEditorOpen ? (
+                  <div>
+                    {crmSalesOrderNotice ? (
+                      <div className="alert alert-danger py-2 mb-3">{crmSalesOrderNotice}</div>
+                    ) : null}
+                    <BillingDocumentEditor
+                      kind="salesOrder"
+                      form={crmSalesOrderForm}
+                      setField={setCrmSalesOrderField}
+                      totals={crmSalesOrderTotals}
+                      onSave={saveCrmSalesOrder}
+                      onCancelEdit={closeCrmSalesOrderEditor}
+                      editingId={editingCrmSalesOrderId}
+                      moduleData={crmSalesOrderEditorModuleData}
+                      erpUsersForSales={crmSalesOrderErpUsers}
+                      customerOptions={crmSalesOrderCustomerOptions}
+                      taxUi={crmSalesOrderTaxUi}
+                      inventoryItems={crmSalesOrderInventoryItems}
+                      itemMasterOptions={crmSalesOrderItemMasterOptions}
+                      enableItemPicker={false}
+                      applyBillingTemplateToDocument={(_kind, templateId) => applyCrmSalesOrderBillingTemplate(templateId)}
+                      addDocLine={() => addCrmSalesOrderLine()}
+                      updateDocLineDescription={(_kind, lineId, value) => updateCrmSalesOrderLineDescription(lineId, value)}
+                      applyInventoryItemToLine={(_kind, lineId, itemId) => applyCrmSalesOrderInventoryItemToLine(lineId, itemId)}
+                      applyItemMasterToLine={(_kind, lineId, itemId) => applyCrmSalesOrderItemMasterToLine(lineId, itemId)}
+                      selectRecentItemForLine={(_kind, lineId, value) => selectRecentCrmSalesOrderItemForLine(lineId, value)}
+                      availableInventoryQty={getCrmSalesOrderInventoryAvailableQty}
+                      updateDocLine={(_kind, lineId, key, value) => updateCrmSalesOrderLine(lineId, key, value)}
+                      removeDocLine={(_kind, lineId) => removeCrmSalesOrderLine(lineId)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="d-flex flex-wrap justify-content-between gap-2">
+                      <div className="small text-secondary align-self-center">
+                        Convert won deals into sales orders, review loaded CRM data, and save after adding extra details.
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-success"
+                        onClick={() => openCrmSalesOrderCreate()}
+                      >
+                        Create Sales Order
+                      </button>
+                    </div>
+                    <SearchablePaginatedTableCard
+                      title="Sales Orders List"
+                      rows={salesOrderRows}
+                      columns={[
+                        { key: "orderId", label: "Order ID" },
+                        { key: "customerName", label: "Customer" },
+                        { key: "issueDate", label: "Issue Date" },
+                        { key: "dueDate", label: "Due Date" },
+                        { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
+                        { key: "gstTemplateName", label: "GST Template" },
+                        { key: "status", label: "Status" },
+                      ]}
+                      emptyMessage="No sales orders yet."
+                      searchPlaceholder="Search Sales Orders"
+                      pageSize={DEFAULT_TABLE_PAGE_SIZE}
+                      withoutOuterCard
+                      searchBy={(row) => [
+                        row.orderId,
+                        row.customerName,
+                        row.company,
+                        row.status,
+                        row.gstTemplateName,
+                      ].join(" ")}
+                      renderCells={(row) => [
+                        row.orderId || "-",
+                        row.customerName || "-",
+                        formatDateLikeCellValue("issueDate", row.issueDate, "-"),
+                        formatDateLikeCellValue("dueDate", row.dueDate, "-"),
+                        row.amountDisplay || "-",
+                        row.gstTemplateName || "-",
+                        row.convertedToInvoice
+                          ? (
+                            <span className="badge text-bg-success">
+                              Converted to Invoice
+                            </span>
+                          )
+                          : formatDateLikeCellValue("status", row.status, "-"),
+                      ]}
+                      renderActions={(row) => (
+                        <div className="d-inline-flex gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-info"
+                            onClick={() => editCrmSalesOrder(row)}
+                          >
+                            Edit
+                          </button>
+                          {canDeleteCrmRow(sectionKey, row) ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={() => onDelete(sectionKey, row.id)}
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      )}
+                    />
+                  </>
+                )
+              ) : null}
+
+              {crmSalesOrderTab === "gst" ? (
+                <>
+                  {crmSalesOrderNotice ? (
+                    <div className="alert alert-danger py-2 mb-0">{crmSalesOrderNotice}</div>
+                  ) : null}
+                  <SearchablePaginatedTableCard
+                    title="GST Template List"
+                    badgeLabel={`${crmSalesOrderGstTemplates.length} templates`}
+                    rows={crmSalesOrderGstTemplates}
+                    columns={[
+                      { key: "name", label: "Template Name" },
+                      { key: "taxScope", label: crmSalesOrderTaxUi.scopeLabel },
+                      { key: "cgst", label: crmSalesOrderTaxUi.cgstLabel.replace(" %", "") },
+                      { key: "sgst", label: crmSalesOrderTaxUi.sgstLabel.replace(" %", "") },
+                      { key: "igst", label: crmSalesOrderTaxUi.igstLabel.replace(" %", "") },
+                      { key: "cess", label: crmSalesOrderTaxUi.cessLabel.replace(" %", "") },
+                      { key: "total", label: "Total" },
+                      { key: "status", label: "Status" },
+                    ]}
+                    emptyMessage="No GST templates available."
+                    searchPlaceholder="Search GST Templates"
+                    pageSize={DEFAULT_TABLE_PAGE_SIZE}
+                    withoutOuterCard
+                    searchBy={(row) => [
+                      row.name,
+                      row.scopeLabel || row.scope || row.taxScope,
+                      row.status,
+                      row.notes,
+                    ].join(" ")}
+                    renderCells={(row) => [
+                      (
+                        <div>
+                          <div className="fw-semibold">{String(row.name || "").trim() || "-"}</div>
+                          <div className="small text-secondary">{String(row.notes || "").trim() || "-"}</div>
+                        </div>
+                      ),
+                      String(row.scopeLabel || row.scope || row.taxScope || "").trim() || "-",
+                      `${row.cgst || ""}%`,
+                      `${row.sgst || ""}%`,
+                      `${row.igst || ""}%`,
+                      `${row.cess || ""}%`,
+                      `${gstTemplateTotalPercent(row)}%`,
+                      (
+                        <select
+                          className="form-select form-select-sm"
+                          value={row.status || "Active"}
+                          onChange={(event) => updateCrmGstStatus(row.id, event.target.value)}
+                        >
+                          {GST_STATUS_OPTIONS.map((status) => (
+                            <option key={`crm-gst-${row.id}-${status}`} value={status}>{status}</option>
+                          ))}
+                        </select>
+                      ),
+                    ]}
+                    renderActions={(row) => (
+                      <div className="d-inline-flex gap-2">
+                        <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editCrmGstTemplate(row)}>Edit</button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteCrmGstTemplate(row.id)}>Delete</button>
+                      </div>
+                    )}
+                  />
+
+                  <div className="card p-3">
+                    <h6 className="mb-1">{editingCrmGstId ? crmSalesOrderTaxUi.editTitle : crmSalesOrderTaxUi.createTitle}</h6>
+                    <div className="small text-secondary mb-3">{crmSalesOrderTaxUi.helperText}</div>
+                    <form className="d-flex flex-column gap-3" onSubmit={saveCrmGstTemplate}>
+                      <div className="row g-3">
+                        <div className="col-12 col-xl-4">
+                          <label className="form-label small text-secondary mb-1">Template Name</label>
+                          <input className="form-control" value={crmGstForm.name || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, name: event.target.value }))} placeholder={crmSalesOrderTaxUi.namePlaceholder} />
+                        </div>
+                        <div className="col-12 col-xl-2">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.scopeLabel}</label>
+                          <select className="form-select" value={crmGstForm.taxScope || crmSalesOrderTaxUi.defaultScope} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, taxScope: event.target.value }))}>
+                            {Array.from(new Set([...(crmSalesOrderTaxUi.scopeOptions || []), String(crmGstForm.taxScope || "").trim()].filter(Boolean))).map((scope) => (
+                              <option key={`crm-gst-scope-${scope}`} value={scope}>{scope}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cgstLabel}</label>
+                          <input className="form-control" value={crmGstForm.cgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cgst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.sgstLabel}</label>
+                          <input className="form-control" value={crmGstForm.sgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, sgst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.igstLabel}</label>
+                          <input className="form-control" value={crmGstForm.igst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, igst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cessLabel}</label>
+                          <input className="form-control" value={crmGstForm.cess || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cess: event.target.value }))} />
+                        </div>
+                        <div className="col-12 col-xl-2">
+                          <label className="form-label small text-secondary mb-1">Status</label>
+                          <select className="form-select" value={crmGstForm.status || "Active"} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, status: event.target.value }))}>
+                            {GST_STATUS_OPTIONS.map((status) => (
+                              <option key={`crm-gst-form-status-${status}`} value={status}>{status}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-12">
+                          <label className="form-label small text-secondary mb-1">Notes</label>
+                          <textarea className="form-control" rows="2" value={crmGstForm.notes || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder={crmSalesOrderTaxUi.notesPlaceholder} />
+                        </div>
+                      </div>
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-success btn-sm">{editingCrmGstId ? crmSalesOrderTaxUi.editActionLabel : crmSalesOrderTaxUi.createActionLabel}</button>
+                        {editingCrmGstId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetCrmGstForm}>Cancel</button> : null}
+                      </div>
+                    </form>
+                  </div>
+                </>
+              ) : null}
+
+              {crmSalesOrderTab === "billing" ? (
+                <SearchablePaginatedTableCard
+                  title="Billing Template List"
+                  rows={crmSalesOrderBillingTemplates}
+                  columns={[
+                    { key: "name", label: "Template Name" },
+                    { key: "docTypeLabel", label: "Document Type" },
+                    { key: "footerNote", label: "Footer Note" },
+                    { key: "termsText", label: "Terms" },
+                  ]}
+                  emptyMessage="No billing templates available."
+                  searchPlaceholder="Search Billing Templates"
+                  pageSize={DEFAULT_TABLE_PAGE_SIZE}
+                  withoutOuterCard
+                  searchBy={(row) => [
+                    row.name,
+                    row.docType,
+                    row.footerNote,
+                    row.termsText,
+                  ].join(" ")}
+                  renderCells={(row) => [
+                    String(row.name || "").trim() || "-",
+                    String(row.docType || "General").trim() || "General",
+                    String(row.footerNote || "-").trim() || "-",
+                    String(row.termsText || "-").trim() || "-",
+                  ]}
+                  renderActions={() => null}
+                />
+              ) : null}
+            </div>
+          );
+        }
         return (
 		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
 		            {shouldShowCrmForm ? (
@@ -10973,7 +12931,7 @@ function CrmOnePageModule() {
           role="dialog"
           aria-modal="true"
           className="modal-overlay wz-crm-popup-overlay"
-          onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+          onClick={clearCrmActionPopup}
         >
           <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -10981,19 +12939,34 @@ function CrmOnePageModule() {
               <button
                 type="button"
                 className="btn btn-sm wz-crm-popup-close"
-                onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+                onClick={clearCrmActionPopup}
               >
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
             <div className="text-secondary mb-3">{crmActionPopup.message || "Operation completed successfully."}</div>
-            <div className="d-flex justify-content-end">
+            <div className="d-flex justify-content-end gap-2">
+              {typeof crmActionPopup.onConfirm === "function" ? (
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm"
+                  onClick={clearCrmActionPopup}
+                >
+                  {crmActionPopup.cancelText || "Cancel"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn btn-success btn-sm"
-                onClick={() => setCrmActionPopup({ open: false, title: "", message: "" })}
+                onClick={() => {
+                  const confirmAction = crmActionPopup.onConfirm;
+                  clearCrmActionPopup();
+                  if (typeof confirmAction === "function") {
+                    confirmAction();
+                  }
+                }}
               >
-                OK
+                {crmActionPopup.confirmText || "OK"}
               </button>
             </div>
           </div>
@@ -14439,7 +16412,10 @@ function CategoryCrudModule({
   storageKey,
   statsBuilder,
   statIcons = [],
-  defaultActiveTab = ""
+  defaultActiveTab = "",
+  renderInventoryItemActions = null,
+  extraTabs = [],
+  renderExtraTabContent = null
 }) {
   const CATEGORY_ENTRY_LIMIT = 100;
   const firstTab = Object.keys(tabConfig)[0];
@@ -14464,8 +16440,10 @@ function CategoryCrudModule({
   ));
   const [categoryEditingIds, setCategoryEditingIds] = useState({ mainCategories: "", subCategories: "" });
   const [categoryNotice, setCategoryNotice] = useState("");
+  const [moduleActionPopup, setModuleActionPopup] = useState({ open: false, title: "", message: "" });
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [ticketingClientSearchOpen, setTicketingClientSearchOpen] = useState(false);
+  const extraTabKeys = useMemo(() => (extraTabs || []).map((tab) => tab.key), [extraTabs]);
 
   useEffect(() => {
     try {
@@ -14520,12 +16498,12 @@ function CategoryCrudModule({
 
   useEffect(() => {
     setEditingId("");
-    if (activeTab === "categories") {
+    if (activeTab === "categories" || extraTabKeys.includes(activeTab)) {
       return;
     }
     setTicketingClientSearchOpen(false);
     setFormValues(buildEmptyValues(tabConfig[activeTab].fields));
-  }, [activeTab, tabConfig]);
+  }, [activeTab, tabConfig, extraTabKeys]);
 
   useEffect(() => {
     if (!tabConfig?.tickets) {
@@ -14541,20 +16519,22 @@ function CategoryCrudModule({
 
   const visibleTabs = useMemo(() => {
     if (!hasCombinedCategoryTabs) {
-      return Object.entries(tabConfig).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
+      return [...Object.entries(tabConfig).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label })), ...(extraTabs || [])];
     }
     const nonCategoryEntries = Object.entries(tabConfig)
       .filter(([tabKey]) => tabKey !== "mainCategories" && tabKey !== "subCategories")
       .map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
-    return [...nonCategoryEntries, { key: "categories", label: "Category" }];
-  }, [hasCombinedCategoryTabs, tabConfig]);
+    return [...nonCategoryEntries, { key: "categories", label: "Category" }, ...(extraTabs || [])];
+  }, [hasCombinedCategoryTabs, tabConfig, extraTabs]);
   const hasOverviewTab = useMemo(
     () => Object.prototype.hasOwnProperty.call(tabConfig || {}, "overview"),
     [tabConfig]
   );
 
-  const config = activeTab === "categories" ? null : tabConfig[activeTab];
-  const currentRows = activeTab === "categories" ? [] : (moduleData[activeTab] || []);
+  const isExtraTab = extraTabKeys.includes(activeTab);
+  const config = activeTab === "categories" || isExtraTab ? null : tabConfig[activeTab];
+  const currentRows = activeTab === "categories" || isExtraTab ? [] : (moduleData[activeTab] || []);
+  const isStocksModule = storageKey === STOCKS_STORAGE_KEY;
   const isInventoryItemsTab = storageKey === STOCKS_STORAGE_KEY && activeTab === "items";
   const isTicketingTicketsTab = storageKey === TICKETING_STORAGE_KEY && activeTab === "tickets";
   const sharedTicketingCustomers = useMemo(
@@ -14745,6 +16725,13 @@ function CategoryCrudModule({
         [activeTab]: [{ id: `${activeTab}_${Date.now()}`, ...payload }, ...existing]
       };
     });
+    if (isStocksModule && isInventoryItemsTab) {
+      setModuleActionPopup({
+        open: true,
+        title: editingId ? "Inventory Updated" : "Inventory Created",
+        message: editingId ? "Inventory item updated successfully." : "Inventory item created successfully.",
+      });
+    }
     onCancelEdit();
   }
 
@@ -14823,6 +16810,14 @@ function CategoryCrudModule({
         [tabKey]: [{ id: `${tabKey}_${Date.now()}`, ...payload }, ...existing]
       };
     });
+    if (isStocksModule) {
+      const label = cfg.itemLabel || cfg.label || "Category";
+      setModuleActionPopup({
+        open: true,
+        title: editId ? `${label} Updated` : `${label} Created`,
+        message: editId ? `${label} updated successfully.` : `${label} created successfully.`,
+      });
+    }
     onCategoryCancelEdit(tabKey);
   }
 
@@ -14883,10 +16878,13 @@ function CategoryCrudModule({
                         <div className="row g-3">
                           {cfg.fields.map((field) => (
                             <div className="col-12 col-xl-4" key={`${tabKey}-${field.key}`}>
-                              <label className="form-label small text-secondary mb-1">{field.label}</label>
+                              <label className="form-label small text-secondary mb-1">
+                                {field.label}{isStocksModule ? " *" : ""}
+                              </label>
                               {storageKey === STOCKS_STORAGE_KEY && tabKey === "subCategories" && field.key === "mainCategory" ? (
                                 <select
                                   className="form-select"
+                                  required={isStocksModule}
                                   value={form[field.key] || ""}
                                   onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
                                 >
@@ -14901,6 +16899,7 @@ function CategoryCrudModule({
                                 <input
                                   type={field.type || "text"}
                                   className="form-control"
+                                  required={isStocksModule}
                                   placeholder={field.placeholder}
                                   value={form[field.key] || ""}
                                   onChange={(event) => onCategoryChangeField(tabKey, field.key, event.target.value)}
@@ -14956,7 +16955,9 @@ function CategoryCrudModule({
         </div>
       ) : null}
 
-      {activeTab !== "categories" && activeTab !== "tickets" && !isInventoryItemsTab ? (
+      {isExtraTab && typeof renderExtraTabContent === "function" ? renderExtraTabContent({ activeTab, moduleData, setModuleData }) : null}
+
+      {activeTab !== "categories" && !isExtraTab && activeTab !== "tickets" && !isInventoryItemsTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
           badgeLabel={`${currentRows.length} items`}
@@ -14990,7 +16991,7 @@ function CategoryCrudModule({
         />
       ) : null}
 
-      {activeTab !== "categories" ? (
+      {activeTab !== "categories" && !isExtraTab ? (
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
         <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
@@ -15019,7 +17020,9 @@ function CategoryCrudModule({
                 }
                 key={field.key}
               >
-                <label className="form-label small text-secondary mb-1">{field.label}</label>
+                <label className="form-label small text-secondary mb-1">
+                  {field.label}{isStocksModule ? " *" : ""}
+                </label>
                 {field.key === "department" && departmentOptions.length ? (
                   <select
                     className="form-select"
@@ -15161,6 +17164,7 @@ function CategoryCrudModule({
                     <input
                       type="text"
                       className="form-control datalist-readable-input inventory-category-datalist"
+                      required={isStocksModule}
                       list="inventory-main-category-list"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
@@ -15181,6 +17185,7 @@ function CategoryCrudModule({
                     <input
                       type="text"
                       className="form-control datalist-readable-input inventory-category-datalist"
+                      required={isStocksModule}
                       list="inventory-sub-category-list"
                       placeholder={field.placeholder}
                       value={formValues[field.key] || ""}
@@ -15197,6 +17202,7 @@ function CategoryCrudModule({
                   <input
                     type={field.type || "text"}
                     className="form-control"
+                    required={isStocksModule}
                     placeholder={field.placeholder}
                     value={formValues[field.key] || ""}
                     maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
@@ -15238,7 +17244,7 @@ function CategoryCrudModule({
       </div>
       ) : null}
 
-      {isInventoryItemsTab ? (
+      {isInventoryItemsTab && !isExtraTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
           badgeLabel={`${currentRows.length} items`}
@@ -15260,19 +17266,29 @@ function CategoryCrudModule({
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={(row) => (
-            <div className="d-inline-flex gap-2">
-              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
-                Edit
-              </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
-                Delete
-              </button>
-            </div>
+            renderInventoryItemActions
+              ? renderInventoryItemActions({
+                  row,
+                  onEditRow,
+                  onDeleteRow,
+                  moduleData,
+                  activeTab,
+                })
+              : (
+                <div className="d-inline-flex gap-2">
+                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                    Delete
+                  </button>
+                </div>
+              )
           )}
         />
       ) : null}
 
-      {activeTab === "tickets" ? (
+      {activeTab === "tickets" && !isExtraTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
           badgeLabel={`${currentRows.length} items`}
@@ -15295,6 +17311,27 @@ function CategoryCrudModule({
             </div>
           )}
         />
+      ) : null}
+
+      {moduleActionPopup.open ? (
+        <div className="modal-overlay wz-crm-popup-overlay" role="dialog" aria-modal="true" onClick={() => setModuleActionPopup((prev) => ({ ...prev, open: false }))}>
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">{moduleActionPopup.title}</h5>
+                <p className="mb-0 small text-secondary">{moduleActionPopup.message}</p>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={() => setModuleActionPopup((prev) => ({ ...prev, open: false }))}>
+                Close
+              </button>
+            </div>
+            <div className="d-flex justify-content-end">
+              <button type="button" className="btn btn-success btn-sm" onClick={() => setModuleActionPopup((prev) => ({ ...prev, open: false }))}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -15327,6 +17364,19 @@ function TicketingSystemModule() {
 }
 
 function StocksManagementModule() {
+  const [stockHistoryPopup, setStockHistoryPopup] = useState({
+    open: false,
+    itemName: "",
+    rows: [],
+  });
+  const [stockHistoryTab, setStockHistoryTab] = useState("all");
+  const [stockSettings, setStockSettings] = useState(createDefaultStockAlertSettings());
+  const [stockAlertDepartments, setStockAlertDepartments] = useState([]);
+  const [stockAlertUsers, setStockAlertUsers] = useState([]);
+  const [stockDepartmentSearch, setStockDepartmentSearch] = useState("");
+  const [stockDepartmentSearchOpen, setStockDepartmentSearchOpen] = useState(false);
+  const [stockUserSearch, setStockUserSearch] = useState("");
+  const [stockUserSearchOpen, setStockUserSearchOpen] = useState(false);
   const statsBuilder = useMemo(() => (data) => {
     const itemCount = (data.items || []).length;
     const lowStockAlerts = (data.items || []).filter((row) => Number(row.qty || 0) > 0 && Number(row.qty || 0) <= 5).length;
@@ -15337,17 +17387,413 @@ function StocksManagementModule() {
       { label: "Categories", value: String(categoryCount) }
     ];
   }, []);
+  const filteredStockHistoryRows = useMemo(
+    () => (
+      stockHistoryTab === "all"
+        ? stockHistoryPopup.rows
+        : stockHistoryPopup.rows.filter((row) => row.historyType === stockHistoryTab)
+    ),
+    [stockHistoryPopup.rows, stockHistoryTab]
+  );
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+      if (!raw) {
+        setStockSettings(createDefaultStockAlertSettings());
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const storedSettings = parsed?.settings?.stockAlerts || {};
+      setStockSettings({
+        ...createDefaultStockAlertSettings(),
+        ...storedSettings,
+        notifications: {
+          ...createDefaultStockAlertSettings().notifications,
+          ...(storedSettings.notifications || {}),
+        },
+        departments: Array.isArray(storedSettings.departments) ? storedSettings.departments : [],
+        users: Array.isArray(storedSettings.users) ? storedSettings.users : [],
+      });
+    } catch {
+      setStockSettings(createDefaultStockAlertSettings());
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await apiFetch("/api/business-autopilot/departments");
+        if (!active) {
+          return;
+        }
+        const departmentNames = Array.from(new Set(
+          (Array.isArray(data?.departments) ? data.departments : [])
+            .map((row) => String(row?.name || "").trim())
+            .filter(Boolean)
+        ));
+        setStockAlertDepartments(departmentNames);
+      } catch {
+        if (active) {
+          setStockAlertDepartments([]);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const userNames = Array.from(new Set(
+      [
+        ...(readSharedHrEmployees() || []).map((row) => row?.name),
+        ...((DEFAULT_HR_DATA.employees || []).map((row) => row?.name)),
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+    setStockAlertUsers(userNames);
+  }, []);
+
+  const stockDepartmentMatches = useMemo(() => {
+    const query = String(stockDepartmentSearch || "").trim().toLowerCase();
+    return stockAlertDepartments
+      .filter((department) => !(stockSettings.departments || []).includes(department))
+      .filter((department) => !query || department.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [stockAlertDepartments, stockDepartmentSearch, stockSettings.departments]);
+
+  const stockUserMatches = useMemo(() => {
+    const query = String(stockUserSearch || "").trim().toLowerCase();
+    return stockAlertUsers
+      .filter((user) => !(stockSettings.users || []).includes(user))
+      .filter((user) => !query || user.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [stockAlertUsers, stockUserSearch, stockSettings.users]);
+
+  function toggleStockAlertSelection(key, value) {
+    setStockSettings((prev) => {
+      const nextValues = Array.isArray(prev[key]) ? prev[key] : [];
+      const normalizedValue = String(value || "").trim();
+      if (!normalizedValue) {
+        return prev;
+      }
+      const exists = nextValues.includes(normalizedValue);
+      return {
+        ...prev,
+        [key]: exists
+          ? nextValues.filter((entry) => entry !== normalizedValue)
+          : [...nextValues, normalizedValue],
+      };
+    });
+  }
+
+  function saveStockAlertSettings() {
+    const normalizedThreshold = String(stockSettings.lowStockThreshold || "").trim();
+    if (!normalizedThreshold) {
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : DEFAULT_STOCKS_DATA;
+      const nextData = {
+        ...(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA),
+        settings: {
+          ...((parsed && typeof parsed === "object" && parsed.settings) ? parsed.settings : {}),
+          stockAlerts: {
+            ...stockSettings,
+            lowStockThreshold: normalizedThreshold,
+          },
+        },
+      };
+      window.localStorage.setItem(STOCKS_STORAGE_KEY, JSON.stringify(nextData));
+    } catch {
+      // ignore storage errors for local settings UI
+    }
+  }
 
   return (
-    <CategoryCrudModule
-      heading="Inventory"
-      subtitle="Create main/sub categories and manage inventory items with create, edit, and delete actions."
-      tabConfig={STOCKS_TAB_CONFIG}
-      defaultData={DEFAULT_STOCKS_DATA}
-      storageKey={STOCKS_STORAGE_KEY}
-      statsBuilder={statsBuilder}
-      statIcons={["bi-box-seam", "bi-exclamation-triangle", "bi-diagram-3"]}
-    />
+    <>
+      <CategoryCrudModule
+        heading="Inventory"
+        subtitle="Create main/sub categories and manage inventory items with create, edit, and delete actions."
+        tabConfig={STOCKS_TAB_CONFIG}
+        defaultData={DEFAULT_STOCKS_DATA}
+        storageKey={STOCKS_STORAGE_KEY}
+        statsBuilder={statsBuilder}
+        statIcons={["bi-box-seam", "bi-exclamation-triangle", "bi-diagram-3"]}
+        extraTabs={[{ key: "settings", label: "Setting" }]}
+        renderExtraTabContent={({ activeTab }) => (
+          activeTab === "settings" ? (
+            <div className="card p-3">
+              <h5 className="mb-2">Inventory Settings</h5>
+              <p className="text-secondary mb-3">Configure low stock alert threshold and notification targets.</p>
+
+              <div className="row g-3">
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Low Stock Alert Below Qty *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control"
+                    value={stockSettings.lowStockThreshold || ""}
+                    onChange={(event) => setStockSettings((prev) => ({ ...prev, lowStockThreshold: event.target.value }))}
+                    placeholder="5"
+                  />
+                </div>
+                <div className="col-12 col-xl-5">
+                  <label className="form-label small text-secondary mb-1">Alert Departments</label>
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Search and select departments"
+                      value={stockDepartmentSearch}
+                      onFocus={() => setStockDepartmentSearchOpen(true)}
+                      onClick={() => setStockDepartmentSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setStockDepartmentSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        setStockDepartmentSearch(event.target.value);
+                        setStockDepartmentSearchOpen(true);
+                      }}
+                    />
+                    {stockDepartmentSearchOpen ? (
+                      stockDepartmentMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Departments</div>
+                            {stockDepartmentMatches.map((department) => (
+                              <button
+                                key={`stock-setting-dept-${department}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  toggleStockAlertSelection("departments", department);
+                                  setStockDepartmentSearch("");
+                                  setStockDepartmentSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{department}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No departments found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                  <div className="d-flex flex-wrap gap-2 mt-2">
+                    {(stockSettings.departments || []).length ? (stockSettings.departments || []).map((department) => (
+                      <span key={`stock-setting-dept-chip-${department}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                        <button
+                          type="button"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                          onClick={() => toggleStockAlertSelection("departments", department)}
+                          aria-label={`Remove ${department}`}
+                        >
+                          &times;
+                        </button>
+                        <span>{department}</span>
+                      </span>
+                    )) : <div className="small text-secondary">No departments selected.</div>}
+                  </div>
+                </div>
+
+                <div className="col-12 col-xl-5">
+                  <label className="form-label small text-secondary mb-1">Alert Users</label>
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Search and select users"
+                      value={stockUserSearch}
+                      onFocus={() => setStockUserSearchOpen(true)}
+                      onClick={() => setStockUserSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setStockUserSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        setStockUserSearch(event.target.value);
+                        setStockUserSearchOpen(true);
+                      }}
+                    />
+                    {stockUserSearchOpen ? (
+                      stockUserMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Users</div>
+                            {stockUserMatches.map((user) => (
+                              <button
+                                key={`stock-setting-user-${user}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  toggleStockAlertSelection("users", user);
+                                  setStockUserSearch("");
+                                  setStockUserSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{user}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No users found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                  <div className="d-flex flex-wrap gap-2 mt-2">
+                    {(stockSettings.users || []).length ? (stockSettings.users || []).map((user) => (
+                      <span key={`stock-setting-user-chip-${user}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                        <button
+                          type="button"
+                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                          onClick={() => toggleStockAlertSelection("users", user)}
+                          aria-label={`Remove ${user}`}
+                        >
+                          &times;
+                        </button>
+                        <span>{user}</span>
+                      </span>
+                    )) : <div className="small text-secondary">No users selected.</div>}
+                  </div>
+                </div>
+
+                <div className="col-12 col-xl-6">
+                  <label className="form-label small text-secondary mb-2">Alert Notifications</label>
+                  <div className="d-flex flex-wrap gap-3">
+                    {[
+                      { key: "email", label: "Email" },
+                      { key: "whatsapp", label: "Whatsapp" },
+                      { key: "portalInbox", label: "Portal Inbox" },
+                    ].map((channel) => (
+                      <label key={channel.key} className="form-check d-flex align-items-center gap-2 mb-0">
+                        <input
+                          type="checkbox"
+                          className="form-check-input mt-0"
+                          checked={Boolean(stockSettings.notifications?.[channel.key])}
+                          onChange={(event) => setStockSettings((prev) => ({
+                            ...prev,
+                            notifications: {
+                              ...(prev.notifications || {}),
+                              [channel.key]: event.target.checked,
+                            },
+                          }))}
+                        />
+                        <span>{channel.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="col-12 col-xl-6 d-flex align-items-end justify-content-xl-end">
+                  <button type="button" className="btn btn-success btn-sm" onClick={saveStockAlertSettings}>
+                    Save Settings
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null
+        )}
+        renderInventoryItemActions={({ row, onEditRow, onDeleteRow }) => (
+          <div className="d-inline-flex gap-2">
+            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+              Edit
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-light"
+              onClick={() => {
+                const nextRows = getInventoryHistoryRowsForItem(row.id, readSharedAccountsData().invoices || []);
+                setStockHistoryPopup({
+                  open: true,
+                  itemName: String(row.itemName || row.name || "Inventory Item"),
+                  rows: nextRows,
+                });
+                setStockHistoryTab("all");
+              }}
+            >
+              History
+            </button>
+            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+              Delete
+            </button>
+          </div>
+        )}
+      />
+
+      {stockHistoryPopup.open ? (
+        <div className="modal-overlay wz-crm-popup-overlay" role="dialog" aria-modal="true" onClick={() => setStockHistoryPopup((prev) => ({ ...prev, open: false }))}>
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(880px, 96vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Product Stock History</h5>
+                <div className="small text-secondary">{stockHistoryPopup.itemName || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={() => setStockHistoryPopup((prev) => ({ ...prev, open: false }))}>
+                Close
+              </button>
+            </div>
+
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              {[
+                { key: "all", label: `All (${stockHistoryPopup.rows.length})` },
+                { key: "invoiced", label: `Invoiced (${stockHistoryPopup.rows.filter((row) => row.historyType === "invoiced").length})` },
+                { key: "locked", label: `Locked (${stockHistoryPopup.rows.filter((row) => row.historyType === "locked").length})` },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`btn btn-sm ${stockHistoryTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                  onClick={() => setStockHistoryTab(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="table-responsive">
+              <table className="table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Invoice Number</th>
+                    <th>Created Date</th>
+                    <th>Used Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStockHistoryRows.length ? filteredStockHistoryRows.map((row) => (
+                    <tr key={row.id}>
+                      <td className="fw-semibold">{row.invoiceNo || "-"}</td>
+                      <td>{formatDateLikeCellValue("issueDate", row.createdDate, "-")}</td>
+                      <td>{row.usedQty}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan="3" className="text-center text-secondary py-4">
+                        No invoice history found for this product.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -15459,6 +17905,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionAssignSearch, setSubscriptionAssignSearch] = useState("");
   const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
   const [accountsFormNotice, setAccountsFormNotice] = useState("");
+  const [accountsActionPopup, setAccountsActionPopup] = useState({ open: false, title: "", message: "" });
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
   const isValidAccountsTab = new Set([
@@ -15735,6 +18182,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       return type === itemMasterListTypeFilter;
     }),
     [moduleData.itemMasters, itemMasterListTypeFilter]
+  );
+  const productItemMasterRows = useMemo(
+    () => (moduleData.itemMasters || []).filter((row) => String(row?.itemType || "Product") === "Product"),
+    [moduleData.itemMasters]
+  );
+  const serviceItemMasterRows = useMemo(
+    () => (moduleData.itemMasters || []).filter((row) => String(row?.itemType || "Product") === "Service"),
+    [moduleData.itemMasters]
   );
   const inventoryItems = useMemo(() => Array.isArray(inventoryWorkspace?.items) ? inventoryWorkspace.items : [], [inventoryWorkspace]);
   const inventoryItemLookup = useMemo(
@@ -16956,6 +19411,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (!selected) {
       return;
     }
+    const currencyCode = orgBillingCurrency || getOrgCurrency();
     const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
     setter((prev) => ({
       ...prev,
@@ -16966,8 +19422,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               itemMasterId: selected.id,
               inventoryItemId: "",
               description: selected.name || row.description,
+              hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
               hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
-              rate: String(selected.defaultRate || row.rate || ""),
+              rate: formatCurrencyNumberInput(
+                sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
+                currencyCode
+              ),
               taxPercent: String(selected.taxPercent || row.taxPercent || "")
             }
           : row
@@ -16990,7 +19450,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       if (!invoice || (excludeInvoiceId && invoice.id === excludeInvoiceId)) return;
       const deliveryStatus = String(invoice.deliveryStatus || "").toLowerCase();
       const status = String(invoice.status || "").toLowerCase();
-      if (deliveryStatus === "completed" || status === "cancelled") return;
+      if (isInventoryCommittedDeliveryStatus(deliveryStatus) || status === "cancelled") return;
       (invoice.items || []).forEach((line) => {
         const inventoryItemId = String(line?.inventoryItemId || "").trim();
         if (!inventoryItemId) return;
@@ -17035,6 +19495,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const linkedItemMaster = (moduleData.itemMasters || []).find((itemMaster) =>
       String(itemMaster?.name || "").trim().toLowerCase() === String(selected?.itemName || "").trim().toLowerCase()
     );
+    const resolvedHsnSacType = inferHsnSacTypeFromItem(
+      selected,
+      inferHsnSacTypeFromItem(linkedItemMaster, "HSN")
+    );
     const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
     setter((prev) => ({
       ...prev,
@@ -17045,6 +19509,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               inventoryItemId: selected.id,
               itemMasterId: "",
               description: selected.itemName || row.description || "",
+              hsnSacType: resolvedHsnSacType,
               hsnSacCode: String(
                 selected.hsnSacCode
                 || selected.hsnCode
@@ -17059,47 +19524,46 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }));
   }
 
-  function applyInventoryDeductionForInvoiceCompletion(previousInvoice, nextInvoice) {
-    if (!nextInvoice || String(nextInvoice.deliveryStatus || "").toLowerCase() !== "completed") {
+  function applyInventorySyncForInvoiceChange(previousInvoice, nextInvoice) {
+    const previousCommitted = previousInvoice && !isCancelledInvoiceStatus(previousInvoice.status)
+      ? isInventoryCommittedDeliveryStatus(previousInvoice.deliveryStatus)
+      : false;
+    const nextCommitted = nextInvoice && !isCancelledInvoiceStatus(nextInvoice.status)
+      ? isInventoryCommittedDeliveryStatus(nextInvoice.deliveryStatus)
+      : false;
+    const previousQtyMap = previousCommitted ? getInvoiceInventoryQtyMap(previousInvoice) : new Map();
+    const nextQtyMap = nextCommitted ? getInvoiceInventoryQtyMap(nextInvoice) : new Map();
+    const affectedItemIds = new Set([...previousQtyMap.keys(), ...nextQtyMap.keys()]);
+
+    if (affectedItemIds.size && inventoryWorkspace && Array.isArray(inventoryWorkspace.items)) {
+      const nextWorkspace = {
+        ...inventoryWorkspace,
+        items: (inventoryWorkspace.items || []).map((row) => {
+          const key = String(row?.id || "").trim();
+          if (!affectedItemIds.has(key)) {
+            return row;
+          }
+          const previousQty = parseNumber(previousQtyMap.get(key) || 0);
+          const nextQty = parseNumber(nextQtyMap.get(key) || 0);
+          const delta = nextQty - previousQty;
+          if (!delta) {
+            return row;
+          }
+          const currentQty = parseNumber(row?.qty);
+          return { ...row, qty: String(Math.max(0, currentQty - delta)) };
+        })
+      };
+      saveInventoryWorkspace(nextWorkspace);
+    }
+
+    if (!nextInvoice) {
       return nextInvoice;
     }
-    if (nextInvoice.inventoryCommitted) {
-      return nextInvoice;
-    }
-    const previousDeliveryCompleted = String(previousInvoice?.deliveryStatus || "").toLowerCase() === "completed";
-    if (previousDeliveryCompleted && previousInvoice?.inventoryCommitted) {
-      return { ...nextInvoice, inventoryCommitted: true };
-    }
-    if (!inventoryWorkspace || !Array.isArray(inventoryWorkspace.items)) {
-      return { ...nextInvoice, inventoryCommitted: true };
-    }
-    const deductionByItem = new Map();
-    (nextInvoice.items || []).forEach((line) => {
-      const itemId = String(line?.inventoryItemId || "").trim();
-      if (!itemId) return;
-      const qty = parseNumber(line?.qty);
-      if (qty <= 0) return;
-      deductionByItem.set(itemId, (deductionByItem.get(itemId) || 0) + qty);
-    });
-    if (!deductionByItem.size) {
-      return { ...nextInvoice, inventoryCommitted: true };
-    }
-    const nextWorkspace = {
-      ...inventoryWorkspace,
-      items: (inventoryWorkspace.items || []).map((row) => {
-        const key = String(row?.id || "");
-        const deductQty = parseNumber(deductionByItem.get(key) || 0);
-        if (!deductQty) return row;
-        const currentQty = parseNumber(row?.qty);
-        return { ...row, qty: String(Math.max(0, currentQty - deductQty)) };
-      })
-    };
-    saveInventoryWorkspace(nextWorkspace);
-    return { ...nextInvoice, inventoryCommitted: true };
+    return { ...nextInvoice, inventoryCommitted: nextCommitted && nextQtyMap.size > 0 };
   }
 
   function openDocumentPrint(kind, id) {
-    const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print`;
+    const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print?format=pdf`;
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
@@ -17132,9 +19596,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   function updateDocLine(kind, lineId, key, value) {
     const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
+    const normalizedValue = key === "rate"
+      ? formatCurrencyNumberInput(sanitizeCurrencyInput(value), orgBillingCurrency || getOrgCurrency())
+      : value;
     setter((prev) => ({
       ...prev,
-      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: value } : row))
+      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row))
     }));
   }
 
@@ -17174,6 +19641,43 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setAccountsFormNotice("Client / Company name is required.");
       return;
     }
+    if (!String(form.gstTemplateId || "").trim()) {
+      setAccountsFormNotice("GST template is required.");
+      return;
+    }
+    if (!String(form.billingTemplateId || "").trim()) {
+      setAccountsFormNotice("Billing template is required.");
+      return;
+    }
+    if (kind === "invoice" && !String(form.issueDate || "").trim()) {
+      setAccountsFormNotice("Issue date is required.");
+      return;
+    }
+    const lineValidationError = (form.items || []).reduce((message, row, index) => {
+      if (message) return message;
+      const lineNumber = index + 1;
+      if (kind === "invoice" && !String(row.customText || "").trim()) {
+        return `Bill line 1 custom text is required in row ${lineNumber}.`;
+      }
+      if (kind === "invoice" && !String(row.hsnSacCode || "").trim()) {
+        const codeLabel = normalizeHsnSacType(row.hsnSacType || "HSN") === "SAC" ? "SAC code" : "HSN code";
+        return `${codeLabel} is required in row ${lineNumber}.`;
+      }
+      if (!String(row.qty || "").trim()) {
+        return `Qty is required in row ${lineNumber}.`;
+      }
+      if (!String(row.rate || "").trim()) {
+        return `Rate is required in row ${lineNumber}.`;
+      }
+      if (!String(row.taxPercent || "").trim()) {
+        return `Tax is required in row ${lineNumber}.`;
+      }
+      return "";
+    }, "");
+    if (lineValidationError) {
+      setAccountsFormNotice(lineValidationError);
+      return;
+    }
     const payload = {
       ...form,
       customerName: String(form.customerName || "").trim(),
@@ -17184,6 +19688,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         : String(form.salesperson || "").trim(),
       notes: String(form.notes || "").trim(),
       termsText: String(form.termsText || "").trim(),
+      paymentStatusNotes: String(form.paymentStatusNotes || "").trim(),
       paymentStatus: kind === "invoice" ? String(form.paymentStatus || "Pending").trim() : "",
       deliveryStatus: kind === "invoice" ? String(form.deliveryStatus || "Pending").trim() : "",
       inventoryCommitted: kind === "invoice" ? Boolean(form.inventoryCommitted) : false,
@@ -17196,6 +19701,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             inventoryItemId: row.inventoryItemId || "",
             description,
             customText: String(row.customText || "").trim(),
+            hsnSacType: normalizeHsnSacType(row.hsnSacType || "HSN"),
             hsnSacCode: String(row.hsnSacCode || "").trim(),
             qty: String(row.qty || "").trim(),
             rate: String(row.rate || "").trim(),
@@ -17209,23 +19715,41 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const editingId = kind === "estimate" ? editingEstimateId : editingInvoiceId;
+    const sourceEstimateId = kind === "invoice" ? String(form.sourceEstimateId || "").trim() : "";
     setModuleData((prev) => {
       const rows = prev[listKey] || [];
       if (editingId) {
         if (kind === "invoice") {
+          const nextInvoices = rows.map((row) => {
+            if (row.id !== editingId) return row;
+            return applyInventorySyncForInvoiceChange(row, { ...row, ...payload, sourceEstimateId });
+          });
+          const nextState = { ...prev, [listKey]: nextInvoices };
+          if (sourceEstimateId) {
+            nextState.estimates = (prev.estimates || []).map((estimate) => (
+              estimate.id === sourceEstimateId
+                ? { ...estimate, status: "Converted", convertedInvoiceId: editingId }
+                : estimate
+            ));
+          }
           return {
-            ...prev,
-            [listKey]: rows.map((row) => {
-              if (row.id !== editingId) return row;
-              return applyInventoryDeductionForInvoiceCompletion(row, { ...row, ...payload });
-            })
+            ...nextState,
           };
         }
         return { ...prev, [listKey]: rows.map((row) => (row.id === editingId ? { ...row, ...payload } : row)) };
       }
       if (kind === "invoice") {
-        const nextInvoice = applyInventoryDeductionForInvoiceCompletion(null, { ...payload, id: `${kind}_${Date.now()}` });
-        return { ...prev, [listKey]: [nextInvoice, ...rows] };
+        const nextInvoiceId = `${kind}_${Date.now()}`;
+        const nextInvoice = applyInventorySyncForInvoiceChange(null, { ...payload, id: nextInvoiceId, sourceEstimateId });
+        const nextState = { ...prev, [listKey]: [nextInvoice, ...rows] };
+        if (sourceEstimateId) {
+          nextState.estimates = (prev.estimates || []).map((estimate) => (
+            estimate.id === sourceEstimateId
+              ? { ...estimate, status: "Converted", convertedInvoiceId: nextInvoiceId }
+              : estimate
+          ));
+        }
+        return nextState;
       }
       return { ...prev, [listKey]: [{ ...payload, id: `${kind}_${Date.now()}` }, ...rows] };
     });
@@ -17236,7 +19760,52 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     } else {
       setEditingInvoiceId("");
       setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
+      setOverviewDocTab("invoice");
+      setActiveTab("overview");
+      setAccountsActionPopup({
+        open: true,
+        title: editingId ? "Invoice Updated" : "Invoice Created",
+        message: editingId ? "Invoice updated successfully." : "Invoice created successfully.",
+      });
     }
+  }
+
+  function convertEstimateToInvoice(row) {
+    const parsedSalesperson = Array.isArray(row.salesperson)
+      ? row.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : String(row.salesperson || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    const normalized = {
+      ...row,
+      id: "",
+      sourceEstimateId: row.id,
+      docNo: getNextBillingDocNo("invoice", moduleData.invoices || []),
+      status: "Draft",
+      paymentStatus: "Pending",
+      deliveryStatus: "Pending",
+      inventoryCommitted: false,
+      salesperson: parsedSalesperson,
+      items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
+        ...splitDocumentLineDescription(item.description, item.customText),
+        id: item.id || createEmptyDocLine().id,
+        itemMasterId: item.itemMasterId || "",
+        inventoryItemId: item.inventoryItemId || "",
+        hsnSacType: normalizeHsnSacType(
+          item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+          "HSN"
+        ),
+        hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
+        qty: String(item.qty ?? ""),
+        rate: String(item.rate ?? ""),
+        taxPercent: String(item.taxPercent ?? "")
+      })),
+    };
+    setEditingInvoiceId("");
+    setInvoiceForm(normalized);
+    setAccountsFormNotice("");
+    setActiveTab("invoices");
   }
 
   function editDocument(kind, row) {
@@ -17253,6 +19822,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         id: item.id || createEmptyDocLine().id,
         itemMasterId: item.itemMasterId || "",
         inventoryItemId: item.inventoryItemId || "",
+        hsnSacType: normalizeHsnSacType(
+          item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+          "HSN"
+        ),
         hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
         qty: String(item.qty ?? ""),
         rate: String(item.rate ?? ""),
@@ -17276,10 +19849,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   function deleteDocument(kind, id) {
     const listKey = kind === "estimate" ? "estimates" : "invoices";
-    setModuleData((prev) => ({
-      ...prev,
-      [listKey]: (prev[listKey] || []).filter((row) => row.id !== id)
-    }));
+    setModuleData((prev) => {
+      const rows = prev[listKey] || [];
+      const targetRow = rows.find((row) => row.id === id);
+      if (kind === "invoice" && targetRow) {
+        applyInventorySyncForInvoiceChange(targetRow, null);
+      }
+      return {
+        ...prev,
+        [listKey]: rows.filter((row) => row.id !== id)
+      };
+    });
     if (kind === "estimate" && editingEstimateId === id) {
       setEditingEstimateId("");
       setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
@@ -17294,7 +19874,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     setModuleData((prev) => ({
       ...prev,
-      [listKey]: (prev[listKey] || []).map((row) => (row.id === id ? { ...row, status } : row))
+      [listKey]: (prev[listKey] || []).map((row) => {
+        if (row.id !== id) {
+          return row;
+        }
+        if (kind === "invoice") {
+          return applyInventorySyncForInvoiceChange(row, { ...row, status });
+        }
+        return { ...row, status };
+      })
     }));
   }
 
@@ -17310,7 +19898,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ...prev,
       invoices: (prev.invoices || []).map((row) => {
         if (row.id !== id) return row;
-        return applyInventoryDeductionForInvoiceCompletion(row, { ...row, deliveryStatus });
+        return applyInventorySyncForInvoiceChange(row, { ...row, deliveryStatus });
       })
     }));
   }
@@ -17331,8 +19919,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     () => computeDocumentTotals(invoiceForm, moduleData.gstTemplates || []),
     [invoiceForm, moduleData.gstTemplates]
   );
-  const StableBillingDocumentEditor = useMemo(() => BillingDocumentEditor, []);
-
   function BillingDocumentEditor({
     kind,
     form,
@@ -17347,6 +19933,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     taxUi,
     inventoryItems,
     itemMasterOptions,
+    enableItemPicker = true,
     applyBillingTemplateToDocument,
     addDocLine,
     updateDocLineDescription,
@@ -17357,16 +19944,27 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     updateDocLine,
     removeDocLine,
   }) {
-    const kindLabel = kind === "estimate" ? "Estimate" : "Invoice";
+    const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
+    const requireCustomer = kind !== "estimate";
+    const requireIssueDate = kind !== "estimate";
+    const customerLocked = kind === "salesOrder";
+    const customerLockedMessage = "This sales order is linked to the customer from the lead or deal pipeline. To change the customer, update the original lead or deal first.";
     const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
     const [salesSearchOpen, setSalesSearchOpen] = useState(false);
     const [salesSearchText, setSalesSearchText] = useState("");
     const [itemPickerState, setItemPickerState] = useState({ open: false, lineId: "" });
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
-    const billingTemplates = (moduleData.billingTemplates || []).filter((row) =>
-      String(row.docType || "").toLowerCase() === kindLabel.toLowerCase()
-    );
+    const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
+    const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
+      const docType = String(row.docType || "").trim().toLowerCase();
+      if (!docType) return true;
+      if (docType === kindLabel.toLowerCase()) return true;
+      // Estimates can reuse invoice billing templates unless a dedicated estimate template exists.
+      if (kind === "estimate" && docType === "invoice") return true;
+      if (kind === "salesOrder" && (docType === "invoice" || docType === "estimate" || docType === "sales order")) return true;
+      return false;
+    });
     const salesPeople = Array.from(new Set((erpUsersForSales || [])
       .filter((user) => Boolean(user?.name))
       .map((user) => String(user.name || "").trim())
@@ -17395,6 +19993,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         source: "inventory",
         onHandQty: parseNumber(item?.qty),
         sku: String(item?.sku || "").trim(),
+        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
         hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
       })).filter((item) => item.id && item.name);
       const masterSource = (Array.isArray(itemMasterOptions) ? itemMasterOptions : []).map((item) => ({
@@ -17404,9 +20003,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         itemType: String(item?.itemType || "Product").trim(),
         defaultRate: String(item?.defaultRate || "").trim(),
         taxPercent: String(item?.taxPercent || "").trim(),
+        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
         hsnSacCode: String(item?.hsnSacCode || "").trim(),
       })).filter((item) => item.name);
-      const recentSource = [...(moduleData.invoices || []), ...(moduleData.estimates || [])]
+      const recentSource = [...(moduleData.invoices || []), ...(moduleData.estimates || []), ...(moduleData.salesOrders || [])]
         .flatMap((doc) => (Array.isArray(doc?.items) ? doc.items : []))
         .map((item) => {
           const lineData = splitDocumentLineDescription(item?.description, item?.customText);
@@ -17416,6 +20016,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             source: "recent",
             recentQty: String(item?.qty || "").trim(),
             recentRate: String(item?.rate || "").trim(),
+            hsnSacType: normalizeHsnSacType(item?.hsnSacType || item?.hsn_sac_type || "HSN"),
             hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
           };
         })
@@ -17427,7 +20028,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         seenNames.add(key);
         return true;
       });
-    }, [inventoryItems, itemMasterOptions, moduleData.invoices, moduleData.estimates]);
+    }, [inventoryItems, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
     const resolveLineItemByName = (value) => {
       const normalizedValue = String(value || "").trim().toLowerCase();
       if (!normalizedValue) return null;
@@ -17446,6 +20047,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       }
       if (matched?.source === "recent") {
         selectRecentItemForLine(kind, lineId, matched.name || "");
+        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(matched.hsnSacType || "HSN"));
         if (matched.hsnSacCode) {
           updateDocLine(kind, lineId, "hsnSacCode", matched.hsnSacCode);
         }
@@ -17461,6 +20063,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         applyItemMasterToLine(kind, lineId, item.id);
       } else {
         selectRecentItemForLine(kind, lineId, item.name || "");
+        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(item.hsnSacType || "HSN"));
         if (item.hsnSacCode) {
           updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
         }
@@ -17497,6 +20100,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const itemPickerCanUseCustom = Boolean(itemPickerQuery)
       && !itemPickerMatches.some((item) => String(item.name || "").toLowerCase() === itemPickerQueryLower);
     const openItemPicker = (line) => {
+      if (!enableItemPicker) return;
       const seed = String(line?.description || "").trim();
       setItemPickerSearch(seed);
       setItemPickerState({ open: true, lineId: String(line?.id || "").trim() });
@@ -17552,22 +20156,39 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           <div className="p-0">
             <div className="row g-3">
               <div className="col-12 col-xl-3">
-                <label className="form-label small text-secondary mb-1">Client / Company Name</label>
+                <label className="form-label small text-secondary mb-1">
+                  Client / Company Name{requireCustomer ? " *" : ""}
+                </label>
                 <div className="crm-inline-suggestions-wrap">
                   <input
                     className="form-control"
+                    required={requireCustomer}
                     value={form.customerName || ""}
-                    onFocus={() => setCustomerSearchOpen(true)}
-                    onClick={() => setCustomerSearchOpen(true)}
+                    readOnly={customerLocked}
+                    onFocus={() => {
+                      if (customerLocked) {
+                        setCustomerLockedPopupOpen(true);
+                        return;
+                      }
+                      setCustomerSearchOpen(true);
+                    }}
+                    onClick={() => {
+                      if (customerLocked) {
+                        setCustomerLockedPopupOpen(true);
+                        return;
+                      }
+                      setCustomerSearchOpen(true);
+                    }}
                     onBlur={() => window.setTimeout(() => setCustomerSearchOpen(false), 120)}
                     onChange={(e) => {
+                      if (customerLocked) return;
                       const nextValue = e.target.value;
                       setField("customerName", nextValue);
                       setCustomerSearchOpen(true);
                     }}
-                    placeholder="Search client / company"
+                    placeholder={customerLocked ? "Customer locked from pipeline" : "Search client / company"}
                   />
-                  {customerSearchOpen ? (
+                  {!customerLocked && customerSearchOpen ? (
                     <div className="crm-inline-suggestions">
                       <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Clients</div>
@@ -17598,7 +20219,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
               <div className="col-12 col-xl-1">
                 <label className="form-label small text-secondary mb-1">{kindLabel} No</label>
-                <input className="form-control" value={form.docNo || ""} onChange={(e) => setField("docNo", e.target.value)} placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : "INV-DDMMYYYY-001"} />
+                <input
+                  className="form-control"
+                  value={form.docNo || ""}
+                  onChange={(e) => setField("docNo", e.target.value)}
+                  placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DDMMYYYY-001"}
+                />
               </div>
               <div className="col-12 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Sales Person</label>
@@ -17656,16 +20282,18 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </div>
               </div>
               <div className="col-12 col-md-6 col-xl-1">
-                <label className="form-label small text-secondary mb-1">Issue Date</label>
-                <input type="date" className="form-control" value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
+                <label className="form-label small text-secondary mb-1">
+                  Issue Date{requireIssueDate ? " *" : ""}
+                </label>
+                <input type="date" className="form-control" required={requireIssueDate} value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
               </div>
               <div className="col-12 col-md-6 col-xl-1">
                 <label className="form-label small text-secondary mb-1">Due Date</label>
                 <input type="date" className="form-control" value={form.dueDate || ""} onChange={(e) => setField("dueDate", e.target.value)} />
               </div>
               <div className="col-12 col-md-6 col-xl-2">
-                <label className="form-label small text-secondary mb-1">{taxUi.templateSingular}</label>
-                <select className="form-select" value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
+                <label className="form-label small text-secondary mb-1">{taxUi.templateSingular} *</label>
+                <select className="form-select" required value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
                   <option value="">{`Select ${taxUi.templateSingular}`}</option>
                   {(moduleData.gstTemplates || []).map((row) => (
                     <option key={row.id} value={row.id}>
@@ -17675,8 +20303,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </select>
               </div>
               <div className="col-12 col-md-6 col-xl-2">
-                <label className="form-label small text-secondary mb-1">Billing Template</label>
-                <select className="form-select" value={form.billingTemplateId || ""} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                <label className="form-label small text-secondary mb-1">Billing Template *</label>
+                <select className="form-select" required value={form.billingTemplateId || ""} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
                   <option value="">Select Billing Template</option>
                   {billingTemplates.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -17706,7 +20334,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </div>
           </div>
 
-          <div className="card p-3 border">
+          <div className="p-0">
             <div className="d-flex align-items-center justify-content-between mb-2">
               <h6 className="mb-0">Item Table</h6>
               <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addDocLine(kind)}>
@@ -17738,18 +20366,19 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       .slice(0, 8);
                     const canUseCustomLine = Boolean(lineQuery)
                       && !lineMatches.some((item) => String(item.name || "").toLowerCase() === lineQuery);
-                    const showLineSearchDropdown = Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
+                    const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
                     return (
                       <tr key={line.id}>
                         <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control mb-2 wz-item-custom-input"
+                            required={kind === "invoice"}
                             value={line.customText || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "customText", e.target.value)}
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
-                            <div className="col-9">
+                            <div className="col-8">
                               <div className="crm-inline-suggestions-wrap">
                                 <input
                                   className="form-control wz-item-primary-input"
@@ -17761,9 +20390,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                   }, 140)}
                                   onChange={(e) => {
                                     setPrimaryItemText(line.id, e.target.value);
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: true }));
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
                                   }}
-                                  placeholder="Type or search item"
+                                  placeholder={enableItemPicker ? "Type or search item" : "Type item"}
                                 />
                                 {showLineSearchDropdown ? (
                                   <div className="wz-item-details-suggestions">
@@ -17775,7 +20404,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                           className="crm-inline-suggestions__item"
                                           onMouseDown={() => applyLineCustomTextFromSearch(line.id, line.description || "")}
                                         >
-                                          <span className="crm-inline-suggestions__item-main">Use custom text: {line.description || ""}</span>
+                                          <span className="crm-inline-suggestions__item-main">Add your custom text: {line.description || ""}</span>
                                           <span className="crm-inline-suggestions__item-sub">Manual entry</span>
                                         </button>
                                       ) : null}
@@ -17801,13 +20430,23 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                 ) : null}
                               </div>
                             </div>
-                            <div className="col-3">
-                              <input
-                                className="form-control"
-                                value={line.hsnSacCode || ""}
-                                onChange={(e) => updateDocLine(kind, line.id, "hsnSacCode", e.target.value)}
-                                placeholder="HSN / SAC"
-                              />
+                            <div className="col-4">
+                              <div className="d-flex gap-2">
+                                <select
+                                  className="form-select wz-item-hsn-type-select"
+                                  value={normalizeHsnSacType(line.hsnSacType || "HSN")}
+                                  onChange={(e) => updateDocLine(kind, line.id, "hsnSacType", normalizeHsnSacType(e.target.value, "HSN"))}
+                                >
+                                  <option value="HSN">HSN</option>
+                                  <option value="SAC">SAC</option>
+                                </select>
+                                <input
+                                  className="form-control"
+                                  value={line.hsnSacCode || ""}
+                                  onChange={(e) => updateDocLine(kind, line.id, "hsnSacCode", e.target.value)}
+                                  placeholder={normalizeHsnSacType(line.hsnSacType || "HSN") === "SAC" ? "SAC Code" : "HSN Code"}
+                                />
+                              </div>
                             </div>
                           </div>
                           {line.inventoryItemId ? (
@@ -17819,6 +20458,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control"
+                            required
                             value={line.qty || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
                             placeholder="1"
@@ -17827,6 +20467,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control"
+                            required
                             value={line.rate || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
                             placeholder="0.00"
@@ -17835,6 +20476,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control"
+                            required
                             value={line.taxPercent || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
                             placeholder="Auto"
@@ -17852,7 +20494,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </tbody>
               </table>
             </div>
-            {itemPickerState.open ? (
+            {enableItemPicker && itemPickerState.open ? (
               <div className="wz-item-picker-backdrop" onMouseDown={closeItemPicker}>
                 <div className="wz-item-picker-modal" onMouseDown={(event) => event.stopPropagation()}>
                   <div className="wz-item-picker-modal__header">
@@ -17880,7 +20522,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Custom</div>
                         <button type="button" className="crm-inline-suggestions__item" onClick={applyCustomPickedText}>
-                          <span className="crm-inline-suggestions__item-main">Use custom text: {itemPickerQuery}</span>
+                          <span className="crm-inline-suggestions__item-main">Add your custom text: {itemPickerQuery}</span>
                           <span className="crm-inline-suggestions__item-sub">Manual entry</span>
                         </button>
                       </div>
@@ -17900,7 +20542,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                               Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
                               {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
                               {item.sku ? ` | SKU: ${item.sku}` : ""}
-                              {item.hsnSacCode ? ` | HSN/SAC: ${item.hsnSacCode}` : ""}
+                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
                             </span>
                           </button>
                         ))}
@@ -17909,22 +20551,50 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     {itemPickerMasterMatches.length ? (
                       <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Item Masters</div>
-                        {itemPickerMasterMatches.map((item) => (
-                          <button
-                            key={`${kind}-picker-master-${item.id || item.name}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onClick={() => applyPickedItem(item)}
-                          >
-                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
-                            <span className="crm-inline-suggestions__item-sub">
-                              {item.itemType || "Product"}
-                              {item.defaultRate ? ` | Rate: ${item.defaultRate}` : ""}
-                              {item.taxPercent ? ` | Tax: ${item.taxPercent}%` : ""}
-                              {item.hsnSacCode ? ` | HSN/SAC: ${item.hsnSacCode}` : ""}
-                            </span>
-                          </button>
-                        ))}
+                        <div className="row g-3">
+                          <div className="col-12 col-md-6">
+                            <div className="crm-inline-suggestions__title mb-2">Products</div>
+                            {itemPickerMasterMatches
+                              .filter((item) => String(item.itemType || "Product").trim().toLowerCase() !== "service")
+                              .map((item) => (
+                                <button
+                                  key={`${kind}-picker-master-product-${item.id || item.name}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onClick={() => applyPickedItem(item)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {item.itemType || "Product"}
+                                    {item.defaultRate ? ` | Rate: ${item.defaultRate}` : ""}
+                                    {item.taxPercent ? ` | Tax: ${item.taxPercent}%` : ""}
+                                    {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                          <div className="col-12 col-md-6">
+                            <div className="crm-inline-suggestions__title mb-2">Services</div>
+                            {itemPickerMasterMatches
+                              .filter((item) => String(item.itemType || "").trim().toLowerCase() === "service")
+                              .map((item) => (
+                                <button
+                                  key={`${kind}-picker-master-service-${item.id || item.name}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onClick={() => applyPickedItem(item)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {item.itemType || "Service"}
+                                    {item.defaultRate ? ` | Rate: ${item.defaultRate}` : ""}
+                                    {item.taxPercent ? ` | Tax: ${item.taxPercent}%` : ""}
+                                    {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
                       </div>
                     ) : null}
                     {itemPickerRecentMatches.length ? (
@@ -17942,7 +20612,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                               Recent usage
                               {item.recentQty ? ` | Qty: ${item.recentQty}` : ""}
                               {item.recentRate ? ` | Rate: ${item.recentRate}` : ""}
-                              {item.hsnSacCode ? ` | HSN/SAC: ${item.hsnSacCode}` : ""}
+                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
                             </span>
                           </button>
                         ))}
@@ -17965,9 +20635,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             <div className="col-12 col-xl-7">
               <div className="h-100">
                 <label className="form-label small text-secondary mb-1">Customer Notes</label>
-                <textarea className="form-control mb-3" rows="3" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
+                <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
-                <textarea className="form-control" rows="3" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
+                <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
+                <label className="form-label small text-secondary mb-1">Payment Status Notes</label>
+                <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
               </div>
             </div>
             <div className="col-12 col-xl-5">
@@ -17994,6 +20666,33 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             ) : null}
           </div>
         </form>
+        {customerLockedPopupOpen ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="modal-overlay wz-crm-popup-overlay"
+            onClick={() => setCustomerLockedPopupOpen(false)}
+          >
+            <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+              <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+                <h5 className="mb-0">Customer Locked</h5>
+                <button
+                  type="button"
+                  className="btn btn-sm wz-crm-popup-close"
+                  onClick={() => setCustomerLockedPopupOpen(false)}
+                >
+                  <i className="bi bi-x-lg" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="text-secondary mb-3">{customerLockedMessage}</div>
+              <div className="d-flex justify-content-end">
+                <button type="button" className="btn btn-success btn-sm" onClick={() => setCustomerLockedPopupOpen(false)}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -18074,12 +20773,29 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }}
         renderActions={(row) => (
           <div className="d-inline-flex gap-2">
-            <button type="button" className="btn btn-sm btn-outline-light" onClick={() => openDocumentPrint(kind, row.id)}>
-              Print / PDF
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-light"
+              title="Download PDF"
+              aria-label="Download PDF"
+              onClick={() => openDocumentPrint(kind, row.id)}
+            >
+              <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
             </button>
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editDocument(kind, row)}>
               Edit
             </button>
+            {kind === "estimate" ? (
+              row.convertedInvoiceId ? (
+                <button type="button" className="btn btn-sm btn-outline-success" disabled>
+                  Converted to Invoice
+                </button>
+              ) : (
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => convertEstimateToInvoice(row)}>
+                  Convert to Invoice
+                </button>
+              )
+            ) : null}
             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id)}>
               Delete
             </button>
@@ -18124,6 +20840,37 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {accountsFormNotice ? (
         <div className="alert alert-danger py-2 mb-0">{accountsFormNotice}</div>
+      ) : null}
+      {accountsActionPopup.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+        >
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <h5 className="mb-0">{accountsActionPopup.title || "Success"}</h5>
+              <button
+                type="button"
+                className="btn btn-sm wz-crm-popup-close"
+                onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="text-secondary mb-3">{accountsActionPopup.message || "Operation completed successfully."}</div>
+            <div className="d-flex justify-content-end">
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {activeTab === "overview" ? (
@@ -18653,56 +21400,78 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </form>
           </div>
 
-          <div className="d-flex flex-wrap gap-2 align-items-center">
-            <button
-              type="button"
-              className={`btn btn-sm ${itemMasterListTypeFilter === "Product" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setItemMasterListTypeFilter("Product")}
-            >
-              Products
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${itemMasterListTypeFilter === "Service" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setItemMasterListTypeFilter("Service")}
-            >
-              Service
-            </button>
+          <div className="row g-3">
+            <div className="col-12 col-xl-6">
+              <SearchablePaginatedTableCard
+                title="Item Master List (Products)"
+                badgeLabel={`${productItemMasterRows.length} items`}
+                rows={productItemMasterRows}
+                withoutOuterCard
+                columns={[
+                  { key: "name", label: "Item Name" },
+                  { key: "itemType", label: "Type" },
+                  { key: "sku", label: "SKU" },
+                  ...(isIndiaBillingOrg ? [{ key: "hsnSacCode", label: "HSN / SAC" }] : []),
+                  { key: "unit", label: "Unit" },
+                  { key: "defaultRate", label: "Default Rate" },
+                  { key: "taxPercent", label: "Tax %" },
+                ]}
+                searchPlaceholder="Search product items"
+                noRowsText="No product item masters yet."
+                searchBy={(row) => [row.name, row.itemType, row.sku, row.hsnSacCode, row.unit, row.defaultRate, row.taxPercent].join(" ")}
+                renderCells={(row) => [
+                  <span className="fw-semibold">{row.name || "-"}</span>,
+                  row.itemType || "Product",
+                  row.sku || "-",
+                  ...(isIndiaBillingOrg ? [row.hsnSacCode || "-"] : []),
+                  row.unit || "-",
+                  row.defaultRate || "-",
+                  row.taxPercent || "-",
+                ]}
+                renderActions={(row) => (
+                  <div className="d-inline-flex gap-2">
+                    <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editItemMaster(row)}>Edit</button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteItemMaster(row.id)}>Delete</button>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="col-12 col-xl-6">
+              <SearchablePaginatedTableCard
+                title="Item Master List (Service)"
+                badgeLabel={`${serviceItemMasterRows.length} items`}
+                rows={serviceItemMasterRows}
+                withoutOuterCard
+                columns={[
+                  { key: "name", label: "Item Name" },
+                  { key: "itemType", label: "Type" },
+                  { key: "sku", label: "SKU" },
+                  ...(isIndiaBillingOrg ? [{ key: "hsnSacCode", label: "HSN / SAC" }] : []),
+                  { key: "unit", label: "Unit" },
+                  { key: "defaultRate", label: "Default Rate" },
+                  { key: "taxPercent", label: "Tax %" },
+                ]}
+                searchPlaceholder="Search service items"
+                noRowsText="No service item masters yet."
+                searchBy={(row) => [row.name, row.itemType, row.sku, row.hsnSacCode, row.unit, row.defaultRate, row.taxPercent].join(" ")}
+                renderCells={(row) => [
+                  <span className="fw-semibold">{row.name || "-"}</span>,
+                  row.itemType || "Product",
+                  row.sku || "-",
+                  ...(isIndiaBillingOrg ? [row.hsnSacCode || "-"] : []),
+                  row.unit || "-",
+                  row.defaultRate || "-",
+                  row.taxPercent || "-",
+                ]}
+                renderActions={(row) => (
+                  <div className="d-inline-flex gap-2">
+                    <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editItemMaster(row)}>Edit</button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteItemMaster(row.id)}>Delete</button>
+                  </div>
+                )}
+              />
+            </div>
           </div>
-
-          <SearchablePaginatedTableCard
-            title={`Item Master List (${itemMasterListTypeFilter})`}
-            badgeLabel={`${filteredItemMasterRows.length} items`}
-            rows={filteredItemMasterRows}
-            withoutOuterCard
-            columns={[
-              { key: "name", label: "Item Name" },
-              { key: "itemType", label: "Type" },
-              { key: "sku", label: "SKU" },
-              ...(isIndiaBillingOrg ? [{ key: "hsnSacCode", label: "HSN / SAC" }] : []),
-              { key: "unit", label: "Unit" },
-              { key: "defaultRate", label: "Default Rate" },
-              { key: "taxPercent", label: "Tax %" },
-            ]}
-            searchPlaceholder={`Search ${String(itemMasterListTypeFilter).toLowerCase()} items`}
-            noRowsText={`No ${String(itemMasterListTypeFilter).toLowerCase()} item masters yet.`}
-            searchBy={(row) => [row.name, row.itemType, row.sku, row.hsnSacCode, row.unit, row.defaultRate, row.taxPercent].join(" ")}
-            renderCells={(row) => [
-              <span className="fw-semibold">{row.name || "-"}</span>,
-              row.itemType || "Product",
-              row.sku || "-",
-              ...(isIndiaBillingOrg ? [row.hsnSacCode || "-"] : []),
-              row.unit || "-",
-              row.defaultRate || "-",
-              row.taxPercent || "-",
-            ]}
-            renderActions={(row) => (
-              <div className="d-inline-flex gap-2">
-                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editItemMaster(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteItemMaster(row.id)}>Delete</button>
-              </div>
-            )}
-          />
         </>
       ) : null}
 
@@ -18877,8 +21646,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {activeTab === "estimates" ? (
         <>
-          <DocumentTable kind="estimate" rows={moduleData.estimates || []} statusOptions={ESTIMATE_STATUS_OPTIONS} />
-          <StableBillingDocumentEditor
+          <BillingDocumentEditor
             kind="estimate"
             form={estimateForm}
             setField={(key, value) => setDocField("estimate", key, value)}
@@ -18910,7 +21678,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {activeTab === "invoices" ? (
         <>
-          <StableBillingDocumentEditor
+          <BillingDocumentEditor
             kind="invoice"
             form={invoiceForm}
             setField={(key, value) => setDocField("invoice", key, value)}
