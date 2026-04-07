@@ -254,6 +254,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Lead",
     icon: "bi-person-plus",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "name", label: "Lead Name" },
       { key: "company", label: "Company" },
       { key: "leadAmount", label: "Lead Amount" },
@@ -264,6 +265,7 @@ const CRM_SECTION_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "name", label: "Lead Name", placeholder: "Enter lead name" },
       { key: "company", label: "Company", placeholder: "Company / Business name" },
       { key: "contactPerson", label: "Contact Person", placeholder: "Client / Contact person", required: false },
@@ -283,6 +285,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Contact",
     icon: "bi-person-lines-fill",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "name", label: "Name" },
       { key: "company", label: "Company" },
       { key: "email", label: "Email" },
@@ -290,6 +293,7 @@ const CRM_SECTION_CONFIG = {
       { key: "tag", label: "Tag" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "name", label: "Name", placeholder: "Contact name" },
       { key: "company", label: "Company", placeholder: "Company name" },
       { key: "email", label: "Email", placeholder: "contact@example.com" },
@@ -318,6 +322,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Deal",
     icon: "bi-currency-rupee",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "dealName", label: "Deal Name" },
       { key: "company", label: "Company" },
       { key: "dealValueExpected", label: "Deal Value (Expected)" },
@@ -325,6 +330,7 @@ const CRM_SECTION_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "dealName", label: "Deal Name", placeholder: "ERP rollout annual contract" },
       { key: "company", label: "Company", placeholder: "Client or Company" },
       { key: "dealValueExpected", label: "Deal Value (Expected)", placeholder: "Expected value", required: false },
@@ -337,6 +343,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Sales Order",
     icon: "bi-receipt-cutoff",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "orderId", label: "Order ID" },
       { key: "customerName", label: "Customer Name" },
       { key: "company", label: "Company" },
@@ -345,6 +352,7 @@ const CRM_SECTION_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "customerName", label: "Customer Name", placeholder: "Customer name" },
       { key: "company", label: "Company", placeholder: "Company name" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
@@ -360,6 +368,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Follow-up",
     icon: "bi-telephone-forward",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "subject", label: "Subject" },
       { key: "relatedTo", label: "Related To" },
       { key: "dueDate", label: "Due Date" },
@@ -367,6 +376,7 @@ const CRM_SECTION_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "subject", label: "Subject", placeholder: "Demo callback / pricing follow-up" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
       { key: "dueDate", label: "Due Date", type: "date" },
@@ -379,6 +389,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Activity",
     icon: "bi-clock-history",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "activityType", label: "Activity Type" },
       { key: "relatedTo", label: "Company / Contacts" },
       { key: "date", label: "Date" },
@@ -386,6 +397,7 @@ const CRM_SECTION_CONFIG = {
       { key: "notes", label: "Notes" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "activityType", label: "Activity Type", placeholder: "Enter activity type" },
       { key: "relatedTo", label: "Company / Contacts", placeholder: "Search company / contacts" },
       { key: "date", label: "Date", type: "date" },
@@ -398,6 +410,7 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Meeting",
     icon: "bi-calendar-event",
     columns: [
+      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "title", label: "Meeting Title" },
       { key: "relatedTo", label: "Related To" },
       { key: "meetingDate", label: "Date" },
@@ -407,6 +420,7 @@ const CRM_SECTION_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
+      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
       { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
@@ -1066,12 +1080,19 @@ function createEmptyDocLine() {
 function getNextBillingDocNo(kind = "invoice", existingRows = []) {
   const prefix = kind === "estimate" ? "EST" : "INV";
   const now = new Date();
-  const dayKey = `${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear())}`;
-  const pattern = new RegExp(`^${prefix}-${dayKey}-(\\d{3})$`);
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const year = String(now.getFullYear());
+  const dayKeyCompact = `${day}${month}${year}`;
+  const dayKeyDashed = `${day}-${month}-${year}`;
+  const patterns = [
+    new RegExp(`^${prefix}-${dayKeyDashed}-(\\d{3})$`),
+    new RegExp(`^${prefix}-${dayKeyCompact}-(\\d{3})$`),
+  ];
   let maxSeq = 0;
   (Array.isArray(existingRows) ? existingRows : []).forEach((row) => {
     const rawDocNo = String(row?.docNo || row?.doc_no || "").trim();
-    const match = pattern.exec(rawDocNo);
+    const match = patterns.map((pattern) => pattern.exec(rawDocNo)).find(Boolean);
     if (!match) {
       return;
     }
@@ -1080,7 +1101,7 @@ function getNextBillingDocNo(kind = "invoice", existingRows = []) {
       maxSeq = seq;
     }
   });
-  return `${prefix}-${dayKey}-${String(maxSeq + 1).padStart(3, "0")}`;
+  return `${prefix}-${dayKeyDashed}-${String(maxSeq + 1).padStart(3, "0")}`;
 }
 
 function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
@@ -1134,6 +1155,7 @@ function createEmptyCrmSalesOrder(existingRows = []) {
   return {
     id: "",
     sourceDealId: "",
+    crmReferenceId: "",
     orderId: nextOrderId,
     docNo: nextOrderId,
     customerName: "",
@@ -2534,6 +2556,7 @@ function normalizeCrmLeadRecord(row = {}) {
   ).trim();
   return {
     ...row,
+    crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
     name: leadName,
     contactPerson: String(row.contactPerson || row.contact_person || "").trim(),
     leadAmount: String(leadAmount ?? "").trim(),
@@ -2573,6 +2596,7 @@ function normalizeCrmDealRecord(row = {}) {
   ).trim();
   return {
     ...row,
+    crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
     dealName,
     dealValueExpected: String(expectedValue ?? "").trim(),
     wonAmountFinal: String(wonValue ?? "").trim(),
@@ -2626,6 +2650,7 @@ function normalizeCrmSalesOrderRecord(row = {}) {
       .filter(Boolean);
   return {
     ...row,
+    crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
     orderId: String(row.orderId || row.order_id || "").trim(),
     docNo: String(row.orderId || row.order_id || row.docNo || row.doc_no || "").trim(),
     customerName: String(row.customerName || row.customer_name || "").trim(),
@@ -2754,6 +2779,7 @@ function normalizeCrmMeetingRecord(row = {}) {
   const meetingTime = normalizeMeetingTimeValue(row.meetingTime ?? row.meeting_time ?? "");
   return {
     ...row,
+    crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
     serverMeetingId: row.serverMeetingId || row.id || "",
     title: String(row.title || "").trim(),
     companyOrClientName: String(row.companyOrClientName || row.company_or_client_name || "").trim(),
@@ -4904,7 +4930,7 @@ function collectImportHeaderMap(rows) {
   return headerMap;
 }
 
-function validateImportHeaders(rows, expectedHeaders = []) {
+function validateImportHeaders(rows, expectedHeaders = [], optionalHeaders = []) {
   const expectedMap = new Map();
   (Array.isArray(expectedHeaders) ? expectedHeaders : []).forEach((header) => {
     const rawHeader = String(header || "").trim();
@@ -4914,12 +4940,19 @@ function validateImportHeaders(rows, expectedHeaders = []) {
     }
     expectedMap.set(normalizedHeader, rawHeader);
   });
+  const optionalSet = new Set();
+  (Array.isArray(optionalHeaders) ? optionalHeaders : []).forEach((header) => {
+    const normalizedHeader = normalizeImportHeader(header);
+    if (normalizedHeader) {
+      optionalSet.add(normalizedHeader);
+    }
+  });
   const actualMap = collectImportHeaderMap(rows);
   const missing = Array.from(expectedMap.entries())
     .filter(([normalizedHeader]) => !actualMap.has(normalizedHeader))
     .map(([, rawHeader]) => rawHeader);
   const unexpected = Array.from(actualMap.entries())
-    .filter(([normalizedHeader]) => !expectedMap.has(normalizedHeader))
+    .filter(([normalizedHeader]) => !expectedMap.has(normalizedHeader) && !optionalSet.has(normalizedHeader))
     .map(([, rawHeader]) => rawHeader);
   return {
     isValid: missing.length === 0 && unexpected.length === 0,
@@ -5520,7 +5553,7 @@ function BillingDocumentEditor({
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
     const requireIssueDate = kind !== "estimate";
-    const customerLocked = kind === "salesOrder";
+    const customerLocked = kind === "salesOrder" && Boolean(String(form.sourceDealId || form.source_deal_id || "").trim());
     const customerLockedMessage = "This sales order is linked to the customer from the lead or deal pipeline. To change the customer, update the original lead or deal first.";
     const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
     const [salesSearchOpen, setSalesSearchOpen] = useState(false);
@@ -5796,9 +5829,20 @@ function BillingDocumentEditor({
                   className="form-control"
                   value={form.docNo || ""}
                   onChange={(e) => setField("docNo", e.target.value)}
-                  placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DDMMYYYY-001"}
+                  placeholder={kind === "estimate" ? "EST-DD-MM-YYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DD-MM-YYYY-001"}
                 />
               </div>
+              {kind === "salesOrder" ? (
+                <div className="col-12 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">CRM Reference ID</label>
+                  <input
+                    className="form-control"
+                    value={form.crmReferenceId || ""}
+                    readOnly
+                    placeholder="Auto from lead/deal"
+                  />
+                </div>
+              ) : null}
               <div className="col-12 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Sales Person</label>
                 <div className="crm-inline-suggestions-wrap">
@@ -6350,6 +6394,8 @@ function CrmOnePageModule() {
   );
   const [deletedViewSection, setDeletedViewSection] = useState("");
   const [crmActionPopup, setCrmActionPopup] = useState({ open: false, title: "", message: "" });
+  const [crmModuleCatalog, setCrmModuleCatalog] = useState([]);
+  const [crmCanManageModules, setCrmCanManageModules] = useState(false);
   const [crmAccountsWorkspace, setCrmAccountsWorkspace] = useState(() => DEFAULT_ACCOUNTS_DATA);
   const [crmInventoryWorkspace, setCrmInventoryWorkspace] = useState(() => {
     try {
@@ -6365,6 +6411,8 @@ function CrmOnePageModule() {
   const [editingCrmSalesOrderId, setEditingCrmSalesOrderId] = useState("");
   const [crmSalesOrderEditorOpen, setCrmSalesOrderEditorOpen] = useState(false);
   const [crmSalesOrderNotice, setCrmSalesOrderNotice] = useState("");
+  const [crmSalesOrderConvertPopup, setCrmSalesOrderConvertPopup] = useState({ open: false, row: null });
+  const [crmSalesOrderConvertBusy, setCrmSalesOrderConvertBusy] = useState(false);
   const [crmGstForm, setCrmGstForm] = useState({
     id: "",
     name: "",
@@ -6963,9 +7011,10 @@ function CrmOnePageModule() {
       setCurrentUserEmail(String(authData?.user?.email || "").trim());
       setCurrentUserRole(String(authData?.profile?.role || authData?.user?.role || "").trim());
 
-      const [usersData, roleAccessData] = await Promise.all([
+      const [usersData, roleAccessData, modulesData] = await Promise.all([
         apiFetch("/api/business-autopilot/users").catch(() => null),
         apiFetch("/api/business-autopilot/role-access").catch(() => null),
+        apiFetch("/api/business-autopilot/modules").catch(() => null),
       ]);
       if (!active) return;
 
@@ -6992,6 +7041,8 @@ function CrmOnePageModule() {
         : readCrmRoleAccessMapFromStorage();
       setCrmRoleAccessMap(nextRoleAccessMap);
       window.localStorage.setItem(CRM_ROLE_ACCESS_STORAGE_KEY, JSON.stringify(nextRoleAccessMap));
+      setCrmModuleCatalog(Array.isArray(modulesData?.catalog) ? modulesData.catalog : []);
+      setCrmCanManageModules(Boolean(modulesData?.can_manage_modules));
 
       const activeOrgId = String(usersData?.organization_id || authData?.organization_id || getOrganizationIdFromAuth(authData) || getActiveBusinessAutopilotOrgId() || "").trim();
       if (activeOrgId) {
@@ -7029,6 +7080,8 @@ function CrmOnePageModule() {
     setCrmActionPopup({ open: false, title: "", message: "" });
     setDealQuickEditPopup(null);
     setTeamMembersPopup(null);
+    setCrmSalesOrderConvertPopup({ open: false, row: null });
+    setCrmSalesOrderConvertBusy(false);
   }, [activeSection]);
 
   useEffect(() => {
@@ -7365,6 +7418,161 @@ function CrmOnePageModule() {
     });
     return map;
   }, [moduleData.contacts, sharedCustomerOptions]);
+  const crmReferenceLookup = useMemo(() => {
+    const map = new Map();
+    const addEntry = (rawKey, rawReferenceId) => {
+      const key = String(rawKey || "").trim().toLowerCase();
+      const referenceId = String(rawReferenceId || "").trim();
+      if (!key || !referenceId || map.has(key)) {
+        return;
+      }
+      map.set(key, referenceId);
+    };
+    (moduleData.leads || []).forEach((lead) => {
+      const leadRef = String(lead?.crmReferenceId || lead?.crm_reference_id || "").trim();
+      addEntry(lead?.name, leadRef);
+      addEntry(lead?.company, leadRef);
+    });
+    (moduleData.deals || []).forEach((deal) => {
+      const dealRef = String(deal?.crmReferenceId || deal?.crm_reference_id || "").trim();
+      addEntry(deal?.dealName, dealRef);
+      addEntry(deal?.company, dealRef);
+    });
+    (moduleData.salesOrders || []).forEach((order) => {
+      const orderRef = String(order?.crmReferenceId || order?.crm_reference_id || "").trim();
+      addEntry(order?.customerName, orderRef);
+      addEntry(order?.company, orderRef);
+    });
+    return map;
+  }, [moduleData.deals, moduleData.leads, moduleData.salesOrders]);
+
+  function resolveCrmReferenceIdByText(value) {
+    const key = String(value || "").trim().toLowerCase();
+    if (!key) {
+      return "";
+    }
+    return String(crmReferenceLookup.get(key) || "").trim();
+  }
+
+  function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}) {
+    const sourceId = String(salesOrderRow?.id || "").trim();
+    const sourceOrderNo = String(
+      salesOrderRow?.orderId
+      || salesOrderRow?.order_id
+      || salesOrderRow?.docNo
+      || salesOrderRow?.doc_no
+      || ""
+    ).trim();
+    return (Array.isArray(rows) ? rows : []).find((row) => {
+      const rowSourceId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
+      const rowSourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
+      if (sourceId && rowSourceId && sourceId === rowSourceId) {
+        return true;
+      }
+      if (sourceOrderNo && rowSourceOrderNo && sourceOrderNo === rowSourceOrderNo) {
+        return true;
+      }
+      return false;
+    }) || null;
+  }
+
+  async function getLatestCrmModuleAccess() {
+    const modulesResponse = await apiFetch("/api/business-autopilot/modules").catch(() => null);
+    if (!modulesResponse) {
+      return {
+        catalog: Array.isArray(crmModuleCatalog) ? crmModuleCatalog : [],
+        canManageModules: Boolean(crmCanManageModules),
+        fromServer: false,
+      };
+    }
+    const catalog = Array.isArray(modulesResponse?.catalog) ? modulesResponse.catalog : [];
+    const canManageModules = Boolean(modulesResponse?.can_manage_modules);
+    setCrmModuleCatalog(catalog);
+    setCrmCanManageModules(canManageModules);
+    return {
+      catalog,
+      canManageModules,
+      fromServer: true,
+    };
+  }
+
+  function resolveAccountsConvertGuard(catalog = [], canManageModules = false) {
+    const rows = Array.isArray(catalog) ? catalog : [];
+    const accountsModule = rows.find((row) => String(row?.slug || "").trim().toLowerCase() === "accounts");
+    if (!accountsModule) {
+      return {
+        allowed: false,
+        title: "Accounts Check Failed",
+        message: "Unable to verify Accounts module status right now. Please refresh and try again.",
+      };
+    }
+    if (Boolean(accountsModule.enabled)) {
+      return { allowed: true, title: "", message: "" };
+    }
+    if (Boolean(accountsModule.eligible)) {
+      return {
+        allowed: false,
+        title: "Accounts Module Disabled",
+        message: canManageModules
+          ? "Your plan includes Accounts, but the module is disabled. Enable Accounts in Dashboard > Module Access Settings, then try conversion again."
+          : "Your plan includes Accounts, but the module is disabled by your organization. Ask your Org Admin to enable Accounts module, then try conversion again.",
+      };
+    }
+    return {
+      allowed: false,
+      title: "Upgrade Plan Required",
+      message: "Your current plan does not include Accounts module. Upgrade to a higher plan to convert Sales Orders into Estimate or Invoice.",
+    };
+  }
+
+  function buildBillingDocumentFromSalesOrder(sourceRow, kind = "estimate") {
+    const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
+    const listKey = kind === "estimate" ? "estimates" : "invoices";
+    const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
+    const baseDocument = createEmptyBillingDocument(kind, existingRows);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
+    const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
+    const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
+    return {
+      ...baseDocument,
+      id: `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      docNo: getNextBillingDocNo(kind, existingRows),
+      customerName: String(normalizedRow.customerName || normalizedRow.leadName || "").trim(),
+      customerGstin: String(normalizedRow.customerGstin || "").trim(),
+      issueDate,
+      dueDate,
+      gstTemplateId: String(normalizedRow.gstTemplateId || "").trim(),
+      billingTemplateId: String(normalizedRow.billingTemplateId || "").trim(),
+      salesperson: Array.isArray(normalizedRow.salesperson)
+        ? normalizedRow.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
+        : String(normalizedRow.salesperson || normalizedRow.assignedTo || "").trim(),
+      billingAddress: String(normalizedRow.billingAddress || "").trim(),
+      notes: String(normalizedRow.notes || baseDocument.notes || "").trim(),
+      termsText: String(normalizedRow.termsText || baseDocument.termsText || "").trim(),
+      paymentStatusNotes: String(normalizedRow.paymentStatusNotes || "").trim(),
+      paymentStatus: kind === "invoice" ? "Pending" : "",
+      deliveryStatus: kind === "invoice" ? "Pending" : "",
+      status: "Draft",
+      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => ({
+        ...createEmptyDocLine(),
+        ...item,
+        id: String(item?.id || createEmptyDocLine().id).trim(),
+        description: String(item?.description || "").trim(),
+        customText: String(item?.customText || "").trim(),
+        hsnSacType: normalizeHsnSacType(item?.hsnSacType || "HSN"),
+        hsnSacCode: String(item?.hsnSacCode || "").trim(),
+        qty: String(item?.qty ?? "1").trim(),
+        rate: String(item?.rate ?? "").trim(),
+        taxPercent: String(item?.taxPercent ?? "").trim(),
+      })),
+      crmReferenceId: String(normalizedRow.crmReferenceId || "").trim(),
+      sourceSalesOrderId: String(normalizedRow.id || "").trim(),
+      sourceSalesOrderNo: sourceOrderNo,
+      sourceSalesOrderLeadName: String(normalizedRow.customerName || normalizedRow.leadName || "").trim(),
+      sourceSalesOrderClientName: String(normalizedRow.company || normalizedRow.clients || "").trim(),
+    };
+  }
 
   function buildMeetingOwnerUserIds(ownerNames = []) {
     const normalizedNames = Array.isArray(ownerNames)
@@ -7558,6 +7766,10 @@ function CrmOnePageModule() {
       ? normalizeCrmLeadRecord(row)
       : sectionKey === "contacts"
       ? normalizeCrmContactRecord(row)
+      : sectionKey === "deals"
+      ? normalizeCrmDealRecord(row)
+      : sectionKey === "meetings"
+      ? normalizeCrmMeetingRecord(row)
       : sectionKey === "teams"
       ? normalizeCrmTeamRecord(row)
       : row;
@@ -7585,6 +7797,15 @@ function CrmOnePageModule() {
         nextValues[field.key] = rowValue ?? field.defaultValue ?? "";
       }
     });
+    if ((sectionKey === "followUps" || sectionKey === "activities") && !String(nextValues.crmReferenceId || "").trim()) {
+      nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.relatedTo || "");
+    }
+    if (sectionKey === "contacts" && !String(nextValues.crmReferenceId || "").trim()) {
+      nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.company || nextValues.name || "");
+    }
+    if (sectionKey === "meetings" && !String(nextValues.crmReferenceId || "").trim()) {
+      nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.relatedTo || nextValues.companyOrClientName || "");
+    }
     setForms((prev) => ({ ...prev, [sectionKey]: nextValues }));
     if (sectionKey === "teams") {
       setSelectedTeamDepartments(Array.isArray(normalizedRow.departmentFilters) ? normalizedRow.departmentFilters : []);
@@ -8277,6 +8498,7 @@ function CrmOnePageModule() {
       ? leadRow.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
       : [];
     return {
+      crmReferenceId: String(leadRow?.crmReferenceId || leadRow?.crm_reference_id || "").trim(),
       dealName: normalizedLeadName,
       company: String(leadRow?.company || "").trim(),
       dealValueExpected: expectedValue,
@@ -8465,9 +8687,10 @@ function CrmOnePageModule() {
           .split(",")
           .map((entry) => entry.trim())
           .filter(Boolean);
-    return {
-      sourceDealId: String(dealRow?.id || "").trim(),
-      docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
+  return {
+    sourceDealId: String(dealRow?.id || "").trim(),
+    crmReferenceId: String(dealRow?.crmReferenceId || dealRow?.crm_reference_id || "").trim(),
+    docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
       customerName: matchedCustomer?.companyName || matchedCustomer?.name || companyName || String(dealRow?.dealName || "").trim(),
       customerGstin: String(matchedCustomer?.gstin || "").trim(),
       billingAddress: String(matchedCustomer?.billingAddress || "").trim(),
@@ -8508,6 +8731,53 @@ function CrmOnePageModule() {
     }) || null;
   }
 
+  function buildFallbackContactFromDeal(dealRow = {}) {
+    const normalizedDeal = normalizeCrmDealRecord(dealRow);
+    const dealReferenceId = String(normalizedDeal.crmReferenceId || normalizedDeal.crm_reference_id || "").trim();
+    const matchedLead = (moduleData.leads || [])
+      .map((row) => normalizeCrmLeadRecord(row))
+      .find((lead) => {
+        const leadReferenceId = String(lead.crmReferenceId || lead.crm_reference_id || "").trim();
+        if (dealReferenceId && leadReferenceId && dealReferenceId === leadReferenceId) {
+          return true;
+        }
+        const leadName = String(lead.name || "").trim().toLowerCase();
+        const leadCompany = String(lead.company || "").trim().toLowerCase();
+        const dealName = String(normalizedDeal.dealName || "").trim().toLowerCase();
+        const dealCompany = String(normalizedDeal.company || "").trim().toLowerCase();
+        return Boolean(
+          (dealName && (leadName === dealName || leadCompany === dealName))
+          || (dealCompany && (leadCompany === dealCompany || leadName === dealCompany))
+        );
+      }) || null;
+    const contactName = String(
+      matchedLead?.contactPerson
+      || matchedLead?.name
+      || normalizedDeal.dealName
+      || normalizedDeal.company
+      || "Client Contact"
+    ).trim();
+    const companyName = String(
+      normalizedDeal.company
+      || matchedLead?.company
+      || contactName
+    ).trim();
+    const phoneNumber = String(
+      normalizedDeal.phone
+      || matchedLead?.phone
+      || ""
+    ).trim();
+    const phoneCountryCode = String(matchedLead?.phoneCountryCode || "+91").trim() || "+91";
+    return normalizeCrmContactRecord({
+      id: "",
+      name: contactName,
+      company: companyName,
+      email: "",
+      phoneCountryCode,
+      phone: phoneNumber,
+    });
+  }
+
   function writePendingCrmSalesOrderDraft(dealRow = {}) {
     const sourceDeal = normalizeCrmDealRecord(dealRow);
     const sourceDealId = String(sourceDeal.id || "").trim();
@@ -8544,6 +8814,7 @@ function CrmOnePageModule() {
     setCrmSalesOrderForm({
       ...createEmptyCrmSalesOrder(moduleData.salesOrders || []),
       ...row,
+      crmReferenceId: String(row?.crmReferenceId || row?.crm_reference_id || "").trim(),
       orderId: String(row?.orderId || row?.order_id || "").trim(),
       docNo: String(row?.orderId || row?.order_id || row?.docNo || row?.doc_no || "").trim(),
       salesperson: Array.isArray(row?.salesperson)
@@ -8620,6 +8891,7 @@ function CrmOnePageModule() {
       terms_text: String(form.termsText || "").trim(),
       payment_status_notes: String(form.paymentStatusNotes || "").trim(),
       source_deal_id: String(form.sourceDealId || "").trim(),
+      crm_reference_id: String(form.crmReferenceId || "").trim(),
       order_id: String(form.orderId || form.docNo || "").trim(),
       status: String(form.status || "Pending").trim(),
       items: (form.items || []).map((row) => ({
@@ -8678,11 +8950,15 @@ function CrmOnePageModule() {
     if (!matchedCustomer) {
       const matchedContact = findConvertibleCrmContactForDeal(dealRow);
       if (!matchedContact) {
+        const fallbackContact = buildFallbackContactFromDeal(dealRow);
+        writePendingCrmSalesOrderDraft(dealRow);
         setCrmActionPopup({
           open: true,
           title: "Client Required",
-          message: "Convert the related CRM contact into a client first. Client billing details are required before creating a Sales Order.",
-          isError: true,
+          message: "Client details are required before creating Sales Order. Click Convert to open Clients page with this lead contact prefilled.",
+          confirmText: "Convert",
+          cancelText: "OK",
+          onConfirm: () => onConvertContactToClient(fallbackContact),
         });
         return;
       }
@@ -8699,6 +8975,190 @@ function CrmOnePageModule() {
     }
     openCrmSalesOrderCreate(buildCrmSalesOrderFromDeal(dealRow));
     setActiveSection("salesOrders");
+  }
+
+  function resolveLeadForDealCancellation(dealRow = {}) {
+    const leadId = String(dealRow?.leadId || dealRow?.lead_id || "").trim();
+    if (leadId) {
+      const byId = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === leadId);
+      if (byId) {
+        return normalizeCrmLeadRecord(byId);
+      }
+    }
+    const crmReferenceId = String(dealRow?.crmReferenceId || dealRow?.crm_reference_id || "").trim();
+    if (crmReferenceId) {
+      const byReference = (moduleData.leads || []).find((row) => (
+        String(row?.crmReferenceId || row?.crm_reference_id || "").trim() === crmReferenceId
+      ));
+      if (byReference) {
+        return normalizeCrmLeadRecord(byReference);
+      }
+    }
+    const dealName = String(dealRow?.dealName || dealRow?.deal_name || "").trim().toLowerCase();
+    const dealCompany = String(dealRow?.company || "").trim().toLowerCase();
+    const byTextMatch = (moduleData.leads || []).find((row) => {
+      const normalizedLead = normalizeCrmLeadRecord(row);
+      const leadName = String(normalizedLead?.name || "").trim().toLowerCase();
+      const leadCompany = String(normalizedLead?.company || "").trim().toLowerCase();
+      return Boolean(
+        (dealName && (leadName === dealName || leadCompany === dealName))
+        || (dealCompany && (leadCompany === dealCompany || leadName === dealCompany))
+      );
+    });
+    return byTextMatch ? normalizeCrmLeadRecord(byTextMatch) : null;
+  }
+
+  async function cancelDealAndReopenLead(dealRow = {}) {
+    const dealId = String(dealRow?.id || "").trim();
+    if (!dealId) {
+      return;
+    }
+    const linkedLead = resolveLeadForDealCancellation(dealRow);
+    const linkedLeadId = String(linkedLead?.id || "").trim();
+    const leadPatchPayload = {};
+    if (linkedLeadId) {
+      const currentStatus = String(linkedLead?.status || "").trim().toLowerCase();
+      if (currentStatus === "converted" || currentStatus === "closed") {
+        leadPatchPayload.status = "Open";
+      }
+      const currentStage = String(linkedLead?.stage || "").trim().toLowerCase();
+      if (currentStage === "qualified") {
+        leadPatchPayload.stage = "New";
+      }
+    }
+    try {
+      try {
+        await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealId)}`, {
+          method: "DELETE",
+        });
+      } catch (deleteError) {
+        const detail = String(deleteError?.data?.detail || deleteError?.message || "").trim().toLowerCase();
+        if (detail !== "forbidden") {
+          throw deleteError;
+        }
+        await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            stage: "Lost",
+            status: "Lost",
+          }),
+        });
+      }
+      const shouldPatchLead = linkedLeadId && Object.keys(leadPatchPayload).length;
+      if (shouldPatchLead) {
+        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(linkedLeadId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(leadPatchPayload),
+        });
+      }
+      await refreshCrmRowsFromBackend();
+      setActiveSection("leads");
+      setCrmActionPopup({
+        open: true,
+        title: "Deal Cancelled",
+        message: shouldPatchLead
+          ? "Deal conversion cancelled. Linked lead is moved back to Open status."
+          : "Deal conversion cancelled successfully.",
+      });
+    } catch (error) {
+      setCrmActionPopup({
+        open: true,
+        title: "Cancel Failed",
+        message: error?.message || "Unable to cancel this deal right now. Please try again.",
+        isError: true,
+      });
+    }
+  }
+
+  function onCancelDeal(row) {
+    setCrmActionPopup({
+      open: true,
+      title: "Cancel Deal Conversion",
+      message: "Do you want to cancel this deal and reopen the linked lead?",
+      confirmText: "Cancel Deal",
+      cancelText: "Keep Deal",
+      onConfirm: () => cancelDealAndReopenLead(row),
+    });
+  }
+
+  function openCrmSalesOrderConvertPopup(row) {
+    setCrmSalesOrderConvertPopup({
+      open: true,
+      row: normalizeCrmSalesOrderRecord(row),
+    });
+    setCrmSalesOrderConvertBusy(false);
+  }
+
+  function closeCrmSalesOrderConvertPopup() {
+    setCrmSalesOrderConvertPopup({ open: false, row: null });
+    setCrmSalesOrderConvertBusy(false);
+  }
+
+  async function convertCrmSalesOrderToBillingDocument(kind = "estimate") {
+    const sourceRow = crmSalesOrderConvertPopup?.row;
+    if (!sourceRow || crmSalesOrderConvertBusy) {
+      return;
+    }
+    setCrmSalesOrderConvertBusy(true);
+    try {
+      const moduleAccess = await getLatestCrmModuleAccess();
+      if (!moduleAccess.fromServer && !(moduleAccess.catalog || []).length) {
+        closeCrmSalesOrderConvertPopup();
+        setCrmActionPopup({
+          open: true,
+          title: "Accounts Check Failed",
+          message: "Unable to verify Accounts module status now. Please refresh and try again.",
+          isError: true,
+        });
+        return;
+      }
+      const guard = resolveAccountsConvertGuard(moduleAccess.catalog, moduleAccess.canManageModules);
+      if (!guard.allowed) {
+        closeCrmSalesOrderConvertPopup();
+        setCrmActionPopup({
+          open: true,
+          title: guard.title,
+          message: guard.message,
+          isError: true,
+        });
+        return;
+      }
+      const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow);
+      const listKey = kind === "estimate" ? "estimates" : "invoices";
+      const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
+      const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+      if (existingConverted) {
+        closeCrmSalesOrderConvertPopup();
+        const label = kind === "estimate" ? "Estimate" : "Invoice";
+        setCrmActionPopup({
+          open: true,
+          title: "Already Converted",
+          message: `${label} already created for this Sales Order: ${String(existingConverted.docNo || "-").trim() || "-"}.`,
+        });
+        return;
+      }
+      const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
+      await persistCrmAccountsWorkspace({
+        ...crmAccountsWorkspace,
+        [listKey]: [convertedDocument, ...existingRows],
+      });
+      closeCrmSalesOrderConvertPopup();
+      setCrmActionPopup({
+        open: true,
+        title: "Converted Successfully",
+        message: `${kind === "estimate" ? "Estimate" : "Invoice"} created with number ${String(convertedDocument.docNo || "-").trim() || "-"}.`,
+      });
+    } catch (error) {
+      closeCrmSalesOrderConvertPopup();
+      setCrmActionPopup({
+        open: true,
+        title: "Convert Failed",
+        message: error?.message || "Unable to convert this Sales Order right now. Please try again.",
+        isError: true,
+      });
+    } finally {
+      setCrmSalesOrderConvertBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -8929,12 +9389,20 @@ function CrmOnePageModule() {
       } else {
         payload.statusUpdatedAt = "";
       }
+      payload.crmReferenceId = String(previousLead?.crmReferenceId || previousLead?.crm_reference_id || "").trim();
       payload = normalizeCrmLeadRecord(payload);
     }
     if (sectionKey === "deals") {
       const previousDeal = editingId
         ? (moduleData.deals || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
         : null;
+      payload.crmReferenceId = String(
+        payload.crmReferenceId
+        || previousDeal?.crmReferenceId
+        || previousDeal?.crm_reference_id
+        || resolveCrmReferenceIdByText(payload.dealName || payload.company || "")
+        || ""
+      ).trim();
       const assignType = String(payload.assignType || previousDeal?.assignType || "Users").trim();
       const assignedTeam = String(payload.assignedTeam || previousDeal?.assignedTeam || "").trim();
       const assignedUsers = assignType.toLowerCase() === "team"
@@ -8955,6 +9423,13 @@ function CrmOnePageModule() {
       const previousOrder = editingId
         ? (moduleData.salesOrders || []).find((row) => String(row.id || "").trim() === String(editingId || "").trim())
         : null;
+      payload.crmReferenceId = String(
+        payload.crmReferenceId
+        || previousOrder?.crmReferenceId
+        || previousOrder?.crm_reference_id
+        || resolveCrmReferenceIdByText(payload.customerName || payload.company || "")
+        || ""
+      ).trim();
       const assignType = String(payload.assignType || previousOrder?.assignType || "Users").trim();
       const assignedTeam = String(payload.assignedTeam || previousOrder?.assignedTeam || "").trim();
       const assignedUsers = assignType.toLowerCase() === "team"
@@ -9044,6 +9519,11 @@ function CrmOnePageModule() {
       payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
       payload.owner = effectiveMeetingOwners.join(", ");
       payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveMeetingOwners);
+      payload.crmReferenceId = String(
+        payload.crmReferenceId
+        || resolveCrmReferenceIdByText(payload.relatedTo || payload.companyOrClientName || "")
+        || ""
+      ).trim();
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
       payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
@@ -9061,6 +9541,7 @@ function CrmOnePageModule() {
       const effectiveActivityOwners = activityOwners.length ? activityOwners : [String(currentUserName || "Current User").trim()];
       payload.owner = effectiveActivityOwners.join(", ");
       payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveActivityOwners);
+      payload.crmReferenceId = String(payload.crmReferenceId || resolveCrmReferenceIdByText(payload.relatedTo || "") || "").trim();
       payload.createdBy = String(currentUserName || "Current User").trim();
     }
     if (sectionKey === "followUps") {
@@ -9068,6 +9549,7 @@ function CrmOnePageModule() {
       const effectiveFollowUpOwners = followUpOwners.length ? followUpOwners : [String(currentUserName || "Current User").trim()];
       payload.owner = effectiveFollowUpOwners.join(", ");
       payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveFollowUpOwners);
+      payload.crmReferenceId = String(payload.crmReferenceId || resolveCrmReferenceIdByText(payload.relatedTo || "") || "").trim();
       payload.createdBy = String(currentUserName || "Current User").trim();
       const normalizedStatus = String(payload.status || "").trim().toLowerCase();
       const existingFollowUp = editingId ? (moduleData.followUps || []).find((row) => String(row.id) === String(editingId)) : null;
@@ -9095,6 +9577,7 @@ function CrmOnePageModule() {
             {
               method: editingId ? "PATCH" : "POST",
               body: JSON.stringify({
+                crm_reference_id: payload.crmReferenceId || "",
                 lead_name: payload.name || "",
                 company: payload.company || "",
                 phone: payload.phone || "",
@@ -9158,6 +9641,7 @@ function CrmOnePageModule() {
             await apiFetch("/api/business-autopilot/deals", {
               method: "POST",
               body: JSON.stringify({
+                crm_reference_id: payload.crmReferenceId || "",
                 deal_name: payload.dealName || "",
                 company: payload.company || "",
                 phone: payload.phone || "",
@@ -9185,6 +9669,7 @@ function CrmOnePageModule() {
           await apiFetch("/api/business-autopilot/sales-orders", {
             method: "POST",
             body: JSON.stringify({
+              crm_reference_id: payload.crmReferenceId || "",
               customer_name: payload.customerName || "",
               company: payload.company || "",
               phone: payload.phone || "",
@@ -9216,6 +9701,7 @@ function CrmOnePageModule() {
     let meetingServerId = "";
     if (sectionKey === "meetings") {
       const meetingApiPayload = {
+        crm_reference_id: payload.crmReferenceId || "",
         title: payload.title || "",
         company_or_client_name: payload.companyOrClientName || "",
         related_to: payload.relatedTo || "",
@@ -9529,8 +10015,11 @@ function CrmOnePageModule() {
 
   function importRows(sectionKey, importedRows) {
     const config = CRM_SECTION_CONFIG[sectionKey];
-    const expectedHeaders = (config.columns || []).map((column) => column.label);
-    const headerValidation = validateImportHeaders(importedRows, expectedHeaders);
+    const expectedHeaders = (config.columns || []).filter((column) => !column.importOptional).map((column) => column.label);
+    const optionalHeaders = (config.columns || [])
+      .filter((column) => column.importOptional)
+      .flatMap((column) => [column.label, column.key]);
+    const headerValidation = validateImportHeaders(importedRows, expectedHeaders, optionalHeaders);
     if (!headerValidation.isValid) {
       return {
         isError: true,
@@ -10279,6 +10768,7 @@ function CrmOnePageModule() {
               label: String(lead.name || lead.company || "").trim() || "Unnamed Lead",
               subText: String(lead.company || lead.name || "").trim() || "-",
               value: String(lead.name || lead.company || "").trim(),
+              crmReferenceId: String(lead.crmReferenceId || lead.crm_reference_id || "").trim(),
               haystack: `${String(lead.name || "").trim()} ${String(lead.company || "").trim()} ${String(lead.phone || "").trim()}`.toLowerCase(),
             }))
               .filter((lead) => !hasFollowUpRelatedToQuery || lead.haystack.includes(followUpRelatedToQuery))
@@ -10289,6 +10779,7 @@ function CrmOnePageModule() {
                 label: String(contact.name || "").trim() || "Unnamed Contact",
                 subText: String(contact.company || contact.email || "").trim() || "-",
                 value: String(contact.name || contact.company || "").trim(),
+                crmReferenceId: String(contact.crmReferenceId || contact.crm_reference_id || resolveCrmReferenceIdByText(contact.name || contact.company || "")).trim(),
                 haystack: `${String(contact.name || "").trim()} ${String(contact.company || "").trim()} ${String(contact.email || "").trim()}`.toLowerCase(),
               })).filter((contact) => !hasFollowUpRelatedToQuery || contact.haystack.includes(followUpRelatedToQuery)).slice(0, 6)
               : sharedCustomerOptions.map((customer) => {
@@ -10299,6 +10790,7 @@ function CrmOnePageModule() {
                   label,
                   subText: String(customer.companyName || customer.clientName || "").trim() || "-",
                   value: String(label || customer.companyName || customer.clientName || "").trim(),
+                  crmReferenceId: resolveCrmReferenceIdByText(label || customer.companyName || customer.clientName || ""),
                   haystack,
                 };
               }).filter((customer) => !hasFollowUpRelatedToQuery || customer.haystack.includes(followUpRelatedToQuery)).slice(0, 6)
@@ -10512,15 +11004,21 @@ function CrmOnePageModule() {
         if (sectionKey === "salesOrders") {
           const salesOrderRows = filteredRows.map((row) => {
             const totals = computeDocumentTotals(row, crmSalesOrderGstTemplates || []);
+            const linkedEstimate = findAccountsDocumentForSalesOrder(crmAccountsWorkspace.estimates || [], row);
+            const linkedInvoice = findAccountsDocumentForSalesOrder(crmAccountsWorkspace.invoices || [], row);
             return {
               ...row,
+              crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || resolveCrmReferenceIdByText(row.customerName || row.company || "") || "").trim(),
               orderId: String(row.orderId || row.order_id || "").trim() || "-",
-              customerName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
+              leadName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
+              clients: String(row.company || "").trim() || "-",
               issueDate: String(row.issueDate || row.issue_date || "").trim(),
               dueDate: String(row.dueDate || row.due_date || "").trim(),
               amountDisplay: totals.grandTotal > 0 ? formatCurrencyAmount(totals.grandTotal, crmCurrencyCode) : "-",
-              gstTemplateName: crmSalesOrderGstTemplates.find((template) => String(template?.id || "") === String(row.gstTemplateId || row.gst_template_id || ""))?.name || "-",
-              billingTemplateName: crmSalesOrderBillingTemplates.find((template) => String(template?.id || "") === String(row.billingTemplateId || row.billing_template_id || ""))?.name || "-",
+              convertedToEstimate: Boolean(linkedEstimate),
+              convertedEstimateNo: String(linkedEstimate?.docNo || "").trim(),
+              convertedToInvoice: Boolean(linkedInvoice || row.convertedToInvoice),
+              convertedInvoiceNo: String(linkedInvoice?.docNo || row.convertedInvoiceId || "").trim(),
             };
           });
           const crmSalesOrderEditorModuleData = {
@@ -10605,12 +11103,13 @@ function CrmOnePageModule() {
                       title="Sales Orders List"
                       rows={salesOrderRows}
                       columns={[
+                        { key: "crmReferenceId", label: "CRM ID" },
                         { key: "orderId", label: "Order ID" },
-                        { key: "customerName", label: "Customer" },
+                        { key: "leadName", label: "Lead Name" },
+                        { key: "clients", label: "Clients" },
                         { key: "issueDate", label: "Issue Date" },
                         { key: "dueDate", label: "Due Date" },
                         { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
-                        { key: "gstTemplateName", label: "GST Template" },
                         { key: "status", label: "Status" },
                       ]}
                       emptyMessage="No sales orders yet."
@@ -10618,29 +11117,46 @@ function CrmOnePageModule() {
                       pageSize={DEFAULT_TABLE_PAGE_SIZE}
                       withoutOuterCard
                       searchBy={(row) => [
+                        row.crmReferenceId,
                         row.orderId,
-                        row.customerName,
+                        row.leadName,
+                        row.clients,
                         row.company,
                         row.status,
-                        row.gstTemplateName,
+                        row.convertedEstimateNo,
+                        row.convertedInvoiceNo,
                       ].join(" ")}
                       renderCells={(row) => [
+                        row.crmReferenceId || "-",
                         row.orderId || "-",
-                        row.customerName || "-",
+                        row.leadName || "-",
+                        row.clients || "-",
                         formatDateLikeCellValue("issueDate", row.issueDate, "-"),
                         formatDateLikeCellValue("dueDate", row.dueDate, "-"),
                         row.amountDisplay || "-",
-                        row.gstTemplateName || "-",
                         row.convertedToInvoice
                           ? (
                             <span className="badge text-bg-success">
-                              Converted to Invoice
+                              {`Converted to Invoice${row.convertedInvoiceNo ? ` (${row.convertedInvoiceNo})` : ""}`}
                             </span>
                           )
-                          : formatDateLikeCellValue("status", row.status, "-"),
+                          : row.convertedToEstimate
+                            ? (
+                              <span className="badge text-bg-info">
+                                {`Converted to Estimate${row.convertedEstimateNo ? ` (${row.convertedEstimateNo})` : ""}`}
+                              </span>
+                            )
+                            : formatDateLikeCellValue("status", row.status, "-"),
                       ]}
                       renderActions={(row) => (
                         <div className="d-inline-flex gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-info"
+                            onClick={() => openCrmSalesOrderConvertPopup(row)}
+                          >
+                            Convert
+                          </button>
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-info"
@@ -11066,6 +11582,8 @@ function CrmOnePageModule() {
                         <Fragment key={`${sectionKey}-${field.key}`}>
                           {hasPhoneCountryCodeField && field.key === "phoneCountryCode"
                             ? null
+                            : sectionKey === "leads" && field.key === "crmReferenceId" && !editingId
+                            ? null
                             : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "Users").trim().toLowerCase() === "team"
                             ? null
                             : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "Users").trim().toLowerCase() !== "team"
@@ -11077,6 +11595,8 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "name" || field.key === "company"
                                       ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "contactPerson"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "phone"
@@ -11097,6 +11617,8 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "activityType"
                                       ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "relatedTo"
                                       ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "date"
@@ -11111,6 +11633,8 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "name" || field.key === "company"
                                       ? "col-12 col-md-6 col-xl-2"
+                                      : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "email"
                                       ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "phone"
@@ -11123,6 +11647,8 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "dealName" || field.key === "company"
                                       ? "col-12 col-md-6 col-xl-3"
+                                      : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "stage"
                                       ? "col-12 col-md-6 col-xl-1"
                                       : field.key === "dealValueExpected" || field.key === "wonAmountFinal"
@@ -11137,6 +11663,8 @@ function CrmOnePageModule() {
                                       ? field.key === "relatedTo"
                                         ? "col-12 col-md-6 col-xl-4"
                                         : "col-12 col-md-6 col-xl-2"
+                                      : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "dueDate"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "owner"
@@ -11149,6 +11677,8 @@ function CrmOnePageModule() {
                                 ? (
                                     field.key === "title" || field.key === "companyOrClientName"
                                       ? "col-12 col-md-6 col-xl-3"
+                                    : field.key === "crmReferenceId"
+                                      ? "col-12 col-md-6 col-xl-2"
                                     : field.key === "relatedTo"
                                       ? "col-12 col-md-6 col-xl-2"
                                     : field.key === "meetingDate" || field.key === "meetingTime"
@@ -11170,6 +11700,17 @@ function CrmOnePageModule() {
                               {isCrmFieldRequired(sectionKey, field, formValues) ? " *" : ""}
                             </label>
                             {(() => {
+                              if (field.readOnly) {
+                                return (
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    value={formValues[field.key] || ""}
+                                    readOnly
+                                    placeholder={field.placeholder || "Auto generated"}
+                                  />
+                                );
+                              }
                               if (hasPhoneCountryCodeField && field.key === "phone") {
                                 return (
                                   <div className="input-group">
@@ -11452,6 +11993,7 @@ function CrmOnePageModule() {
                                           setFollowUpRelatedToType(event.target.value);
                                           setFollowUpRelatedToSearch("");
                                           setField(sectionKey, "relatedTo", "");
+                                          setField(sectionKey, "crmReferenceId", "");
                                         }}
                                       >
                                         {CRM_FOLLOWUP_RELATED_TO_TYPES.map((type) => (
@@ -11470,6 +12012,7 @@ function CrmOnePageModule() {
                                         onChange={(event) => {
                                           setFollowUpRelatedToSearch(event.target.value);
                                           setField(sectionKey, field.key, event.target.value);
+                                          setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(event.target.value));
                                           setFollowUpRelatedToSearchOpen(true);
                                         }}
                                       />
@@ -11487,6 +12030,7 @@ function CrmOnePageModule() {
                                                 onMouseDown={(event) => event.preventDefault()}
                                                 onClick={() => {
                                                   setField(sectionKey, "relatedTo", item.value);
+                                                  setField(sectionKey, "crmReferenceId", String(item.crmReferenceId || resolveCrmReferenceIdByText(item.value)).trim());
                                                   setFollowUpRelatedToSearch(item.value);
                                                   setFollowUpRelatedToSearchOpen(false);
                                                 }}
@@ -11593,6 +12137,7 @@ function CrmOnePageModule() {
                                       onBlur={() => window.setTimeout(() => setActivityClientSearchOpen(false), 120)}
                                       onChange={(event) => {
                                         setField(sectionKey, field.key, event.target.value);
+                                        setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(event.target.value));
                                         setActivityClientSearchOpen(true);
                                       }}
                                     />
@@ -11610,6 +12155,7 @@ function CrmOnePageModule() {
                                                   onMouseDown={(event) => event.preventDefault()}
                                                   onClick={() => {
                                                     setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
+                                                    setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(contact.company || contact.name || ""));
                                                     setActivityClientSearchOpen(false);
                                                   }}
                                                 >
@@ -11630,6 +12176,7 @@ function CrmOnePageModule() {
                                                   onMouseDown={(event) => event.preventDefault()}
                                                   onClick={() => {
                                                     setField(sectionKey, field.key, String(customer.companyName || customer.name || customer.clientName || "").trim());
+                                                    setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(customer.companyName || customer.name || customer.clientName || ""));
                                                     setActivityClientSearchOpen(false);
                                                   }}
                                                 >
@@ -12484,9 +13031,27 @@ function CrmOnePageModule() {
               ) : (
                 bulkActions
               )}
-              searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+              searchBy={(row) => config.columns.map((column) => {
+                if (column.key === "crmReferenceId") {
+                  return String(
+                    row.crmReferenceId
+                    || row.crm_reference_id
+                    || resolveCrmReferenceIdByText(row.relatedTo || row.company || row.name || row.dealName || row.customerName || "")
+                    || ""
+                  ).trim();
+                }
+                return row[column.key] || "";
+              }).join(" ")}
               pageSize={sectionKey === "leads" ? 15 : DEFAULT_TABLE_PAGE_SIZE}
               exportCellValue={(row, column) => {
+                if (column.key === "crmReferenceId") {
+                  return String(
+                    row.crmReferenceId
+                    || row.crm_reference_id
+                    || resolveCrmReferenceIdByText(row.relatedTo || row.company || row.name || row.dealName || row.customerName || "")
+                    || ""
+                  ).trim();
+                }
                 if (column.key === "phone") {
                   const phone = String(row.phone || "").trim();
                   if (!phone) return "";
@@ -12502,6 +13067,11 @@ function CrmOnePageModule() {
               }}
 	              renderCells={(row) =>
 	                config.columns.map((column) => {
+                  if (column.key === "crmReferenceId") {
+                    const directValue = String(row.crmReferenceId || row.crm_reference_id || "").trim();
+                    const derivedValue = resolveCrmReferenceIdByText(row.relatedTo || row.company || row.name || row.dealName || row.customerName || "");
+                    return directValue || derivedValue || "-";
+                  }
 	                  if (column.key === "phone") {
 	                    const phone = String(row.phone || "").trim();
 	                    if (!phone) return "-";
@@ -12631,7 +13201,16 @@ function CrmOnePageModule() {
                         disabled={String(row.status || "").trim().toLowerCase() !== "won"}
                         title="Create sales order from won deal"
                       >
-                        Convert to Sales Order
+                        Convert to SO
+                      </button>
+                    ) : null}
+                    {sectionKey === "deals" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-info"
+                        onClick={() => onCancelDeal(row)}
+                      >
+                        Cancel
                       </button>
                     ) : null}
                     {canEditCrmRow(sectionKey, row) ? (
@@ -12922,6 +13501,59 @@ function CrmOnePageModule() {
               ) : (
                 <div className="small text-secondary">No employees found.</div>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {crmSalesOrderConvertPopup.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeCrmSalesOrderConvertPopup}
+        >
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(460px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <h5 className="mb-0">Convert Sales Order</h5>
+              <button
+                type="button"
+                className="btn btn-sm wz-crm-popup-close"
+                onClick={closeCrmSalesOrderConvertPopup}
+                disabled={crmSalesOrderConvertBusy}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="text-secondary mb-3">
+              <div><strong>Order ID:</strong> {String(crmSalesOrderConvertPopup.row?.orderId || crmSalesOrderConvertPopup.row?.order_id || "-").trim() || "-"}</div>
+              <div><strong>Lead Name:</strong> {String(crmSalesOrderConvertPopup.row?.customerName || crmSalesOrderConvertPopup.row?.customer_name || "-").trim() || "-"}</div>
+              <div><strong>Client:</strong> {String(crmSalesOrderConvertPopup.row?.company || "-").trim() || "-"}</div>
+            </div>
+            <div className="d-flex flex-wrap justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={closeCrmSalesOrderConvertPopup}
+                disabled={crmSalesOrderConvertBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => convertCrmSalesOrderToBillingDocument("estimate")}
+                disabled={crmSalesOrderConvertBusy}
+              >
+                {crmSalesOrderConvertBusy ? "Converting..." : "Convert to Estimate"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                onClick={() => convertCrmSalesOrderToBillingDocument("invoice")}
+                disabled={crmSalesOrderConvertBusy}
+              >
+                {crmSalesOrderConvertBusy ? "Converting..." : "Convert to Invoice"}
+              </button>
             </div>
           </div>
         </div>
@@ -19947,7 +20579,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
     const requireIssueDate = kind !== "estimate";
-    const customerLocked = kind === "salesOrder";
+    const customerLocked = kind === "salesOrder" && Boolean(String(form.sourceDealId || form.source_deal_id || "").trim());
     const customerLockedMessage = "This sales order is linked to the customer from the lead or deal pipeline. To change the customer, update the original lead or deal first.";
     const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
     const [salesSearchOpen, setSalesSearchOpen] = useState(false);
@@ -20223,7 +20855,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   className="form-control"
                   value={form.docNo || ""}
                   onChange={(e) => setField("docNo", e.target.value)}
-                  placeholder={kind === "estimate" ? "EST-DDMMYYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DDMMYYYY-001"}
+                  placeholder={kind === "estimate" ? "EST-DD-MM-YYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DD-MM-YYYY-001"}
                 />
               </div>
               <div className="col-12 col-xl-2">

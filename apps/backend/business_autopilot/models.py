@@ -1,5 +1,8 @@
-from django.db import models
+import re
+
 from django.conf import settings
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 
 
 class Module(models.Model):
@@ -420,11 +423,15 @@ class CrmLead(models.Model):
         ("Team", "Team"),
     )
 
+    CRM_REFERENCE_PREFIX = "CRM"
+    CRM_REFERENCE_RE = re.compile(r"^CRM-(\d{2})-(\d{2})-(\d{4})-(\d+)$")
+
     organization = models.ForeignKey(
         "core.Organization",
         on_delete=models.CASCADE,
         related_name="business_autopilot_crm_leads",
     )
+    crm_reference_id = models.CharField(max_length=32, unique=True, editable=False, db_index=True)
     lead_name = models.CharField(max_length=180)
     company = models.CharField(max_length=180, blank=True, default="")
     phone = models.CharField(max_length=40, blank=True, default="")
@@ -470,6 +477,42 @@ class CrmLead(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+
+    @classmethod
+    def _build_crm_reference_prefix(cls, for_date):
+        return f"{cls.CRM_REFERENCE_PREFIX}-{for_date.strftime('%d-%m-%Y')}-"
+
+    @classmethod
+    def _next_crm_reference_id(cls, for_date):
+        prefix = cls._build_crm_reference_prefix(for_date)
+        max_seq = 0
+        existing_ids = cls.objects.select_for_update().filter(crm_reference_id__startswith=prefix).values_list("crm_reference_id", flat=True)
+        for raw_id in existing_ids:
+            match = cls.CRM_REFERENCE_RE.match(str(raw_id or "").strip())
+            if not match:
+                continue
+            try:
+                seq = int(match.group(4))
+            except (TypeError, ValueError):
+                continue
+            if seq > max_seq:
+                max_seq = seq
+        return f"{prefix}{max_seq + 1:02d}"
+
+    def save(self, *args, **kwargs):
+        if self.pk or self.crm_reference_id:
+            return super().save(*args, **kwargs)
+
+        for _ in range(8):
+            try:
+                with transaction.atomic():
+                    self.crm_reference_id = self._next_crm_reference_id(timezone.localdate())
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                # Retry with next sequence if another request created the same id concurrently.
+                self.crm_reference_id = ""
+                continue
+        raise IntegrityError("Unable to generate unique crm_reference_id after multiple attempts.")
 
     def __str__(self):
         return f"Lead({self.organization_id} - {self.lead_name})"
@@ -544,6 +587,7 @@ class CrmDeal(models.Model):
         on_delete=models.CASCADE,
         related_name="business_autopilot_crm_deals",
     )
+    crm_reference_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
     lead = models.ForeignKey(
         CrmLead,
         on_delete=models.SET_NULL,
@@ -610,6 +654,7 @@ class CrmSalesOrder(models.Model):
         on_delete=models.CASCADE,
         related_name="business_autopilot_crm_sales_orders",
     )
+    crm_reference_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
     deal = models.OneToOneField(
         CrmDeal,
         on_delete=models.SET_NULL,
@@ -683,6 +728,7 @@ class CrmMeeting(models.Model):
         on_delete=models.CASCADE,
         related_name="business_autopilot_crm_meetings",
     )
+    crm_reference_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
     title = models.CharField(max_length=180)
     company_or_client_name = models.CharField(max_length=180, blank=True, default="")
     related_to = models.CharField(max_length=180, blank=True, default="")

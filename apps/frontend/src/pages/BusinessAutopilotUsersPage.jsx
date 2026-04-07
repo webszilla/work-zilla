@@ -805,6 +805,24 @@ function clearCrmContactToClientDraft(preferredOrgId = "") {
   }
 }
 
+function buildCrmSalesOrderResumePath() {
+  try {
+    const pathname = String(window.location.pathname || "").trim();
+    if (!pathname) {
+      return "/app/business-autopilot/crm?resume-sales-order=1";
+    }
+    let crmPath = pathname;
+    if (/\/users(?:\/.*)?$/i.test(pathname)) {
+      crmPath = pathname.replace(/\/users(?:\/.*)?$/i, "/crm");
+    } else if (!/\/crm(?:\/.*)?$/i.test(pathname)) {
+      crmPath = "/app/business-autopilot/crm";
+    }
+    return `${crmPath}?resume-sales-order=1`;
+  } catch {
+    return "/app/business-autopilot/crm?resume-sales-order=1";
+  }
+}
+
 function writeBusinessAutopilotUserDirectory(users) {
   if (typeof window === "undefined") {
     return;
@@ -2746,17 +2764,46 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     const clientName = String(clientForm.clientName || "").trim();
+    if (!clientName) {
+      setNotice("Client name is required.");
+      return;
+    }
     const primaryPhone = String(clientForm.phone || "").trim();
+    if (!primaryPhone) {
+      setNotice("Phone number is required.");
+      return;
+    }
     const primaryEmail = String(clientForm.email || "").trim();
+    if (!primaryEmail) {
+      setNotice("Email ID is required.");
+      return;
+    }
     const additionalPhones = (clientForm.additionalPhones || [])
       .map((row) => ({ countryCode: String(row.countryCode || "+91").trim() || "+91", number: String(row.number || "").trim() }))
       .filter((row) => row.number);
     const additionalEmails = (clientForm.additionalEmails || [])
       .map((value) => String(value || "").trim())
       .filter(Boolean);
+    const billingAddress = String(clientForm.billingAddress || "").trim();
+    if (!billingAddress) {
+      setNotice("Billing address is required.");
+      return;
+    }
     const billingCountry = String(clientForm.billingCountry || "").trim() || "India";
+    if (!billingCountry) {
+      setNotice("Billing country is required.");
+      return;
+    }
     const billingState = String(clientForm.billingState || "").trim();
+    if (!billingState) {
+      setNotice("Billing state is required.");
+      return;
+    }
     const billingPincode = String(clientForm.billingPincode || "").trim();
+    if (!billingPincode) {
+      setNotice("Billing pincode is required.");
+      return;
+    }
     const useSameShipping = Boolean(clientForm.billingShippingSame);
     const shippingAddress = useSameShipping
       ? String(clientForm.billingAddress || "").trim()
@@ -2770,6 +2817,24 @@ export default function BusinessAutopilotUsersPage() {
     const shippingPincode = useSameShipping
       ? billingPincode
       : String(clientForm.shippingPincode || "").trim();
+    if (!useSameShipping) {
+      if (!shippingAddress) {
+        setNotice("Shipping address is required.");
+        return;
+      }
+      if (!shippingCountry) {
+        setNotice("Shipping country is required.");
+        return;
+      }
+      if (!shippingState) {
+        setNotice("Shipping state is required.");
+        return;
+      }
+      if (!shippingPincode) {
+        setNotice("Shipping pincode is required.");
+        return;
+      }
+    }
     const payload = normalizeSharedCustomerRecord({
       id: editingClientId || `cust_${Date.now()}`,
       companyName,
@@ -2786,7 +2851,7 @@ export default function BusinessAutopilotUsersPage() {
       email: primaryEmail,
       additionalEmails,
       emailList: [primaryEmail, ...additionalEmails].filter(Boolean),
-      billingAddress: String(clientForm.billingAddress || "").trim(),
+      billingAddress,
       shippingAddress,
       billingCountry,
       billingState,
@@ -2815,6 +2880,11 @@ export default function BusinessAutopilotUsersPage() {
     }
     setNotice(successMessage);
     resetClientForm();
+    if (conversionDraftForThisSave) {
+      window.setTimeout(() => {
+        window.location.assign(buildCrmSalesOrderResumePath());
+      }, 120);
+    }
   }
 
   function editClient(row) {
@@ -4459,10 +4529,11 @@ export default function BusinessAutopilotUsersPage() {
               <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Company Name</label>
+                  <label className="form-label small text-secondary mb-1">Company Name *</label>
                   <div className="crm-inline-suggestions-wrap">
                     <input
                       className="form-control"
+                      required
                       maxLength={getBusinessAutopilotMaxLength("companyName")}
                       value={clientForm.companyName || ""}
                       onFocus={() => setClientCompanySearchOpen(true)}
@@ -4503,15 +4574,15 @@ export default function BusinessAutopilotUsersPage() {
                   </div>
                 </div>
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Client Name</label>
-                  <input className="form-control" maxLength={getBusinessAutopilotMaxLength("clientName")} value={clientForm.clientName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, clientName: limitedInput("clientName", event.target.value) }))} placeholder="Client / Contact person" />
+                  <label className="form-label small text-secondary mb-1">Client Name *</label>
+                  <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("clientName")} value={clientForm.clientName || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, clientName: limitedInput("clientName", event.target.value) }))} placeholder="Client / Contact person" />
                 </div>
                 <div className="col-12 col-xl-4">
                   <label className="form-label small text-secondary mb-1">GSTIN</label>
                   <input className="form-control" maxLength={getBusinessAutopilotMaxLength("gstin")} value={clientForm.gstin || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, gstin: limitedInput("gstin", event.target.value) }))} placeholder="GSTIN" />
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Phone Number</label>
+                  <label className="form-label small text-secondary mb-1">Phone Number *</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
                       <PhoneCountryCodePicker
@@ -4521,7 +4592,7 @@ export default function BusinessAutopilotUsersPage() {
                         style={{ maxWidth: "220px" }}
                         ariaLabel="Client phone country code"
                       />
-                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("phone")} value={clientForm.phone || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, phone: limitedInput("phone", event.target.value) }))} placeholder="Phone number" />
+                      <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("phone")} value={clientForm.phone || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, phone: limitedInput("phone", event.target.value) }))} placeholder="Phone number" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -4567,10 +4638,10 @@ export default function BusinessAutopilotUsersPage() {
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Email ID</label>
+                  <label className="form-label small text-secondary mb-1">Email ID *</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("email")} value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
+                      <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("email")} value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -4607,7 +4678,7 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
                 <div className="col-12 col-xl-6">
                   <div className="d-flex align-items-center justify-content-between mb-1">
-                    <label className="form-label small text-secondary mb-0">Billing Address</label>
+                    <label className="form-label small text-secondary mb-0">Billing Address *</label>
                     <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
                       <input
                         type="checkbox"
@@ -4615,59 +4686,59 @@ export default function BusinessAutopilotUsersPage() {
                         checked={Boolean(clientForm.billingShippingSame)}
                         onChange={(event) => setClientForm((prev) => ({ ...prev, billingShippingSame: event.target.checked }))}
                       />
-                      Billing and Shipping Same
+                      Billing And Shipping Same
                     </label>
                   </div>
-                  <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
+                  <textarea className="form-control mb-2" required rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
                   <div className="d-flex flex-column gap-2">
                     <div>
-                      <label className="form-label small text-secondary mb-1">Country</label>
-                      <select className="form-select" value={clientForm.billingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
+                      <label className="form-label small text-secondary mb-1">Country *</label>
+                      <select className="form-select" required value={clientForm.billingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
                         {COUNTRY_OPTIONS.map((country) => <option key={`users-client-country-${country}`} value={country}>{country}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">State</label>
+                      <label className="form-label small text-secondary mb-1">State *</label>
                       {billingStateOptions.length ? (
-                        <select className="form-select" value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))}>
+                        <select className="form-select" required value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))}>
                           <option value="">Select State</option>
                           {billingStateOptions.map((state) => <option key={`users-client-state-${state}`} value={state}>{state}</option>)}
                         </select>
                       ) : (
-                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingState")} value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
+                        <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("billingState")} value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
                       )}
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">Pincode</label>
-                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
+                      <label className="form-label small text-secondary mb-1">Pincode *</label>
+                      <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
                     </div>
                   </div>
                 </div>
                 {!clientForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
-                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
-                    <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
+                    <label className="form-label small text-secondary mb-1">Shipping Address *</label>
+                    <textarea className="form-control mb-2" required rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
                     <div className="d-flex flex-column gap-2">
                       <div>
-                        <label className="form-label small text-secondary mb-1">Country</label>
-                        <select className="form-select" value={clientForm.shippingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
+                        <label className="form-label small text-secondary mb-1">Country *</label>
+                        <select className="form-select" required value={clientForm.shippingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
                           {COUNTRY_OPTIONS.map((country) => <option key={`users-client-shipping-country-${country}`} value={country}>{country}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">State</label>
+                        <label className="form-label small text-secondary mb-1">State *</label>
                         {shippingStateOptions.length ? (
-                          <select className="form-select" value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
+                          <select className="form-select" required value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
                             <option value="">Select State</option>
                             {shippingStateOptions.map((state) => <option key={`users-client-shipping-state-${state}`} value={state}>{state}</option>)}
                           </select>
                         ) : (
-                          <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingState")} value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
+                          <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("shippingState")} value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
                         )}
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">Pincode</label>
-                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
+                        <label className="form-label small text-secondary mb-1">Pincode *</label>
+                        <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
                       </div>
                     </div>
                   </div>

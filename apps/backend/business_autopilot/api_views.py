@@ -3866,6 +3866,49 @@ def _crm_order_id(org: Organization):
     return f"{prefix}{last_seq + 1:03d}"
 
 
+def _crm_reference_id_from_related_to(org: Organization, related_to: str):
+    related_value = str(related_to or "").strip()
+    if not related_value:
+        return ""
+    lead_match = (
+        CrmLead.objects
+        .filter(organization=org, is_deleted=False, lead_name__iexact=related_value)
+        .order_by("-updated_at", "-id")
+        .values_list("crm_reference_id", flat=True)
+        .first()
+    )
+    if lead_match:
+        return str(lead_match).strip()
+    lead_company_match = (
+        CrmLead.objects
+        .filter(organization=org, is_deleted=False, company__iexact=related_value)
+        .order_by("-updated_at", "-id")
+        .values_list("crm_reference_id", flat=True)
+        .first()
+    )
+    if lead_company_match:
+        return str(lead_company_match).strip()
+    deal_match = (
+        CrmDeal.objects
+        .filter(organization=org, is_deleted=False, deal_name__iexact=related_value)
+        .order_by("-updated_at", "-id")
+        .values_list("crm_reference_id", flat=True)
+        .first()
+    )
+    if deal_match:
+        return str(deal_match).strip()
+    deal_company_match = (
+        CrmDeal.objects
+        .filter(organization=org, is_deleted=False, company__iexact=related_value)
+        .order_by("-updated_at", "-id")
+        .values_list("crm_reference_id", flat=True)
+        .first()
+    )
+    if deal_company_match:
+        return str(deal_company_match).strip()
+    return ""
+
+
 def _crm_clean_user_id_list(value):
     raw = value if isinstance(value, list) else []
     user_ids = []
@@ -3907,6 +3950,7 @@ def _crm_can_access_row(user: User, org: Organization, row):
 def _serialize_crm_lead(row: CrmLead):
     return {
         "id": row.id,
+        "crm_reference_id": str(row.crm_reference_id or "").strip(),
         "lead_name": row.lead_name,
         "company": row.company,
         "phone": row.phone,
@@ -3947,8 +3991,12 @@ def _serialize_crm_contact(row: CrmContact):
 
 
 def _serialize_crm_deal(row: CrmDeal):
+    crm_reference_id = str(row.crm_reference_id or "").strip()
+    if not crm_reference_id and row.lead_id:
+        crm_reference_id = str(getattr(row.lead, "crm_reference_id", "") or "").strip()
     return {
         "id": row.id,
+        "crm_reference_id": crm_reference_id,
         "lead_id": row.lead_id,
         "deal_name": row.deal_name,
         "company": row.company,
@@ -3970,8 +4018,14 @@ def _serialize_crm_deal(row: CrmDeal):
 
 
 def _serialize_crm_sales_order(row: CrmSalesOrder):
+    crm_reference_id = str(row.crm_reference_id or "").strip()
+    if not crm_reference_id and row.deal_id:
+        deal_ref = str(getattr(row.deal, "crm_reference_id", "") or "").strip()
+        lead_ref = str(getattr(getattr(row.deal, "lead", None), "crm_reference_id", "") or "").strip()
+        crm_reference_id = deal_ref or lead_ref
     return {
         "id": row.id,
+        "crm_reference_id": crm_reference_id,
         "deal_id": row.deal_id,
         "order_id": row.order_id,
         "customer_name": row.customer_name,
@@ -3998,6 +4052,7 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
 def _serialize_crm_meeting(row: CrmMeeting):
     return {
         "id": row.id,
+        "crm_reference_id": str(row.crm_reference_id or "").strip(),
         "title": row.title,
         "company_or_client_name": row.company_or_client_name,
         "related_to": row.related_to,
@@ -4229,6 +4284,7 @@ def crm_leads(request, lead_id: int = None):
         if sync_related_deal:
             linked_deals = CrmDeal.objects.filter(organization=org, lead=row, is_deleted=False)
             for linked_deal in linked_deals:
+                linked_deal.crm_reference_id = str(row.crm_reference_id or "").strip()
                 linked_deal.deal_name = str(row.lead_name or "").strip()[:180]
                 linked_deal.company = row.company
                 linked_deal.phone = row.phone
@@ -4239,6 +4295,7 @@ def crm_leads(request, lead_id: int = None):
                 linked_deal.updated_by = request.user
                 linked_deal.save(
                     update_fields=[
+                        "crm_reference_id",
                         "deal_name",
                         "company",
                         "phone",
@@ -4383,6 +4440,7 @@ def crm_convert_to_deal(request, lead_id: int):
     existing_deal = CrmDeal.objects.filter(organization=org, lead=lead, is_deleted=False).first()
     if existing_deal:
         # Keep converted deal in sync with latest lead data when user retries convert.
+        existing_deal.crm_reference_id = str(lead.crm_reference_id or "").strip()
         existing_deal.deal_name = str(lead.lead_name or "").strip()[:180]
         existing_deal.company = lead.company
         existing_deal.phone = lead.phone
@@ -4393,6 +4451,7 @@ def crm_convert_to_deal(request, lead_id: int):
         existing_deal.updated_by = request.user
         existing_deal.save(
             update_fields=[
+                "crm_reference_id",
                 "deal_name",
                 "company",
                 "phone",
@@ -4421,6 +4480,7 @@ def crm_convert_to_deal(request, lead_id: int):
         deal = CrmDeal.objects.create(
             organization=org,
             lead=lead,
+            crm_reference_id=str(lead.crm_reference_id or "").strip(),
             deal_name=str(lead.lead_name or "").strip()[:180],
             company=lead.company,
             phone=lead.phone,
@@ -4475,11 +4535,15 @@ def crm_deals(request, deal_id: int = None):
         lead_id = _coerce_positive_int(payload.get("lead_id"))
         if lead_id:
             lead = CrmLead.objects.filter(organization=org, id=lead_id).first()
+        deal_crm_reference_id = str(payload.get("crm_reference_id") or "").strip()[:32]
+        if lead and not deal_crm_reference_id:
+            deal_crm_reference_id = str(lead.crm_reference_id or "").strip()[:32]
         assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
         assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
         row = CrmDeal.objects.create(
             organization=org,
             lead=lead,
+            crm_reference_id=deal_crm_reference_id,
             deal_name=deal_name[:180],
             company=str(payload.get("company") or "").strip()[:180],
             phone=str(payload.get("phone") or "").strip()[:40],
@@ -4515,8 +4579,14 @@ def crm_deals(request, deal_id: int = None):
                 row.status = status
         if "deal_value" in payload:
             row.deal_value = _crm_to_decimal(payload.get("deal_value"))
+        update_fields = ["stage", "status", "deal_value", "updated_by", "updated_at"]
+        if not row.crm_reference_id and row.lead_id:
+            lead_ref = str(getattr(row.lead, "crm_reference_id", "") or "").strip()
+            if lead_ref:
+                row.crm_reference_id = lead_ref
+                update_fields.append("crm_reference_id")
         row.updated_by = request.user
-        row.save(update_fields=["stage", "status", "deal_value", "updated_by", "updated_at"])
+        row.save(update_fields=update_fields)
         return JsonResponse({"deal": _serialize_crm_deal(row)})
 
     if resolved_method == "DELETE":
@@ -4556,13 +4626,18 @@ def crm_meetings(request, meeting_id: int = None):
         title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
         if not title:
             return JsonResponse({"detail": "title_required"}, status=400)
+        related_to_value = str(payload.get("related_to") or payload.get("relatedTo") or "").strip()[:180]
+        meeting_crm_reference_id = str(payload.get("crm_reference_id") or payload.get("crmReferenceId") or "").strip()[:32]
+        if not meeting_crm_reference_id:
+            meeting_crm_reference_id = _crm_reference_id_from_related_to(org, related_to_value)
         meeting_date = parse_date(str(payload.get("meeting_date") or payload.get("meetingDate") or "").strip() or "")
         meeting_time = parse_time(str(payload.get("meeting_time") or payload.get("meetingTime") or "").strip() or "")
         row = CrmMeeting.objects.create(
             organization=org,
+            crm_reference_id=meeting_crm_reference_id,
             title=title[:180],
             company_or_client_name=str(payload.get("company_or_client_name") or payload.get("companyOrClientName") or "").strip()[:180],
-            related_to=str(payload.get("related_to") or payload.get("relatedTo") or "").strip()[:180],
+            related_to=related_to_value,
             meeting_date=meeting_date,
             meeting_time=meeting_time,
             owner_names=str(payload.get("owner") or "").strip()[:500],
@@ -4592,6 +4667,7 @@ def crm_meetings(request, meeting_id: int = None):
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        related_to_changed = False
         if "title" in payload or "meeting_title" in payload:
             title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
             if title:
@@ -4600,6 +4676,11 @@ def crm_meetings(request, meeting_id: int = None):
             row.company_or_client_name = str(payload.get("company_or_client_name") or payload.get("companyOrClientName") or "").strip()[:180]
         if "related_to" in payload or "relatedTo" in payload:
             row.related_to = str(payload.get("related_to") or payload.get("relatedTo") or "").strip()[:180]
+            related_to_changed = True
+        if "crm_reference_id" in payload or "crmReferenceId" in payload:
+            row.crm_reference_id = str(payload.get("crm_reference_id") or payload.get("crmReferenceId") or "").strip()[:32]
+        elif related_to_changed and not str(row.crm_reference_id or "").strip():
+            row.crm_reference_id = _crm_reference_id_from_related_to(org, row.related_to)
         if "meeting_date" in payload or "meetingDate" in payload:
             row.meeting_date = parse_date(str(payload.get("meeting_date") or payload.get("meetingDate") or "").strip() or "")
         if "meeting_time" in payload or "meetingTime" in payload:
@@ -4659,7 +4740,7 @@ def crm_sales_orders(request, order_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     if request.method == "GET" and not order_id:
-        rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "created_by").order_by("-created_at")
+        rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "deal__lead", "created_by").order_by("-created_at")
         visible_rows = [row for row in rows if _crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id]
         return JsonResponse({"sales_orders": [_serialize_crm_sales_order(row) for row in visible_rows]})
 
@@ -4687,10 +4768,18 @@ def crm_sales_orders(request, order_id: int = None):
     tax = _crm_to_decimal(payload.get("tax"))
     amount = _crm_to_decimal(payload.get("amount"))
     total_amount = amount if amount > 0 else (price * Decimal(quantity)) + tax
+    crm_reference_id = str(payload.get("crm_reference_id") or payload.get("crmReferenceId") or "").strip()[:32]
+    source_deal_id = _coerce_positive_int(payload.get("source_deal_id") or payload.get("sourceDealId") or payload.get("deal_id"))
+    source_deal = None
+    if source_deal_id:
+        source_deal = CrmDeal.objects.filter(organization=org, id=source_deal_id).select_related("lead").first()
+    if source_deal and not crm_reference_id:
+        crm_reference_id = str(source_deal.crm_reference_id or getattr(source_deal.lead, "crm_reference_id", "") or "").strip()[:32]
     assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
     assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else request.user
     row = CrmSalesOrder.objects.create(
         organization=org,
+        crm_reference_id=crm_reference_id,
         order_id=_crm_order_id(org),
         customer_name=customer_name[:180],
         company=str(payload.get("company") or "").strip()[:180],
@@ -4716,7 +4805,7 @@ def crm_convert_to_sales_order(request, deal_id: int):
     org = _resolve_org(request.user)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
-    deal = CrmDeal.objects.filter(organization=org, id=deal_id, is_deleted=False).first()
+    deal = CrmDeal.objects.filter(organization=org, id=deal_id, is_deleted=False).select_related("lead").first()
     if not deal:
         return JsonResponse({"detail": "deal_not_found"}, status=404)
     if not _crm_can_access_row(request.user, org, deal):
@@ -4725,6 +4814,9 @@ def crm_convert_to_sales_order(request, deal_id: int):
         return JsonResponse({"detail": "deal_not_won"}, status=400)
     existing = CrmSalesOrder.objects.filter(organization=org, deal=deal, is_deleted=False).first()
     if existing:
+        if not str(existing.crm_reference_id or "").strip():
+            existing.crm_reference_id = str(deal.crm_reference_id or getattr(deal.lead, "crm_reference_id", "") or "").strip()[:32]
+            existing.save(update_fields=["crm_reference_id", "updated_at"])
         return JsonResponse({"sales_order": _serialize_crm_sales_order(existing), "already_converted": True})
     with transaction.atomic():
         amount = _crm_to_decimal(deal.deal_value)
@@ -4732,6 +4824,7 @@ def crm_convert_to_sales_order(request, deal_id: int):
         row = CrmSalesOrder.objects.create(
             organization=org,
             deal=deal,
+            crm_reference_id=str(deal.crm_reference_id or getattr(deal.lead, "crm_reference_id", "") or "").strip()[:32],
             order_id=_crm_order_id(org),
             customer_name=customer_name or "Customer",
             company=str(deal.company or "").strip()[:180],
