@@ -144,6 +144,12 @@
   })();
 
   (function () {
+    // Refresh the CSRF cookie on page load so stale browser state does not
+    // trigger the raw Django 403 page on the first login attempt.
+    fetch("/api/auth/csrf", { credentials: "same-origin" }).catch(function () {});
+  })();
+
+  (function () {
     var lockAlert = document.getElementById("loginLockAlert");
     if (!lockAlert) return;
     var rawRemaining = parseInt(lockAlert.getAttribute("data-lock-remaining-seconds") || "0", 10);

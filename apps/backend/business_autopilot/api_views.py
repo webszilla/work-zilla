@@ -4156,13 +4156,16 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         pdf.setFont("Helvetica", 9)
         for row in line_rows[:12]:
             line_tax = _to_decimal(row.get("tax_percent"))
+            line_type = str(row.get("hsn_sac_type") or row.get("hsnSacType") or "HSN").strip().upper() or "HSN"
+            line_type = "SAC" if line_type == "SAC" else "HSN"
             line_code = str(row.get("hsn_sac_code") or "").strip() or "-"
+            line_code_display = f"{line_type} {line_code}" if line_code != "-" else line_type
             description_text = str(row.get("description_custom") or row.get("description") or "-")
             description_lines = _ba_wrap_pdf_text(pdf, description_text, 86 * mm, "Helvetica", 9)
             for idx, line in enumerate(description_lines[:2]):
                 pdf.drawString(left, row_y - (idx * 4 * mm), line)
             text_bottom_y = row_y - ((len(description_lines[:2]) - 1) * 4 * mm)
-            pdf.drawString(left + 90 * mm, text_bottom_y, line_code)
+            pdf.drawString(left + 90 * mm, text_bottom_y, line_code_display)
             pdf.drawString(left + 114 * mm, text_bottom_y, str(row.get("qty") or ""))
             pdf.setFont(money_font, 9)
             pdf.drawString(left + 131 * mm, text_bottom_y, _format_pdf_inr(row.get('rate') or '0'))
@@ -5319,6 +5322,18 @@ def crm_sales_orders(request, order_id: int = None):
         "notes": str(payload.get("notes") or "").strip(),
         "termsText": str(payload.get("terms_text") or payload.get("termsText") or "").strip(),
         "paymentStatusNotes": str(payload.get("payment_status_notes") or payload.get("paymentStatusNotes") or "").strip(),
+        "paymentEntries": [
+            {
+                "id": str(entry.get("id") or "").strip(),
+                "paymentDate": str(entry.get("paymentDate") or entry.get("payment_date") or "").strip(),
+                "paymentMode": str(entry.get("paymentMode") or entry.get("payment_mode") or "").strip(),
+                "amount": float(_crm_to_decimal(entry.get("amount") or entry.get("paidAmount") or entry.get("paid_amount"))),
+                "transactionId": str(entry.get("transactionId") or entry.get("transaction_id") or "").strip(),
+                "notes": str(entry.get("notes") or entry.get("paymentNotes") or "").strip(),
+            }
+            for entry in (payload.get("payment_entries") or payload.get("paymentEntries") or [])
+            if isinstance(entry, dict)
+        ],
         "paymentStatus": payment_status,
         "paidAmount": float(paid_amount),
         "paymentMode": str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip() if can_edit_payment_details else str(row.payment_mode if row else ""),

@@ -213,6 +213,8 @@ STATICFILES_DIRS = [
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+CSRF_FAILURE_VIEW = "apps.backend.common_auth.views.csrf_failure_view"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", REPO_ROOT / "env" / "media"))
 

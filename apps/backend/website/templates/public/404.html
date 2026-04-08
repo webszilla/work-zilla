@@ -1,0 +1,23 @@
+{% extends "public/base.html" %}
+{% load static %}
+
+{% block meta_title %}Page Not Found | {{ brand_site_name }}{% endblock %}
+{% block meta_description %}The page you are looking for could not be found.{% endblock %}
+
+{% block content %}
+<section class="site-hero site-hero--compact">
+  <div class="site-container">
+    <div class="hero-copy">
+      <span class="eyebrow">404</span>
+      <h1 class="hero-title">Page not found</h1>
+      <p class="hero-subtitle">
+        The page may have been moved, renamed, or deleted.
+      </p>
+      <div class="d-flex flex-wrap gap-2 mt-4">
+        <a class="btn btn-primary" href="/">Go Home</a>
+        <a class="btn btn-outline" href="/contact/">Contact Support</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

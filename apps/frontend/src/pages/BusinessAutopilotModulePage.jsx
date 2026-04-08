@@ -321,7 +321,6 @@ const CRM_SECTION_CONFIG = {
     itemLabel: "Contact",
     icon: "bi-person-lines-fill",
     columns: [
-      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "name", label: "Name" },
       { key: "company", label: "Company" },
       { key: "email", label: "Email" },
@@ -1072,21 +1071,26 @@ function normalizePaymentStatus(value) {
 
 function normalizePaymentDetails(rawDetails, totalAmountValue) {
   const totalAmount = Math.max(0, parseNumber(totalAmountValue));
-  const paidRaw = sanitizeDecimalTextInput(
-    String(rawDetails?.paidAmount ?? rawDetails?.paid_amount ?? "").trim(),
-    CURRENCY_MAX_INTEGER_DIGITS,
-    CURRENCY_MAX_DECIMAL_DIGITS
-  );
+  const paidAmountRawInput = String(rawDetails?.paidAmount ?? rawDetails?.paid_amount ?? "").trim();
+  const paidRaw = sanitizeCurrencyInput(paidAmountRawInput);
   const paidAmount = Math.max(0, parseNumber(paidRaw));
   const cappedPaidAmount = totalAmount > 0 ? Math.min(paidAmount, totalAmount) : paidAmount;
   const paidAmountText = paidRaw ? formatCurrencyNumberInput(String(cappedPaidAmount), getOrgCurrency()) : "";
-  let paymentStatus = normalizePaymentStatus(rawDetails?.paymentStatus ?? rawDetails?.payment_status);
-  if (totalAmount > 0 && cappedPaidAmount >= totalAmount) {
-    paymentStatus = "Paid";
-  } else if (cappedPaidAmount > 0) {
-    paymentStatus = "Partial";
-  } else {
-    paymentStatus = "Pending";
+  const rawPaymentStatus = String(rawDetails?.paymentStatus ?? rawDetails?.payment_status ?? "").trim();
+  const normalizedRawStatus = rawPaymentStatus.toLowerCase();
+  const hasExplicitPaymentStatus = normalizedRawStatus === "pending"
+    || normalizedRawStatus === "partial"
+    || normalizedRawStatus === "partially paid"
+    || normalizedRawStatus === "paid";
+  let paymentStatus = hasExplicitPaymentStatus ? normalizePaymentStatus(rawPaymentStatus) : "";
+  if (!paymentStatus) {
+    if (totalAmount > 0 && cappedPaidAmount >= totalAmount) {
+      paymentStatus = "Paid";
+    } else if (cappedPaidAmount > 0) {
+      paymentStatus = "Partial";
+    } else {
+      paymentStatus = "Pending";
+    }
   }
   const balanceAmount = Math.max(0, totalAmount - cappedPaidAmount);
   return {
@@ -1098,6 +1102,33 @@ function normalizePaymentDetails(rawDetails, totalAmountValue) {
     paymentDate: String(rawDetails?.paymentDate ?? rawDetails?.payment_date ?? "").trim(),
     transactionId: String(rawDetails?.transactionId ?? rawDetails?.transaction_id ?? "").trim(),
   };
+}
+
+function createEmptyPaymentEntry() {
+  return {
+    id: `pay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    paymentDate: new Date().toISOString().slice(0, 10),
+    paymentMode: "",
+    amount: "",
+    transactionId: "",
+    notes: "",
+  };
+}
+
+function normalizePaymentEntry(entry = {}) {
+  const amountRawInput = String(entry.amount ?? entry.paidAmount ?? entry.paid_amount ?? "").trim();
+  return {
+    id: String(entry.id || `pay_${Date.now()}`).trim(),
+    paymentDate: String(entry.paymentDate || entry.payment_date || "").trim(),
+    paymentMode: String(entry.paymentMode || entry.payment_mode || "").trim(),
+    amount: formatCurrencyNumberInput(sanitizeCurrencyInput(amountRawInput), getOrgCurrency()),
+    transactionId: String(entry.transactionId || entry.transaction_id || "").trim(),
+    notes: String(entry.notes || entry.paymentNotes || "").trim(),
+  };
+}
+
+function getPaymentEntriesTotal(entries = []) {
+  return (Array.isArray(entries) ? entries : []).reduce((sum, entry) => sum + Math.max(0, parseNumber(entry.amount)), 0);
 }
 
 function getPaymentStatusBadgeClass(status) {
@@ -1264,6 +1295,7 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
     paymentDate: "",
     transactionId: "",
     paymentStatusNotes: "",
+    paymentEntries: [],
     deliveryStatus: kind === "invoice" ? "Pending" : "",
     inventoryCommitted: false,
     items: [createEmptyDocLine()]
@@ -1316,6 +1348,7 @@ function createEmptyCrmSalesOrder(existingRows = []) {
     paymentDate: "",
     transactionId: "",
     paymentStatusNotes: "",
+    paymentEntries: [],
     company: "",
     phone: "",
     items: [createEmptyDocLine()],
@@ -2835,6 +2868,9 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     paymentDate: row.paymentDate || row.payment_date || payload.paymentDate || payload.payment_date,
     transactionId: row.transactionId || row.transaction_id || payload.transactionId || payload.transaction_id,
   }, row.grandTotal ?? row.grand_total ?? row.total_amount ?? row.amount ?? payload.grandTotal ?? payload.grand_total);
+  const paymentEntries = Array.isArray(row.paymentEntries || row.payment_entries || payload.paymentEntries || payload.payment_entries)
+    ? (row.paymentEntries || row.payment_entries || payload.paymentEntries || payload.payment_entries).map(normalizePaymentEntry)
+    : [];
   const assignedUser = Array.isArray(row.assignedUser)
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
     : String(
@@ -2880,6 +2916,7 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     paymentMode: paymentDetails.paymentMode,
     paymentDate: paymentDetails.paymentDate,
     transactionId: paymentDetails.transactionId,
+    paymentEntries,
     balanceAmount: String(row.balanceAmount ?? row.balance_amount ?? paymentDetails.balanceAmount ?? "").trim(),
     sourceDealId: String(row.sourceDealId || row.source_deal_id || payload.sourceDealId || payload.source_deal_id || row.deal_id || "").trim(),
     convertedToInvoice: Boolean(row.convertedToInvoice || row.converted_to_invoice || payload.convertedToInvoice || payload.converted_to_invoice),
@@ -5766,6 +5803,7 @@ function BillingDocumentEditor({
     availableInventoryQty,
     updateDocLine,
     removeDocLine,
+    canEditPaymentDetails = false,
   }) {
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
@@ -5779,6 +5817,43 @@ function BillingDocumentEditor({
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
+    const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
+    const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
+    const showPartialPaymentSection = paymentSummary.paymentStatus === "Partial";
+    const paymentEntries = Array.isArray(form.paymentEntries) ? form.paymentEntries.map(normalizePaymentEntry) : [];
+    const syncPaymentEntries = (entries) => {
+      const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
+      const totalPaid = getPaymentEntriesTotal(normalizedEntries);
+      setField("paymentEntries", normalizedEntries);
+      setField("paidAmount", formatCurrencyNumberInput(String(totalPaid), getOrgCurrency()));
+      if (!normalizedEntries.length) {
+        setEditingPaymentEntryId("");
+      }
+    };
+    const addPaymentEntry = () => {
+      const nextEntry = createEmptyPaymentEntry();
+      setEditingPaymentEntryId(nextEntry.id);
+      syncPaymentEntries([...(paymentEntries || []), nextEntry]);
+    };
+    const updatePaymentEntry = (entryId, key, value) => {
+      setEditingPaymentEntryId(entryId);
+      syncPaymentEntries((paymentEntries || []).map((entry) => (
+        entry.id === entryId ? { ...entry, [key]: value } : entry
+      )));
+    };
+    const deletePaymentEntry = (entryId) => {
+      syncPaymentEntries((paymentEntries || []).filter((entry) => entry.id !== entryId));
+      if (String(editingPaymentEntryId || "") === String(entryId || "")) {
+        setEditingPaymentEntryId("");
+      }
+    };
+    const documentLineItemsComplete = (Array.isArray(form.items) ? form.items : []).length > 0
+      && (Array.isArray(form.items) ? form.items : []).every((line) => (
+        Boolean(String(line.customText || line.description || "").trim())
+        && Number(parseNumber(line.qty)) > 0
+        && Number(parseNumber(line.rate)) > 0
+      ));
+    const canAddPartialPayment = Boolean(canEditPaymentDetails && showPartialPaymentSection && documentLineItemsComplete);
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
       const docType = String(row.docType || "").trim().toLowerCase();
       if (!docType) return true;
@@ -6049,7 +6124,7 @@ function BillingDocumentEditor({
                   placeholder={kind === "estimate" ? "EST-DD-MM-YYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DD-MM-YYYY-001"}
                 />
               </div>
-              {kind === "salesOrder" ? (
+              {kind === "salesOrder" && Boolean(String(form.sourceDealId || form.source_deal_id || "").trim()) ? (
                 <div className="col-12 col-xl-2">
                   <label className="form-label small text-secondary mb-1">CRM Reference ID</label>
                   <input
@@ -6127,7 +6202,7 @@ function BillingDocumentEditor({
               </div>
               <div className="col-12 col-md-6 col-xl-2">
                 <label className="form-label small text-secondary mb-1">{taxUi.templateSingular} *</label>
-                <select className="form-select" required value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
+                <select className="form-select" required value={form.gstTemplateId || String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim()} onChange={(e) => setField("gstTemplateId", e.target.value)}>
                   <option value="">{`Select ${taxUi.templateSingular}`}</option>
                   {(moduleData.gstTemplates || []).map((row) => (
                     <option key={row.id} value={row.id}>
@@ -6304,7 +6379,6 @@ function BillingDocumentEditor({
                         <td style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control"
-                            required
                             inputMode="decimal"
                             maxLength={6}
                             value={line.taxPercent || ""}
@@ -6468,6 +6542,8 @@ function BillingDocumentEditor({
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
+                <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
+                <textarea className="form-control mb-3" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
                 <div className="border rounded p-3 mb-3">
                   <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
                     <div className="fw-semibold">Payment Details</div>
@@ -6504,13 +6580,23 @@ function BillingDocumentEditor({
                       <input className="form-control" value={form.transactionId || ""} onChange={(e) => setField("transactionId", e.target.value)} placeholder="Transaction ID" disabled={!canEditPaymentDetails} />
                     </div>
                   </div>
+                  {canEditPaymentDetails ? (
+                    <div className="d-flex justify-content-end mt-3">
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm px-3"
+                        onClick={addPaymentEntry}
+                        disabled={!canAddPartialPayment}
+                      >
+                        Add Partial Payment
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-                <label className="form-label small text-secondary mb-1">Payment Status Notes</label>
-                <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
               </div>
             </div>
             <div className="col-12 col-xl-5">
-              <div className="card p-3 h-100 border">
+              <div className="card p-3 border">
                 <h6 className="mb-3">Summary</h6>
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
                 {totals.taxBreakdown?.cgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CGST ({Number(totals.breakdownPercent?.cgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cgst)}</strong></div> : null}
@@ -6539,6 +6625,65 @@ function BillingDocumentEditor({
               </button>
             ) : null}
           </div>
+          {showPartialPaymentSection || paymentEntries.length > 0 || Boolean(editingPaymentEntryId) ? (
+            <div className="border rounded p-3">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+              <div className="fw-semibold">Partial Payment Details</div>
+              </div>
+              {showPartialPaymentSection && !documentLineItemsComplete ? (
+                <div className="alert alert-warning py-2 mb-3">
+                  Complete the item rows, qty, and rate before adding partial payments.
+                </div>
+              ) : null}
+              {paymentEntries.length ? (
+                <div className="table-responsive">
+                  <table className="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Mode</th>
+                        <th>Amount</th>
+                        <th>Transaction ID</th>
+                        <th>Notes</th>
+                        <th className="text-end">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentEntries.map((entry) => {
+                        const isEditing = String(editingPaymentEntryId || "") === String(entry.id || "");
+                        return (
+                          <tr key={entry.id} className={isEditing ? "table-warning" : ""}>
+                            <td><input type="date" className="form-control form-control-sm" value={entry.paymentDate || ""} onChange={(e) => updatePaymentEntry(entry.id, "paymentDate", e.target.value)} disabled={!canEditPaymentDetails} /></td>
+                            <td>
+                              <select className="form-select form-select-sm" value={entry.paymentMode || ""} onChange={(e) => updatePaymentEntry(entry.id, "paymentMode", e.target.value)} disabled={!canEditPaymentDetails}>
+                                <option value="">Select</option>
+                                {PAYMENT_MODE_OPTIONS.map((mode) => <option key={`entry-mode-${entry.id}-${mode}`} value={mode}>{mode}</option>)}
+                              </select>
+                            </td>
+                            <td><input className="form-control form-control-sm" inputMode="decimal" value={entry.amount || ""} onChange={(e) => updatePaymentEntry(entry.id, "amount", e.target.value)} placeholder="0.00" disabled={!canEditPaymentDetails} /></td>
+                            <td><input className="form-control form-control-sm" value={entry.transactionId || ""} onChange={(e) => updatePaymentEntry(entry.id, "transactionId", e.target.value)} placeholder="Transaction ID" disabled={!canEditPaymentDetails} /></td>
+                            <td><input className="form-control form-control-sm" value={entry.notes || ""} onChange={(e) => updatePaymentEntry(entry.id, "notes", e.target.value)} placeholder="Notes" disabled={!canEditPaymentDetails} /></td>
+                            <td className="text-end">
+                              <div className="d-inline-flex gap-2">
+                                <button type="button" className="btn btn-success btn-sm" onClick={() => setEditingPaymentEntryId(entry.id)} disabled={!canEditPaymentDetails}>
+                                  {isEditing ? "Editing" : "Edit"}
+                                </button>
+                                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deletePaymentEntry(entry.id)} disabled={!canEditPaymentDetails}>
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-secondary small">No partial payment entries yet.</div>
+              )}
+            </div>
+          ) : null}
         </form>
         {customerLockedPopupOpen ? (
           <div
@@ -7808,6 +7953,7 @@ function CrmOnePageModule() {
       notes: String(normalizedRow.notes || baseDocument.notes || "").trim(),
       termsText: String(normalizedRow.termsText || baseDocument.termsText || "").trim(),
       paymentStatusNotes: String(normalizedRow.paymentStatusNotes || "").trim(),
+      paymentEntries: Array.isArray(normalizedRow.paymentEntries) ? normalizedRow.paymentEntries.map(normalizePaymentEntry) : [],
       paymentStatus: kind === "invoice" ? "Pending" : "",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
@@ -8781,16 +8927,51 @@ function CrmOnePageModule() {
 
   function setCrmSalesOrderField(key, value) {
     setCrmSalesOrderForm((prev) => {
+      const nextValue = value;
+      const nextForm = { ...prev, [key]: nextValue };
+      if ((key === "customerName" || key === "company") && !String(nextForm.crmReferenceId || "").trim()) {
+        nextForm.crmReferenceId = resolveCrmReferenceIdByText(nextForm.customerName || nextForm.company || "");
+      }
       if (key === "docNo" || key === "orderId") {
-        const nextOrderId = String(value || "").trim();
+        const nextOrderId = String(nextValue || "").trim();
         return applyPaymentDetailsToForm({
-          ...prev,
+          ...nextForm,
           docNo: nextOrderId,
           orderId: nextOrderId,
         }, computeDocumentTotals(prev, crmSalesOrderGstTemplates || []).grandTotal);
       }
-      return applyPaymentDetailsToForm({ ...prev, [key]: value }, computeDocumentTotals({ ...prev, [key]: value }, crmSalesOrderGstTemplates || []).grandTotal);
+      return applyPaymentDetailsToForm(nextForm, computeDocumentTotals(nextForm, crmSalesOrderGstTemplates || []).grandTotal);
     });
+  }
+
+  function syncCrmSalesOrderPaymentEntries(entries) {
+    const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
+    const totalPaid = getPaymentEntriesTotal(normalizedEntries);
+    setCrmSalesOrderForm((prev) => {
+      const totals = computeDocumentTotals(prev, crmSalesOrderGstTemplates || []);
+      const grandTotal = totals.grandTotal;
+      const paymentStatus = totalPaid >= grandTotal && grandTotal > 0 ? "Paid" : totalPaid > 0 ? "Partial" : "Pending";
+      return {
+        ...prev,
+        paymentEntries: normalizedEntries,
+        paidAmount: formatCurrencyNumberInput(String(totalPaid), crmCurrencyCode),
+        paymentStatus,
+      };
+    });
+  }
+
+  function addCrmSalesOrderPaymentEntry() {
+    syncCrmSalesOrderPaymentEntries([...(crmSalesOrderForm.paymentEntries || []), createEmptyPaymentEntry()]);
+  }
+
+  function updateCrmSalesOrderPaymentEntry(entryId, key, value) {
+    syncCrmSalesOrderPaymentEntries((crmSalesOrderForm.paymentEntries || []).map((entry) => (
+      entry.id === entryId ? { ...entry, [key]: value } : entry
+    )));
+  }
+
+  function deleteCrmSalesOrderPaymentEntry(entryId) {
+    syncCrmSalesOrderPaymentEntries((crmSalesOrderForm.paymentEntries || []).filter((entry) => entry.id !== entryId));
   }
 
   function applyCrmSalesOrderBillingTemplate(templateId) {
@@ -8930,11 +9111,20 @@ function CrmOnePageModule() {
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
-    setCrmSalesOrderForm(prefill ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || []), ...prefill } : createEmptyCrmSalesOrder(moduleData.salesOrders || []));
+    const baseForm = prefill ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || []), ...prefill } : createEmptyCrmSalesOrder(moduleData.salesOrders || []);
+    const fallbackGstTemplateId = String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
+    if (!String(baseForm.gstTemplateId || "").trim() && fallbackGstTemplateId) {
+      baseForm.gstTemplateId = fallbackGstTemplateId;
+    }
+    if (!String(baseForm.crmReferenceId || "").trim()) {
+      baseForm.crmReferenceId = resolveCrmReferenceIdByText(baseForm.customerName || baseForm.company || "");
+    }
+    setCrmSalesOrderForm(baseForm);
   }
 
   function buildCrmSalesOrderFromDeal(dealRow = {}) {
     const companyName = String(dealRow?.company || "").trim();
+    const fallbackGstTemplateId = String((crmAccountsWorkspace?.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
     const matchedCustomer = [...crmSalesOrderCustomerOptions, ...sharedCustomerOptions].find((row) => {
       if (!hasSalesOrderReadyCustomerDetails(row)) {
         return false;
@@ -8952,9 +9142,39 @@ function CrmOnePageModule() {
           .split(",")
           .map((entry) => entry.trim())
           .filter(Boolean);
-  return {
+    const linkedLead = (() => {
+      const leadId = String(dealRow?.leadId || dealRow?.lead_id || "").trim();
+      if (leadId) {
+        const byId = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === leadId);
+        if (byId) {
+          return normalizeCrmLeadRecord(byId);
+        }
+      }
+      const dealReferenceId = String(dealRow?.crmReferenceId || dealRow?.crm_reference_id || "").trim();
+      if (dealReferenceId) {
+        const byReference = (moduleData.leads || []).find((row) => String(row?.crmReferenceId || row?.crm_reference_id || "").trim() === dealReferenceId);
+        if (byReference) {
+          return normalizeCrmLeadRecord(byReference);
+        }
+      }
+      const byText = (moduleData.leads || []).find((row) => {
+        const normalizedLead = normalizeCrmLeadRecord(row);
+        const leadName = String(normalizedLead.name || "").trim().toLowerCase();
+        const leadCompany = String(normalizedLead.company || "").trim().toLowerCase();
+        return Boolean(companyName && (leadName === companyName.toLowerCase() || leadCompany === companyName.toLowerCase()));
+      });
+      return byText ? normalizeCrmLeadRecord(byText) : null;
+    })();
+    return {
     sourceDealId: String(dealRow?.id || "").trim(),
-    crmReferenceId: String(dealRow?.crmReferenceId || dealRow?.crm_reference_id || "").trim(),
+    crmReferenceId: String(
+      dealRow?.crmReferenceId
+      || dealRow?.crm_reference_id
+      || linkedLead?.crmReferenceId
+      || linkedLead?.crm_reference_id
+      || ""
+    ).trim(),
+    gstTemplateId: String(dealRow?.gstTemplateId || fallbackGstTemplateId || "").trim(),
     docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
       customerName: matchedCustomer?.companyName || matchedCustomer?.name || companyName || String(dealRow?.dealName || "").trim(),
       customerGstin: String(matchedCustomer?.gstin || "").trim(),
@@ -9115,6 +9335,8 @@ function CrmOnePageModule() {
     event.preventDefault();
     const form = crmSalesOrderForm;
     const paymentDetails = normalizePaymentDetails(form, crmSalesOrderTotals.grandTotal);
+    const fallbackGstTemplateId = String((crmSalesOrderGstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
+    const resolvedGstTemplateId = String(form.gstTemplateId || fallbackGstTemplateId || "").trim();
     if (!String(form.customerName || "").trim()) {
       setCrmSalesOrderNotice("Customer / Company name is required.");
       return;
@@ -9123,7 +9345,7 @@ function CrmOnePageModule() {
       setCrmSalesOrderNotice("Issue date is required.");
       return;
     }
-    if (!String(form.gstTemplateId || "").trim()) {
+    if (!resolvedGstTemplateId) {
       setCrmSalesOrderNotice("GST template is required.");
       return;
     }
@@ -9136,7 +9358,6 @@ function CrmOnePageModule() {
       const lineNumber = index + 1;
       if (!String(row.qty || "").trim()) return `Qty is required in row ${lineNumber}.`;
       if (!String(row.rate || "").trim()) return `Rate is required in row ${lineNumber}.`;
-      if (!String(row.taxPercent || "").trim()) return `Tax is required in row ${lineNumber}.`;
       if (!String(row.hsnSacCode || "").trim()) {
         const codeLabel = normalizeHsnSacType(row.hsnSacType || "HSN") === "SAC" ? "SAC code" : "HSN code";
         return `${codeLabel} is required in row ${lineNumber}.`;
@@ -9153,7 +9374,7 @@ function CrmOnePageModule() {
       phone: String(form.phone || "").trim(),
       issue_date: String(form.issueDate || "").trim(),
       due_date: String(form.dueDate || "").trim(),
-      gst_template_id: String(form.gstTemplateId || "").trim(),
+      gst_template_id: resolvedGstTemplateId,
       billing_template_id: String(form.billingTemplateId || "").trim(),
       salesperson: Array.isArray(form.salesperson)
         ? form.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
@@ -9163,6 +9384,7 @@ function CrmOnePageModule() {
       notes: String(form.notes || "").trim(),
       terms_text: String(form.termsText || "").trim(),
       payment_status_notes: String(form.paymentStatusNotes || "").trim(),
+      payment_entries: (Array.isArray(form.paymentEntries) ? form.paymentEntries : []).map(normalizePaymentEntry),
       payment_status: paymentDetails.paymentStatus.toLowerCase(),
       paid_amount: paymentDetails.paidAmountValue,
       balance_amount: paymentDetails.balanceAmount,
@@ -11362,7 +11584,7 @@ function CrmOnePageModule() {
                       availableInventoryQty={getCrmSalesOrderInventoryAvailableQty}
                       updateDocLine={(_kind, lineId, key, value) => updateCrmSalesOrderLine(lineId, key, value)}
                       removeDocLine={(_kind, lineId) => removeCrmSalesOrderLine(lineId)}
-                      canEditPaymentDetails={isCrmAdmin}
+                      canEditPaymentDetails={true}
                     />
                   </div>
                 ) : (
@@ -13815,7 +14037,7 @@ function CrmOnePageModule() {
               </button>
               <button
                 type="button"
-                className="btn btn-outline-primary btn-sm"
+                className="btn btn-success btn-sm"
                 onClick={() => convertCrmSalesOrderToBillingDocument("estimate")}
                 disabled={crmSalesOrderConvertBusy}
               >
@@ -14868,12 +15090,14 @@ function ProjectDetailPage() {
   const [activeSection, setActiveSection] = useState("overview");
   const [expenseForm, setExpenseForm] = useState(() => createEmptyProjectExpense());
   const [editingExpenseId, setEditingExpenseId] = useState("");
+  const [expenseViewModal, setExpenseViewModal] = useState({ open: false, row: null });
   const [crmTeams, setCrmTeams] = useState(() => readSharedCrmTeams());
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [accountsVendors, setAccountsVendors] = useState(() => readSharedAccountsVendors());
   const [erpUsers, setErpUsers] = useState([]);
   const [customTeamInput, setCustomTeamInput] = useState("");
-  const [customEmployeeInput, setCustomEmployeeInput] = useState("");
+  const [projectEmployeeSearchText, setProjectEmployeeSearchText] = useState("");
+  const [projectEmployeeSearchOpen, setProjectEmployeeSearchOpen] = useState(false);
   const [expensePayeeSearchOpen, setExpensePayeeSearchOpen] = useState(false);
 
   useEffect(() => {
@@ -14953,6 +15177,17 @@ function ProjectDetailPage() {
       ...(projectDetail.employees || []),
     ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [erpUsers, hrEmployees, projectDetail.employees]
+  );
+  const selectedProjectEmployees = Array.isArray(projectDetail.employees) ? projectDetail.employees : [];
+  const filteredProjectEmployeeOptions = useMemo(
+    () => employeeOptions.filter((option) => {
+      const query = String(projectEmployeeSearchText || "").trim().toLowerCase();
+      if (!query) {
+        return true;
+      }
+      return option.toLowerCase().includes(query);
+    }).filter((option) => !selectedProjectEmployees.includes(option)),
+    [employeeOptions, projectEmployeeSearchText, selectedProjectEmployees]
   );
   const vendorOptions = useMemo(
     () => Array.from(new Set([
@@ -15070,6 +15305,17 @@ function ProjectDetailPage() {
     setExpenseForm(normalizeProjectExpenseRecord(row));
   }
 
+  function openExpenseViewModal(row) {
+    setExpenseViewModal({
+      open: true,
+      row: normalizeProjectExpenseRecord(row),
+    });
+  }
+
+  function closeExpenseViewModal() {
+    setExpenseViewModal({ open: false, row: null });
+  }
+
   function deleteExpense(expenseId) {
     updateProjectDetails((prev) => ({
       ...prev,
@@ -15126,26 +15372,13 @@ function ProjectDetailPage() {
   return (
     <div className="d-flex flex-column gap-3">
       <div className="card p-3 p-lg-4">
-        <div className="d-flex flex-column flex-xl-row align-items-xl-center justify-content-between gap-3">
-          <div>
-            <div className="d-flex flex-wrap align-items-stretch gap-2 mb-3">
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={() => navigate("..", { relative: "path" })}>
-                <i className="bi bi-arrow-left me-1" />
-                Back to Projects
-              </button>
-              <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "120px" }}>
-                <span className="text-secondary small text-uppercase">Status</span>
-                <span className="fw-semibold">{project.status || "New"}</span>
-              </div>
-              <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "200px" }}>
-                <span className="text-secondary small text-uppercase">Client / Company</span>
-                <span className="fw-semibold">{project.clientCompany || "No client selected"}</span>
-              </div>
+        <div className="d-flex flex-column gap-3">
+          <div className="d-flex flex-column flex-xl-row align-items-xl-start justify-content-between gap-3">
+            <div>
+              <h4 className="mb-1">{project.name || "Project Details"}</h4>
+              <p className="text-secondary mb-0">Manage project value, expenses, teams, and employees from one focused workspace.</p>
             </div>
-            <h4 className="mb-1">{project.name || "Project Details"}</h4>
-            <p className="text-secondary mb-0">Manage project value, expenses, teams, and employees from one focused workspace.</p>
-          </div>
-          <div className="d-flex flex-wrap gap-2">
+            <div className="d-flex flex-wrap gap-2 justify-content-xl-end">
             {[
               { key: "overview", label: "Overview", icon: "bi-grid" },
               { key: "expenses", label: "Expenses", icon: "bi-wallet2" },
@@ -15161,6 +15394,21 @@ function ProjectDetailPage() {
                 {tab.label}
               </button>
             ))}
+          </div>
+        </div>
+          <div className="d-flex flex-wrap align-items-stretch gap-2">
+            <button type="button" className="btn btn-sm btn-outline-light" onClick={() => navigate("..", { relative: "path" })}>
+              <i className="bi bi-arrow-left me-1" />
+              Back to Projects
+            </button>
+            <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "120px" }}>
+              <span className="text-secondary small text-uppercase">Status</span>
+              <span className="fw-semibold">{project.status || "New"}</span>
+            </div>
+            <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "200px" }}>
+              <span className="text-secondary small text-uppercase">Client / Company</span>
+              <span className="fw-semibold">{project.clientCompany || "No client selected"}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -15432,6 +15680,7 @@ function ProjectDetailPage() {
             ]}
             searchPlaceholder="Search expenses"
             noRowsText="No expenses added yet."
+            withoutOuterCard
             searchBy={(row) => [row.date, row.title, row.category, row.payee, row.notes, row.amount].join(" ")}
             renderCells={(row) => [
               formatDateLikeCellValue("date", row.date, "-"),
@@ -15442,12 +15691,55 @@ function ProjectDetailPage() {
             ]}
             renderActions={(row) => (
               <div className="d-inline-flex gap-2">
+                <button type="button" className="btn btn-sm btn-success" onClick={() => openExpenseViewModal(row)}>View</button>
                 <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editExpense(row)}>Edit</button>
                 <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteExpense(row.id)}>Delete</button>
               </div>
             )}
           />
         </>
+      ) : null}
+
+      {expenseViewModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeExpenseViewModal}
+        >
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(560px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Expense Details</h5>
+                <div className="small text-secondary">{String(expenseViewModal.row?.title || "").trim() || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeExpenseViewModal}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="row g-3">
+              {[
+                ["date", "Date", formatDateLikeCellValue("date", expenseViewModal.row?.date, "-")],
+                ["title", "Expense", String(expenseViewModal.row?.title || "").trim() || "-"],
+                ["category", "Category", String(expenseViewModal.row?.category || "").trim() || "-"],
+                ["payee", "Payee / Vendor", String(expenseViewModal.row?.payee || "").trim() || "-"],
+                ["amount", "Amount", formatInr(expenseViewModal.row?.amount)],
+                ["notes", "Notes", String(expenseViewModal.row?.notes || "").trim() || "-"],
+                ["attachmentName", "Attachment", expenseViewModal.row?.attachmentName ? `${expenseViewModal.row.attachmentName}${expenseViewModal.row.attachmentSizeLabel ? ` (${expenseViewModal.row.attachmentSizeLabel})` : ""}` : "-"],
+              ].map(([key, label, value]) => (
+                <div className="col-12 col-md-6" key={`expense-view-${key}`}>
+                  <div className="border rounded p-3 h-100">
+                    <div className="small text-secondary mb-1">{label}</div>
+                    <div className="fw-semibold" style={{ whiteSpace: "pre-wrap" }}>{value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-success btn-sm" onClick={closeExpenseViewModal}>Close</button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {activeSection === "resources" ? (
@@ -15476,27 +15768,73 @@ function ProjectDetailPage() {
               </div>
             </div>
           </div>
-          <div className="col-12 col-xl-6">
+              <div className="col-12 col-xl-6">
             <div className="card p-3 h-100">
               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
                 <h6 className="mb-0">Project Employees</h6>
                 <span className="text-secondary small">Assign multiple employees to this project.</span>
               </div>
-              <div className="d-flex gap-2 mb-3">
-                <input className="form-control" value={customEmployeeInput} onChange={(event) => setCustomEmployeeInput(event.target.value)} placeholder="Add custom employee" />
-                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addCustomSelection("employees", customEmployeeInput, setCustomEmployeeInput)}>Add</button>
+              <div className="crm-inline-suggestions-wrap">
+                <input
+                  className="form-control"
+                  value={projectEmployeeSearchText}
+                  placeholder="Search employee"
+                  autoComplete="off"
+                  onFocus={() => setProjectEmployeeSearchOpen(true)}
+                  onClick={() => setProjectEmployeeSearchOpen(true)}
+                  onBlur={() => window.setTimeout(() => setProjectEmployeeSearchOpen(false), 120)}
+                  onChange={(event) => {
+                    setProjectEmployeeSearchText(event.target.value);
+                    setProjectEmployeeSearchOpen(true);
+                  }}
+                />
+                {projectEmployeeSearchOpen ? (
+                  <div className="crm-inline-suggestions">
+                    <div className="crm-inline-suggestions__group">
+                      <div className="crm-inline-suggestions__title">Employees</div>
+                      {filteredProjectEmployeeOptions.length ? (
+                        filteredProjectEmployeeOptions.map((employee) => (
+                          <button
+                            key={`project-employee-suggest-${employee}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              toggleSelection("employees", employee);
+                              setProjectEmployeeSearchText("");
+                              setProjectEmployeeSearchOpen(true);
+                            }}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{employee}</span>
+                            <span className="crm-inline-suggestions__item-sub">Select employee</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="crm-inline-suggestions__item">
+                          <span className="crm-inline-suggestions__item-main">No employees found</span>
+                          <span className="crm-inline-suggestions__item-sub">Try another search term.</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              <div className="d-flex flex-wrap gap-2">
-                {employeeOptions.length ? employeeOptions.map((employee) => (
-                  <button
-                    key={employee}
-                    type="button"
-                    className={`btn btn-sm ${(projectDetail.employees || []).includes(employee) ? "btn-primary" : "btn-outline-light"}`}
-                    onClick={() => toggleSelection("employees", employee)}
-                  >
-                    {employee}
-                  </button>
-                )) : <span className="text-secondary small">No employee suggestions yet. Add a custom employee above.</span>}
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                {selectedProjectEmployees.length ? selectedProjectEmployees.map((employee) => (
+                  <span key={`project-employee-chip-${employee}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                    <button
+                      type="button"
+                      className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                      aria-label={`Remove ${employee}`}
+                      onClick={() => toggleSelection("employees", employee)}
+                    >
+                      &times;
+                    </button>
+                    <span>{employee}</span>
+                  </span>
+                )) : (
+                  <span className="text-secondary small">No employees selected yet.</span>
+                )}
               </div>
             </div>
           </div>
@@ -17111,14 +17449,14 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                   <>
                     <button
                       type="button"
-                      className={`btn btn-sm ${hasTaskList ? "btn-primary" : "btn-outline-primary"}`}
+                      className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
                       onClick={() => openAttendanceTaskModal(row)}
                     >
                       Task
                     </button>
                     <button
                       type="button"
-                      className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-outline-primary" : "btn-outline-secondary"}`}
+                      className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-success" : "btn-outline-success"}`}
                       onClick={() => openAttendanceNotesModal(row)}
                     >
                       Notes
@@ -19742,7 +20080,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       id: "",
       name: "",
       docType: "Invoice",
-      gstTemplateId: activeGstTemplates[0]?.id || "",
+      gstTemplateId: String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim(),
       prefix: "",
       invStartFrom: "",
       themeColor: "#22c55e",
@@ -20578,9 +20916,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       if (!String(row.rate || "").trim()) {
         return `Rate is required in row ${lineNumber}.`;
       }
-      if (!String(row.taxPercent || "").trim()) {
-        return `Tax is required in row ${lineNumber}.`;
-      }
       return "";
     }, "");
     if (lineValidationError) {
@@ -20881,6 +21216,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
+    const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
     const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
       const docType = String(row.docType || "").trim().toLowerCase();
@@ -20912,6 +21248,40 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       if (!q) return true;
       return name.toLowerCase().includes(q);
     }).slice(0, 8);
+    const paymentEntries = Array.isArray(form.paymentEntries) ? form.paymentEntries.map(normalizePaymentEntry) : [];
+    const syncPaymentEntries = (entries) => {
+      const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
+      const totalPaid = getPaymentEntriesTotal(normalizedEntries);
+      setField("paymentEntries", normalizedEntries);
+      setField("paidAmount", formatCurrencyNumberInput(String(totalPaid), getOrgCurrency()));
+      if (!normalizedEntries.length) {
+        setEditingPaymentEntryId("");
+      }
+    };
+    const addPaymentEntry = () => {
+      const nextEntry = createEmptyPaymentEntry();
+      setEditingPaymentEntryId(nextEntry.id);
+      syncPaymentEntries([...(paymentEntries || []), nextEntry]);
+    };
+    const updatePaymentEntry = (entryId, key, value) => {
+      setEditingPaymentEntryId(entryId);
+      syncPaymentEntries((paymentEntries || []).map((entry) => (
+        entry.id === entryId ? { ...entry, [key]: value } : entry
+      )));
+    };
+    const deletePaymentEntry = (entryId) => {
+      syncPaymentEntries((paymentEntries || []).filter((entry) => entry.id !== entryId));
+      if (String(editingPaymentEntryId || "") === String(entryId || "")) {
+        setEditingPaymentEntryId("");
+      }
+    };
+    const documentLineItemsComplete = (Array.isArray(form.items) ? form.items : []).length > 0
+      && (Array.isArray(form.items) ? form.items : []).every((line) => (
+        Boolean(String(line.customText || line.description || "").trim())
+        && Number(parseNumber(line.qty)) > 0
+        && Number(parseNumber(line.rate)) > 0
+      ));
+    const canAddPartialPayment = Boolean(canEditPaymentDetails && paymentSummary.paymentStatus === "Partial" && documentLineItemsComplete);
     const billingItemSource = useMemo(() => {
       const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
         id: String(item?.id || "").trim(),
@@ -21219,7 +21589,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
               <div className="col-12 col-md-6 col-xl-2">
                 <label className="form-label small text-secondary mb-1">{taxUi.templateSingular} *</label>
-                <select className="form-select" required value={form.gstTemplateId || ""} onChange={(e) => setField("gstTemplateId", e.target.value)}>
+                <select className="form-select" required value={form.gstTemplateId || String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim()} onChange={(e) => setField("gstTemplateId", e.target.value)}>
                   <option value="">{`Select ${taxUi.templateSingular}`}</option>
                   {(moduleData.gstTemplates || []).map((row) => (
                     <option key={row.id} value={row.id}>
@@ -21560,12 +21930,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
-                <label className="form-label small text-secondary mb-1">Payment Status Notes</label>
+                <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
                 <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
               </div>
             </div>
             <div className="col-12 col-xl-5">
-              <div className="card p-3 h-100 border">
+              <div className="card p-3 border">
+                <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                  <h6 className="mb-0">Payment Details</h6>
+                </div>
                 <h6 className="mb-3">Summary</h6>
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
                 {totals.taxBreakdown?.cgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CGST ({Number(totals.breakdownPercent?.cgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cgst)}</strong></div> : null}
@@ -21594,6 +21967,65 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </button>
             ) : null}
           </div>
+          {paymentSummary.paymentStatus === "Partial" || paymentEntries.length > 0 || Boolean(editingPaymentEntryId) ? (
+            <div className="border rounded p-3">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+              <div className="fw-semibold">Partial Payment Details</div>
+              </div>
+              {paymentSummary.paymentStatus === "Partial" && !documentLineItemsComplete ? (
+                <div className="alert alert-warning py-2 mb-3">
+                  Complete the item rows, qty, and rate before adding partial payments.
+                </div>
+              ) : null}
+              {paymentEntries.length ? (
+                <div className="table-responsive">
+                  <table className="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Mode</th>
+                        <th>Amount</th>
+                        <th>Transaction ID</th>
+                        <th>Notes</th>
+                        <th className="text-end">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentEntries.map((entry) => {
+                        const isEditing = String(editingPaymentEntryId || "") === String(entry.id || "");
+                        return (
+                          <tr key={entry.id} className={isEditing ? "table-warning" : ""}>
+                            <td><input type="date" className="form-control form-control-sm" value={entry.paymentDate || ""} onChange={(e) => updatePaymentEntry(entry.id, "paymentDate", e.target.value)} disabled={!canEditPaymentDetails} /></td>
+                            <td>
+                              <select className="form-select form-select-sm" value={entry.paymentMode || ""} onChange={(e) => updatePaymentEntry(entry.id, "paymentMode", e.target.value)} disabled={!canEditPaymentDetails}>
+                                <option value="">Select</option>
+                                {PAYMENT_MODE_OPTIONS.map((mode) => <option key={`entry-mode-${entry.id}-${mode}`} value={mode}>{mode}</option>)}
+                              </select>
+                            </td>
+                            <td><input className="form-control form-control-sm" inputMode="decimal" value={entry.amount || ""} onChange={(e) => updatePaymentEntry(entry.id, "amount", e.target.value)} placeholder="0.00" disabled={!canEditPaymentDetails} /></td>
+                            <td><input className="form-control form-control-sm" value={entry.transactionId || ""} onChange={(e) => updatePaymentEntry(entry.id, "transactionId", e.target.value)} placeholder="Transaction ID" disabled={!canEditPaymentDetails} /></td>
+                            <td><input className="form-control form-control-sm" value={entry.notes || ""} onChange={(e) => updatePaymentEntry(entry.id, "notes", e.target.value)} placeholder="Notes" disabled={!canEditPaymentDetails} /></td>
+                            <td className="text-end">
+                              <div className="d-inline-flex gap-2">
+                                <button type="button" className="btn btn-success btn-sm" onClick={() => setEditingPaymentEntryId(entry.id)} disabled={!canEditPaymentDetails}>
+                                  {isEditing ? "Editing" : "Edit"}
+                                </button>
+                                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deletePaymentEntry(entry.id)} disabled={!canEditPaymentDetails}>
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-secondary small">No partial payment entries yet.</div>
+              )}
+            </div>
+          ) : null}
         </form>
         {customerLockedPopupOpen ? (
           <div
@@ -21720,7 +22152,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   Converted to Invoice
                 </button>
               ) : (
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => convertEstimateToInvoice(row)}>
+                <button type="button" className="btn btn-sm btn-success" onClick={() => convertEstimateToInvoice(row)}>
                   Convert to Invoice
                 </button>
               )
@@ -22601,7 +23033,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             availableInventoryQty={availableInventoryQty}
             updateDocLine={updateDocLine}
             removeDocLine={removeDocLine}
-            canEditPaymentDetails={isCrmAdmin}
+            canEditPaymentDetails={true}
           />
         </>
       ) : null}
@@ -22634,7 +23066,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             availableInventoryQty={availableInventoryQty}
             updateDocLine={updateDocLine}
             removeDocLine={removeDocLine}
-            canEditPaymentDetails={isCrmAdmin}
+            canEditPaymentDetails={true}
           />
         </>
       ) : null}

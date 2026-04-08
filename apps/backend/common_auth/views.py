@@ -287,6 +287,22 @@ def login_view(request):
     return redirect("/my-account/")
 
 
+@ensure_csrf_cookie
+def csrf_failure_view(request, reason=""):
+    captcha_question = _build_login_captcha(request)
+    return render(
+        request,
+        "sites/login.html",
+        {
+            "next": request.GET.get("next") or request.POST.get("next") or "/my-account/",
+            "captcha_question": captcha_question,
+            "error": "Your session expired or the browser blocked the security token. Please refresh the page and try again.",
+            "csrf_failure_reason": reason,
+        },
+        status=403,
+    )
+
+
 @require_http_methods(["GET", "POST"])
 def logout_view(request):
     # Drain pending flash messages so old success/error toasts don't appear

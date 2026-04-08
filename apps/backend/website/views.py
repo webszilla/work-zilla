@@ -3194,3 +3194,7 @@ def sitemap_view(request):
         xml_lines.append("  </url>")
     xml_lines.append("</urlset>")
     return HttpResponse("\n".join(xml_lines), content_type="application/xml")
+
+
+def page_not_found(request, exception):
+    return render(request, "public/404.html", status=404)

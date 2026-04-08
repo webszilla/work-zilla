@@ -115,3 +115,5 @@ urlpatterns = [
     path("", include("apps.backend.modules.whatsapp_automation.urls")),
     re_path(r"^app/(?P<path>.*)$", spa_serve, name="spa"),
 ]
+
+handler404 = website_views.page_not_found
