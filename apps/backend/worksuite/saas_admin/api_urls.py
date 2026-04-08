@@ -77,6 +77,7 @@ urlpatterns = [
     path("products/<slug:slug>/transfer-history", api_views.product_transfer_history, name="saas_admin_product_transfer_history"),
     path("products/<slug:slug>/billing-history", api_views.product_billing_history, name="saas_admin_product_billing_history"),
     path("billing-history", api_views.billing_history, name="saas_admin_billing_history"),
+    path("billing-invoice/<int:transfer_id>", api_views.billing_invoice_pdf, name="saas_admin_billing_invoice"),
     path("billing-gst-archive", api_views.billing_gst_archive, name="saas_admin_billing_gst_archive"),
     path("products/<slug:slug>/renewals", api_views.product_renewals, name="saas_admin_product_renewals"),
     path("products/<slug:slug>/referrals", api_views.product_referrals, name="saas_admin_product_referrals"),

@@ -98,6 +98,7 @@ from apps.backend.storage import services_admin as storage_admin_services
 from apps.backend.storage.usage_cache import rebuild_all_usage, rebuild_usage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 TICKET_MAX_ATTACHMENTS = 5
@@ -768,8 +769,53 @@ def _wrap_text_lines(text, max_width, doc):
     return lines
 
 
+def _load_pdf_logo_image(file_field):
+    if not file_field:
+        return None
+    try:
+        if getattr(file_field, "path", ""):
+            return ImageReader(file_field.path)
+    except Exception:
+        pass
+    try:
+        file_field.open("rb")
+        try:
+            return ImageReader(BytesIO(file_field.read()))
+        finally:
+            file_field.close()
+    except Exception:
+        return None
+
+
+def _draw_pdf_logo(doc, image, x, top_y, max_width, max_height):
+    if not image:
+        return 0
+    try:
+        image_width, image_height = image.getSize()
+    except Exception:
+        return 0
+    if not image_width or not image_height:
+        return 0
+    scale = min(max_width / image_width, max_height / image_height)
+    draw_width = image_width * scale
+    draw_height = image_height * scale
+    doc.drawImage(
+        image,
+        x,
+        top_y - draw_height,
+        width=draw_width,
+        height=draw_height,
+        mask="auto",
+        preserveAspectRatio=True,
+        anchor="nw",
+    )
+    return draw_height
+
+
 def _render_invoice_pdf_bytes(transfer, billing_profile):
     seller = _invoice_seller()
+    site_brand = SiteBrandSettings.get_active()
+    logo_image = _load_pdf_logo_image(getattr(site_brand, "logo", None))
     invoice_number = _build_invoice_number(transfer)
     invoice_date = timezone.localtime(
         transfer.updated_at or transfer.created_at or timezone.now()
@@ -803,8 +849,10 @@ def _render_invoice_pdf_bytes(transfer, billing_profile):
     right = 115 * mm
     y = height - 20 * mm
 
+    logo_height = _draw_pdf_logo(doc, logo_image, left, y + 2 * mm, 26 * mm, 16 * mm)
+    seller_x = left + (32 * mm if logo_height else 0)
     doc.setFont("Helvetica-Bold", 14)
-    doc.drawString(left, y, seller.get("name", "Work Zilla Work Suite"))
+    doc.drawString(seller_x, y, seller.get("name", site_brand.site_name or "Work Zilla Work Suite"))
     doc.setFont("Helvetica-Bold", 16)
     doc.drawString(right, y, "INVOICE")
 
@@ -819,13 +867,13 @@ def _render_invoice_pdf_bytes(transfer, billing_profile):
     for line in seller_lines:
         if not line:
             continue
-        doc.drawString(left, y, line)
+        doc.drawString(seller_x, y, line)
         y -= 4 * mm
 
-    doc.drawString(left, y, f"SAC: {seller.get('sac', '997331')}")
+    doc.drawString(seller_x, y, f"SAC: {seller.get('sac', '997331')}")
     y -= 4 * mm
     if seller.get("gstin"):
-        doc.drawString(left, y, f"GSTIN: {seller.get('gstin')}")
+        doc.drawString(seller_x, y, f"GSTIN: {seller.get('gstin')}")
 
     org = transfer.organization
     invoice_meta_y = height - 30 * mm
@@ -3653,7 +3701,7 @@ def product_billing_history(request, slug):
             "updated_at": _format_datetime(row.updated_at),
             "receipt_url": row.receipt.url if row.receipt else "",
             "invoice_available": row.status == "approved",
-            "invoice_url": f"/api/dashboard/billing/invoice/{row.id}" if row.status == "approved" else "",
+            "invoice_url": f"/api/saas-admin/billing-invoice/{row.id}" if row.status == "approved" else "",
         })
     transfer_rows.sort(key=lambda item: item["sort_time"] or timezone.now(), reverse=True)
     transfer_payload = [{key: value for key, value in row.items() if key != "sort_time"} for row in transfer_rows]
@@ -3759,7 +3807,7 @@ def billing_history(request):
             "updated_at": _format_datetime(row.updated_at),
             "receipt_url": row.receipt.url if row.receipt else "",
             "invoice_available": row.status == "approved",
-            "invoice_url": f"/api/dashboard/billing/invoice/{row.id}" if row.status == "approved" else "",
+            "invoice_url": f"/api/saas-admin/billing-invoice/{row.id}" if row.status == "approved" else "",
         })
     for row in dealer_transfers:
         transfer_rows.append({
@@ -3783,7 +3831,7 @@ def billing_history(request):
             "updated_at": _format_datetime(row.updated_at),
             "receipt_url": row.receipt.url if row.receipt else "",
             "invoice_available": row.status == "approved",
-            "invoice_url": f"/api/dashboard/billing/invoice/{row.id}" if row.status == "approved" else "",
+            "invoice_url": f"/api/saas-admin/billing-invoice/{row.id}" if row.status == "approved" else "",
         })
 
     transfer_rows.sort(key=lambda item: item["sort_time"] or timezone.now(), reverse=True)
@@ -3903,6 +3951,39 @@ def billing_gst_archive(request):
     response["Content-Disposition"] = (
         f'attachment; filename="gst-bills-{from_month.strftime("%Y-%m")}-to-{to_month.strftime("%Y-%m")}.zip"'
     )
+    return response
+
+
+@login_required
+@require_http_methods(["GET"])
+def billing_invoice_pdf(request, transfer_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    transfer = get_object_or_404(PendingTransfer, id=transfer_id)
+    if transfer.status != "approved":
+        return JsonResponse({"error": "invoice_not_available"}, status=400)
+
+    org = transfer.organization
+    billing_profile = BillingProfile.objects.filter(organization=org).first()
+    if not billing_profile:
+        billing_profile = SimpleNamespace(
+            contact_name=org.name if org else (transfer.org_display_name or "Customer"),
+            company_name=org.name if org else (transfer.org_display_name or "Customer"),
+            address_line1="-",
+            address_line2="",
+            city="-",
+            state="",
+            postal_code="-",
+            country="India",
+            email=(org.owner.email if org and getattr(org, "owner", None) else (transfer.user.email if transfer.user else "")),
+            gstin="",
+        )
+
+    pdf_bytes = _render_invoice_pdf_bytes(transfer, billing_profile)
+    invoice_number = _build_invoice_number(transfer)
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="invoice-{invoice_number}.pdf"'
     return response
 
 
