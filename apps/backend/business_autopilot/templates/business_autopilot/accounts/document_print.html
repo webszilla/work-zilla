@@ -5,26 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ doc_type_label }} {{ document.docNo|default:'-' }}</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; background: #f8fafc; }
     .toolbar { margin-bottom: 16px; display: flex; gap: 8px; }
     .btn { border: 1px solid #cbd5e1; background: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
-    .doc { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
-    .header { padding: 20px; color: #fff; background: {{ billing_template.themeColor|default:'#22c55e' }}; }
-    .header h1 { margin: 0 0 4px; font-size: 24px; }
+    .doc { border: 1px solid #e5e7eb; border-radius: 18px; overflow: hidden; background: #fff; }
+    .header { padding: 22px 24px; color: #fff; background: {{ theme_color|default:'#22c55e' }}; display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+    .header-brand { display: flex; gap: 16px; align-items: center; }
+    .header h1 { margin: 0 0 6px; font-size: 24px; }
+    .logo-box { width: 72px; height: 72px; border-radius: 16px; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .logo-box img { width: 100%; height: 100%; object-fit: contain; }
+    .meta-title { text-align: right; }
+    .meta-title .doc-title { font-size: 28px; font-weight: 800; letter-spacing: .06em; }
+    .meta-title .doc-sub { margin-top: 6px; font-size: 14px; opacity: .92; }
     .muted { color: #64748b; }
-    .section { padding: 16px 20px; border-top: 1px solid #e5e7eb; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+    .section { padding: 20px 24px; border-top: 1px solid #e5e7eb; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; background: #fff; }
     .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
     .value { font-weight: 600; margin-top: 2px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
-    th { background: #f8fafc; font-size: 12px; text-transform: uppercase; color: #475569; }
+    th { background: #f0fdf4; font-size: 12px; text-transform: uppercase; color: #475569; }
     .line-main { font-size: 13px; font-weight: 500; line-height: 1.3; }
     .line-custom { font-size: 17px; font-weight: 700; line-height: 1.25; margin-top: 2px; white-space: pre-wrap; }
     .text-right { text-align: right; }
     .totals { width: 340px; margin-left: auto; }
     .totals td { border: none; padding: 6px 0; }
     .totals .grand td { border-top: 1px solid #cbd5e1; padding-top: 10px; font-weight: 700; }
+    .footer-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .footer-card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; min-height: 120px; }
     @media print {
       .toolbar { display: none; }
       body { margin: 0; }
@@ -39,42 +49,52 @@
   </div>
   <div class="doc">
     <div class="header">
-      <h1>{{ doc_type_label }}</h1>
-      <div>{{ document.docNo|default:'-' }}</div>
-      <div style="margin-top:6px; font-size:13px; opacity:.9;">{{ org.name }}</div>
-    </div>
-    <div class="section">
-      <div class="grid">
-        <div>
-          <div class="label">Customer</div>
-          <div class="value">{{ document.customerName|default:'-' }}</div>
-          <div class="muted" style="margin-top:4px;">GSTIN: {{ document.customerGstin|default:'-' }}</div>
+      <div class="header-brand">
+        {% if company_logo_data_url %}
+        <div class="logo-box">
+          <img src="{{ company_logo_data_url }}" alt="Company logo">
         </div>
+        {% endif %}
         <div>
-          <div class="label">Salesperson</div>
-          <div class="value">{{ document.salesperson|default:'-' }}</div>
-        </div>
-        <div>
-          <div class="label">Issue Date</div>
-          <div class="value">{{ document.issueDate|default:'-' }}</div>
-        </div>
-        <div>
-          <div class="label">Due Date</div>
-          <div class="value">{{ document.dueDate|default:'-' }}</div>
-        </div>
-        <div>
-          <div class="label">Status</div>
-          <div class="value">{{ document.status|default:'-' }}</div>
-        </div>
-        <div>
-          <div class="label">GST Template</div>
-          <div class="value">{{ gst_template.name|default:'-' }}</div>
-          <div class="muted" style="margin-top:4px;">GST Total: {{ gst_total_percent }}%</div>
+          <h1>{{ org.name }}</h1>
+          <div>{{ doc_type_label }} {{ document.docNo|default:'-' }}</div>
+          <div style="margin-top:6px; font-size:13px; opacity:.9;">GST billing document</div>
         </div>
       </div>
-      <div style="margin-top:12px;">
-        <div class="label">Billing Address</div>
-        <div class="value" style="font-weight:500; white-space:pre-wrap;">{{ document.billingAddress|default:'-' }}</div>
+      <div class="meta-title">
+        <div class="doc-title">{{ doc_type_label|upper }}</div>
+        <div class="doc-sub">No. {{ document.docNo|default:'-' }}</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Billed To</div>
+          <div class="value" style="margin-top:8px;">{{ document.customerName|default:'-' }}</div>
+          <div class="muted" style="margin-top:6px;">GSTIN: {{ document.customerGstin|default:'-' }}</div>
+          <div style="margin-top:12px; white-space:pre-wrap;">{{ document.billingAddress|default:'-' }}</div>
+        </div>
+        <div class="card">
+          <div class="grid">
+            <div>
+              <div class="label">Issue Date</div>
+              <div class="value">{{ document.issueDate|default:'-' }}</div>
+            </div>
+            <div>
+              <div class="label">Due Date</div>
+              <div class="value">{{ document.dueDate|default:'-' }}</div>
+            </div>
+            <div>
+              <div class="label">Status</div>
+              <div class="value">{{ document.status|default:'-' }}</div>
+            </div>
+            <div>
+              <div class="label">GST Template</div>
+              <div class="value">{{ gst_template.name|default:'-' }}</div>
+              <div class="muted" style="margin-top:4px;">GST Total: {{ gst_total_percent }}%</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -116,19 +136,34 @@
       <table class="totals">
         <tr><td>Sub Total</td><td class="text-right">{{ totals.subtotal }}</td></tr>
         <tr><td>GST / Tax</td><td class="text-right">{{ totals.tax_total }}</td></tr>
+        <tr><td>Paid</td><td class="text-right">{{ paid_amount }}</td></tr>
+        <tr><td>Balance</td><td class="text-right">{{ balance_amount }}</td></tr>
         <tr class="grand"><td>Total</td><td class="text-right">{{ totals.grand_total }}</td></tr>
       </table>
     </div>
 
     <div class="section">
-      <div class="grid">
-        <div>
+      <div class="footer-grid">
+        <div class="footer-card">
           <div class="label">Notes</div>
-          <div style="white-space:pre-wrap;">{{ document.notes|default:'-' }}</div>
+          <div style="white-space:pre-wrap; margin-top:10px;">{{ document.notes|default:'-' }}</div>
         </div>
-        <div>
+        <div class="footer-card">
           <div class="label">Terms & Conditions</div>
-          <div style="white-space:pre-wrap;">{{ document.termsText|default:'-' }}</div>
+          <div style="white-space:pre-wrap; margin-top:10px;">{{ document.termsText|default:'-' }}</div>
+        </div>
+        <div class="footer-card">
+          <div class="label">Payment Details</div>
+          <div style="white-space:pre-wrap; margin-top:10px;">
+            Payment Status: {{ payment_status|default:'Pending' }}
+            {% if has_payment %}
+            <br>Paid Amount: ₹{{ paid_amount }}
+            <br>Balance Amount: ₹{{ balance_amount }}
+            {% if payment_mode %}<br>Payment Mode: {{ payment_mode }}{% endif %}
+            {% if payment_date %}<br>Payment Date: {{ payment_date }}{% endif %}
+            {% if transaction_id %}<br>Transaction ID: {{ transaction_id }}{% endif %}
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>

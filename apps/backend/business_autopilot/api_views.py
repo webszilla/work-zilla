@@ -20,6 +20,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
@@ -108,6 +111,103 @@ logger = logging.getLogger(__name__)
 
 TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
 TEMP_PASSWORD_LENGTH = 10
+_BA_UNICODE_PDF_FONT = None
+
+
+def _ba_hex_to_rgb(value, default="#22c55e"):
+    raw = str(value or default).strip()
+    if not raw.startswith("#"):
+        raw = default
+    raw = raw.lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        raw = default.lstrip("#")
+    try:
+        return tuple(int(raw[index:index + 2], 16) / 255 for index in (0, 2, 4))
+    except ValueError:
+        fallback = default.lstrip("#")
+        return tuple(int(fallback[index:index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _ba_pdf_image_from_data_url(data_url):
+    raw = str(data_url or "").strip()
+    if not raw.startswith("data:image/") or "," not in raw:
+        return None
+    _, encoded = raw.split(",", 1)
+    try:
+        return ImageReader(BytesIO(base64.b64decode(encoded)))
+    except (ValueError, TypeError, binascii.Error):
+        return None
+
+
+def _ba_draw_pdf_logo(pdf, image, x, top_y, max_width, max_height):
+    if not image:
+        return 0
+    try:
+        image_width, image_height = image.getSize()
+    except Exception:
+        return 0
+    if not image_width or not image_height:
+        return 0
+    scale = min(max_width / image_width, max_height / image_height)
+    draw_width = image_width * scale
+    draw_height = image_height * scale
+    pdf.drawImage(
+        image,
+        x,
+        top_y - draw_height,
+        width=draw_width,
+        height=draw_height,
+        mask="auto",
+        preserveAspectRatio=True,
+        anchor="nw",
+    )
+    return draw_height
+
+
+def _ba_wrap_pdf_text(pdf, text, max_width, font_name="Helvetica", font_size=9):
+    words = str(text or "").split()
+    if not words:
+        return [""]
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if pdf.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _ba_get_unicode_pdf_font():
+    global _BA_UNICODE_PDF_FONT
+    if _BA_UNICODE_PDF_FONT is not None:
+        return _BA_UNICODE_PDF_FONT
+    font_candidates = [
+        ("ArialUnicodeWZ", "/Library/Fonts/Arial Unicode.ttf"),
+        ("ArialUnicodeWZ", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        ("TimesNewRomanWZ", "/System/Library/Fonts/Supplemental/Times New Roman.ttf"),
+        ("ArialWZ", "/System/Library/Fonts/Supplemental/Arial.ttf"),
+    ]
+    for font_name, path in font_candidates:
+        try:
+            pdfmetrics.getFont(font_name)
+            _BA_UNICODE_PDF_FONT = font_name
+            return _BA_UNICODE_PDF_FONT
+        except KeyError:
+            pass
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, path))
+            _BA_UNICODE_PDF_FONT = font_name
+            return _BA_UNICODE_PDF_FONT
+        except Exception:
+            continue
+    _BA_UNICODE_PDF_FONT = ""
+    return _BA_UNICODE_PDF_FONT
 
 
 
@@ -855,6 +955,30 @@ def _decimal_to_string(value, default="0.00"):
     return f"{amount.quantize(Decimal('0.01'))}"
 
 
+def _format_indian_currency_value(value, default="0.00"):
+    normalized = _decimal_to_string(value, default)
+    sign = ""
+    if normalized.startswith("-"):
+        sign = "-"
+        normalized = normalized[1:]
+    integer_part, _, decimal_part = normalized.partition(".")
+    if len(integer_part) > 3:
+        last_three = integer_part[-3:]
+        remaining = integer_part[:-3]
+        grouped_parts = []
+        while len(remaining) > 2:
+            grouped_parts.insert(0, remaining[-2:])
+            remaining = remaining[:-2]
+        if remaining:
+            grouped_parts.insert(0, remaining)
+        integer_part = ",".join(grouped_parts + [last_three])
+    return f"{sign}{integer_part}.{decimal_part or '00'}"
+
+
+def _format_pdf_inr(value, default="0.00"):
+    return f"INR {_format_indian_currency_value(value, default)}"
+
+
 def _to_bool(value, default=False):
     if isinstance(value, bool):
         return value
@@ -1134,6 +1258,42 @@ def _default_accounts_workspace():
     }
 
 
+def _default_india_gst_templates():
+    return [
+        {
+            "id": "gst_default_india_igst",
+            "name": "IGST",
+            "taxScope": "Inter State",
+            "cgst": "",
+            "sgst": "",
+            "igst": "18",
+            "cess": "",
+            "status": "Active",
+            "notes": "",
+        },
+        {
+            "id": "gst_default_india_cgst_sgst",
+            "name": "CGST & SGST",
+            "taxScope": "Intra State",
+            "cgst": "9",
+            "sgst": "9",
+            "igst": "",
+            "cess": "",
+            "status": "Active",
+            "notes": "",
+        },
+    ]
+
+
+def _seed_accounts_workspace_defaults_for_org(payload, org):
+    base = _normalize_accounts_workspace(payload)
+    country = str(getattr(org, "country", "") or "").strip().lower()
+    is_empty_workspace = not any(base.get(key) for key in ACCOUNTS_ALLOWED_ROOT_KEYS)
+    if country == "india" and is_empty_workspace and not base.get("gstTemplates"):
+        base["gstTemplates"] = _default_india_gst_templates()
+    return base
+
+
 def _normalize_accounts_workspace(payload):
     base = _default_accounts_workspace()
     if not isinstance(payload, dict):
@@ -1283,11 +1443,15 @@ def _serialize_subscription(row, customer_lookup=None):
 
 
 def _get_accounts_workspace(org):
-    workspace, _ = AccountsWorkspace.objects.get_or_create(
+    workspace, created = AccountsWorkspace.objects.get_or_create(
         organization=org,
         defaults={"data": _default_accounts_workspace()},
     )
-    workspace.data = _normalize_accounts_workspace(workspace.data)
+    original_data = workspace.data
+    seeded_data = _seed_accounts_workspace_defaults_for_org(workspace.data, org)
+    workspace.data = seeded_data
+    if created or original_data != seeded_data:
+        workspace.save(update_fields=["data", "updated_at"])
     return workspace
 
 
@@ -1514,16 +1678,21 @@ def _document_totals(document, gst_templates_by_id):
     if not isinstance(items, list):
         items = []
     gst_template = gst_templates_by_id.get((document or {}).get("gstTemplateId")) if isinstance(document, dict) else None
-    default_tax = Decimal("0")
-    if isinstance(gst_template, dict):
-        default_tax = (
-            _to_decimal(gst_template.get("cgst"))
-            + _to_decimal(gst_template.get("sgst"))
-            + _to_decimal(gst_template.get("igst"))
-            + _to_decimal(gst_template.get("cess"))
-        )
+    template_components = {
+        "cgst": _to_decimal(gst_template.get("cgst")) if isinstance(gst_template, dict) else Decimal("0"),
+        "sgst": _to_decimal(gst_template.get("sgst")) if isinstance(gst_template, dict) else Decimal("0"),
+        "igst": _to_decimal(gst_template.get("igst")) if isinstance(gst_template, dict) else Decimal("0"),
+        "cess": _to_decimal(gst_template.get("cess")) if isinstance(gst_template, dict) else Decimal("0"),
+    }
+    default_tax = sum(template_components.values(), Decimal("0"))
     subtotal = Decimal("0")
     tax_total = Decimal("0")
+    tax_breakdown = {
+        "cgst": Decimal("0"),
+        "sgst": Decimal("0"),
+        "igst": Decimal("0"),
+        "cess": Decimal("0"),
+    }
     for row in items:
         if not isinstance(row, dict):
             continue
@@ -1531,12 +1700,33 @@ def _document_totals(document, gst_templates_by_id):
         rate = _to_decimal(row.get("rate"))
         line_total = qty * rate
         tax_pct = _to_decimal(row.get("taxPercent")) if str(row.get("taxPercent") or "").strip() else default_tax
+        component_total = sum(template_components.values(), Decimal("0"))
+        if component_total > 0:
+            effective_components = {
+                key: (tax_pct * value) / component_total
+                for key, value in template_components.items()
+            }
+        else:
+            effective_components = {
+                "cgst": Decimal("0"),
+                "sgst": Decimal("0"),
+                "igst": tax_pct,
+                "cess": Decimal("0"),
+            }
         subtotal += line_total
         tax_total += (line_total * tax_pct) / Decimal("100")
+        for key, value in effective_components.items():
+            tax_breakdown[key] += (line_total * value) / Decimal("100")
+    breakdown_percent = {
+        key: ((value / subtotal) * Decimal("100")) if subtotal > 0 else Decimal("0")
+        for key, value in tax_breakdown.items()
+    }
     return {
         "subtotal": float(subtotal),
         "tax_total": float(tax_total),
         "grand_total": float(subtotal + tax_total),
+        "tax_breakdown": {key: float(value) for key, value in tax_breakdown.items()},
+        "breakdown_percent": {key: float(value) for key, value in breakdown_percent.items()},
     }
 
 
@@ -3757,13 +3947,60 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     normalized_doc_type = (doc_type or "").strip().lower()
-    if normalized_doc_type not in {"estimate", "invoice"}:
+    doc_type_aliases = {
+        "estimate": "estimate",
+        "invoice": "invoice",
+        "salesorder": "sales_order",
+        "sales-order": "sales_order",
+        "sales_order": "sales_order",
+        "sales order": "sales_order",
+    }
+    normalized_doc_type = doc_type_aliases.get(normalized_doc_type, normalized_doc_type)
+    if normalized_doc_type not in {"estimate", "invoice", "sales_order"}:
         return JsonResponse({"detail": "invalid_doc_type"}, status=400)
 
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
-    list_key = "estimates" if normalized_doc_type == "estimate" else "invoices"
-    document = next((row for row in data.get(list_key, []) if str(row.get("id")) == str(doc_id)), None)
+    if normalized_doc_type == "sales_order":
+        sales_order = (
+            CrmSalesOrder.objects
+            .filter(organization=org, id=doc_id, is_deleted=False)
+            .select_related("deal")
+            .first()
+        )
+        if not sales_order:
+            return JsonResponse({"detail": "document_not_found"}, status=404)
+        payload = _serialize_crm_sales_order(sales_order)
+        document = {
+            "id": sales_order.id,
+            "docNo": sales_order.order_id,
+            "customerName": payload.get("company") or payload.get("customer_name") or "-",
+            "customerGstin": payload.get("customer_gstin") or "",
+            "billingAddress": payload.get("billing_address") or "",
+            "issueDate": payload.get("issue_date") or "",
+            "dueDate": payload.get("due_date") or "",
+            "status": "",
+            "gstTemplateId": payload.get("gst_template_id") or "",
+            "billingTemplateId": payload.get("billing_template_id") or "",
+            "items": payload.get("items") or [],
+            "notes": payload.get("notes") or "",
+            "termsText": payload.get("terms_text") or "",
+            "paymentStatusNotes": payload.get("payment_status_notes") or "",
+            "paymentStatus": payload.get("payment_status") or sales_order.payment_status or "pending",
+            "paidAmount": payload.get("paid_amount") if payload.get("paid_amount") is not None else sales_order.paid_amount,
+            "paymentMode": payload.get("payment_mode") or sales_order.payment_mode or "",
+            "paymentDate": payload.get("payment_date") or (sales_order.payment_date.isoformat() if sales_order.payment_date else ""),
+            "transactionId": payload.get("transaction_id") or sales_order.transaction_id or "",
+            "balanceAmount": payload.get("balance_amount") if payload.get("balance_amount") is not None else float(max(Decimal("0"), (sales_order.total_amount or Decimal("0")) - Decimal(str(sales_order.paid_amount or 0)))),
+            "salesperson": payload.get("salesperson") or "",
+            "sourceDealId": payload.get("source_deal_id") or "",
+            "subtotal": payload.get("subtotal") or 0,
+            "taxTotal": payload.get("tax_total") or 0,
+            "grandTotal": payload.get("grand_total") or 0,
+        }
+    else:
+        list_key = "estimates" if normalized_doc_type == "estimate" else "invoices"
+        document = next((row for row in data.get(list_key, []) if str(row.get("id")) == str(doc_id)), None)
     if not document:
         return JsonResponse({"detail": "document_not_found"}, status=404)
 
@@ -3794,6 +4031,8 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
             {
                 "description": description_main,
                 "description_custom": description_custom,
+                "hsn_sac_type": str(row.get("hsnSacType") or row.get("hsn_sac_type") or "").strip(),
+                "hsn_sac_code": str(row.get("hsnSacCode") or row.get("hsnCode") or row.get("sacCode") or "").strip(),
                 "qty": str(row.get("qty") or ""),
                 "rate": float(rate),
                 "tax_percent": float(_to_decimal(row.get("taxPercent"))),
@@ -3804,7 +4043,7 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
     context = {
         "org": org,
         "doc_type": normalized_doc_type,
-        "doc_type_label": "Estimate" if normalized_doc_type == "estimate" else "Invoice",
+        "doc_type_label": "Estimate" if normalized_doc_type == "estimate" else "Sales Order" if normalized_doc_type == "sales_order" else "Invoice",
         "document": document,
         "items": line_rows,
         "gst_template": gst_template,
@@ -3815,7 +4054,169 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
             if isinstance(gst_template, dict)
             else Decimal("0")
         ),
+        "theme_color": (billing_template or {}).get("themeColor") or "#22c55e",
+        "company_logo_data_url": (billing_template or {}).get("companyLogoDataUrl") or "",
+        "payment_status": str(document.get("paymentStatus") or "Pending").strip().title() or "Pending",
+        "paid_amount": float(_to_decimal(document.get("paidAmount"))),
+        "balance_amount": float(_to_decimal(document.get("balanceAmount"))),
+        "payment_mode": str(document.get("paymentMode") or "").strip(),
+        "payment_date": str(document.get("paymentDate") or "").strip(),
+        "transaction_id": str(document.get("transactionId") or "").strip(),
+        "has_payment": _to_decimal(document.get("paidAmount")) > 0,
     }
+    if str(request.GET.get("format") or "").strip().lower() == "pdf":
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+        left = 18 * mm
+        right = width - 18 * mm
+        top = height - 20 * mm
+        logo_image = _ba_pdf_image_from_data_url(context["company_logo_data_url"])
+        money_font = _ba_get_unicode_pdf_font() or "Helvetica"
+        tax_breakdown = totals.get("tax_breakdown") or {}
+        breakdown_percent = totals.get("breakdown_percent") or {}
+        gst_breakdown = []
+        for key, label in (("cgst", "CGST"), ("sgst", "SGST"), ("igst", "IGST"), ("cess", "CESS")):
+            amount = _to_decimal(tax_breakdown.get(key))
+            if amount > 0:
+                gst_breakdown.append((label, float(breakdown_percent.get(key) or 0), amount))
+
+        pdf.setTitle(f"{context['doc_type_label']} {document.get('docNo') or doc_id}")
+        pdf.setFillColorRGB(0, 0, 0)
+        logo_height = _ba_draw_pdf_logo(pdf, logo_image, left, top + 1 * mm, 24 * mm, 14 * mm)
+        seller_x = left + (30 * mm if logo_height else 0)
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawString(seller_x, top, str(org.name or "Organization"))
+        pdf.setFont("Helvetica", 9)
+        seller_lines = []
+        billing_address_lines = [line for line in str(document.get("billingAddress") or "").splitlines() if str(line).strip()]
+        if billing_address_lines:
+            seller_lines.append(billing_address_lines[0])
+        if document.get("customerGstin"):
+            seller_lines.append(f"GSTIN: {document.get('customerGstin')}")
+        if isinstance(gst_template, dict) and str(gst_template.get("name") or "").strip():
+            seller_lines.append(f"GST Template: {gst_template.get('name')}")
+        seller_y = top - 8 * mm
+        for line in seller_lines[:3]:
+            pdf.drawString(seller_x, seller_y, str(line))
+            seller_y -= 4 * mm
+
+        invoice_meta_y = top - 2 * mm
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(width - 86 * mm, invoice_meta_y, context["doc_type_label"].upper())
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(width - 86 * mm, invoice_meta_y - 6 * mm, f"{context['doc_type_label']} # {document.get('docNo') or '-'}")
+        pdf.drawString(width - 86 * mm, invoice_meta_y - 10 * mm, f"{context['doc_type_label']} Date {document.get('issueDate') or '-'}")
+        pdf.setFont(money_font, 9)
+        pdf.drawString(width - 86 * mm, invoice_meta_y - 14 * mm, f"{context['doc_type_label']} Amount {_format_pdf_inr(totals.get('grand_total') or '0')}")
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(width - 86 * mm, invoice_meta_y - 18 * mm, f"Customer {document.get('customerName') or '-'}")
+
+        billed_y = top - 34 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(left, billed_y, "BILLED TO")
+        pdf.setFont("Helvetica", 9)
+        billed_lines = [document.get("customerName") or "-"]
+        customer_company = ""
+        raw_customer = str(document.get("customerName") or "").strip()
+        if raw_customer and raw_customer.lower() != str(org.name or "").strip().lower():
+            customer_company = raw_customer
+        if customer_company:
+            billed_lines.append(customer_company)
+        billed_lines.extend(billing_address_lines[:5])
+        if document.get("customerGstin"):
+            billed_lines.append(f"GSTIN: {document.get('customerGstin')}")
+        billed_line_y = billed_y - 4 * mm
+        for line in billed_lines[:7]:
+            pdf.drawString(left, billed_line_y, str(line))
+            billed_line_y -= 4 * mm
+
+        details_y = top - 34 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(width - 86 * mm, details_y, "DOCUMENT DETAILS")
+        pdf.setFont("Helvetica", 9)
+        details_rows = [
+            f"Due Date {document.get('dueDate') or '-'}",
+            f"Status {document.get('status') or '-'}",
+        ]
+        if isinstance(gst_template, dict) and str(gst_template.get("name") or "").strip():
+            details_rows.append(f"GST Template {gst_template.get('name')}")
+        for index, line in enumerate(details_rows, start=1):
+            pdf.drawString(width - 86 * mm, details_y - (index * 4 * mm), line)
+
+        table_top = min(billed_line_y, details_y - (len(details_rows) + 1) * 4 * mm) - 8 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(left, table_top, "DESCRIPTION")
+        pdf.drawString(left + 90 * mm, table_top, "HSN / SAC")
+        pdf.drawString(left + 112 * mm, table_top, "UNITS")
+        pdf.drawString(left + 131 * mm, table_top, "UNIT PRICE")
+        pdf.drawRightString(right, table_top, "AMOUNT")
+        pdf.line(left, table_top - 2 * mm, right, table_top - 2 * mm)
+        row_y = table_top - 8 * mm
+        pdf.setFont("Helvetica", 9)
+        for row in line_rows[:12]:
+            line_tax = _to_decimal(row.get("tax_percent"))
+            line_code = str(row.get("hsn_sac_code") or "").strip() or "-"
+            description_text = str(row.get("description_custom") or row.get("description") or "-")
+            description_lines = _ba_wrap_pdf_text(pdf, description_text, 86 * mm, "Helvetica", 9)
+            for idx, line in enumerate(description_lines[:2]):
+                pdf.drawString(left, row_y - (idx * 4 * mm), line)
+            text_bottom_y = row_y - ((len(description_lines[:2]) - 1) * 4 * mm)
+            pdf.drawString(left + 90 * mm, text_bottom_y, line_code)
+            pdf.drawString(left + 114 * mm, text_bottom_y, str(row.get("qty") or ""))
+            pdf.setFont(money_font, 9)
+            pdf.drawString(left + 131 * mm, text_bottom_y, _format_pdf_inr(row.get('rate') or '0'))
+            pdf.drawRightString(right, text_bottom_y, _format_pdf_inr(row.get('amount') or '0'))
+            pdf.setFont("Helvetica", 9)
+            if line_tax > 0:
+                pdf.setFont("Helvetica", 8)
+                pdf.drawString(left + 56 * mm, text_bottom_y, f"Tax {float(line_tax)}%")
+                pdf.setFont("Helvetica", 9)
+            pdf.line(left, text_bottom_y - 4 * mm, right, text_bottom_y - 4 * mm)
+            row_y = text_bottom_y - 8 * mm
+
+        summary_y = row_y - 8 * mm
+        pdf.setFont(money_font, 9)
+        pdf.drawRightString(right, summary_y, f"Sub Total {_format_pdf_inr(totals.get('subtotal') or '0')}")
+        summary_y -= 5 * mm
+        if gst_breakdown:
+            for label, percent, tax_value in gst_breakdown:
+                pdf.drawRightString(right, summary_y, f"{label} @ {percent:.2f}% {_format_pdf_inr(tax_value)}")
+                summary_y -= 5 * mm
+        else:
+            pdf.drawRightString(right, summary_y, f"GST / Tax {_format_pdf_inr(totals.get('tax_total') or '0')}")
+            summary_y -= 5 * mm
+        pdf.setFont(money_font, 11)
+        pdf.drawRightString(right, summary_y - 1 * mm, f"Total {_format_pdf_inr(totals.get('grand_total') or '0')}")
+
+        payment_y = summary_y - 16 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(left, payment_y, "PAYMENT DETAILS")
+        pdf.setFont("Helvetica", 9)
+        payment_lines = [f"Payment Status: {context['payment_status']}"]
+        if _to_decimal(context.get("paid_amount")) > 0:
+            pdf.setFont(money_font, 9)
+            payment_lines.append(f"Paid Amount: {_format_pdf_inr(context.get('paid_amount') or '0')}")
+            payment_lines.append(f"Balance Amount: {_format_pdf_inr(context.get('balance_amount') or '0')}")
+            pdf.setFont("Helvetica", 9)
+            if context.get("payment_mode"):
+                payment_lines.append(f"Payment Mode: {context['payment_mode']}")
+            if context.get("payment_date"):
+                payment_lines.append(f"Payment Date: {context['payment_date']}")
+            if context.get("transaction_id"):
+                payment_lines.append(f"Transaction ID: {context['transaction_id']}")
+        payment_line_y = payment_y - 4 * mm
+        for line in payment_lines[:6]:
+            pdf.drawString(left, payment_line_y, str(line))
+            payment_line_y -= 4 * mm
+
+        pdf.showPage()
+        pdf.save()
+        buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+        filename = f"{normalized_doc_type}_{document.get('docNo') or doc_id}.pdf".replace(" ", "_")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
     return render(request, "business_autopilot/accounts/document_print.html", context)
 
 
@@ -3841,6 +4242,15 @@ def _crm_to_decimal(value):
         return Decimal(normalized or "0")
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _normalize_payment_status(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "paid":
+        return "paid"
+    if normalized in {"partial", "partially paid"}:
+        return "partial"
+    return "pending"
 
 
 def _crm_order_id(org: Organization):
@@ -3933,6 +4343,76 @@ def _crm_clean_int_list(value):
     return list(dict.fromkeys(numbers))
 
 
+def _crm_sales_order_payload_dict(row: CrmSalesOrder):
+    raw_payload = row.products if isinstance(row.products, dict) else {}
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+    items = raw_payload.get("items")
+    if not isinstance(items, list):
+        items = row.products if isinstance(row.products, list) else []
+    return {
+        **raw_payload,
+        "items": [item for item in items if isinstance(item, dict)],
+    }
+
+
+def _crm_normalize_sales_order_items(items):
+    normalized_items = []
+    if not isinstance(items, list):
+        return normalized_items
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        description = str(item.get("description") or item.get("customText") or "").strip()
+        hsn_sac_type = str(item.get("hsnSacType") or item.get("hsn_sac_type") or "HSN").strip().upper() or "HSN"
+        hsn_sac_code = str(item.get("hsnSacCode") or item.get("hsn_sac_code") or item.get("hsnCode") or item.get("sacCode") or "").strip()
+        qty_value = _crm_to_decimal(item.get("qty"))
+        qty = qty_value if qty_value > 0 else Decimal("1")
+        rate = _crm_to_decimal(item.get("rate"))
+        tax_percent = _crm_to_decimal(item.get("taxPercent") if item.get("taxPercent") is not None else item.get("tax_percent"))
+        qty_text = format(qty.quantize(Decimal("1")), "f") if qty == qty.to_integral() else format(qty.normalize(), "f")
+        normalized_items.append({
+            "id": str(item.get("id") or f"crm_so_line_{index + 1}").strip(),
+            "itemMasterId": str(item.get("itemMasterId") or "").strip(),
+            "inventoryItemId": str(item.get("inventoryItemId") or "").strip(),
+            "description": description,
+            "customText": str(item.get("customText") or "").strip(),
+            "hsnSacType": "SAC" if hsn_sac_type == "SAC" else "HSN",
+            "hsnSacCode": hsn_sac_code,
+            "qty": qty_text,
+            "rate": str(rate),
+            "taxPercent": str(tax_percent),
+        })
+    return normalized_items
+
+
+def _crm_sales_order_totals(items):
+    subtotal = Decimal("0")
+    tax_total = Decimal("0")
+    total_qty = Decimal("0")
+    first_rate = Decimal("0")
+    first_tax = Decimal("0")
+    for index, item in enumerate(items):
+        qty = _crm_to_decimal(item.get("qty"))
+        rate = _crm_to_decimal(item.get("rate"))
+        tax_percent = _crm_to_decimal(item.get("taxPercent"))
+        line_subtotal = qty * rate
+        subtotal += line_subtotal
+        tax_total += line_subtotal * (tax_percent / Decimal("100"))
+        total_qty += qty
+        if index == 0:
+            first_rate = rate
+            first_tax = tax_percent
+    return {
+        "subtotal": subtotal,
+        "tax_total": tax_total,
+        "grand_total": subtotal + tax_total,
+        "total_qty": total_qty,
+        "first_rate": first_rate,
+        "first_tax": first_tax,
+    }
+
+
 def _crm_can_access_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
         return True
@@ -4023,6 +4503,9 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         deal_ref = str(getattr(row.deal, "crm_reference_id", "") or "").strip()
         lead_ref = str(getattr(getattr(row.deal, "lead", None), "crm_reference_id", "") or "").strip()
         crm_reference_id = deal_ref or lead_ref
+    payload = _crm_sales_order_payload_dict(row)
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    totals = _crm_sales_order_totals(items)
     return {
         "id": row.id,
         "crm_reference_id": crm_reference_id,
@@ -4032,12 +4515,35 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         "company": row.company,
         "phone": row.phone,
         "amount": float(row.amount or 0),
-        "products": row.products if isinstance(row.products, list) else [],
+        "products": payload,
+        "items": items,
         "quantity": int(row.quantity or 0),
         "price": float(row.price or 0),
         "tax": float(row.tax or 0),
         "total_amount": float(row.total_amount or 0),
         "status": row.status,
+        "payment_status": row.payment_status,
+        "paid_amount": float(row.paid_amount or 0),
+        "payment_mode": row.payment_mode or "",
+        "payment_date": row.payment_date.isoformat() if row.payment_date else "",
+        "transaction_id": row.transaction_id or "",
+        "balance_amount": float(max(Decimal("0"), (row.total_amount or Decimal("0")) - Decimal(str(row.paid_amount or 0)))),
+        "issue_date": str(payload.get("issueDate") or payload.get("issue_date") or ""),
+        "due_date": str(payload.get("dueDate") or payload.get("due_date") or ""),
+        "gst_template_id": str(payload.get("gstTemplateId") or payload.get("gst_template_id") or ""),
+        "billing_template_id": str(payload.get("billingTemplateId") or payload.get("billing_template_id") or ""),
+        "salesperson": str(payload.get("salesperson") or ""),
+        "customer_gstin": str(payload.get("customerGstin") or payload.get("customer_gstin") or ""),
+        "billing_address": str(payload.get("billingAddress") or payload.get("billing_address") or ""),
+        "notes": str(payload.get("notes") or ""),
+        "terms_text": str(payload.get("termsText") or payload.get("terms_text") or ""),
+        "payment_status_notes": str(payload.get("paymentStatusNotes") or payload.get("payment_status_notes") or ""),
+        "source_deal_id": str(payload.get("sourceDealId") or payload.get("source_deal_id") or row.deal_id or ""),
+        "converted_to_invoice": bool(payload.get("convertedToInvoice") or payload.get("converted_to_invoice")),
+        "converted_invoice_id": str(payload.get("convertedInvoiceId") or payload.get("converted_invoice_id") or ""),
+        "subtotal": float(totals["subtotal"]),
+        "tax_total": float(totals["tax_total"]),
+        "grand_total": float(totals["grand_total"]),
         "assigned_user_id": row.assigned_user_id,
         "assigned_user_name": _get_org_user_display_name(row.assigned_user) if row.assigned_user_id else "",
         "is_deleted": bool(row.is_deleted),
@@ -4731,7 +5237,7 @@ def crm_meetings(request, meeting_id: int = None):
     return JsonResponse({"detail": "invalid_method"}, status=405)
 
 
-@require_http_methods(["GET", "POST", "DELETE"])
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
 def crm_sales_orders(request, order_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -4739,17 +5245,27 @@ def crm_sales_orders(request, order_id: int = None):
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
-    if request.method == "GET" and not order_id:
+    resolved_method = request.method
+    if request.method == "POST":
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        if override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method == "GET" and not order_id:
         rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "deal__lead", "created_by").order_by("-created_at")
         visible_rows = [row for row in rows if _crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id]
         return JsonResponse({"sales_orders": [_serialize_crm_sales_order(row) for row in visible_rows]})
 
-    if request.method == "DELETE":
+    row = CrmSalesOrder.objects.filter(organization=org, id=order_id).select_related("deal", "assigned_user", "created_by").first() if order_id else None
+    if order_id and not row:
+        return JsonResponse({"detail": "sales_order_not_found"}, status=404)
+    if row and not (_crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id or row.created_by_id == request.user.id):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    can_edit_payment_details = _crm_is_admin(request.user, org)
+
+    if resolved_method == "DELETE":
         if not _crm_is_admin(request.user, org):
             return JsonResponse({"detail": "forbidden"}, status=403)
-        row = CrmSalesOrder.objects.filter(organization=org, id=order_id).first()
-        if not row:
-            return JsonResponse({"detail": "sales_order_not_found"}, status=404)
         row.is_deleted = True
         row.deleted_at = timezone.now()
         row.deleted_by = request.user
@@ -4763,11 +5279,6 @@ def crm_sales_orders(request, order_id: int = None):
     customer_name = str(payload.get("customer_name") or "").strip()
     if not customer_name:
         return JsonResponse({"detail": "customer_name_required"}, status=400)
-    quantity = _coerce_positive_int(payload.get("quantity")) or 1
-    price = _crm_to_decimal(payload.get("price"))
-    tax = _crm_to_decimal(payload.get("tax"))
-    amount = _crm_to_decimal(payload.get("amount"))
-    total_amount = amount if amount > 0 else (price * Decimal(quantity)) + tax
     crm_reference_id = str(payload.get("crm_reference_id") or payload.get("crmReferenceId") or "").strip()[:32]
     source_deal_id = _coerce_positive_int(payload.get("source_deal_id") or payload.get("sourceDealId") or payload.get("deal_id"))
     source_deal = None
@@ -4775,21 +5286,92 @@ def crm_sales_orders(request, order_id: int = None):
         source_deal = CrmDeal.objects.filter(organization=org, id=source_deal_id).select_related("lead").first()
     if source_deal and not crm_reference_id:
         crm_reference_id = str(source_deal.crm_reference_id or getattr(source_deal.lead, "crm_reference_id", "") or "").strip()[:32]
+    normalized_items = _crm_normalize_sales_order_items(payload.get("items"))
+    totals = _crm_sales_order_totals(normalized_items)
+    subtotal_amount = _crm_to_decimal(payload.get("amount")) if not normalized_items else totals["subtotal"]
+    total_amount = _crm_to_decimal(payload.get("total_amount")) if not normalized_items else totals["grand_total"]
+    quantity = _coerce_positive_int(payload.get("quantity")) or int(totals["total_qty"] or Decimal("1")) or 1
+    price = _crm_to_decimal(payload.get("price")) if not normalized_items else totals["first_rate"]
+    tax = _crm_to_decimal(payload.get("tax")) if not normalized_items else totals["first_tax"]
     assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
     assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else request.user
+    deal = None
+    source_deal_id = _coerce_positive_int(payload.get("source_deal_id") or payload.get("sourceDealId") or payload.get("deal_id"))
+    if source_deal_id:
+        deal = CrmDeal.objects.filter(organization=org, id=source_deal_id).first()
+    paid_amount = _crm_to_decimal(payload.get("paid_amount") or payload.get("paidAmount")) if can_edit_payment_details else _crm_to_decimal(row.paid_amount if row else 0)
+    calculated_total_amount = total_amount or (subtotal_amount + (subtotal_amount * (tax / Decimal("100"))))
+    if paid_amount >= calculated_total_amount and calculated_total_amount > 0:
+        payment_status = "paid"
+    elif paid_amount > 0:
+        payment_status = "partial"
+    else:
+        payment_status = "pending"
+    products_payload = {
+        "items": normalized_items,
+        "issueDate": str(payload.get("issue_date") or payload.get("issueDate") or "").strip(),
+        "dueDate": str(payload.get("due_date") or payload.get("dueDate") or "").strip(),
+        "gstTemplateId": str(payload.get("gst_template_id") or payload.get("gstTemplateId") or "").strip(),
+        "billingTemplateId": str(payload.get("billing_template_id") or payload.get("billingTemplateId") or "").strip(),
+        "salesperson": str(payload.get("salesperson") or "").strip(),
+        "customerGstin": str(payload.get("customer_gstin") or payload.get("customerGstin") or "").strip(),
+        "billingAddress": str(payload.get("billing_address") or payload.get("billingAddress") or "").strip(),
+        "notes": str(payload.get("notes") or "").strip(),
+        "termsText": str(payload.get("terms_text") or payload.get("termsText") or "").strip(),
+        "paymentStatusNotes": str(payload.get("payment_status_notes") or payload.get("paymentStatusNotes") or "").strip(),
+        "paymentStatus": payment_status,
+        "paidAmount": float(paid_amount),
+        "paymentMode": str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip() if can_edit_payment_details else str(row.payment_mode if row else ""),
+        "paymentDate": str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() if can_edit_payment_details else (row.payment_date.isoformat() if row and row.payment_date else ""),
+        "transactionId": str(payload.get("transaction_id") or payload.get("transactionId") or "").strip() if can_edit_payment_details else str(row.transaction_id if row else ""),
+        "balanceAmount": float(max(Decimal("0"), calculated_total_amount - paid_amount)),
+        "sourceDealId": str(source_deal_id or (row.deal_id if row else "") or "").strip(),
+        "convertedToInvoice": bool(payload.get("converted_to_invoice") or payload.get("convertedToInvoice")),
+        "convertedInvoiceId": str(payload.get("converted_invoice_id") or payload.get("convertedInvoiceId") or "").strip(),
+    }
+    if resolved_method == "PATCH":
+        row.customer_name = customer_name[:180]
+        row.company = str(payload.get("company") or "").strip()[:180]
+        row.phone = str(payload.get("phone") or "").strip()[:40]
+        row.amount = subtotal_amount
+        row.products = products_payload
+        row.quantity = quantity
+        row.price = price
+        row.tax = tax
+        row.total_amount = calculated_total_amount
+        row.payment_status = payment_status
+        row.paid_amount = float(paid_amount)
+        if can_edit_payment_details:
+            row.payment_mode = str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip()[:50]
+            row.payment_date = parse_date(str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() or "")
+            row.transaction_id = str(payload.get("transaction_id") or payload.get("transactionId") or "").strip()[:100]
+        row.status = str(payload.get("status") or row.status or "Pending").strip()[:20] or "Pending"
+        row.assigned_user = assigned_user
+        if deal:
+            row.deal = deal
+        row.updated_by = request.user
+        row.save()
+        return JsonResponse({"sales_order": _serialize_crm_sales_order(row)})
+
     row = CrmSalesOrder.objects.create(
         organization=org,
         crm_reference_id=crm_reference_id,
-        order_id=_crm_order_id(org),
+        deal=deal,
+        order_id=str(payload.get("order_id") or payload.get("orderId") or _crm_order_id(org)).strip()[:30] or _crm_order_id(org),
         customer_name=customer_name[:180],
         company=str(payload.get("company") or "").strip()[:180],
         phone=str(payload.get("phone") or "").strip()[:40],
-        amount=amount,
-        products=payload.get("products") if isinstance(payload.get("products"), list) else [],
+        amount=subtotal_amount,
+        products=products_payload,
         quantity=quantity,
         price=price,
         tax=tax,
-        total_amount=total_amount,
+        total_amount=calculated_total_amount,
+        payment_status=payment_status,
+        paid_amount=float(paid_amount),
+        payment_mode=str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip()[:50] if can_edit_payment_details else "",
+        payment_date=parse_date(str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() or "") if can_edit_payment_details else None,
+        transaction_id=str(payload.get("transaction_id") or payload.get("transactionId") or "").strip()[:100] if can_edit_payment_details else "",
         status=str(payload.get("status") or "Pending").strip()[:20] or "Pending",
         assigned_user=assigned_user,
         created_by=request.user,
@@ -4834,6 +5416,11 @@ def crm_convert_to_sales_order(request, deal_id: int):
             price=amount,
             tax=Decimal("0"),
             total_amount=amount,
+            payment_status="pending",
+            paid_amount=0,
+            payment_mode="",
+            payment_date=None,
+            transaction_id="",
             status="Pending",
             assigned_user=deal.assigned_user,
             created_by=request.user,

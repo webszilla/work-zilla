@@ -248,6 +248,42 @@ const CRM_FOLLOWUP_STATUS_TABS = ["ongoing", "pending", "missed", "completed"];
 const CRM_DEAL_STATUS_OPTIONS = ["Open", "Won", "Lost"];
 const CRM_SOFT_DELETE_RETENTION_DAYS = 180;
 
+async function downloadDocumentPdf(kind, id) {
+  const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print?format=pdf`;
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+    });
+    if (!response.ok) {
+      let errorMessage = `Unable to download PDF (${response.status}).`;
+      try {
+        const data = await response.json();
+        errorMessage = data?.detail || data?.error || errorMessage;
+      } catch (_error) {
+        // ignore non-json responses
+      }
+      throw new Error(errorMessage);
+    }
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const contentDisposition = String(response.headers.get("Content-Disposition") || "");
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+    const fallbackLabel = kind === "estimate" ? "estimate" : kind === "salesOrder" ? "sales_order" : "invoice";
+    const filename = filenameMatch?.[1] || `${fallbackLabel}_${id}.pdf`;
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+  } catch (error) {
+    const message = String(error?.message || "").trim() || "Unable to download PDF.";
+    showUploadAlert(message);
+  }
+}
+
 const CRM_SECTION_CONFIG = {
   leads: {
     label: "Leads",
@@ -845,7 +881,9 @@ const DEFAULT_STOCKS_DATA = {
 const GST_STATUS_OPTIONS = ["Active", "Inactive"];
 const ESTIMATE_STATUS_OPTIONS = ["Draft", "Sent", "Approved", "Rejected", "Converted"];
 const INVOICE_STATUS_OPTIONS = ["Draft", "Sent", "Partially Paid", "Paid", "Overdue", "Cancelled"];
-const INVOICE_PAYMENT_STATUS_OPTIONS = ["Pending", "Partially Paid", "Paid", "Failed", "Refunded"];
+const PAYMENT_STATUS_OPTIONS = ["Pending", "Partial", "Paid"];
+const PAYMENT_MODE_OPTIONS = ["Cash", "UPI", "Bank Transfer"];
+const INVOICE_PAYMENT_STATUS_OPTIONS = PAYMENT_STATUS_OPTIONS;
 const INVOICE_DELIVERY_STATUS_OPTIONS = ["Pending", "Packed", "Shipped", "Completed", "Cancelled"];
 const SUBSCRIPTION_STATUS_OPTIONS = ["Active", "Expired", "Cancelled"];
 const SUBSCRIPTION_LIST_STATUS_TABS = [
@@ -980,6 +1018,105 @@ function sanitizeCurrencyInput(rawValue) {
     return "";
   }
   return decimalPart ? `${integerPart || "0"}.${decimalPart}` : (integerPart || "0");
+}
+
+function sanitizeDigitsOnlyInput(rawValue, maxLength) {
+  const digits = String(rawValue ?? "").replace(/\D/g, "");
+  const limit = Number.isFinite(Number(maxLength)) ? Math.max(0, Number(maxLength)) : 0;
+  return limit > 0 ? digits.slice(0, limit) : digits;
+}
+
+function sanitizeDecimalTextInput(rawValue, maxIntegerDigits, maxDecimalDigits) {
+  const value = String(rawValue ?? "").replace(/\s+/g, "").replace(/,/g, ".");
+  if (!value) {
+    return "";
+  }
+
+  let result = "";
+  let sawDot = false;
+  let integerDigits = 0;
+  let decimalDigits = 0;
+
+  for (const char of value) {
+    if (/\d/.test(char)) {
+      if (!sawDot) {
+        if (integerDigits >= maxIntegerDigits) {
+          continue;
+        }
+        result += char;
+        integerDigits += 1;
+      } else {
+        if (decimalDigits >= maxDecimalDigits) {
+          continue;
+        }
+        result += char;
+        decimalDigits += 1;
+      }
+      continue;
+    }
+    if (char === "." && !sawDot) {
+      sawDot = true;
+      result += result ? "." : "0.";
+    }
+  }
+
+  return result;
+}
+
+function normalizePaymentStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "paid") return "Paid";
+  if (normalized === "partial" || normalized === "partially paid") return "Partial";
+  return "Pending";
+}
+
+function normalizePaymentDetails(rawDetails, totalAmountValue) {
+  const totalAmount = Math.max(0, parseNumber(totalAmountValue));
+  const paidRaw = sanitizeDecimalTextInput(
+    String(rawDetails?.paidAmount ?? rawDetails?.paid_amount ?? "").trim(),
+    CURRENCY_MAX_INTEGER_DIGITS,
+    CURRENCY_MAX_DECIMAL_DIGITS
+  );
+  const paidAmount = Math.max(0, parseNumber(paidRaw));
+  const cappedPaidAmount = totalAmount > 0 ? Math.min(paidAmount, totalAmount) : paidAmount;
+  const paidAmountText = paidRaw ? formatCurrencyNumberInput(String(cappedPaidAmount), getOrgCurrency()) : "";
+  let paymentStatus = normalizePaymentStatus(rawDetails?.paymentStatus ?? rawDetails?.payment_status);
+  if (totalAmount > 0 && cappedPaidAmount >= totalAmount) {
+    paymentStatus = "Paid";
+  } else if (cappedPaidAmount > 0) {
+    paymentStatus = "Partial";
+  } else {
+    paymentStatus = "Pending";
+  }
+  const balanceAmount = Math.max(0, totalAmount - cappedPaidAmount);
+  return {
+    paymentStatus,
+    paidAmount: paidAmountText,
+    paidAmountValue: cappedPaidAmount,
+    balanceAmount,
+    paymentMode: String(rawDetails?.paymentMode ?? rawDetails?.payment_mode ?? "").trim(),
+    paymentDate: String(rawDetails?.paymentDate ?? rawDetails?.payment_date ?? "").trim(),
+    transactionId: String(rawDetails?.transactionId ?? rawDetails?.transaction_id ?? "").trim(),
+  };
+}
+
+function getPaymentStatusBadgeClass(status) {
+  if (status === "Paid") return "bg-success-subtle text-success border border-success-subtle";
+  if (status === "Partial") return "bg-warning-subtle text-warning border border-warning-subtle";
+  return "bg-danger-subtle text-danger border border-danger-subtle";
+}
+
+function applyPaymentDetailsToForm(form, totalAmountValue) {
+  const paymentDetails = normalizePaymentDetails(form, totalAmountValue);
+  return {
+    ...form,
+    paymentStatus: paymentDetails.paymentStatus,
+    paidAmount: paymentDetails.paidAmount,
+    paymentMode: paymentDetails.paymentMode,
+    paymentDate: paymentDetails.paymentDate,
+    transactionId: paymentDetails.transactionId,
+    balanceAmount: String(paymentDetails.balanceAmount || "").trim(),
+  };
 }
 
 function getCurrencySymbol(currencyCode) {
@@ -1121,8 +1258,12 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = []) {
     billingAddress: "",
     notes: "Thank you for your business.",
     termsText: "Payment due within 7 days. Please contact your org admin for support.",
+    paymentStatus: "Pending",
+    paidAmount: "",
+    paymentMode: "",
+    paymentDate: "",
+    transactionId: "",
     paymentStatusNotes: "",
-    paymentStatus: kind === "invoice" ? "Pending" : "",
     deliveryStatus: kind === "invoice" ? "Pending" : "",
     inventoryCommitted: false,
     items: [createEmptyDocLine()]
@@ -1169,6 +1310,11 @@ function createEmptyCrmSalesOrder(existingRows = []) {
     billingAddress: "",
     notes: "Thank you for your business.",
     termsText: "Payment due within 7 days. Please contact your org admin for support.",
+    paymentStatus: "Pending",
+    paidAmount: "",
+    paymentMode: "",
+    paymentDate: "",
+    transactionId: "",
     paymentStatusNotes: "",
     company: "",
     phone: "",
@@ -1389,22 +1535,68 @@ function createEmptySubscriptionForm({ currency = "INR" } = {}) {
 
 function computeDocumentTotals(doc, gstTemplates) {
   const gstTemplate = (gstTemplates || []).find((row) => row.id === doc.gstTemplateId);
-  const defaultTax = gstTemplate ? gstTemplateTotalPercent(gstTemplate) : 0;
+  const templateComponents = {
+    cgst: parseNumber(gstTemplate?.cgst),
+    sgst: parseNumber(gstTemplate?.sgst),
+    igst: parseNumber(gstTemplate?.igst),
+    cess: parseNumber(gstTemplate?.cess),
+  };
+  const defaultTax = Object.values(templateComponents).reduce((sum, value) => sum + value, 0);
   const rows = Array.isArray(doc?.items) ? doc.items : [];
   let subtotal = 0;
   let taxTotal = 0;
+  const taxBreakdown = {
+    cgst: 0,
+    sgst: 0,
+    igst: 0,
+    cess: 0,
+  };
   rows.forEach((item) => {
     const qty = parseNumber(item.qty);
     const rate = parseNumber(item.rate);
     const lineAmount = qty * rate;
-    const taxPct = parseNumber(item.taxPercent || defaultTax);
+    const hasRowTaxOverride = String(item?.taxPercent ?? "").trim() !== "";
+    const taxPct = hasRowTaxOverride ? parseNumber(item.taxPercent) : defaultTax;
+    const componentTotal = Object.values(templateComponents).reduce((sum, value) => sum + value, 0);
+    const effectiveComponents = componentTotal > 0
+      ? {
+          cgst: (taxPct * templateComponents.cgst) / componentTotal,
+          sgst: (taxPct * templateComponents.sgst) / componentTotal,
+          igst: (taxPct * templateComponents.igst) / componentTotal,
+          cess: (taxPct * templateComponents.cess) / componentTotal,
+        }
+      : {
+          cgst: 0,
+          sgst: 0,
+          igst: taxPct,
+          cess: 0,
+        };
     subtotal += lineAmount;
     taxTotal += lineAmount * (taxPct / 100);
+    taxBreakdown.cgst += lineAmount * (effectiveComponents.cgst / 100);
+    taxBreakdown.sgst += lineAmount * (effectiveComponents.sgst / 100);
+    taxBreakdown.igst += lineAmount * (effectiveComponents.igst / 100);
+    taxBreakdown.cess += lineAmount * (effectiveComponents.cess / 100);
   });
+  const breakdownPercent = subtotal > 0
+    ? {
+        cgst: (taxBreakdown.cgst / subtotal) * 100,
+        sgst: (taxBreakdown.sgst / subtotal) * 100,
+        igst: (taxBreakdown.igst / subtotal) * 100,
+        cess: (taxBreakdown.cess / subtotal) * 100,
+      }
+    : {
+        cgst: 0,
+        sgst: 0,
+        igst: 0,
+        cess: 0,
+      };
   return {
     subtotal,
     taxTotal,
-    grandTotal: subtotal + taxTotal
+    grandTotal: subtotal + taxTotal,
+    taxBreakdown,
+    breakdownPercent,
   };
 }
 
@@ -2630,12 +2822,19 @@ function normalizeCrmSalesOrderRecord(row = {}) {
         "HSN"
       ),
       hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
-      qty: String(item?.qty ?? "").trim(),
+      qty: sanitizeDigitsOnlyInput(String(item?.qty ?? "").trim(), 8),
       rate: String(item?.rate ?? "").trim(),
       taxPercent: String(item?.taxPercent ?? item?.tax_percent ?? "").trim(),
     }))
     : [createEmptyDocLine()];
   const assignType = "Users";
+  const paymentDetails = normalizePaymentDetails({
+    paymentStatus: row.paymentStatus || row.payment_status || payload.paymentStatus || payload.payment_status,
+    paidAmount: row.paidAmount ?? row.paid_amount ?? payload.paidAmount ?? payload.paid_amount,
+    paymentMode: row.paymentMode || row.payment_mode || payload.paymentMode || payload.payment_mode,
+    paymentDate: row.paymentDate || row.payment_date || payload.paymentDate || payload.payment_date,
+    transactionId: row.transactionId || row.transaction_id || payload.transactionId || payload.transaction_id,
+  }, row.grandTotal ?? row.grand_total ?? row.total_amount ?? row.amount ?? payload.grandTotal ?? payload.grand_total);
   const assignedUser = Array.isArray(row.assignedUser)
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
     : String(
@@ -2676,6 +2875,12 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     notes: String(row.notes || payload.notes || "Thank you for your business.").trim(),
     termsText: String(row.termsText || row.terms_text || payload.termsText || payload.terms_text || "Payment due within 7 days. Please contact your org admin for support.").trim(),
     paymentStatusNotes: String(row.paymentStatusNotes || row.payment_status_notes || payload.paymentStatusNotes || payload.payment_status_notes || "").trim(),
+    paymentStatus: paymentDetails.paymentStatus,
+    paidAmount: paymentDetails.paidAmount,
+    paymentMode: paymentDetails.paymentMode,
+    paymentDate: paymentDetails.paymentDate,
+    transactionId: paymentDetails.transactionId,
+    balanceAmount: String(row.balanceAmount ?? row.balance_amount ?? paymentDetails.balanceAmount ?? "").trim(),
     sourceDealId: String(row.sourceDealId || row.source_deal_id || payload.sourceDealId || payload.source_deal_id || row.deal_id || "").trim(),
     convertedToInvoice: Boolean(row.convertedToInvoice || row.converted_to_invoice || payload.convertedToInvoice || payload.converted_to_invoice),
     convertedInvoiceId: String(row.convertedInvoiceId || row.converted_invoice_id || payload.convertedInvoiceId || payload.converted_invoice_id || "").trim(),
@@ -2996,6 +3201,18 @@ function normalizeSharedCustomerRecord(row = {}) {
     state: String(row.billingState || row.state || "").trim(),
     pincode: String(row.billingPincode || row.pincode || "").trim(),
   };
+}
+
+function hasSalesOrderReadyCustomerDetails(row = {}) {
+  const normalized = normalizeSharedCustomerRecord(row);
+  return [
+    normalized.companyName || normalized.name,
+    normalized.clientName,
+    normalized.billingAddress,
+    normalized.billingCountry,
+    normalized.billingState,
+    normalized.billingPincode,
+  ].every((value) => String(value || "").trim());
 }
 
 function formatSharedCustomerPhones(row = {}) {
@@ -5929,24 +6146,14 @@ function BillingDocumentEditor({
                 </select>
               </div>
               {kind === "invoice" ? (
-                <>
-                  <div className="col-12 col-md-6 col-xl-3">
-                    <label className="form-label small text-secondary mb-1">Payment Status</label>
-                    <select className="form-select" value={form.paymentStatus || "Pending"} onChange={(e) => setField("paymentStatus", e.target.value)}>
-                      {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
-                        <option key={`inv-pay-${status}`} value={status}>{status}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-12 col-md-6 col-xl-3">
-                    <label className="form-label small text-secondary mb-1">Delivery Status</label>
-                    <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
-                      {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
-                        <option key={`inv-del-${status}`} value={status}>{status}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                  <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                    {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                      <option key={`inv-del-${status}`} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
               ) : null}
             </div>
           </div>
@@ -5995,7 +6202,7 @@ function BillingDocumentEditor({
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
-                            <div className="col-8">
+                            <div className="col-7">
                               <div className="crm-inline-suggestions-wrap">
                                 <input
                                   className="form-control wz-item-primary-input"
@@ -6047,7 +6254,7 @@ function BillingDocumentEditor({
                                 ) : null}
                               </div>
                             </div>
-                            <div className="col-4">
+                            <div className="col-5">
                               <div className="d-flex gap-2">
                                 <select
                                   className="form-select wz-item-hsn-type-select"
@@ -6076,6 +6283,8 @@ function BillingDocumentEditor({
                           <input
                             className="form-control"
                             required
+                            inputMode="numeric"
+                            maxLength={8}
                             value={line.qty || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
                             placeholder="1"
@@ -6085,6 +6294,8 @@ function BillingDocumentEditor({
                           <input
                             className="form-control"
                             required
+                            inputMode="decimal"
+                            maxLength={13}
                             value={line.rate || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
                             placeholder="0.00"
@@ -6094,6 +6305,8 @@ function BillingDocumentEditor({
                           <input
                             className="form-control"
                             required
+                            inputMode="decimal"
+                            maxLength={6}
                             value={line.taxPercent || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
                             placeholder="Auto"
@@ -6255,6 +6468,43 @@ function BillingDocumentEditor({
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
+                <div className="border rounded p-3 mb-3">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                    <div className="fw-semibold">Payment Details</div>
+                    <span className={`badge ${getPaymentStatusBadgeClass(paymentSummary.paymentStatus)}`}>{paymentSummary.paymentStatus}</span>
+                  </div>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Payment Status</label>
+                      <select className="form-select" value={paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
+                        {PAYMENT_STATUS_OPTIONS.map((status) => (
+                          <option key={`${kind}-pay-status-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Paid Amount</label>
+                      <input className="form-control" inputMode="decimal" value={form.paidAmount || ""} onChange={(e) => setField("paidAmount", e.target.value)} placeholder="0.00" disabled={!canEditPaymentDetails} />
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Payment Mode</label>
+                      <select className="form-select" value={form.paymentMode || ""} onChange={(e) => setField("paymentMode", e.target.value)} disabled={!canEditPaymentDetails}>
+                        <option value="">Select Payment Mode</option>
+                        {PAYMENT_MODE_OPTIONS.map((mode) => (
+                          <option key={`${kind}-pay-mode-${mode}`} value={mode}>{mode}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Payment Date</label>
+                      <input type="date" className="form-control" value={form.paymentDate || ""} onChange={(e) => setField("paymentDate", e.target.value)} disabled={!canEditPaymentDetails} />
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Transaction ID</label>
+                      <input className="form-control" value={form.transactionId || ""} onChange={(e) => setField("transactionId", e.target.value)} placeholder="Transaction ID" disabled={!canEditPaymentDetails} />
+                    </div>
+                  </div>
+                </div>
                 <label className="form-label small text-secondary mb-1">Payment Status Notes</label>
                 <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
               </div>
@@ -6263,7 +6513,14 @@ function BillingDocumentEditor({
               <div className="card p-3 h-100 border">
                 <h6 className="mb-3">Summary</h6>
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
+                {totals.taxBreakdown?.cgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CGST ({Number(totals.breakdownPercent?.cgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cgst)}</strong></div> : null}
+                {totals.taxBreakdown?.sgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">SGST ({Number(totals.breakdownPercent?.sgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.sgst)}</strong></div> : null}
+                {totals.taxBreakdown?.igst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">IGST ({Number(totals.breakdownPercent?.igst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.igst)}</strong></div> : null}
+                {totals.taxBreakdown?.cess > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CESS ({Number(totals.breakdownPercent?.cess || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cess)}</strong></div> : null}
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">GST / Tax</span><strong>{formatInr(totals.taxTotal)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Paid</span><strong>{formatInr(paymentSummary.paidAmountValue)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Balance</span><strong>{formatInr(paymentSummary.balanceAmount)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Status</span><span className={`badge ${getPaymentStatusBadgeClass(paymentSummary.paymentStatus)}`}>{paymentSummary.paymentStatus}</span></div>
                 <div className="d-flex justify-content-between pt-2 border-top">
                   <span className="fw-semibold">Total</span>
                   <strong>{formatInr(totals.grandTotal)}</strong>
@@ -8526,13 +8783,13 @@ function CrmOnePageModule() {
     setCrmSalesOrderForm((prev) => {
       if (key === "docNo" || key === "orderId") {
         const nextOrderId = String(value || "").trim();
-        return {
+        return applyPaymentDetailsToForm({
           ...prev,
           docNo: nextOrderId,
           orderId: nextOrderId,
-        };
+        }, computeDocumentTotals(prev, crmSalesOrderGstTemplates || []).grandTotal);
       }
-      return { ...prev, [key]: value };
+      return applyPaymentDetailsToForm({ ...prev, [key]: value }, computeDocumentTotals({ ...prev, [key]: value }, crmSalesOrderGstTemplates || []).grandTotal);
     });
   }
 
@@ -8551,9 +8808,14 @@ function CrmOnePageModule() {
   }
 
   function updateCrmSalesOrderLine(lineId, key, value) {
-    const normalizedValue = key === "rate"
-      ? formatCurrencyNumberInput(sanitizeCurrencyInput(value), crmCurrencyCode)
-      : value;
+    let normalizedValue = value;
+    if (key === "rate") {
+      normalizedValue = sanitizeDecimalTextInput(value, CURRENCY_MAX_INTEGER_DIGITS, CURRENCY_MAX_DECIMAL_DIGITS);
+    } else if (key === "qty") {
+      normalizedValue = sanitizeDigitsOnlyInput(value, 8);
+    } else if (key === "taxPercent") {
+      normalizedValue = sanitizeDecimalTextInput(value, 3, 2);
+    }
     setCrmSalesOrderForm((prev) => ({
       ...prev,
       items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row)),
@@ -8674,6 +8936,9 @@ function CrmOnePageModule() {
   function buildCrmSalesOrderFromDeal(dealRow = {}) {
     const companyName = String(dealRow?.company || "").trim();
     const matchedCustomer = [...crmSalesOrderCustomerOptions, ...sharedCustomerOptions].find((row) => {
+      if (!hasSalesOrderReadyCustomerDetails(row)) {
+        return false;
+      }
       const haystack = [
         row?.companyName,
         row?.name,
@@ -8707,12 +8972,17 @@ function CrmOnePageModule() {
     const dealName = String(dealRow?.dealName || dealRow?.name || "").trim().toLowerCase();
     return [...crmSalesOrderCustomerOptions, ...sharedCustomerOptions].find((row) => {
       const normalizedCustomer = normalizeSharedCustomerRecord(row);
+      if (!hasSalesOrderReadyCustomerDetails(normalizedCustomer)) {
+        return false;
+      }
       const customerCompany = String(normalizedCustomer.companyName || "").trim().toLowerCase();
       const customerClient = String(normalizedCustomer.clientName || "").trim().toLowerCase();
       const customerName = String(normalizedCustomer.name || "").trim().toLowerCase();
+      if (companyName) {
+        return customerCompany === companyName || customerClient === companyName || customerName === companyName;
+      }
       return Boolean(
-        (companyName && (customerCompany === companyName || customerClient === companyName || customerName === companyName))
-        || (dealName && (customerClient === dealName || customerName === dealName || customerCompany === dealName))
+        dealName && (customerClient === dealName || customerName === dealName || customerCompany === dealName)
       );
     }) || null;
   }
@@ -8724,9 +8994,11 @@ function CrmOnePageModule() {
       const normalizedContact = normalizeCrmContactRecord(row);
       const contactCompany = String(normalizedContact.company || "").trim().toLowerCase();
       const contactName = String(normalizedContact.name || "").trim().toLowerCase();
+      if (companyName) {
+        return contactCompany === companyName || contactName === companyName;
+      }
       return Boolean(
-        (companyName && (contactCompany === companyName || contactName === companyName))
-        || (dealName && (contactName === dealName || contactCompany === dealName))
+        dealName && (contactName === dealName || contactCompany === dealName)
       );
     }) || null;
   }
@@ -8832,7 +9104,7 @@ function CrmOnePageModule() {
         inventoryItemId: item.inventoryItemId || "",
         hsnSacType: normalizeHsnSacType(item.hsnSacType || inferHsnSacTypeFromItem(item, "HSN"), "HSN"),
         hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: String(item.qty ?? "1"),
+        qty: sanitizeDigitsOnlyInput(String(item.qty ?? "1"), 8) || "1",
         rate: formatCurrencyNumberInput(sanitizeCurrencyInput(String(item.rate ?? "")), crmCurrencyCode),
         taxPercent: String(item.taxPercent ?? ""),
       })),
@@ -8842,6 +9114,7 @@ function CrmOnePageModule() {
   async function saveCrmSalesOrder(event) {
     event.preventDefault();
     const form = crmSalesOrderForm;
+    const paymentDetails = normalizePaymentDetails(form, crmSalesOrderTotals.grandTotal);
     if (!String(form.customerName || "").trim()) {
       setCrmSalesOrderNotice("Customer / Company name is required.");
       return;
@@ -8890,6 +9163,12 @@ function CrmOnePageModule() {
       notes: String(form.notes || "").trim(),
       terms_text: String(form.termsText || "").trim(),
       payment_status_notes: String(form.paymentStatusNotes || "").trim(),
+      payment_status: paymentDetails.paymentStatus.toLowerCase(),
+      paid_amount: paymentDetails.paidAmountValue,
+      balance_amount: paymentDetails.balanceAmount,
+      payment_mode: String(form.paymentMode || "").trim(),
+      payment_date: String(form.paymentDate || "").trim(),
+      transaction_id: String(form.transactionId || "").trim(),
       source_deal_id: String(form.sourceDealId || "").trim(),
       crm_reference_id: String(form.crmReferenceId || "").trim(),
       order_id: String(form.orderId || form.docNo || "").trim(),
@@ -8966,7 +9245,7 @@ function CrmOnePageModule() {
       setCrmActionPopup({
         open: true,
         title: "Convert to Client",
-        message: "This deal is linked to a CRM contact. Convert that contact into a client first, complete billing details, and then continue Sales Order creation.",
+        message: "This deal is linked to a CRM contact. Convert that contact into a client, complete billing details, and then continue Sales Order creation.",
         confirmText: "Convert to Client",
         cancelText: "Cancel",
         onConfirm: () => onConvertContactToClient(matchedContact),
@@ -11083,6 +11362,7 @@ function CrmOnePageModule() {
                       availableInventoryQty={getCrmSalesOrderInventoryAvailableQty}
                       updateDocLine={(_kind, lineId, key, value) => updateCrmSalesOrderLine(lineId, key, value)}
                       removeDocLine={(_kind, lineId) => removeCrmSalesOrderLine(lineId)}
+                      canEditPaymentDetails={isCrmAdmin}
                     />
                   </div>
                 ) : (
@@ -11110,7 +11390,7 @@ function CrmOnePageModule() {
                         { key: "issueDate", label: "Issue Date" },
                         { key: "dueDate", label: "Due Date" },
                         { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
-                        { key: "status", label: "Status" },
+                        { key: "gstTemplateName", label: "GST Template" },
                       ]}
                       emptyMessage="No sales orders yet."
                       searchPlaceholder="Search Sales Orders"
@@ -11122,9 +11402,7 @@ function CrmOnePageModule() {
                         row.leadName,
                         row.clients,
                         row.company,
-                        row.status,
-                        row.convertedEstimateNo,
-                        row.convertedInvoiceNo,
+                        row.gstTemplateName,
                       ].join(" ")}
                       renderCells={(row) => [
                         row.crmReferenceId || "-",
@@ -11134,22 +11412,19 @@ function CrmOnePageModule() {
                         formatDateLikeCellValue("issueDate", row.issueDate, "-"),
                         formatDateLikeCellValue("dueDate", row.dueDate, "-"),
                         row.amountDisplay || "-",
-                        row.convertedToInvoice
-                          ? (
-                            <span className="badge text-bg-success">
-                              {`Converted to Invoice${row.convertedInvoiceNo ? ` (${row.convertedInvoiceNo})` : ""}`}
-                            </span>
-                          )
-                          : row.convertedToEstimate
-                            ? (
-                              <span className="badge text-bg-info">
-                                {`Converted to Estimate${row.convertedEstimateNo ? ` (${row.convertedEstimateNo})` : ""}`}
-                              </span>
-                            )
-                            : formatDateLikeCellValue("status", row.status, "-"),
+                        row.gstTemplateName || "-",
                       ]}
                       renderActions={(row) => (
                         <div className="d-inline-flex gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-light"
+                            title="Download PDF"
+                            aria-label="Download PDF"
+                            onClick={() => downloadDocumentPdf("salesOrder", row.id)}
+                          >
+                            <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
+                          </button>
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-info"
@@ -20194,17 +20469,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     return { ...nextInvoice, inventoryCommitted: nextCommitted && nextQtyMap.size > 0 };
   }
 
-  function openDocumentPrint(kind, id) {
-    const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print?format=pdf`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-
   function setDocField(kind, key, value) {
     if (kind === "estimate") {
-      setEstimateForm((prev) => ({ ...prev, [key]: value }));
+      setEstimateForm((prev) => applyPaymentDetailsToForm({ ...prev, [key]: value }, computeDocumentTotals({ ...prev, [key]: value }, moduleData.gstTemplates || []).grandTotal));
       return;
     }
-    setInvoiceForm((prev) => ({ ...prev, [key]: value }));
+    setInvoiceForm((prev) => applyPaymentDetailsToForm({ ...prev, [key]: value }, computeDocumentTotals({ ...prev, [key]: value }, moduleData.gstTemplates || []).grandTotal));
   }
 
   function applyBillingTemplateToDocument(kind, templateId) {
@@ -20228,9 +20498,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   function updateDocLine(kind, lineId, key, value) {
     const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
-    const normalizedValue = key === "rate"
-      ? formatCurrencyNumberInput(sanitizeCurrencyInput(value), orgBillingCurrency || getOrgCurrency())
-      : value;
+    let normalizedValue = value;
+    if (key === "rate") {
+      normalizedValue = sanitizeDecimalTextInput(value, CURRENCY_MAX_INTEGER_DIGITS, CURRENCY_MAX_DECIMAL_DIGITS);
+    } else if (key === "qty") {
+      normalizedValue = sanitizeDigitsOnlyInput(value, 8);
+    } else if (key === "taxPercent") {
+      normalizedValue = sanitizeDecimalTextInput(value, 3, 2);
+    }
     setter((prev) => ({
       ...prev,
       items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row))
@@ -20269,6 +20544,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   function saveDocument(kind, event) {
     event.preventDefault();
     const form = kind === "estimate" ? estimateForm : invoiceForm;
+    const documentTotals = computeDocumentTotals(form, moduleData.gstTemplates || []);
+    const paymentDetails = normalizePaymentDetails(form, documentTotals.grandTotal);
     if (!String(form.customerName || "").trim()) {
       setAccountsFormNotice("Client / Company name is required.");
       return;
@@ -20321,7 +20598,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       notes: String(form.notes || "").trim(),
       termsText: String(form.termsText || "").trim(),
       paymentStatusNotes: String(form.paymentStatusNotes || "").trim(),
-      paymentStatus: kind === "invoice" ? String(form.paymentStatus || "Pending").trim() : "",
+      paymentStatus: paymentDetails.paymentStatus,
+      paidAmount: paymentDetails.paidAmount,
+      balanceAmount: String(paymentDetails.balanceAmount || "").trim(),
+      paymentMode: String(form.paymentMode || "").trim(),
+      paymentDate: String(form.paymentDate || "").trim(),
+      transactionId: String(form.transactionId || "").trim(),
       deliveryStatus: kind === "invoice" ? String(form.deliveryStatus || "Pending").trim() : "",
       inventoryCommitted: kind === "invoice" ? Boolean(form.inventoryCommitted) : false,
       items: (form.items || [])
@@ -20415,10 +20697,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       sourceEstimateId: row.id,
       docNo: getNextBillingDocNo("invoice", moduleData.invoices || []),
       status: "Draft",
-      paymentStatus: "Pending",
       deliveryStatus: "Pending",
       inventoryCommitted: false,
       salesperson: parsedSalesperson,
+      paymentStatus: normalizePaymentStatus(row.paymentStatus),
+      paidAmount: normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).paidAmount,
+      balanceAmount: String(normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).balanceAmount || "").trim(),
+      paymentMode: String(row.paymentMode || row.payment_mode || "").trim(),
+      paymentDate: String(row.paymentDate || row.payment_date || "").trim(),
+      transactionId: String(row.transactionId || row.transaction_id || "").trim(),
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         ...splitDocumentLineDescription(item.description, item.customText),
         id: item.id || createEmptyDocLine().id,
@@ -20429,7 +20716,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           "HSN"
         ),
         hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: String(item.qty ?? ""),
+        qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
         rate: String(item.rate ?? ""),
         taxPercent: String(item.taxPercent ?? "")
       })),
@@ -20459,11 +20746,16 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           "HSN"
         ),
         hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: String(item.qty ?? ""),
+        qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
         rate: String(item.rate ?? ""),
         taxPercent: String(item.taxPercent ?? "")
       })),
-      paymentStatus: kind === "invoice" ? (row.paymentStatus || "Pending") : (row.paymentStatus || ""),
+      paymentStatus: normalizePaymentStatus(row.paymentStatus),
+      paidAmount: normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).paidAmount,
+      balanceAmount: String(normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).balanceAmount || "").trim(),
+      paymentMode: String(row.paymentMode || row.payment_mode || "").trim(),
+      paymentDate: String(row.paymentDate || row.payment_date || "").trim(),
+      transactionId: String(row.transactionId || row.transaction_id || "").trim(),
       deliveryStatus: kind === "invoice" ? (row.deliveryStatus || "Pending") : (row.deliveryStatus || ""),
       inventoryCommitted: Boolean(row.inventoryCommitted),
       salesperson: parsedSalesperson,
@@ -20575,6 +20867,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     availableInventoryQty,
     updateDocLine,
     removeDocLine,
+    canEditPaymentDetails = false,
   }) {
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
@@ -20588,6 +20881,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
+    const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
       const docType = String(row.docType || "").trim().toLowerCase();
       if (!docType) return true;
@@ -20944,24 +21238,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 </select>
               </div>
               {kind === "invoice" ? (
-                <>
-                  <div className="col-12 col-md-6 col-xl-3">
-                    <label className="form-label small text-secondary mb-1">Payment Status</label>
-                    <select className="form-select" value={form.paymentStatus || "Pending"} onChange={(e) => setField("paymentStatus", e.target.value)}>
-                      {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
-                        <option key={`inv-pay-${status}`} value={status}>{status}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-12 col-md-6 col-xl-3">
-                    <label className="form-label small text-secondary mb-1">Delivery Status</label>
-                    <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
-                      {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
-                        <option key={`inv-del-${status}`} value={status}>{status}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
+                <div className="col-12 col-md-6 col-xl-3">
+                  <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                  <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                    {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                      <option key={`inv-del-${status}`} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
               ) : null}
             </div>
           </div>
@@ -21010,7 +21294,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
-                            <div className="col-8">
+                            <div className="col-7">
                               <div className="crm-inline-suggestions-wrap">
                                 <input
                                   className="form-control wz-item-primary-input"
@@ -21062,7 +21346,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                 ) : null}
                               </div>
                             </div>
-                            <div className="col-4">
+                            <div className="col-5">
                               <div className="d-flex gap-2">
                                 <select
                                   className="form-select wz-item-hsn-type-select"
@@ -21091,6 +21375,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                           <input
                             className="form-control"
                             required
+                            inputMode="numeric"
+                            maxLength={8}
                             value={line.qty || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
                             placeholder="1"
@@ -21100,6 +21386,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                           <input
                             className="form-control"
                             required
+                            inputMode="decimal"
+                            maxLength={13}
                             value={line.rate || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
                             placeholder="0.00"
@@ -21109,6 +21397,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                           <input
                             className="form-control"
                             required
+                            inputMode="decimal"
+                            maxLength={6}
                             value={line.taxPercent || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
                             placeholder="Auto"
@@ -21278,7 +21568,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               <div className="card p-3 h-100 border">
                 <h6 className="mb-3">Summary</h6>
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
+                {totals.taxBreakdown?.cgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CGST ({Number(totals.breakdownPercent?.cgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cgst)}</strong></div> : null}
+                {totals.taxBreakdown?.sgst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">SGST ({Number(totals.breakdownPercent?.sgst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.sgst)}</strong></div> : null}
+                {totals.taxBreakdown?.igst > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">IGST ({Number(totals.breakdownPercent?.igst || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.igst)}</strong></div> : null}
+                {totals.taxBreakdown?.cess > 0 ? <div className="d-flex justify-content-between mb-2"><span className="text-secondary">CESS ({Number(totals.breakdownPercent?.cess || 0).toFixed(2)}%)</span><strong>{formatInr(totals.taxBreakdown.cess)}</strong></div> : null}
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">GST / Tax</span><strong>{formatInr(totals.taxTotal)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Paid</span><strong>{formatInr(paymentSummary.paidAmountValue)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Balance</span><strong>{formatInr(paymentSummary.balanceAmount)}</strong></div>
+                <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Status</span><span className={`badge ${getPaymentStatusBadgeClass(paymentSummary.paymentStatus)}`}>{paymentSummary.paymentStatus}</span></div>
                 <div className="d-flex justify-content-between pt-2 border-top">
                   <span className="fw-semibold">Total</span>
                   <strong>{formatInr(totals.grandTotal)}</strong>
@@ -21410,7 +21707,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               className="btn btn-sm btn-outline-light"
               title="Download PDF"
               aria-label="Download PDF"
-              onClick={() => openDocumentPrint(kind, row.id)}
+              onClick={() => downloadDocumentPdf(kind, row.id)}
             >
               <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
             </button>
@@ -22304,6 +22601,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             availableInventoryQty={availableInventoryQty}
             updateDocLine={updateDocLine}
             removeDocLine={removeDocLine}
+            canEditPaymentDetails={isCrmAdmin}
           />
         </>
       ) : null}
@@ -22336,6 +22634,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             availableInventoryQty={availableInventoryQty}
             updateDocLine={updateDocLine}
             removeDocLine={removeDocLine}
+            canEditPaymentDetails={isCrmAdmin}
           />
         </>
       ) : null}

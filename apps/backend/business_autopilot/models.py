@@ -672,6 +672,15 @@ class CrmSalesOrder(models.Model):
     price = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     tax = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    payment_status = models.CharField(
+        max_length=20,
+        choices=(("pending", "Pending"), ("partial", "Partial"), ("paid", "Paid")),
+        default="pending",
+    )
+    paid_amount = models.FloatField(default=0)
+    payment_mode = models.CharField(max_length=50, blank=True, default="")
+    payment_date = models.DateField(null=True, blank=True)
+    transaction_id = models.CharField(max_length=100, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")
     assigned_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

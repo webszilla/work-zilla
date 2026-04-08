@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
@@ -77,6 +78,8 @@ const CRM_SHARED_CONTACTS_KEY_PREFIX = "wz_business_autopilot_crm_contacts_scope
 const CRM_SHARED_CONTACTS_GLOBAL_KEY = `${CRM_SHARED_CONTACTS_KEY_PREFIX}__global`;
 const CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_contact_to_client_scope";
 const CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY = `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__global`;
+const CRM_SALES_ORDER_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_sales_order_scope";
+const CRM_SALES_ORDER_DRAFT_GLOBAL_KEY = `${CRM_SALES_ORDER_DRAFT_KEY_PREFIX}__global`;
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: option.value,
   label: option.label,
@@ -127,6 +130,7 @@ const USER_DETAIL_FIELDS = [
   { key: "employee_role", label: "Employee Role" },
   { key: "is_active", label: "Status" },
 ];
+const TOP_TAB_KEYS = ["users", "create-employee", "role-access", "clients", "vendors"];
 const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "name", label: "Employee Name" },
   { key: "gender", label: "Gender" },
@@ -805,21 +809,47 @@ function clearCrmContactToClientDraft(preferredOrgId = "") {
   }
 }
 
-function buildCrmSalesOrderResumePath() {
+function buildScopedCrmSalesOrderDraftStorageKey(orgId = "") {
+  const normalizedOrgId = sanitizeScopedStorageKeyPart(orgId);
+  return normalizedOrgId
+    ? `${CRM_SALES_ORDER_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : CRM_SALES_ORDER_DRAFT_GLOBAL_KEY;
+}
+
+function resolveCrmSalesOrderDraftStorageKeys(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  const scopedKey = buildScopedCrmSalesOrderDraftStorageKey(resolvedOrgId);
+  return Array.from(new Set([scopedKey, CRM_SALES_ORDER_DRAFT_GLOBAL_KEY].filter(Boolean)));
+}
+
+function readPendingCrmSalesOrderDraft(preferredOrgId = "") {
   try {
-    const pathname = String(window.location.pathname || "").trim();
-    if (!pathname) {
-      return "/app/business-autopilot/crm?resume-sales-order=1";
+    const keysToTry = resolveCrmSalesOrderDraftStorageKeys(preferredOrgId);
+    for (const key of keysToTry) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed?.sourceDeal?.id) {
+        return parsed;
+      }
     }
-    let crmPath = pathname;
-    if (/\/users(?:\/.*)?$/i.test(pathname)) {
-      crmPath = pathname.replace(/\/users(?:\/.*)?$/i, "/crm");
-    } else if (!/\/crm(?:\/.*)?$/i.test(pathname)) {
-      crmPath = "/app/business-autopilot/crm";
-    }
-    return `${crmPath}?resume-sales-order=1`;
   } catch {
-    return "/app/business-autopilot/crm?resume-sales-order=1";
+    // Ignore invalid pending sales-order drafts.
+  }
+  return null;
+}
+
+function clearPendingCrmSalesOrderDraft(preferredOrgId = "") {
+  try {
+    resolveCrmSalesOrderDraftStorageKeys(preferredOrgId).forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Ignore storage clear failures.
   }
 }
 
@@ -1030,7 +1060,15 @@ function normalizeUserMeta(meta, userRows = []) {
 }
 
 export default function BusinessAutopilotUsersPage() {
-  const [activeTopTab, setActiveTopTab] = useState("users");
+  const navigate = useNavigate();
+  const [activeTopTab, setActiveTopTab] = useState(() => {
+    if (typeof window === "undefined") {
+      return "users";
+    }
+    const params = new URLSearchParams(String(window.location.search || ""));
+    const requestedTab = String(params.get("tab") || params.get("section") || "").trim().toLowerCase();
+    return TOP_TAB_KEYS.includes(requestedTab) ? requestedTab : "users";
+  });
   const [userSearch, setUserSearch] = useState("");
   const [userListTab, setUserListTab] = useState("all");
   const [userPage, setUserPage] = useState(1);
@@ -2449,28 +2487,55 @@ export default function BusinessAutopilotUsersPage() {
   const canCreateVendorsTab = isOrgAdminUser || vendorsAccessLevel === "Create, View and Edit" || vendorsAccessLevel === "Full Access";
   const canDeleteVendorsTab = isOrgAdminUser || vendorsAccessLevel === "Full Access";
 
-  useEffect(() => {
-    const allowedTabs = [];
+  const allowedTopTabs = useMemo(() => {
+    const nextTabs = [];
     if (canManageUsersTab) {
-      allowedTabs.push("users");
-      allowedTabs.push("role-access");
+      nextTabs.push("users");
+      nextTabs.push("role-access");
     }
     if (canViewEmployeeTab) {
-      allowedTabs.push("create-employee");
+      nextTabs.push("create-employee");
     }
     if (canViewClientsTab) {
-      allowedTabs.push("clients");
+      nextTabs.push("clients");
     }
     if (canViewVendorsTab) {
-      allowedTabs.push("vendors");
+      nextTabs.push("vendors");
     }
-    if (!allowedTabs.length) {
+    return nextTabs;
+  }, [canManageUsersTab, canViewClientsTab, canViewEmployeeTab, canViewVendorsTab]);
+
+  function activateTopTab(nextTab, options = {}) {
+    const normalizedTab = String(nextTab || "").trim().toLowerCase();
+    if (!TOP_TAB_KEYS.includes(normalizedTab)) {
       return;
     }
-    if (!allowedTabs.includes(activeTopTab)) {
-      setActiveTopTab(allowedTabs[0]);
+    setActiveTopTab(normalizedTab);
+    if (typeof window === "undefined") {
+      return;
     }
-  }, [activeTopTab, canManageUsersTab, canViewClientsTab, canViewEmployeeTab, canViewVendorsTab]);
+    const currentUrl = new URL(window.location.href);
+    const params = currentUrl.searchParams;
+    params.set("tab", normalizedTab);
+    if (!options.preserveSource) {
+      params.delete("source");
+    }
+    const nextSearch = params.toString();
+    const nextUrl = `${currentUrl.pathname}${nextSearch ? `?${nextSearch}` : ""}${currentUrl.hash || ""}`;
+    const currentFullPath = `${currentUrl.pathname}${currentUrl.search || ""}${currentUrl.hash || ""}`;
+    if (nextUrl !== currentFullPath) {
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+  }
+
+  useEffect(() => {
+    if (!allowedTopTabs.length) {
+      return;
+    }
+    if (!allowedTopTabs.includes(activeTopTab)) {
+      activateTopTab(allowedTopTabs[0]);
+    }
+  }, [activeTopTab, allowedTopTabs]);
 
   useEffect(() => {
     if (!crmContactToClientDraft) {
@@ -2495,7 +2560,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     crmContactToClientDraftAppliedRef.current = true;
     const companyName = normalizedContact.company || normalizedContact.name || "";
-    setActiveTopTab("clients");
+    activateTopTab("clients", { preserveSource: true });
     setEditingClientId("");
     setClientForm({
       ...createEmptySharedPartyForm(),
@@ -2759,10 +2824,6 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     const companyName = String(clientForm.companyName || "").trim();
-    if (!companyName) {
-      setNotice("Client company name is required.");
-      return;
-    }
     const clientName = String(clientForm.clientName || "").trim();
     if (!clientName) {
       setNotice("Client name is required.");
@@ -2817,23 +2878,24 @@ export default function BusinessAutopilotUsersPage() {
     const shippingPincode = useSameShipping
       ? billingPincode
       : String(clientForm.shippingPincode || "").trim();
-    if (!useSameShipping) {
-      if (!shippingAddress) {
-        setNotice("Shipping address is required.");
-        return;
-      }
-      if (!shippingCountry) {
-        setNotice("Shipping country is required.");
-        return;
-      }
-      if (!shippingState) {
-        setNotice("Shipping state is required.");
-        return;
-      }
-      if (!shippingPincode) {
-        setNotice("Shipping pincode is required.");
-        return;
-      }
+    const missingClientFields = [];
+    if (!companyName) missingClientFields.push("Company Name");
+    if (!clientName) missingClientFields.push("Client Name");
+    if (!primaryPhone) missingClientFields.push("Phone Number");
+    if (!primaryEmail) missingClientFields.push("Email ID");
+    if (!billingAddress) missingClientFields.push("Billing Address");
+    if (!billingCountry) missingClientFields.push("Billing Country");
+    if (!billingState) missingClientFields.push("Billing State");
+    if (!billingPincode) missingClientFields.push("Billing Pincode");
+    if (!shippingAddress) missingClientFields.push("Shipping Address");
+    if (!shippingCountry) missingClientFields.push("Shipping Country");
+    if (!shippingState) missingClientFields.push("Shipping State");
+    if (!shippingPincode) missingClientFields.push("Shipping Pincode");
+    if (missingClientFields.length) {
+      const message = `${missingClientFields.join(", ")} ${missingClientFields.length === 1 ? "is" : "are"} required. GSTIN is optional.`;
+      setNotice(message);
+      await openAlertDialog(message, { title: "Required Fields Missing" });
+      return;
     }
     const payload = normalizeSharedCustomerRecord({
       id: editingClientId || `cust_${Date.now()}`,
@@ -2878,12 +2940,18 @@ export default function BusinessAutopilotUsersPage() {
         successMessage = "Client created successfully and contact converted from CRM.";
       }
     }
-    setNotice(successMessage);
+    const pendingSalesOrderDraft = conversionDraftForThisSave
+      ? readPendingCrmSalesOrderDraft(conversionDraftForThisSave.orgId)
+      : null;
+    setNotice("");
     resetClientForm();
-    if (conversionDraftForThisSave) {
-      window.setTimeout(() => {
-        window.location.assign(buildCrmSalesOrderResumePath());
-      }, 120);
+    await openAlertDialog(successMessage, {
+      title: editingClientId ? "Client Updated" : "Client Created",
+      confirmText: "OK",
+    });
+    if (pendingSalesOrderDraft?.sourceDeal?.id) {
+      clearPendingCrmSalesOrderDraft(conversionDraftForThisSave?.orgId);
+      navigate("../crm?tab=sales-orders&resume-sales-order=1", { relative: "path" });
     }
   }
 
@@ -2897,7 +2965,7 @@ export default function BusinessAutopilotUsersPage() {
       additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
     });
     setClientCompanySearchOpen(false);
-    setActiveTopTab("clients");
+    activateTopTab("clients");
   }
 
   function selectCrmContactForClient(row) {
@@ -3231,7 +3299,7 @@ export default function BusinessAutopilotUsersPage() {
       additionalPhones: Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : [],
       additionalEmails: Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : [],
     });
-    setActiveTopTab("vendors");
+    activateTopTab("vendors");
   }
 
   async function deleteVendor(vendorId) {
@@ -3491,7 +3559,7 @@ export default function BusinessAutopilotUsersPage() {
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "users" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTopTab("users")}
+              onClick={() => activateTopTab("users")}
             >
               Users
             </button>
@@ -3500,7 +3568,7 @@ export default function BusinessAutopilotUsersPage() {
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "create-employee" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTopTab("create-employee")}
+              onClick={() => activateTopTab("create-employee")}
             >
               Employee
             </button>
@@ -3509,7 +3577,7 @@ export default function BusinessAutopilotUsersPage() {
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "role-access" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTopTab("role-access")}
+              onClick={() => activateTopTab("role-access")}
             >
               Role Based Access
             </button>
@@ -3518,7 +3586,7 @@ export default function BusinessAutopilotUsersPage() {
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "clients" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTopTab("clients")}
+              onClick={() => activateTopTab("clients")}
             >
               Clients
             </button>
@@ -3527,7 +3595,7 @@ export default function BusinessAutopilotUsersPage() {
             <button
               type="button"
               className={`btn btn-sm ${activeTopTab === "vendors" ? "btn-success" : "btn-outline-light"}`}
-              onClick={() => setActiveTopTab("vendors")}
+              onClick={() => activateTopTab("vendors")}
             >
               Vendor Registration
             </button>
