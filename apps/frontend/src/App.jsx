@@ -672,15 +672,13 @@ function AppShell({ state, productPrefix, productSlug }) {
       return null;
     }
     if (onboarding.state === "needs_plan") {
-      return isAllowedPath(pathname, ["/plans"]) ? null : "/plans";
+      return isAllowedPath(pathname, ["/my-account/"]) ? null : "/my-account/";
     }
     if (onboarding.state === "needs_payment") {
-      return isAllowedPath(pathname, ["/bank-transfer", "/plans"])
-        ? null
-        : "/bank-transfer";
+      return isAllowedPath(pathname, ["/my-account/"]) ? null : "/my-account/";
     }
     if (onboarding.state === "pending_payment") {
-      return isAllowedPath(pathname, ["/billing"]) ? null : "/billing";
+      return isAllowedPath(pathname, ["/my-account/"]) ? null : "/my-account/";
     }
     return null;
   }
@@ -916,6 +914,10 @@ function AppShell({ state, productPrefix, productSlug }) {
   useEffect(() => {
     const redirectPath = getOnboardingRedirect(location.pathname);
     if (redirectPath && redirectPath !== location.pathname) {
+      if (redirectPath.startsWith("/my-account/")) {
+        window.location.replace(redirectPath);
+        return;
+      }
       navigate(redirectPath, { replace: true });
     }
   }, [location.pathname, navigate, onboarding.enabled, onboarding.state, state.dealerOnboarding, isDealer]);

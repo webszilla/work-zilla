@@ -1127,6 +1127,17 @@ function normalizePaymentEntry(entry = {}) {
   };
 }
 
+function normalizePaymentEntries(entries = []) {
+  return (Array.isArray(entries) ? entries : [])
+    .map(normalizePaymentEntry)
+    .filter((entry) => Boolean(
+      String(entry.paymentDate || "").trim()
+      || String(entry.paymentMode || "").trim()
+      || String(entry.transactionId || "").trim()
+      || parseNumber(entry.amount) > 0
+    ));
+}
+
 function getPaymentEntriesTotal(entries = []) {
   return (Array.isArray(entries) ? entries : []).reduce((sum, entry) => sum + Math.max(0, parseNumber(entry.amount)), 0);
 }
@@ -2868,9 +2879,7 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     paymentDate: row.paymentDate || row.payment_date || payload.paymentDate || payload.payment_date,
     transactionId: row.transactionId || row.transaction_id || payload.transactionId || payload.transaction_id,
   }, row.grandTotal ?? row.grand_total ?? row.total_amount ?? row.amount ?? payload.grandTotal ?? payload.grand_total);
-  const paymentEntries = Array.isArray(row.paymentEntries || row.payment_entries || payload.paymentEntries || payload.payment_entries)
-    ? (row.paymentEntries || row.payment_entries || payload.paymentEntries || payload.payment_entries).map(normalizePaymentEntry)
-    : [];
+  const paymentEntries = normalizePaymentEntries(row.paymentEntries || row.payment_entries || payload.paymentEntries || payload.payment_entries);
   const assignedUser = Array.isArray(row.assignedUser)
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
     : String(
@@ -5820,7 +5829,8 @@ function BillingDocumentEditor({
     const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
     const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
     const showPartialPaymentSection = paymentSummary.paymentStatus === "Partial";
-    const paymentEntries = Array.isArray(form.paymentEntries) ? form.paymentEntries.map(normalizePaymentEntry) : [];
+    const paymentEntries = normalizePaymentEntries(form.paymentEntries);
+    const showPaymentSection = Boolean(canEditPaymentDetails || showPartialPaymentSection || paymentEntries.length > 0 || editingPaymentEntryId);
     const syncPaymentEntries = (entries) => {
       const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
       const totalPaid = getPaymentEntriesTotal(normalizedEntries);
@@ -5831,8 +5841,19 @@ function BillingDocumentEditor({
       }
     };
     const addPaymentEntry = () => {
-      const nextEntry = createEmptyPaymentEntry();
+      if (!canEditPaymentDetails || !documentLineItemsComplete) return;
+      const nextEntry = {
+        ...createEmptyPaymentEntry(),
+        paymentDate: String(form.paymentDate || createEmptyPaymentEntry().paymentDate || "").trim(),
+        paymentMode: String(form.paymentMode || "").trim(),
+        amount: String(form.paidAmount || "").trim(),
+        transactionId: String(form.transactionId || "").trim(),
+        notes: String(form.paymentStatusNotes || "").trim(),
+      };
       setEditingPaymentEntryId(nextEntry.id);
+      if (paymentSummary.paymentStatus !== "Partial") {
+        setField("paymentStatus", "Partial");
+      }
       syncPaymentEntries([...(paymentEntries || []), nextEntry]);
     };
     const updatePaymentEntry = (entryId, key, value) => {
@@ -5853,7 +5874,13 @@ function BillingDocumentEditor({
         && Number(parseNumber(line.qty)) > 0
         && Number(parseNumber(line.rate)) > 0
       ));
-    const canAddPartialPayment = Boolean(canEditPaymentDetails && showPartialPaymentSection && documentLineItemsComplete);
+    const hasPartialPaymentInput = Boolean(
+      parseNumber(form.paidAmount) > 0
+      || String(form.paymentMode || "").trim()
+      || String(form.paymentDate || "").trim()
+      || String(form.transactionId || "").trim()
+    );
+    const canAddPartialPayment = Boolean(canEditPaymentDetails && documentLineItemsComplete && hasPartialPaymentInput);
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
       const docType = String(row.docType || "").trim().toLowerCase();
       if (!docType) return true;
@@ -6544,7 +6571,7 @@ function BillingDocumentEditor({
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
                 <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
                 <textarea className="form-control mb-3" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
-                <div className="border rounded p-3 mb-3">
+                <div className="border rounded p-3 mb-3" style={{ marginTop: "30px" }}>
                   <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
                     <div className="fw-semibold">Payment Details</div>
                     <span className={`badge ${getPaymentStatusBadgeClass(paymentSummary.paymentStatus)}`}>{paymentSummary.paymentStatus}</span>
@@ -6625,10 +6652,10 @@ function BillingDocumentEditor({
               </button>
             ) : null}
           </div>
-          {showPartialPaymentSection || paymentEntries.length > 0 || Boolean(editingPaymentEntryId) ? (
+          {showPaymentSection ? (
             <div className="border rounded p-3">
               <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
-              <div className="fw-semibold">Partial Payment Details</div>
+                <div className="fw-semibold">Partial Payment Details</div>
               </div>
               {showPartialPaymentSection && !documentLineItemsComplete ? (
                 <div className="alert alert-warning py-2 mb-3">
@@ -7953,8 +7980,8 @@ function CrmOnePageModule() {
       notes: String(normalizedRow.notes || baseDocument.notes || "").trim(),
       termsText: String(normalizedRow.termsText || baseDocument.termsText || "").trim(),
       paymentStatusNotes: String(normalizedRow.paymentStatusNotes || "").trim(),
-      paymentEntries: Array.isArray(normalizedRow.paymentEntries) ? normalizedRow.paymentEntries.map(normalizePaymentEntry) : [],
-      paymentStatus: kind === "invoice" ? "Pending" : "",
+      paymentEntries: normalizePaymentEntries(normalizedRow.paymentEntries),
+      paymentStatus: String(normalizedRow.paymentStatus || "Pending").trim() || "Pending",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
       items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => ({
@@ -9384,7 +9411,7 @@ function CrmOnePageModule() {
       notes: String(form.notes || "").trim(),
       terms_text: String(form.termsText || "").trim(),
       payment_status_notes: String(form.paymentStatusNotes || "").trim(),
-      payment_entries: (Array.isArray(form.paymentEntries) ? form.paymentEntries : []).map(normalizePaymentEntry),
+      payment_entries: normalizePaymentEntries(form.paymentEntries),
       payment_status: paymentDetails.paymentStatus.toLowerCase(),
       paid_amount: paymentDetails.paidAmountValue,
       balance_amount: paymentDetails.balanceAmount,
@@ -20939,6 +20966,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentMode: String(form.paymentMode || "").trim(),
       paymentDate: String(form.paymentDate || "").trim(),
       transactionId: String(form.transactionId || "").trim(),
+      paymentEntries: normalizePaymentEntries(form.paymentEntries),
       deliveryStatus: kind === "invoice" ? String(form.deliveryStatus || "Pending").trim() : "",
       inventoryCommitted: kind === "invoice" ? Boolean(form.inventoryCommitted) : false,
       items: (form.items || [])
@@ -21026,6 +21054,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean);
+    const paymentEntries = normalizePaymentEntries(row.paymentEntries || row.payment_entries);
     const normalized = {
       ...row,
       id: "",
@@ -21041,6 +21070,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentMode: String(row.paymentMode || row.payment_mode || "").trim(),
       paymentDate: String(row.paymentDate || row.payment_date || "").trim(),
       transactionId: String(row.transactionId || row.transaction_id || "").trim(),
+      paymentEntries: normalizePaymentEntries(row.paymentEntries || row.payment_entries),
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         ...splitDocumentLineDescription(item.description, item.customText),
         id: item.id || createEmptyDocLine().id,
@@ -21091,6 +21121,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentMode: String(row.paymentMode || row.payment_mode || "").trim(),
       paymentDate: String(row.paymentDate || row.payment_date || "").trim(),
       transactionId: String(row.transactionId || row.transaction_id || "").trim(),
+      paymentEntries,
       deliveryStatus: kind === "invoice" ? (row.deliveryStatus || "Pending") : (row.deliveryStatus || ""),
       inventoryCommitted: Boolean(row.inventoryCommitted),
       salesperson: parsedSalesperson,
@@ -21149,6 +21180,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setModuleData((prev) => ({
       ...prev,
       invoices: (prev.invoices || []).map((row) => (row.id === id ? { ...row, paymentStatus } : row))
+    }));
+  }
+
+  function updateEstimatePaymentStatus(id, paymentStatus) {
+    setModuleData((prev) => ({
+      ...prev,
+      estimates: (prev.estimates || []).map((row) => (row.id === id ? { ...row, paymentStatus } : row))
     }));
   }
 
@@ -21218,6 +21256,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
     const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
     const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
+    const showPartialPaymentSection = paymentSummary.paymentStatus === "Partial";
     const billingTemplates = (moduleData.billingTemplates || []).filter((row) => {
       const docType = String(row.docType || "").trim().toLowerCase();
       if (!docType) return true;
@@ -21248,7 +21287,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       if (!q) return true;
       return name.toLowerCase().includes(q);
     }).slice(0, 8);
-    const paymentEntries = Array.isArray(form.paymentEntries) ? form.paymentEntries.map(normalizePaymentEntry) : [];
+    const paymentEntries = normalizePaymentEntries(form.paymentEntries);
     const syncPaymentEntries = (entries) => {
       const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
       const totalPaid = getPaymentEntriesTotal(normalizedEntries);
@@ -21259,8 +21298,19 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       }
     };
     const addPaymentEntry = () => {
-      const nextEntry = createEmptyPaymentEntry();
+      if (!canEditPaymentDetails || !documentLineItemsComplete) return;
+      const nextEntry = {
+        ...createEmptyPaymentEntry(),
+        paymentDate: String(form.paymentDate || createEmptyPaymentEntry().paymentDate || "").trim(),
+        paymentMode: String(form.paymentMode || "").trim(),
+        amount: String(form.paidAmount || "").trim(),
+        transactionId: String(form.transactionId || "").trim(),
+        notes: String(form.paymentStatusNotes || "").trim(),
+      };
       setEditingPaymentEntryId(nextEntry.id);
+      if (paymentSummary.paymentStatus !== "Partial") {
+        setField("paymentStatus", "Partial");
+      }
       syncPaymentEntries([...(paymentEntries || []), nextEntry]);
     };
     const updatePaymentEntry = (entryId, key, value) => {
@@ -21281,7 +21331,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         && Number(parseNumber(line.qty)) > 0
         && Number(parseNumber(line.rate)) > 0
       ));
-    const canAddPartialPayment = Boolean(canEditPaymentDetails && paymentSummary.paymentStatus === "Partial" && documentLineItemsComplete);
+    const showPaymentSection = Boolean(canEditPaymentDetails || showPartialPaymentSection || paymentEntries.length > 0 || editingPaymentEntryId);
+    const hasPartialPaymentInput = Boolean(
+      parseNumber(form.paidAmount) > 0
+      || String(form.paymentMode || "").trim()
+      || String(form.paymentDate || "").trim()
+      || String(form.transactionId || "").trim()
+    );
+    const canAddPartialPayment = Boolean(canEditPaymentDetails && documentLineItemsComplete && hasPartialPaymentInput);
     const billingItemSource = useMemo(() => {
       const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
         id: String(item?.id || "").trim(),
@@ -21932,6 +21989,55 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
                 <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
                 <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+                <div className="border rounded p-3 mb-3" style={{ marginTop: "30px" }}>
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                    <div className="fw-semibold">Payment Details</div>
+                    <span className={`badge ${getPaymentStatusBadgeClass(paymentSummary.paymentStatus)}`}>{paymentSummary.paymentStatus}</span>
+                  </div>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Payment Status</label>
+                      <select className="form-select" value={paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
+                        {PAYMENT_STATUS_OPTIONS.map((status) => (
+                          <option key={`${kind}-pay-status-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small text-secondary mb-1">Paid Amount</label>
+                      <input className="form-control" inputMode="decimal" value={form.paidAmount || ""} onChange={(e) => setField("paidAmount", e.target.value)} placeholder="0.00" disabled={!canEditPaymentDetails} />
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Payment Mode</label>
+                      <select className="form-select" value={form.paymentMode || ""} onChange={(e) => setField("paymentMode", e.target.value)} disabled={!canEditPaymentDetails}>
+                        <option value="">Select Payment Mode</option>
+                        {PAYMENT_MODE_OPTIONS.map((mode) => (
+                          <option key={`${kind}-pay-mode-${mode}`} value={mode}>{mode}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Payment Date</label>
+                      <input type="date" className="form-control" value={form.paymentDate || ""} onChange={(e) => setField("paymentDate", e.target.value)} disabled={!canEditPaymentDetails} />
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small text-secondary mb-1">Transaction ID</label>
+                      <input className="form-control" value={form.transactionId || ""} onChange={(e) => setField("transactionId", e.target.value)} placeholder="Transaction ID" disabled={!canEditPaymentDetails} />
+                    </div>
+                  </div>
+                  {canEditPaymentDetails ? (
+                    <div className="d-flex justify-content-end mt-3">
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm px-3"
+                        onClick={addPaymentEntry}
+                        disabled={!canAddPartialPayment}
+                      >
+                        Add Partial Payment
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className="col-12 col-xl-5">
@@ -21967,12 +22073,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </button>
             ) : null}
           </div>
-          {paymentSummary.paymentStatus === "Partial" || paymentEntries.length > 0 || Boolean(editingPaymentEntryId) ? (
+          {showPaymentSection ? (
             <div className="border rounded p-3">
               <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
               <div className="fw-semibold">Partial Payment Details</div>
               </div>
-              {paymentSummary.paymentStatus === "Partial" && !documentLineItemsComplete ? (
+              {showPartialPaymentSection && !documentLineItemsComplete ? (
                 <div className="alert alert-warning py-2 mb-3">
                   Complete the item rows, qty, and rate before adding partial payments.
                 </div>
@@ -22077,8 +22183,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           { key: "dueDate", label: "Due Date" },
           { key: "total", label: "Total" },
           { key: "gstTemplateId", label: taxUi.templateSingular },
+          { key: "paymentStatus", label: "Payment Status" },
           ...(kind === "invoice" ? [
-            { key: "paymentStatus", label: "Payment Status" },
             { key: "deliveryStatus", label: "Delivery Status" },
           ] : []),
           { key: "status", label: "Status" },
@@ -22095,18 +22201,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             formatDateLikeCellValue("dueDate", row.dueDate, "-"),
             formatInr(totals.grandTotal),
             resolveGstTemplateName(row.gstTemplateId),
+            (
+              <select
+                className="form-select form-select-sm"
+                value={row.paymentStatus || "Pending"}
+                onChange={(e) => (
+                  kind === "estimate"
+                    ? updateEstimatePaymentStatus(row.id, e.target.value)
+                    : updateInvoicePaymentStatus(row.id, e.target.value)
+                )}
+              >
+                {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
+                  <option key={`${row.id}-pay-${status}`} value={status}>{status}</option>
+                ))}
+              </select>
+            ),
             ...(kind === "invoice" ? [
-              (
-                <select
-                  className="form-select form-select-sm"
-                  value={row.paymentStatus || "Pending"}
-                  onChange={(e) => updateInvoicePaymentStatus(row.id, e.target.value)}
-                >
-                  {INVOICE_PAYMENT_STATUS_OPTIONS.map((status) => (
-                    <option key={`${row.id}-pay-${status}`} value={status}>{status}</option>
-                  ))}
-                </select>
-              ),
               (
                 <select
                   className="form-select form-select-sm"
