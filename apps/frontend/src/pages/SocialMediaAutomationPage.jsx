@@ -4,6 +4,7 @@ import {
   createSocialPost,
   deleteSocialAutomationCompany,
   disconnectSocialConnection,
+  generateSocialContent,
   getSocialAutomationOverview,
   getSocialAutomationPosts,
   publishSocialPost,
@@ -12,7 +13,7 @@ import {
 } from "../api/socialMediaAutomation.js";
 import TinyHtmlEditor from "../components/TinyHtmlEditor.jsx";
 
-const PLATFORM_ORDER = ["facebook", "instagram", "youtube", "x", "linkedin"];
+const PLATFORM_ORDER = ["facebook", "instagram", "x", "linkedin", "youtube"];
 const PLATFORM_LABELS = {
   facebook: "Facebook",
   instagram: "Instagram",
@@ -63,6 +64,20 @@ const initialComposer = {
   youtube: { enabled: false, title: "", text: "", html: "", media_url: "" },
 };
 
+const initialAiComposer = {
+  title: "",
+  example_content: "",
+  style: "professional",
+  include_emojis: true,
+  platforms: {
+    facebook: true,
+    instagram: true,
+    x: true,
+    linkedin: true,
+    youtube: true,
+  },
+};
+
 function buildPlatformForms() {
   return PLATFORM_ORDER.reduce((acc, platform) => {
     acc[platform] = { ...initialConnectForm };
@@ -98,6 +113,24 @@ function sectionEffectiveMedia(section, composer) {
 
 function effectiveTitle(section, composer) {
   return String(section?.title || composer?.post_title || "").trim();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function textToHtml(value) {
+  return String(value || "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`)
+    .join("");
 }
 
 export default function SocialMediaAutomationPage() {
@@ -143,6 +176,8 @@ export default function SocialMediaAutomationPage() {
   });
 
   const [composer, setComposer] = useState(initialComposer);
+  const [aiComposer, setAiComposer] = useState(initialAiComposer);
+  const [generatingAiContent, setGeneratingAiContent] = useState(false);
 
   const companyPageSize = 5;
 
@@ -247,6 +282,20 @@ export default function SocialMediaAutomationPage() {
       [sectionKey]: {
         ...prev[sectionKey],
         [field]: value,
+      },
+    }));
+  }
+
+  function setAiComposerValue(field, value) {
+    setAiComposer((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function setAiPlatformEnabled(platform, value) {
+    setAiComposer((prev) => ({
+      ...prev,
+      platforms: {
+        ...prev.platforms,
+        [platform]: value,
       },
     }));
   }
@@ -374,6 +423,12 @@ export default function SocialMediaAutomationPage() {
     return selected;
   }
 
+  function selectedPlatformsFromAiComposer() {
+    return ["facebook", "instagram", "x", "linkedin", "youtube"].filter(
+      (platform) => Boolean(aiComposer.platforms?.[platform]),
+    );
+  }
+
   function validateComposer() {
     const selected = selectedPlatformsFromComposer();
     if (!selected.length) {
@@ -446,6 +501,45 @@ export default function SocialMediaAutomationPage() {
       publish_now: Boolean(publishNow),
       scheduled_at: composer.scheduled_at || "",
     };
+  }
+
+  function applyGeneratedContent(generated) {
+    const facebookDraft = generated?.facebook || null;
+    const instagramDraft = generated?.instagram || null;
+    const sharedDraft = facebookDraft || instagramDraft;
+    setComposer((prev) => ({
+      ...prev,
+      post_title: String(aiComposer.title || prev.post_title || sharedDraft?.title || generated?.youtube?.title || "").trim(),
+      shared: {
+        ...prev.shared,
+        facebook: Boolean(facebookDraft || prev.shared.facebook),
+        instagram: Boolean(instagramDraft || prev.shared.instagram),
+        title: sharedDraft?.title || prev.shared.title,
+        text: sharedDraft?.content || prev.shared.text,
+        html: sharedDraft?.content ? textToHtml(sharedDraft.content) : prev.shared.html,
+      },
+      x: {
+        ...prev.x,
+        enabled: Boolean(generated?.x || prev.x.enabled),
+        title: generated?.x?.title || prev.x.title,
+        text: generated?.x?.content || prev.x.text,
+        html: generated?.x?.content ? textToHtml(generated.x.content) : prev.x.html,
+      },
+      linkedin: {
+        ...prev.linkedin,
+        enabled: Boolean(generated?.linkedin || prev.linkedin.enabled),
+        title: generated?.linkedin?.title || prev.linkedin.title,
+        text: generated?.linkedin?.content || prev.linkedin.text,
+        html: generated?.linkedin?.content ? textToHtml(generated.linkedin.content) : prev.linkedin.html,
+      },
+      youtube: {
+        ...prev.youtube,
+        enabled: Boolean(generated?.youtube || prev.youtube.enabled),
+        title: generated?.youtube?.title || prev.youtube.title,
+        text: generated?.youtube?.content || prev.youtube.text,
+        html: generated?.youtube?.content ? textToHtml(generated.youtube.content) : prev.youtube.html,
+      },
+    }));
   }
 
   function setConnectValue(platform, field, value) {
@@ -618,6 +712,41 @@ export default function SocialMediaAutomationPage() {
     }
   }
 
+  async function handleGenerateAiContent() {
+    const platforms = selectedPlatformsFromAiComposer();
+    if (!selectedCompanyId) {
+      setError("Select company before AI content generation.");
+      return;
+    }
+    if (!platforms.length) {
+      setError("Select at least one platform for AI content.");
+      return;
+    }
+    if (!String(aiComposer.title || "").trim() && !String(aiComposer.example_content || "").trim()) {
+      setError("Enter title or example content for AI generation.");
+      return;
+    }
+    setGeneratingAiContent(true);
+    setError("");
+    setAlert("");
+    try {
+      const data = await generateSocialContent({
+        social_company_id: selectedCompanyId,
+        title: aiComposer.title,
+        example_content: aiComposer.example_content,
+        style: aiComposer.style,
+        include_emojis: aiComposer.include_emojis,
+        platforms,
+      });
+      applyGeneratedContent(data?.generated || {});
+      setAlert("AI content generated and loaded into all selected platform editors.");
+    } catch (err) {
+      setError(err?.message || "Unable to generate AI content.");
+    } finally {
+      setGeneratingAiContent(false);
+    }
+  }
+
   async function handlePublishNow(postId) {
     if (!planCapabilities?.posting_enabled) {
       setError("Social posting is disabled for your current plan.");
@@ -705,7 +834,7 @@ export default function SocialMediaAutomationPage() {
               <div className="input-group mb-3">
                 <input
                   className="form-control"
-                  placeholder="Enter company/group name"
+                  placeholder="Enter Company or Group Name"
                   value={newCompanyName}
                   onChange={(event) => setNewCompanyName(event.target.value)}
                 />
@@ -1045,9 +1174,23 @@ export default function SocialMediaAutomationPage() {
         </div>
       ) : (
         <div className="d-flex flex-column gap-3">
-          <div className="card p-4">
+          <div className="p-0">
             <h5 className="mb-3">Create Post</h5>
             <div className="row g-3 mb-3">
+              <div className="col-12 col-xl-3">
+                <label className="form-label">Title</label>
+                <input
+                  className="form-control"
+                  placeholder="Enter post title"
+                  value={composer.post_title}
+                  onChange={(event) => setComposer((prev) => ({ ...prev, post_title: event.target.value }))}
+                />
+              </div>
+              <div className="col-12 col-xl-3">
+                <label className="form-label">Upload Image (JPG/PNG, max 1.5 MB)</label>
+                <input type="file" className="form-control" accept="image/png,image/jpeg" onChange={handleImageUpload} />
+                {composer.uploaded_media_name ? <div className="small text-secondary mt-1">Selected: {composer.uploaded_media_name}</div> : null}
+              </div>
               <div className="col-12 col-xl-3">
                 <label className="form-label">Select Company / Group</label>
                 <select
@@ -1062,7 +1205,7 @@ export default function SocialMediaAutomationPage() {
                 </select>
               </div>
               <div className="col-12 col-xl-3">
-                <label className="form-label">Schedule At (optional)</label>
+                <label className="form-label">Schedule At (Optional)</label>
                 <input
                   type="datetime-local"
                   className="form-control"
@@ -1070,28 +1213,15 @@ export default function SocialMediaAutomationPage() {
                   onChange={(event) => setComposer((prev) => ({ ...prev, scheduled_at: event.target.value }))}
                 />
               </div>
-              <div className="col-12 col-xl-3">
-                <label className="form-label">Upload Image (JPG/PNG, max 1.5 MB)</label>
-                <input type="file" className="form-control" accept="image/png,image/jpeg" onChange={handleImageUpload} />
-                {composer.uploaded_media_name ? <div className="small text-secondary mt-1">Selected: {composer.uploaded_media_name}</div> : null}
-              </div>
-              <div className="col-12 col-xl-3">
-                <label className="form-label">Title</label>
-                <input
-                  className="form-control"
-                  placeholder="Enter post title"
-                  value={composer.post_title}
-                  onChange={(event) => setComposer((prev) => ({ ...prev, post_title: event.target.value }))}
-                />
-              </div>
             </div>
 
             {!selectedCompanyId ? <div className="alert alert-warning">Create and select company/group to create posts.</div> : null}
             {!planCapabilities?.posting_enabled ? <div className="alert alert-warning">Posting is disabled in your current plan.</div> : null}
 
-            <div className="row g-3">
-              <div className="col-12 col-xl-6">
-                <div className="card p-3 h-100">
+            <div className="row g-3 align-items-start">
+              <div className="col-12 col-xxl-8">
+                <div className="d-flex flex-column gap-3">
+                  <div className="card p-3">
                   <div className="d-flex align-items-center justify-content-between mb-2">
                     <h6 className="mb-0">Facebook + Instagram (Same Spec)</h6>
                     <div className="d-flex gap-3">
@@ -1108,10 +1238,8 @@ export default function SocialMediaAutomationPage() {
                   />
                   <input className="form-control" placeholder="Media URL override (optional)" value={composer.shared.media_url} onChange={(e) => setSectionValue("shared", "media_url", e.target.value)} />
                 </div>
-              </div>
 
-              <div className="col-12 col-xl-6">
-                <div className="card p-3 h-100">
+                  <div className="card p-3">
                   <div className="d-flex align-items-center justify-content-between mb-2">
                     <h6 className="mb-0">X.com</h6>
                     <label className="form-check-label d-flex align-items-center gap-2"><input type="checkbox" className="form-check-input" checked={composer.x.enabled} onChange={(e) => setSectionValue("x", "enabled", e.target.checked)} />Enable</label>
@@ -1125,10 +1253,8 @@ export default function SocialMediaAutomationPage() {
                   />
                   <input className="form-control" placeholder="Media URL override (optional)" value={composer.x.media_url} onChange={(e) => setSectionValue("x", "media_url", e.target.value)} />
                 </div>
-              </div>
 
-              <div className="col-12 col-xl-6">
-                <div className="card p-3 h-100">
+                  <div className="card p-3">
                   <div className="d-flex align-items-center justify-content-between mb-2">
                     <h6 className="mb-0">LinkedIn</h6>
                     <label className="form-check-label d-flex align-items-center gap-2"><input type="checkbox" className="form-check-input" checked={composer.linkedin.enabled} onChange={(e) => setSectionValue("linkedin", "enabled", e.target.checked)} />Enable</label>
@@ -1142,10 +1268,8 @@ export default function SocialMediaAutomationPage() {
                   />
                   <input className="form-control" placeholder="Media URL override (optional)" value={composer.linkedin.media_url} onChange={(e) => setSectionValue("linkedin", "media_url", e.target.value)} />
                 </div>
-              </div>
 
-              <div className="col-12 col-xl-6">
-                <div className="card p-3 h-100">
+                  <div className="card p-3">
                   <div className="d-flex align-items-center justify-content-between mb-2">
                     <h6 className="mb-0">YouTube</h6>
                     <label className="form-check-label d-flex align-items-center gap-2"><input type="checkbox" className="form-check-input" checked={composer.youtube.enabled} onChange={(e) => setSectionValue("youtube", "enabled", e.target.checked)} />Enable</label>
@@ -1158,6 +1282,96 @@ export default function SocialMediaAutomationPage() {
                     maxChars={5000}
                   />
                   <input className="form-control" placeholder="Media URL override (optional)" value={composer.youtube.media_url} onChange={(e) => setSectionValue("youtube", "media_url", e.target.value)} />
+                </div>
+                </div>
+              </div>
+
+              <div className="col-12 col-xxl-4">
+                <div className="card p-3 h-100">
+                  <div className="d-flex align-items-center justify-content-between mb-2">
+                    <h6 className="mb-0">AI Content Writing</h6>
+                    <span className="badge text-bg-dark">OpenAI</span>
+                  </div>
+                  <p className="text-secondary small mb-3">
+                    Give a title, example content, style, and emoji preference. Platform-ready captions with hashtags will fill the editors automatically.
+                  </p>
+                  <div className="d-flex flex-column gap-3">
+                    <div>
+                      <label className="form-label">Title / Topic</label>
+                      <input
+                        className="form-control"
+                        placeholder="Enter campaign or post topic"
+                        value={aiComposer.title}
+                        onChange={(event) => setAiComposerValue("title", event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Example Content</label>
+                      <textarea
+                        className="form-control"
+                        rows={6}
+                        placeholder="Paste sample content, points, product details, offer details, or campaign notes"
+                        value={aiComposer.example_content}
+                        onChange={(event) => setAiComposerValue("example_content", event.target.value)}
+                      />
+                    </div>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6 col-xxl-12">
+                        <label className="form-label">Style</label>
+                        <select
+                          className="form-select"
+                          value={aiComposer.style}
+                          onChange={(event) => setAiComposerValue("style", event.target.value)}
+                        >
+                          <option value="professional">Professional</option>
+                          <option value="friendly">Friendly</option>
+                          <option value="sales">Sales</option>
+                          <option value="festival">Festival / Celebration</option>
+                          <option value="educational">Educational</option>
+                          <option value="short-punchy">Short and Punchy</option>
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6 col-xxl-12">
+                        <label className="form-label d-block">Emoji Icons</label>
+                        <div className="form-check form-switch mt-2">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="aiEmojiSwitch"
+                            checked={aiComposer.include_emojis}
+                            onChange={(event) => setAiComposerValue("include_emojis", event.target.checked)}
+                          />
+                          <label className="form-check-label" htmlFor="aiEmojiSwitch">
+                            Include emojis in generated captions
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label d-block">Generate For</label>
+                      <div className="d-flex flex-wrap gap-2">
+                        {["facebook", "instagram", "x", "linkedin", "youtube"].map((platform) => (
+                          <label key={platform} className="form-check-label d-flex align-items-center gap-2 border rounded px-3 py-2">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={Boolean(aiComposer.platforms?.[platform])}
+                              onChange={(event) => setAiPlatformEnabled(platform, event.target.checked)}
+                            />
+                            {PLATFORM_LABELS[platform]}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-success"
+                      disabled={generatingAiContent || !selectedCompanyId || !planCapabilities?.posting_enabled}
+                      onClick={handleGenerateAiContent}
+                    >
+                      {generatingAiContent ? "Generating..." : "Generate For All Selected Platforms"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

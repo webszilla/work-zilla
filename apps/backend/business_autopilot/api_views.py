@@ -27,7 +27,7 @@ from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
 from apps.backend.products.models import Product
-from core.models import Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, log_admin_activity
+from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, log_admin_activity
 from core.email_utils import send_templated_email
 from core.notification_emails import mark_email_verified
 
@@ -1287,9 +1287,11 @@ def _default_india_gst_templates():
 
 def _seed_accounts_workspace_defaults_for_org(payload, org):
     base = _normalize_accounts_workspace(payload)
-    country = str(getattr(org, "country", "") or "").strip().lower()
-    is_empty_workspace = not any(base.get(key) for key in ACCOUNTS_ALLOWED_ROOT_KEYS)
-    if country == "india" and is_empty_workspace and not base.get("gstTemplates"):
+    billing_profile = BillingProfile.objects.filter(organization=org).only("country").first()
+    country = str(
+        (getattr(billing_profile, "country", "") or getattr(org, "country", "") or "India")
+    ).strip().lower()
+    if country == "india" and not base.get("gstTemplates"):
         base["gstTemplates"] = _default_india_gst_templates()
     return base
 

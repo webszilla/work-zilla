@@ -132,6 +132,12 @@ export default function SaasAdminProductPage() {
   const [userPage, setUserPage] = useState(1);
 
   const [planState, setPlanState] = useState(emptyState);
+  const [planUsersModal, setPlanUsersModal] = useState({
+    open: false,
+    planName: "",
+    rows: [],
+    term: ""
+  });
   const [planModal, setPlanModal] = useState({
     open: false,
     mode: "create",
@@ -161,6 +167,24 @@ export default function SaasAdminProductPage() {
     }
     const text = Array.isArray(message) ? message.join(", ") : message;
     return <div className="text-danger small">{text}</div>;
+  }
+
+  function openPlanUsersModal(plan) {
+    setPlanUsersModal({
+      open: true,
+      planName: plan?.name || "",
+      rows: Array.isArray(plan?.subscriber_rows) ? plan.subscriber_rows : [],
+      term: ""
+    });
+  }
+
+  function closePlanUsersModal() {
+    setPlanUsersModal({
+      open: false,
+      planName: "",
+      rows: [],
+      term: ""
+    });
   }
 
   useEffect(() => {
@@ -792,6 +816,36 @@ export default function SaasAdminProductPage() {
   );
 
   const plans = planState.data?.plans || [];
+  const planUsageRows = useMemo(() => (
+    plans.map((plan) => {
+      const subscriberRows = orgs.filter((org) => {
+        const subscription = org?.subscription || {};
+        if (subscription?.plan_id && plan?.id) {
+          return Number(subscription.plan_id) === Number(plan.id);
+        }
+        return String(subscription?.plan_name || "").trim().toLowerCase() === String(plan?.name || "").trim().toLowerCase();
+      });
+      return {
+        ...plan,
+        subscriber_rows: subscriberRows,
+        subscribed_user_count: subscriberRows.length
+      };
+    })
+  ), [plans, orgs]);
+  const filteredPlanUsers = useMemo(() => {
+    const term = String(planUsersModal.term || "").trim().toLowerCase();
+    if (!term) {
+      return planUsersModal.rows;
+    }
+    return planUsersModal.rows.filter((row) =>
+      [
+        row.name,
+        row.owner_name,
+        row.owner_username,
+        row.owner_email,
+      ].some((value) => String(value || "").toLowerCase().includes(term))
+    );
+  }, [planUsersModal.rows, planUsersModal.term]);
   const orgTransfers = pendingState.data?.org_transfers || [];
   const dealerTransfers = pendingState.data?.dealer_transfers || [];
   const transfers = pendingTab === "dealer" ? dealerTransfers : orgTransfers;
@@ -2525,7 +2579,7 @@ export default function SaasAdminProductPage() {
       filterFn
     );
     return (
-      <div className="card p-3 mt-3">
+      <div className="mt-3">
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
           <h6 className="mb-0">{label}</h6>
           <label className="table-search" htmlFor={`org-${statusKey}-search`}>
@@ -2554,7 +2608,6 @@ export default function SaasAdminProductPage() {
               ) : (
                 <tr>
                   <th>Organization</th>
-                  <th>Admin User Name</th>
                   <th>Email ID</th>
                   <th>Plan</th>
                   <th>Expire Date</th>
@@ -2597,7 +2650,6 @@ export default function SaasAdminProductPage() {
                   ) : (
                     <tr key={org.id}>
                       <td>{org.name}</td>
-                      <td>{formatValue(org.owner_name)}</td>
                       <td>{formatValue(org.owner_email)}</td>
                       <td>{org.subscription?.plan_name || "-"}</td>
                       <td>{org.subscription?.end_date || "-"}</td>
@@ -2995,7 +3047,7 @@ export default function SaasAdminProductPage() {
           ) : null}
 
           {activeSection === "plans" ? (
-            <div className="card p-3">
+            <div className="p-0">
               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <h5 className="mb-0">Plans</h5>
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => openPlanModal("create")}>Create Plan</button>
@@ -3009,89 +3061,29 @@ export default function SaasAdminProductPage() {
                     <tr>
                       <th>Plan</th>
                       <th>Monthly</th>
-                      {isStorageProduct ? (
-                        <>
-                          <th>Max Users</th>
-                          <th>Device/User</th>
-                          <th>Storage (GB)</th>
-                          <th>Status</th>
-                        </>
-                      ) : isDigitalAutomationProduct ? (
-                        <th>Yearly</th>
-                      ) : (
-                        <th>Yearly</th>
-                      )}
-                      {isStorageProduct ? null : isDigitalAutomationProduct ? (
-                        <>
-                          <th>Company Count</th>
-                          <th>Social Accounts</th>
-                          <th>Scheduled Posts/mo</th>
-                          <th>AI Words</th>
-                          <th>WP Sites</th>
-                          <th>Hosting Accounts</th>
-                          <th>Support</th>
-                          <th>Popular</th>
-                        </>
-                      ) : isAiChatbotProduct ? null : isWhatsappAutomationProduct ? (
-                        <>
-                          <th>Keyword Lists</th>
-                          <th>Add-ons</th>
-                        </>
-                      ) : isBusinessAutopilotProduct ? (
-                        <>
-                          <th>Employees</th>
-                          <th>Add-on Users</th>
-                          <th>App Usage</th>
-                        </>
-                      ) : (
-                        <th>Add-ons</th>
-                      )}
+                      <th>Yearly</th>
+                      <th>Users</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {plans.length ? (
-                      plans.map((plan) => (
+                    {planUsageRows.length ? (
+                      planUsageRows.map((plan) => (
                         <tr key={plan.id}>
                           <td>{plan.name}</td>
-                          <td>{formatValue(plan.monthly_price_inr ?? plan.monthly_price)}</td>
-                          {isStorageProduct ? (
-                            <>
-                              <td>{formatValue(plan.max_users ?? "-")}</td>
-                              <td>{formatValue(plan.device_limit_per_user ?? "-")}</td>
-                              <td>{formatValue(plan.storage_limit_gb ?? "-")}</td>
-                              <td>{plan.is_active === false ? "Inactive" : "Active"}</td>
-                            </>
-                          ) : isDigitalAutomationProduct ? (
-                            <td>{formatValue(plan.yearly_price)}</td>
-                          ) : (
-                            <td>{formatValue(plan.yearly_price)}</td>
-                          )}
-                          {isStorageProduct ? null : isDigitalAutomationProduct ? (
-                            <>
-                              <td>{formatLimitValue(plan.features?.company_count)}</td>
-                              <td>{formatLimitValue(plan.features?.social_accounts)}</td>
-                              <td>{formatLimitValue(plan.features?.scheduled_posts)}</td>
-                              <td>{formatLimitValue(plan.features?.ai_words_limit)}</td>
-                              <td>{formatLimitValue(plan.features?.wp_sites)}</td>
-                              <td>{formatLimitValue(plan.features?.hosting_accounts)}</td>
-                              <td>{plan.features?.support || "-"}</td>
-                              <td>{plan.features?.is_popular ? "Yes" : "No"}</td>
-                            </>
-                          ) : isAiChatbotProduct ? null : isWhatsappAutomationProduct ? (
-                            <>
-                              <td>{plan.features?.wa_keyword_rules_limit ?? "-"}</td>
-                              <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
-                            </>
-                          ) : isBusinessAutopilotProduct ? (
-                            <>
-                              <td>{plan.employee_limit === 0 ? "Unlimited" : plan.employee_limit}</td>
-                              <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
-                              <td>{plan.allow_app_usage ? "Enabled" : "Disabled"}</td>
-                            </>
-                          ) : (
-                            <td>{plan.allow_addons ? "Enabled" : "Disabled"}</td>
-                          )}
+                          <td>
+                            {formatValue(plan.monthly_price_inr ?? plan.monthly_price)}
+                          </td>
+                          <td>{formatValue(plan.yearly_price_inr ?? plan.yearly_price)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => openPlanUsersModal(plan)}
+                            >
+                              {plan.subscribed_user_count}
+                            </button>
+                          </td>
                           <td>
                             <button
                               type="button"
@@ -3114,7 +3106,7 @@ export default function SaasAdminProductPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={isStorageProduct ? 7 : isDigitalAutomationProduct ? 11 : isAiChatbotProduct ? 4 : isWhatsappAutomationProduct ? 6 : isBusinessAutopilotProduct ? 7 : 5}>No plans found.</td>
+                        <td colSpan={5}>No plans found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4218,6 +4210,64 @@ export default function SaasAdminProductPage() {
                   setAiUsageTrend({ open: false, loading: false, error: "", org: null, rows: [] })
                 }
               >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {planUsersModal.open ? (
+        <div className="modal-overlay" onClick={closePlanUsersModal}>
+          <div className="modal-panel" style={{ width: "min(900px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+              <div>
+                <h5 className="mb-0">{planUsersModal.planName} Users</h5>
+                <div className="text-secondary small mt-1">
+                  Total organizations on this plan: {planUsersModal.rows.length}
+                </div>
+              </div>
+              <label className="table-search mb-0" htmlFor="plan-users-search">
+                <span>Search:</span>
+                <input
+                  id="plan-users-search"
+                  type="text"
+                  value={planUsersModal.term}
+                  onChange={(event) => setPlanUsersModal((prev) => ({ ...prev, term: event.target.value }))}
+                  placeholder="Search organizations"
+                />
+              </label>
+            </div>
+            <div className="table-responsive mt-3">
+              <table className="table table-dark table-striped table-hover align-middle">
+                <thead>
+                  <tr>
+                    <th>Organization</th>
+                    <th>Org Admin Name</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPlanUsers.length ? (
+                    filteredPlanUsers.map((row) => (
+                      <tr key={`${planUsersModal.planName}-${row.id}`}>
+                        <td>{formatValue(row.name)}</td>
+                        <td>{formatValue(row.owner_name)}</td>
+                        <td>{formatValue(row.owner_username)}</td>
+                        <td>{formatValue(row.owner_email)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4}>No organizations found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-secondary" onClick={closePlanUsersModal}>
                 Close
               </button>
             </div>

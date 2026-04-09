@@ -58,6 +58,13 @@ export async function disconnectSocialConnection(platform, payload = {}) {
   });
 }
 
+export async function generateSocialContent(payload) {
+  return apiFetch("/api/dashboard/social-media-automation/content/generate", {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export async function createSocialPost(payload) {
   return apiFetch("/api/dashboard/social-media-automation/posts", {
     method: "POST",

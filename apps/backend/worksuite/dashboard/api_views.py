@@ -65,7 +65,7 @@ from core.models import (
     SocialPostJob,
     SocialPostDispatchLog,
 )
-from saas_admin.models import Product
+from saas_admin.models import OpenAISettings, Product
 from dashboard import views as dashboard_views
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
 from core.email_utils import send_templated_email
@@ -819,6 +819,143 @@ def _normalize_social_platforms(values):
         seen.add(platform)
         normalized.append(platform)
     return normalized
+
+
+def _strip_json_fences(raw):
+    text = str(raw or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        while lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _social_ai_prompt_payload(title, example_content, style, include_emojis, company_name, platforms):
+    emoji_rule = "Use emojis naturally where they improve engagement." if include_emojis else "Do not use emojis."
+    platform_notes = {
+        "facebook": "Friendly, community-first caption, keep it readable, add 3-6 relevant hashtags.",
+        "instagram": "Visual-first caption, short punchy paragraphs, add 5-10 relevant hashtags.",
+        "x": "Short, sharp, timely post for X.com, stay under 280 chars total, add at most 2 hashtags.",
+        "linkedin": "Professional, trust-building tone, slightly more formal, add 3-5 relevant hashtags.",
+        "youtube": "Provide both a title and a longer description, include discoverable hashtags at the end.",
+    }
+    requested_notes = [f"- {SOCIAL_PLATFORM_LABELS.get(platform, platform)}: {platform_notes.get(platform, '')}" for platform in platforms]
+    company_line = f"Company/brand name: {company_name}." if company_name else "Company/brand name was not provided."
+    return (
+        "You are generating platform-specific social media post drafts for a business dashboard.\n"
+        "Return valid JSON only. No markdown, no explanations.\n\n"
+        f"{company_line}\n"
+        f"Campaign title/topic: {title or 'Not provided'}\n"
+        f"Reference content/example: {example_content or 'Not provided'}\n"
+        f"Requested style: {style or 'professional'}\n"
+        f"{emoji_rule}\n\n"
+        "Generate platform-ready copy with natural hashtags that suit each platform.\n"
+        "For each requested platform include:\n"
+        '- "title": short heading or empty string if not needed\n'
+        '- "content": final post body ready to publish\n'
+        '- "hashtags": array of hashtags without duplicates\n\n'
+        "Platform guidance:\n"
+        + "\n".join(requested_notes)
+        + "\n\n"
+        "JSON shape:\n"
+        "{\n"
+        '  "platforms": {\n'
+        '    "facebook": {"title": "", "content": "", "hashtags": ["#one"]},\n'
+        '    "instagram": {"title": "", "content": "", "hashtags": ["#one"]}\n'
+        "  }\n"
+        "}\n"
+    )
+
+
+def _generate_social_ai_content(title, example_content, style, include_emojis, company_name, platforms):
+    settings_obj = OpenAISettings.objects.filter(provider="openai", is_active=True).first()
+    if not settings_obj:
+        settings_obj = OpenAISettings.objects.filter(provider="openai").first()
+    if not settings_obj or not str(settings_obj.api_key or "").strip():
+        raise ValueError("OpenAI API key is not configured.")
+
+    prompt = _social_ai_prompt_payload(
+        title=title,
+        example_content=example_content,
+        style=style,
+        include_emojis=include_emojis,
+        company_name=company_name,
+        platforms=platforms,
+    )
+    request_body = {
+        "model": str(settings_obj.model or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        "temperature": 0.7,
+        "max_tokens": 1400,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You generate clean JSON for social media drafts.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+    }
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {str(settings_obj.api_key).strip()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise ValueError(f"OpenAI request failed: {detail or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"OpenAI connection failed: {exc.reason}") from exc
+
+    choices = payload.get("choices") or []
+    message = choices[0].get("message") if choices else {}
+    content = _strip_json_fences(message.get("content") if isinstance(message, dict) else "")
+    if not content:
+        raise ValueError("OpenAI returned empty content.")
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("OpenAI returned invalid JSON.") from exc
+
+    rows = parsed.get("platforms") if isinstance(parsed, dict) else {}
+    result = {}
+    for platform in platforms:
+        row = rows.get(platform) if isinstance(rows, dict) and isinstance(rows.get(platform), dict) else {}
+        hashtags = row.get("hashtags") if isinstance(row.get("hashtags"), list) else []
+        normalized_tags = []
+        seen = set()
+        for item in hashtags:
+            tag = str(item or "").strip()
+            if not tag:
+                continue
+            if not tag.startswith("#"):
+                tag = f"#{tag.lstrip('#')}"
+            lowered = tag.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized_tags.append(tag)
+        body = str(row.get("content") or "").strip()
+        tags_text = " ".join(normalized_tags).strip()
+        if tags_text and tags_text not in body:
+            body = f"{body}\n\n{tags_text}".strip()
+        result[platform] = {
+            "title": str(row.get("title") or "").strip(),
+            "content": body,
+            "hashtags": normalized_tags,
+        }
+    return result
 
 
 def _mask_token(value):
@@ -1845,6 +1982,55 @@ def social_media_connection_disconnect(request, platform):
         "updated": True,
         "plan_capabilities": capabilities,
         "usage": _social_usage_summary(org),
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def social_media_content_generate(request):
+    org, _, error = _social_admin_guard(request)
+    if error:
+        return error
+    capabilities, feature_error = _social_feature_guard(org, require_posting=True)
+    if feature_error:
+        return feature_error
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return _json_error("invalid_json", status=400)
+
+    title = str(payload.get("title") or "").strip()
+    example_content = str(payload.get("example_content") or "").strip()
+    style = str(payload.get("style") or "professional").strip() or "professional"
+    include_emojis = bool(payload.get("include_emojis"))
+    social_company, company_error = _resolve_social_company(org, payload.get("social_company_id"), required=False)
+    if company_error:
+        return company_error
+    platforms = _normalize_social_platforms(payload.get("platforms") or [])
+    if not platforms:
+        platforms = ["facebook", "instagram", "x", "linkedin", "youtube"]
+    if not title and not example_content:
+        return _json_error("Title or example content is required.", status=400)
+
+    try:
+        generated = _generate_social_ai_content(
+            title=title,
+            example_content=example_content,
+            style=style,
+            include_emojis=include_emojis,
+            company_name=social_company.name if social_company else "",
+            platforms=platforms,
+        )
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+    except Exception:
+        logger.exception("social_media_content_generate_failed")
+        return _json_error("Unable to generate AI content right now.", status=500)
+
+    return JsonResponse({
+        "generated": generated,
+        "platforms": platforms,
+        "plan_capabilities": capabilities,
     })
 
 
