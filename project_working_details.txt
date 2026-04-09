@@ -192,9 +192,17 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 
 2B) If server path has no `.git` (important fallback)
 - If `git pull` shows `fatal: not a git repository`, use rsync code fallback immediately:
-  - `rsync -az --exclude='.git/' --exclude='env/' --exclude='**/node_modules/' --exclude='**/__pycache__/' --exclude='*.sqlite3' --exclude='*.sqlite3-journal' --exclude='*.sqlite3-wal' --exclude='*.sqlite3-shm' <local_project>/ -e "ssh -i ~/.ssh/workzilla_root" root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/`
+  - `rsync -az --exclude='.git/' --exclude='env/' --exclude='.venv/' --exclude='venv/' --exclude='apps/backend/.env' --exclude='**/node_modules/' --exclude='**/__pycache__/' --exclude='*.sqlite3' --exclude='*.sqlite3-journal' --exclude='*.sqlite3-wal' --exclude='*.sqlite3-shm' <local_project>/ -e "ssh -i ~/.ssh/workzilla_root" root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/`
 - After rsync fallback, continue normal steps:
   - `migrate` -> `collectstatic` -> gunicorn restart -> live verify.
+- Critical:
+  - Never overwrite production `apps/backend/.env` from local machine.
+  - Production `.env` contains live PostgreSQL credentials and environment flags.
+  - If this file is replaced by local values, live site can fail with `500` due to PostgreSQL auth errors.
+  - Before live `migrate`, always run:
+    - `set -a && source apps/backend/.env && set +a`
+    - `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
+  - Only if auth check passes, continue with `migrate` and restart.
 
 2A) SSH KEY (HOME LAPTOP - REQUIRED)
 - Preferred working key on home laptop:
