@@ -33,6 +33,7 @@ const TICKETING_STORAGE_KEY = "wz_business_autopilot_ticketing_module";
 const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const ACCOUNTS_STORAGE_KEY_PREFIX = "wz_business_autopilot_accounts_module_scope";
+const STOCKS_DEFAULT_BRANCH_ID = "branch_main";
 const DEFAULT_TABLE_PAGE_SIZE = 5;
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: String(option?.value || "").trim(),
@@ -817,6 +818,7 @@ const STOCKS_TAB_CONFIG = {
     columns: [
       { key: "itemName", label: "Item Name" },
       { key: "sku", label: "SKU" },
+      { key: "branchId", label: "Branch" },
       { key: "mainCategory", label: "Main Category" },
       { key: "subCategory", label: "Sub Category" },
       { key: "qty", label: "Qty" }
@@ -824,6 +826,7 @@ const STOCKS_TAB_CONFIG = {
     fields: [
       { key: "itemName", label: "Item Name", placeholder: "Dell Laptop 14" },
       { key: "sku", label: "SKU", placeholder: "DL-14-001" },
+      { key: "branchId", label: "Branch", placeholder: "Select Branch" },
       { key: "mainCategory", label: "Main Category", placeholder: "Type / select main category" },
       { key: "subCategory", label: "Sub Category", placeholder: "Type / select sub category" },
       { key: "qty", label: "Qty", placeholder: "25" }
@@ -860,6 +863,17 @@ const STOCKS_TAB_CONFIG = {
 };
 
 const DEFAULT_STOCKS_DATA = {
+  branches: [
+    {
+      id: STOCKS_DEFAULT_BRANCH_ID,
+      branchName: "Main Branch",
+      branchCode: "MAIN",
+      address: "",
+      phone: "",
+      isActive: true,
+      isDefault: true
+    }
+  ],
   mainCategories: [
     { id: "sm1", name: "Electronics", code: "ELEC", warehouse: "Main Warehouse" },
     { id: "sm2", name: "Office Supplies", code: "OFF", warehouse: "Store Room" }
@@ -869,8 +883,22 @@ const DEFAULT_STOCKS_DATA = {
     { id: "ss2", name: "Printers", mainCategory: "Electronics", reorderLevel: "3" }
   ],
   items: [
-    { id: "si1", itemName: "Dell Latitude 5440", sku: "DL5440", category: "Electronics / Laptops", qty: "12" },
-    { id: "si2", itemName: "HP LaserJet Pro", sku: "HPLJPRO", category: "Electronics / Printers", qty: "4" }
+    {
+      id: "si1",
+      itemName: "Dell Latitude 5440",
+      sku: "DL5440",
+      branchId: STOCKS_DEFAULT_BRANCH_ID,
+      category: "Electronics / Laptops",
+      qty: "12"
+    },
+    {
+      id: "si2",
+      itemName: "HP LaserJet Pro",
+      sku: "HPLJPRO",
+      branchId: STOCKS_DEFAULT_BRANCH_ID,
+      category: "Electronics / Printers",
+      qty: "4"
+    }
   ],
   settings: {
     stockAlerts: createDefaultStockAlertSettings(),
@@ -917,11 +945,38 @@ const DEFAULT_ACCOUNTS_DATA = {
   customers: [],
   vendors: [],
   itemMasters: [],
-  gstTemplates: [],
+  gstTemplates: createDefaultIndiaGstTemplates(),
   billingTemplates: [],
   estimates: [],
   invoices: []
 };
+
+function createDefaultIndiaGstTemplates() {
+  return [
+    {
+      id: "gst_india_igst",
+      name: "IGST",
+      taxScope: "Inter State",
+      cgst: "0",
+      sgst: "0",
+      igst: "18",
+      cess: "0",
+      status: "Active",
+      notes: "",
+    },
+    {
+      id: "gst_india_cgst_sgst",
+      name: "CGST & SGST",
+      taxScope: "Intra State",
+      cgst: "9",
+      sgst: "9",
+      igst: "0",
+      cess: "0",
+      status: "Active",
+      notes: "",
+    },
+  ];
+}
 
 function parseNumber(value) {
   if (typeof value === "number") {
@@ -1076,22 +1131,11 @@ function normalizePaymentDetails(rawDetails, totalAmountValue) {
   const paidAmount = Math.max(0, parseNumber(paidRaw));
   const cappedPaidAmount = totalAmount > 0 ? Math.min(paidAmount, totalAmount) : paidAmount;
   const paidAmountText = paidRaw ? formatCurrencyNumberInput(String(cappedPaidAmount), getOrgCurrency()) : "";
-  const rawPaymentStatus = String(rawDetails?.paymentStatus ?? rawDetails?.payment_status ?? "").trim();
-  const normalizedRawStatus = rawPaymentStatus.toLowerCase();
-  const hasExplicitPaymentStatus = normalizedRawStatus === "pending"
-    || normalizedRawStatus === "partial"
-    || normalizedRawStatus === "partially paid"
-    || normalizedRawStatus === "paid";
-  let paymentStatus = hasExplicitPaymentStatus ? normalizePaymentStatus(rawPaymentStatus) : "";
-  if (!paymentStatus) {
-    if (totalAmount > 0 && cappedPaidAmount >= totalAmount) {
-      paymentStatus = "Paid";
-    } else if (cappedPaidAmount > 0) {
-      paymentStatus = "Partial";
-    } else {
-      paymentStatus = "Pending";
-    }
-  }
+  const paymentStatus = totalAmount > 0 && cappedPaidAmount >= totalAmount
+    ? "Paid"
+    : cappedPaidAmount > 0
+      ? "Partial"
+      : "Pending";
   const balanceAmount = Math.max(0, totalAmount - cappedPaidAmount);
   return {
     paymentStatus,
@@ -1438,6 +1482,135 @@ function createDefaultStockAlertSettings() {
     },
     departments: [],
     users: [],
+  };
+}
+
+function normalizeStockAlertSettings(settings = {}) {
+  const defaults = createDefaultStockAlertSettings();
+  return {
+    ...defaults,
+    ...settings,
+    notifications: {
+      ...defaults.notifications,
+      ...(settings.notifications || {}),
+    },
+    departments: Array.isArray(settings.departments)
+      ? settings.departments.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
+    users: Array.isArray(settings.users)
+      ? settings.users.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
+  };
+}
+
+function normalizeStockBranch(row = {}, index = 0) {
+  const fallbackName = index === 0 ? "Main Branch" : `Branch ${index + 1}`;
+  const branchName = String(row.branchName || row.name || fallbackName).trim() || fallbackName;
+  const branchCodeSource = String(row.branchCode || row.branch_code || row.code || branchName || fallbackName).trim();
+  const branchCode = (branchCodeSource || fallbackName)
+    .replace(/\s+/g, "_")
+    .toUpperCase()
+    .slice(0, 24);
+  const resolvedId = String(row.id || row.branchId || row.branch_id || branchCode || `${STOCKS_DEFAULT_BRANCH_ID}_${index + 1}`).trim();
+  return {
+    id: resolvedId || `${STOCKS_DEFAULT_BRANCH_ID}_${index + 1}`,
+    branchName,
+    branchCode,
+    address: String(row.address || row.branchAddress || "").trim(),
+    phone: String(row.phone || row.branchPhone || "").trim(),
+    isActive: row.isActive === undefined ? true : Boolean(row.isActive),
+    isDefault: Boolean(row.isDefault ?? row.is_default),
+    createdAt: String(row.createdAt || row.created_at || "").trim(),
+    updatedAt: String(row.updatedAt || row.updated_at || "").trim(),
+  };
+}
+
+function createDefaultStockBranch(overrides = {}) {
+  return normalizeStockBranch({
+    id: STOCKS_DEFAULT_BRANCH_ID,
+    branchName: "Main Branch",
+    branchCode: "MAIN",
+    address: "",
+    phone: "",
+    isActive: true,
+    isDefault: true,
+    ...overrides,
+  }, 0);
+}
+
+function getStockBranchDisplayName(branches = [], branchId = "") {
+  const normalizedId = String(branchId || "").trim();
+  const match = (Array.isArray(branches) ? branches : []).find((row) => String(row?.id || "").trim() === normalizedId);
+  if (!match) {
+    return "Main Branch";
+  }
+  const branchName = String(match.branchName || match.name || "Main Branch").trim() || "Main Branch";
+  const branchCode = String(match.branchCode || "").trim();
+  if (!branchCode || branchCode.toLowerCase() === branchName.toLowerCase()) {
+    return branchName;
+  }
+  return `${branchName} (${branchCode})`;
+}
+
+function normalizeStocksWorkspaceData(payload = DEFAULT_STOCKS_DATA) {
+  const source = payload && typeof payload === "object" ? payload : DEFAULT_STOCKS_DATA;
+  const rawBranches = Array.isArray(source.branches) ? source.branches : [];
+  const normalizedBranches = rawBranches.length
+    ? rawBranches.map((row, index) => normalizeStockBranch(row, index))
+    : [createDefaultStockBranch()];
+  const seenBranchIds = new Set();
+  let defaultBranchFound = false;
+  const branches = normalizedBranches.map((branch, index) => {
+    const baseId = String(branch.id || "").trim() || `${STOCKS_DEFAULT_BRANCH_ID}_${index + 1}`;
+    const uniqueId = seenBranchIds.has(baseId) ? `${baseId}_${index + 1}` : baseId;
+    seenBranchIds.add(uniqueId);
+    const nextBranch = { ...branch, id: uniqueId };
+    if (nextBranch.isDefault && !defaultBranchFound) {
+      defaultBranchFound = true;
+      nextBranch.isDefault = true;
+    } else {
+      nextBranch.isDefault = false;
+    }
+    return nextBranch;
+  });
+  if (!branches.length) {
+    branches.push(createDefaultStockBranch());
+  }
+  if (!branches.some((branch) => branch.isDefault) && branches[0]) {
+    branches[0] = { ...branches[0], isDefault: true };
+  }
+  const defaultBranchId = branches.find((branch) => branch.isDefault)?.id || branches[0]?.id || STOCKS_DEFAULT_BRANCH_ID;
+  const branchLookup = new Map(branches.map((branch) => [String(branch.id || "").trim(), branch]));
+  const branchNameLookup = new Map(branches.map((branch) => [String(branch.branchName || "").trim().toLowerCase(), branch]));
+  const branchCodeLookup = new Map(branches.map((branch) => [String(branch.branchCode || "").trim().toLowerCase(), branch]));
+  const items = Array.isArray(source.items)
+    ? source.items.map((row, index) => {
+        const candidateId = String(row?.branchId || row?.branch_id || row?.branch || "").trim();
+        const candidateName = String(row?.branchName || row?.branch_name || "").trim().toLowerCase();
+        const candidateCode = String(row?.branchCode || row?.branch_code || "").trim().toLowerCase();
+        const branchMatch =
+          branchLookup.get(candidateId)
+          || branchNameLookup.get(candidateName)
+          || branchCodeLookup.get(candidateCode)
+          || null;
+        const branchId = branchMatch?.id || defaultBranchId;
+        return {
+          ...row,
+          id: String(row?.id || `si_${index + 1}`).trim() || `${STOCKS_DEFAULT_BRANCH_ID}_item_${index + 1}`,
+          branchId,
+        };
+      })
+    : [];
+  return {
+    ...source,
+    branches,
+    mainCategories: Array.isArray(source.mainCategories) ? source.mainCategories : [],
+    subCategories: Array.isArray(source.subCategories) ? source.subCategories : [],
+    items,
+    settings: {
+      ...(source.settings || {}),
+      stockAlerts: normalizeStockAlertSettings(source.settings?.stockAlerts || {}),
+    },
   };
 }
 
@@ -4266,7 +4439,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                     Enable ESI
                   </label>
                 </div>
-                <div className="row g-3">
+                <div className="row g-3" style={{ paddingTop: "35px" }}>
                   <div className="col-12 col-md-6">
                     <label className="form-label small text-secondary mb-1">PF Employee %</label>
                     <input className="form-control" value={payrollSettingsForm.pfEmployeePercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, pfEmployeePercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enablePf} />
@@ -4304,7 +4477,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
             <div className="card p-3 h-100">
               <h6 className="mb-3">{editingStructureId ? "Edit Salary Structure" : "Create Salary Structure"}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={saveSalaryStructure}>
-                <div className="row g-3">
+                <div className="row g-3" style={{ marginTop: "20px" }}>
                   <div className="col-12 col-md-8">
                     <label className="form-label small text-secondary mb-1">Template Name</label>
                     <input className="form-control" value={salaryStructureForm.name || ""} onChange={(e) => setSalaryStructureForm((prev) => ({ ...prev, name: e.target.value }))} disabled={!canManagePayroll} />
@@ -4364,7 +4537,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
             <div className="card p-3 h-100">
               <h6 className="mb-3">{editingHistoryId ? "Edit Salary History" : "Employee Salary History"}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={saveSalaryHistory}>
-                <div className="row g-3">
+                <div className="row g-3" style={{ marginTop: "20px" }}>
                   <div className="col-12">
                     <label className="form-label small text-secondary mb-1">Employee</label>
                     <div className="crm-inline-suggestions-wrap">
@@ -5358,6 +5531,7 @@ function SearchablePaginatedTableCard({
   pageSize = DEFAULT_TABLE_PAGE_SIZE,
   withoutOuterCard = false,
   headerBottom = null,
+  initialSearchTerm = "",
   enableExport = false,
   enableImport = false,
   exportFileName = "table-data",
@@ -5366,7 +5540,7 @@ function SearchablePaginatedTableCard({
   actionHeaderStyle = null,
   actionCellStyle = null,
 }) {
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(() => String(initialSearchTerm || "").trim());
   const [page, setPage] = useState(1);
   const importInputRef = useRef(null);
   const [importSummary, setImportSummary] = useState({
@@ -5404,6 +5578,10 @@ function SearchablePaginatedTableCard({
   useEffect(() => {
     setPage(1);
   }, [searchTerm, rows.length]);
+
+  useEffect(() => {
+    setSearchTerm(String(initialSearchTerm || "").trim());
+  }, [initialSearchTerm]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -5801,6 +5979,7 @@ function BillingDocumentEditor({
     customerOptions,
     taxUi,
     inventoryItems,
+    inventoryBranches = [],
     itemMasterOptions,
     enableItemPicker = true,
     applyBillingTemplateToDocument,
@@ -5842,6 +6021,17 @@ function BillingDocumentEditor({
     };
     const addPaymentEntry = () => {
       if (!canEditPaymentDetails || !documentLineItemsComplete) return;
+      const currentPaidAmount = Math.max(0, parseNumber(form.paidAmount));
+      const currentPaidTotal = getPaymentEntriesTotal(paymentEntries);
+      const remainingBalance = Math.max(0, parseNumber(totals.grandTotal) - currentPaidTotal);
+      if (currentPaidAmount > remainingBalance) {
+        setAccountsActionPopup({
+          open: true,
+          title: `${kindLabel} Payment`,
+          message: `The payment amount you entered is greater than the remaining ${kindLabel.toLowerCase()} balance.`,
+        });
+        return;
+      }
       const nextEntry = {
         ...createEmptyPaymentEntry(),
         paymentDate: String(form.paymentDate || createEmptyPaymentEntry().paymentDate || "").trim(),
@@ -5851,9 +6041,6 @@ function BillingDocumentEditor({
         notes: String(form.paymentStatusNotes || "").trim(),
       };
       setEditingPaymentEntryId(nextEntry.id);
-      if (paymentSummary.paymentStatus !== "Partial") {
-        setField("paymentStatus", "Partial");
-      }
       syncPaymentEntries([...(paymentEntries || []), nextEntry]);
     };
     const updatePaymentEntry = (entryId, key, value) => {
@@ -5912,15 +6099,25 @@ function BillingDocumentEditor({
       return name.toLowerCase().includes(q);
     }).slice(0, 8);
     const billingItemSource = useMemo(() => {
-      const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
-        id: String(item?.id || "").trim(),
-        name: String(item?.itemName || "").trim(),
-        source: "inventory",
-        onHandQty: parseNumber(item?.qty),
-        sku: String(item?.sku || "").trim(),
-        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
-        hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
-      })).filter((item) => item.id && item.name);
+      const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => {
+        const name = String(item?.itemName || "").trim();
+        const branchId = String(item?.branchId || "").trim();
+        const branchLabel = getStockBranchDisplayName(inventoryBranches, branchId);
+        const displayName = branchLabel ? `${name} (${branchLabel})` : name;
+        return {
+          id: String(item?.id || "").trim(),
+          name,
+          displayName,
+          branchId,
+          branchName: branchLabel,
+          source: "inventory",
+          onHandQty: parseNumber(item?.qty),
+          sku: String(item?.sku || "").trim(),
+          searchText: [name, displayName, item?.id || "", item?.sku || "", branchLabel, item?.hsnSacCode || item?.hsnCode || item?.sacCode || ""].join(" ").toLowerCase(),
+          hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
+          hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
+        };
+      }).filter((item) => item.id && item.name);
       const masterSource = (Array.isArray(itemMasterOptions) ? itemMasterOptions : []).map((item) => ({
         id: String(item?.id || "").trim(),
         name: String(item?.name || "").trim(),
@@ -5948,16 +6145,21 @@ function BillingDocumentEditor({
         .filter((item) => item.name);
       const seenNames = new Set();
       return [...inventorySource, ...masterSource, ...recentSource].filter((item) => {
-        const key = item.name.toLowerCase();
+        const key = `${item.source || "item"}::${String(item.id || item.displayName || item.name || "").toLowerCase()}`;
         if (seenNames.has(key)) return false;
         seenNames.add(key);
         return true;
       });
-    }, [inventoryItems, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
+    }, [inventoryItems, inventoryBranches, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
     const resolveLineItemByName = (value) => {
       const normalizedValue = String(value || "").trim().toLowerCase();
       if (!normalizedValue) return null;
-      return billingItemSource.find((item) => String(item?.name || "").trim().toLowerCase() === normalizedValue) || null;
+      return billingItemSource.find((item) => [
+        item.name,
+        item.displayName,
+        item.id,
+        item.sku,
+      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(normalizedValue)) || null;
     };
     const setPrimaryItemText = (lineId, rawValue) => {
       const nextValue = String(rawValue || "");
@@ -6015,7 +6217,7 @@ function BillingDocumentEditor({
     const itemPickerMatches = billingItemSource
       .filter((item) => {
         if (!itemPickerQueryLower) return true;
-        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
         return haystack.includes(itemPickerQueryLower);
       })
       .slice(0, 40);
@@ -6023,7 +6225,12 @@ function BillingDocumentEditor({
     const itemPickerMasterMatches = itemPickerMatches.filter((item) => item.source === "itemMaster");
     const itemPickerRecentMatches = itemPickerMatches.filter((item) => item.source === "recent");
     const itemPickerCanUseCustom = Boolean(itemPickerQuery)
-      && !itemPickerMatches.some((item) => String(item.name || "").toLowerCase() === itemPickerQueryLower);
+      && !itemPickerMatches.some((item) => [
+        item.name,
+        item.displayName,
+        item.id,
+        item.sku,
+      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(itemPickerQueryLower));
     const openItemPicker = (line) => {
       if (!enableItemPicker) return;
       const seed = String(line?.description || "").trim();
@@ -6247,16 +6454,6 @@ function BillingDocumentEditor({
                   ))}
                 </select>
               </div>
-              {kind === "invoice" ? (
-                <div className="col-12 col-md-6 col-xl-3">
-                  <label className="form-label small text-secondary mb-1">Delivery Status</label>
-                  <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
-                    {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
-                      <option key={`inv-del-${status}`} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -6286,12 +6483,17 @@ function BillingDocumentEditor({
                     const lineMatches = billingItemSource
                       .filter((item) => {
                         if (!lineQuery) return true;
-                        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+                        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
                         return haystack.includes(lineQuery);
                       })
                       .slice(0, 8);
                     const canUseCustomLine = Boolean(lineQuery)
-                      && !lineMatches.some((item) => String(item.name || "").toLowerCase() === lineQuery);
+                      && !lineMatches.some((item) => [
+                        item.name,
+                        item.displayName,
+                        item.id,
+                        item.sku,
+                      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(lineQuery));
                     const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
                     return (
                       <tr key={line.id}>
@@ -6341,11 +6543,12 @@ function BillingDocumentEditor({
                                           className="crm-inline-suggestions__item"
                                           onMouseDown={() => applyLineItemFromSearch(line.id, item)}
                                         >
-                                          <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                          <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
                                           <span className="crm-inline-suggestions__item-sub">
                                             {[
                                               item.source,
                                               item.sku ? `SKU: ${item.sku}` : "",
+                                              item.branchName ? `Branch: ${item.branchName}` : "",
                                               item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : "",
                                             ].filter(Boolean).join(" | ")}
                                           </span>
@@ -6448,41 +6651,52 @@ function BillingDocumentEditor({
                       </div>
                     ) : null}
                   </div>
-                  <div className="wz-item-picker-modal__body">
+                  <div className="wz-item-picker-modal__body row g-3">
                     {itemPickerCanUseCustom ? (
-                      <div className="crm-inline-suggestions__group">
+                      <div className="col-12">
+                        <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Custom</div>
                         <button type="button" className="crm-inline-suggestions__item" onClick={applyCustomPickedText}>
                           <span className="crm-inline-suggestions__item-main">Add your custom text: {itemPickerQuery}</span>
                           <span className="crm-inline-suggestions__item-sub">Manual entry</span>
                         </button>
                       </div>
+                      </div>
                     ) : null}
                     {itemPickerInventoryMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Inventory Items</div>
-                        {itemPickerInventoryMatches.map((item) => (
-                          <button
-                            key={`${kind}-picker-inv-${item.id || item.name}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onClick={() => applyPickedItem(item)}
-                          >
-                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
-                            <span className="crm-inline-suggestions__item-sub">
-                              Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
-                              {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
-                              {item.sku ? ` | SKU: ${item.sku}` : ""}
-                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
-                            </span>
-                          </button>
-                        ))}
+                      <div className="col-12 col-lg-5">
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Inventory Items</div>
+                          {itemPickerInventoryMatches.map((item) => (
+                            <button
+                              key={`${kind}-picker-inv-${item.id || item.name}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onClick={() => applyPickedItem(item)}
+                            >
+                              <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
+                              <span className="crm-inline-suggestions__item-sub">
+                                Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
+                                {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
+                                {item.sku ? ` | SKU: ${item.sku}` : ""}
+                                {item.branchName ? (
+                                  <>
+                                    {" | Branch: "}
+                                    <span className="fw-semibold">{item.branchName}</span>
+                                  </>
+                                ) : ""}
+                                {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                     {itemPickerMasterMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Item Masters</div>
-                        <div className="row g-3">
+                      <div className="col-12 col-lg-7">
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Item Masters</div>
+                          <div className="row g-3">
                           <div className="col-12 col-md-6">
                             <div className="crm-inline-suggestions__title mb-2">Products</div>
                             {itemPickerMasterMatches
@@ -6527,26 +6741,6 @@ function BillingDocumentEditor({
                           </div>
                         </div>
                       </div>
-                    ) : null}
-                    {itemPickerRecentMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Recent Items</div>
-                        {itemPickerRecentMatches.map((item) => (
-                          <button
-                            key={`${kind}-picker-recent-${item.id || item.name}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onClick={() => applyPickedItem(item)}
-                          >
-                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
-                            <span className="crm-inline-suggestions__item-sub">
-                              Recent usage
-                              {item.recentQty ? ` | Qty: ${item.recentQty}` : ""}
-                              {item.recentRate ? ` | Rate: ${item.recentRate}` : ""}
-                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
-                            </span>
-                          </button>
-                        ))}
                       </div>
                     ) : null}
                     {!itemPickerCanUseCustom && !itemPickerInventoryMatches.length && !itemPickerMasterMatches.length && !itemPickerRecentMatches.length ? (
@@ -6569,8 +6763,22 @@ function BillingDocumentEditor({
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
-                <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
-                <textarea className="form-control mb-3" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+                <div className="row g-3 align-items-start">
+                  <div className="col-12 col-xl-9">
+                    <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
+                    <textarea className="form-control mb-3" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+                  </div>
+                  {kind === "invoice" ? (
+                    <div className="col-12 col-xl-3">
+                      <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                      <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                        {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                          <option key={`inv-del-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="border rounded p-3 mb-3" style={{ marginTop: "30px" }}>
                   <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
                     <div className="fw-semibold">Payment Details</div>
@@ -7675,6 +7883,10 @@ function CrmOnePageModule() {
     () => Array.isArray(crmInventoryWorkspace?.items) ? crmInventoryWorkspace.items : [],
     [crmInventoryWorkspace]
   );
+  const crmSalesOrderInventoryBranches = useMemo(
+    () => Array.isArray(crmInventoryWorkspace?.branches) ? crmInventoryWorkspace.branches : [],
+    [crmInventoryWorkspace]
+  );
   const crmSalesOrderGstTemplates = useMemo(
     () => Array.isArray(crmAccountsWorkspace?.gstTemplates) ? crmAccountsWorkspace.gstTemplates : [],
     [crmAccountsWorkspace]
@@ -7693,6 +7905,23 @@ function CrmOnePageModule() {
     ),
     [crmAccountsWorkspace]
   );
+
+  useEffect(() => {
+    if (crmSalesOrderTaxUi.mode !== "gst") {
+      return;
+    }
+    setCrmAccountsWorkspace((prev) => {
+      const current = _normalizeAccountsWorkspacePayload(prev);
+      if ((current.gstTemplates || []).length) {
+        return prev;
+      }
+      return {
+        ...current,
+        gstTemplates: createDefaultIndiaGstTemplates(),
+      };
+    });
+  }, [crmSalesOrderTaxUi.mode]);
+
   const crmSalesOrderErpUsers = useMemo(
     () => crmDirectoryPool.map((row) => ({ name: row.name })).filter((row) => String(row.name || "").trim()),
     [crmDirectoryPool]
@@ -7905,6 +8134,62 @@ function CrmOnePageModule() {
     }) || null;
   }
 
+  function getAccountsConversionSummaryForSalesOrder(salesOrderRow = {}) {
+    const normalizedRow = normalizeCrmSalesOrderRecord(salesOrderRow || {});
+    const linkedEstimate = findAccountsDocumentForSalesOrder(crmAccountsWorkspace?.estimates || [], normalizedRow);
+    const linkedInvoice = findAccountsDocumentForSalesOrder(crmAccountsWorkspace?.invoices || [], normalizedRow);
+    const estimateNo = String(linkedEstimate?.docNo || "").trim();
+    const invoiceNo = String(linkedInvoice?.docNo || "").trim();
+    const hasEstimate = Boolean(linkedEstimate);
+    const hasInvoice = Boolean(linkedInvoice);
+    const statusParts = [];
+    if (estimateNo) {
+      statusParts.push(estimateNo);
+    }
+    if (invoiceNo) {
+      statusParts.push(invoiceNo);
+    }
+    const statusDetail = statusParts.join(" / ");
+    const convertedDocumentKind = hasInvoice ? "invoice" : hasEstimate ? "estimate" : "";
+    const convertedDocumentId = String((hasInvoice ? linkedInvoice : linkedEstimate)?.id || "").trim();
+    const convertedDocumentNo = invoiceNo || estimateNo;
+    return {
+      linkedEstimate,
+      linkedInvoice,
+      hasEstimate,
+      hasInvoice,
+      statusLabel: hasEstimate || hasInvoice ? "Converted" : String(normalizedRow.status || "Pending").trim() || "Pending",
+      statusDetail,
+      convertedDocumentKind,
+      convertedDocumentId,
+      convertedDocumentNo,
+      convertedButtonLabel: hasEstimate || hasInvoice ? "Converted" : "Convert",
+    };
+  }
+
+  function openConvertedSalesOrderDocumentForEditing(salesOrderRow = {}) {
+    const conversionSummary = getAccountsConversionSummaryForSalesOrder(salesOrderRow);
+    const documentKind = conversionSummary.hasInvoice ? "invoice" : conversionSummary.hasEstimate ? "estimate" : "";
+    const documentRow = conversionSummary.hasInvoice
+      ? conversionSummary.linkedInvoice
+      : conversionSummary.linkedEstimate;
+    if (!documentKind || !documentRow) {
+      return;
+    }
+    editDocument(documentKind, documentRow);
+  }
+
+  function openAccountsDocumentList(kind = "invoice", docNo = "") {
+    const nextKind = kind === "estimate" ? "estimates" : "invoices";
+    const nextSearch = String(docNo || "").trim();
+    const query = new URLSearchParams();
+    query.set("tab", nextKind);
+    if (nextSearch) {
+      query.set("search", nextSearch);
+    }
+    navigate(`../accounts?${query.toString()}`, { relative: "path" });
+  }
+
   async function getLatestCrmModuleAccess() {
     const modulesResponse = await apiFetch("/api/business-autopilot/modules").catch(() => null);
     if (!modulesResponse) {
@@ -8055,19 +8340,28 @@ function CrmOnePageModule() {
   async function refreshCrmAccountsWorkspace() {
     const accountsWorkspace = await apiFetch("/api/business-autopilot/accounts/workspace").catch(() => null);
     if (accountsWorkspace?.data && typeof accountsWorkspace.data === "object") {
-      setCrmAccountsWorkspace(_normalizeAccountsWorkspacePayload(accountsWorkspace.data));
+      const nextWorkspace = _normalizeAccountsWorkspacePayload(accountsWorkspace.data);
+      setCrmAccountsWorkspace(
+        normalizeCountryName(
+          nextWorkspace?.orgBillingCountry
+          || nextWorkspace?.organizationProfile?.country
+          || "India"
+        ) === "india" && !(nextWorkspace.gstTemplates || []).length
+          ? { ...nextWorkspace, gstTemplates: createDefaultIndiaGstTemplates() }
+          : nextWorkspace
+      );
       return;
     }
-    setCrmAccountsWorkspace(DEFAULT_ACCOUNTS_DATA);
+    setCrmAccountsWorkspace({ ...DEFAULT_ACCOUNTS_DATA, gstTemplates: createDefaultIndiaGstTemplates() });
   }
 
   function refreshCrmInventoryWorkspaceFromStorage() {
     try {
       const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      setCrmInventoryWorkspace(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA);
+      setCrmInventoryWorkspace(normalizeStocksWorkspaceData(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA));
     } catch {
-      setCrmInventoryWorkspace(DEFAULT_STOCKS_DATA);
+      setCrmInventoryWorkspace(normalizeStocksWorkspaceData(DEFAULT_STOCKS_DATA));
     }
   }
 
@@ -8977,7 +9271,11 @@ function CrmOnePageModule() {
     setCrmSalesOrderForm((prev) => {
       const totals = computeDocumentTotals(prev, crmSalesOrderGstTemplates || []);
       const grandTotal = totals.grandTotal;
-      const paymentStatus = totalPaid >= grandTotal && grandTotal > 0 ? "Paid" : totalPaid > 0 ? "Partial" : "Pending";
+      const paymentStatus = grandTotal > 0 && totalPaid >= grandTotal
+        ? "Paid"
+        : totalPaid > 0
+          ? "Partial"
+          : "Pending";
       return {
         ...prev,
         paymentEntries: normalizedEntries,
@@ -8988,6 +9286,17 @@ function CrmOnePageModule() {
   }
 
   function addCrmSalesOrderPaymentEntry() {
+    const currentPaidAmount = Math.max(0, parseNumber(crmSalesOrderForm.paidAmount));
+    const currentPaidTotal = getPaymentEntriesTotal(normalizePaymentEntries(crmSalesOrderForm.paymentEntries));
+    const remainingBalance = Math.max(0, parseNumber(crmSalesOrderTotals.grandTotal) - currentPaidTotal);
+    if (currentPaidAmount > remainingBalance) {
+      setAccountsActionPopup({
+        open: true,
+        title: "Sales Order Payment",
+        message: "The payment amount you entered is greater than the remaining sales order balance.",
+      });
+      return;
+    }
     syncCrmSalesOrderPaymentEntries([...(crmSalesOrderForm.paymentEntries || []), createEmptyPaymentEntry()]);
   }
 
@@ -11530,25 +11839,31 @@ function CrmOnePageModule() {
           ? selectedTeamMembers.map((member) => ({ name: member }))
           : [];
         if (sectionKey === "salesOrders") {
-          const salesOrderRows = filteredRows.map((row) => {
-            const totals = computeDocumentTotals(row, crmSalesOrderGstTemplates || []);
-            const linkedEstimate = findAccountsDocumentForSalesOrder(crmAccountsWorkspace.estimates || [], row);
-            const linkedInvoice = findAccountsDocumentForSalesOrder(crmAccountsWorkspace.invoices || [], row);
-            return {
-              ...row,
-              crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || resolveCrmReferenceIdByText(row.customerName || row.company || "") || "").trim(),
-              orderId: String(row.orderId || row.order_id || "").trim() || "-",
-              leadName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
+        const salesOrderRows = filteredRows.map((row) => {
+          const totals = computeDocumentTotals(row, crmSalesOrderGstTemplates || []);
+          const conversionSummary = getAccountsConversionSummaryForSalesOrder(row);
+          return {
+            ...row,
+            crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || resolveCrmReferenceIdByText(row.customerName || row.company || "") || "").trim(),
+            orderId: String(row.orderId || row.order_id || "").trim() || "-",
+            leadName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
               clients: String(row.company || "").trim() || "-",
               issueDate: String(row.issueDate || row.issue_date || "").trim(),
-              dueDate: String(row.dueDate || row.due_date || "").trim(),
-              amountDisplay: totals.grandTotal > 0 ? formatCurrencyAmount(totals.grandTotal, crmCurrencyCode) : "-",
-              convertedToEstimate: Boolean(linkedEstimate),
-              convertedEstimateNo: String(linkedEstimate?.docNo || "").trim(),
-              convertedToInvoice: Boolean(linkedInvoice || row.convertedToInvoice),
-              convertedInvoiceNo: String(linkedInvoice?.docNo || row.convertedInvoiceId || "").trim(),
-            };
-          });
+            dueDate: String(row.dueDate || row.due_date || "").trim(),
+            amountDisplay: totals.grandTotal > 0 ? formatCurrencyAmount(totals.grandTotal, crmCurrencyCode) : "-",
+            statusDisplay: conversionSummary.statusLabel,
+            statusDetail: conversionSummary.statusDetail,
+            convertedToEstimate: conversionSummary.hasEstimate,
+            convertedEstimateNo: String(conversionSummary.linkedEstimate?.docNo || "").trim(),
+            convertedEstimateId: String(conversionSummary.linkedEstimate?.id || "").trim(),
+            convertedToInvoice: conversionSummary.hasInvoice,
+            convertedInvoiceNo: String(conversionSummary.linkedInvoice?.docNo || "").trim(),
+            convertedInvoiceId: String(conversionSummary.linkedInvoice?.id || "").trim(),
+            convertedDocumentKind: conversionSummary.convertedDocumentKind,
+            convertedDocumentId: conversionSummary.convertedDocumentId,
+            convertedDocumentNo: conversionSummary.convertedDocumentNo,
+          };
+        });
           const crmSalesOrderEditorModuleData = {
             gstTemplates: crmSalesOrderGstTemplates,
             billingTemplates: crmSalesOrderBillingTemplates,
@@ -11600,6 +11915,7 @@ function CrmOnePageModule() {
                       customerOptions={crmSalesOrderCustomerOptions}
                       taxUi={crmSalesOrderTaxUi}
                       inventoryItems={crmSalesOrderInventoryItems}
+                      inventoryBranches={crmSalesOrderInventoryBranches}
                       itemMasterOptions={crmSalesOrderItemMasterOptions}
                       enableItemPicker={false}
                       applyBillingTemplateToDocument={(_kind, templateId) => applyCrmSalesOrderBillingTemplate(templateId)}
@@ -11639,7 +11955,7 @@ function CrmOnePageModule() {
                         { key: "issueDate", label: "Issue Date" },
                         { key: "dueDate", label: "Due Date" },
                         { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
-                        { key: "gstTemplateName", label: "GST Template" },
+                        { key: "statusDisplay", label: "Status" },
                       ]}
                       emptyMessage="No sales orders yet."
                       searchPlaceholder="Search Sales Orders"
@@ -11651,7 +11967,10 @@ function CrmOnePageModule() {
                         row.leadName,
                         row.clients,
                         row.company,
-                        row.gstTemplateName,
+                        row.statusDisplay,
+                        row.statusDetail,
+                        row.convertedEstimateNo,
+                        row.convertedInvoiceNo,
                       ].join(" ")}
                       renderCells={(row) => [
                         row.crmReferenceId || "-",
@@ -11661,10 +11980,75 @@ function CrmOnePageModule() {
                         formatDateLikeCellValue("issueDate", row.issueDate, "-"),
                         formatDateLikeCellValue("dueDate", row.dueDate, "-"),
                         row.amountDisplay || "-",
-                        row.gstTemplateName || "-",
+                        row.convertedToEstimate || row.convertedToInvoice ? (
+                          <div className="d-flex flex-column justify-content-center h-100 py-1">
+                            <div className="fw-semibold">{row.statusDisplay || "Converted"}</div>
+                            <div className="small text-secondary lh-sm d-flex flex-wrap align-items-center gap-1">
+                              {String(row.convertedEstimateNo || "").trim() ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm p-0 text-decoration-underline fw-normal text-secondary"
+                                  onClick={() => openAccountsDocumentList("estimate", row.convertedEstimateNo)}
+                                  title={`Open ${String(row.convertedEstimateNo || "").trim()}`}
+                                >
+                                  {row.convertedEstimateNo}
+                                </button>
+                              ) : null}
+                              {String(row.convertedEstimateNo || "").trim() && String(row.convertedInvoiceNo || "").trim() ? (
+                                <span className="text-secondary">/</span>
+                              ) : null}
+                              {String(row.convertedInvoiceNo || "").trim() ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm p-0 text-decoration-underline fw-normal text-secondary"
+                                  onClick={() => openAccountsDocumentList("invoice", row.convertedInvoiceNo)}
+                                  title={`Open ${String(row.convertedInvoiceNo || "").trim()}`}
+                                >
+                                  {row.convertedInvoiceNo}
+                                </button>
+                              ) : null}
+                              {!String(row.convertedEstimateNo || "").trim() && !String(row.convertedInvoiceNo || "").trim() ? "-" : null}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="d-flex align-items-center h-100 py-1">
+                            <span
+                              className={`badge d-inline-flex align-items-center justify-content-center px-3 py-2 rounded-pill ${
+                                (String(row.statusDisplay || row.status || "Pending").trim().toLowerCase() === "pending")
+                                  ? "bg-warning-subtle text-warning-emphasis border border-warning-subtle"
+                                  : "bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle"
+                              }`}
+                              style={{ minHeight: 32 }}
+                            >
+                              {row.statusDisplay || row.status || "Pending"}
+                            </span>
+                          </div>
+                        ),
                       ]}
                       renderActions={(row) => (
                         <div className="d-inline-flex gap-2">
+                          {(() => {
+                            const convertedDocumentKind = String(row.convertedDocumentKind || "").trim();
+                            const convertedDocumentId = String(row.convertedDocumentId || "").trim();
+                            const isConverted = Boolean(convertedDocumentKind && convertedDocumentId);
+                            const handleConvertOrDownload = () => {
+                              if (isConverted) {
+                                openConvertedSalesOrderDocumentForEditing(row);
+                                return;
+                              }
+                              openCrmSalesOrderConvertPopup(row);
+                            };
+                            return (
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${isConverted ? "btn-outline-success" : "btn-outline-info"}`}
+                                onClick={handleConvertOrDownload}
+                                title={isConverted ? `Open ${String(row.convertedDocumentNo || "").trim() || "converted document"} for editing` : "Convert"}
+                              >
+                                {isConverted ? "Converted" : "Convert"}
+                              </button>
+                            );
+                          })()}
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-light"
@@ -11673,13 +12057,6 @@ function CrmOnePageModule() {
                             onClick={() => downloadDocumentPdf("salesOrder", row.id)}
                           >
                             <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-info"
-                            onClick={() => openCrmSalesOrderConvertPopup(row)}
-                          >
-                            Convert
                           </button>
                           <button
                             type="button"
@@ -14632,19 +15009,21 @@ function ProjectManagementModule() {
         </div>
       </div>
 
-      <div className="row g-3">
-        {stats.map((item) => (
-          <div className="col-12 col-md-4" key={item.label}>
-            <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
-              <div className="stat-icon stat-icon-primary mb-2">
-                <i className={`bi ${item.icon || "bi-grid"}`} aria-hidden="true" />
+      {activeTab === "projects" ? (
+        <div className="row g-3">
+          {stats.map((item) => (
+            <div className="col-12 col-md-4" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${item.icon || "bi-grid"}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
               </div>
-              <div className="text-secondary small">{item.label}</div>
-              <h5 className="mb-0 mt-1">{item.value}</h5>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
       {activeTab === "customers" ? (
         <>
@@ -16391,7 +16770,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           {isRequiredField ? " *" : ""}
         </label>
         {activeTab === "attendance" && field.key === "employee" ? (
-          <div className="position-relative">
+          <div className="crm-inline-suggestions-wrap">
             <input
               type="text"
               className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
@@ -16401,7 +16780,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               required={isRequiredField}
               maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setAttendanceEmployeeSuggestOpen(true)}
-                          onClick={() => setAttendanceEmployeeSuggestOpen(true)}
+              onClick={() => setAttendanceEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setAttendanceEmployeeSuggestOpen(false), 120)}
               onChange={(event) => {
                 onChangeField(field.key, event.target.value);
@@ -16409,31 +16788,25 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               }}
             />
             {attendanceEmployeeSuggestOpen && attendanceEmployeeSuggestions.length ? (
-              <div
-                className="position-absolute start-0 end-0 mt-1 border rounded shadow-sm"
-                style={{
-                  zIndex: 30,
-                  background: "#081528",
-                  borderColor: "rgba(255,255,255,0.16)",
-                  maxHeight: "220px",
-                  overflowY: "auto",
-                }}
-              >
-                {attendanceEmployeeSuggestions.map((name) => (
-                  <button
-                    key={`attendance-emp-suggest-${name}`}
-                    type="button"
-                    className="w-100 text-start border-0 bg-transparent px-3 py-2"
-                    style={{ color: "#e9eef8" }}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      onChangeField(field.key, name);
-                      setAttendanceEmployeeSuggestOpen(false);
-                    }}
-                  >
-                    {name}
-                  </button>
-                ))}
+              <div className="crm-inline-suggestions">
+                <div className="crm-inline-suggestions__group">
+                  <div className="crm-inline-suggestions__title">Employees</div>
+                  {attendanceEmployeeSuggestions.map((name) => (
+                    <button
+                      key={`attendance-emp-suggest-${name}`}
+                      type="button"
+                      className="crm-inline-suggestions__item"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        onChangeField(field.key, name);
+                        setAttendanceEmployeeSuggestOpen(false);
+                      }}
+                    >
+                      <span className="crm-inline-suggestions__item-main">{name}</span>
+                      <span className="crm-inline-suggestions__item-sub">Select employee</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>
@@ -16448,7 +16821,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               required={isRequiredField}
               maxLength={getBusinessAutopilotMaxLength(field.key)}
               onFocus={() => setHrEmployeeSuggestOpen(true)}
-                          onClick={() => setHrEmployeeSuggestOpen(true)}
+              onClick={() => setHrEmployeeSuggestOpen(true)}
               onBlur={() => window.setTimeout(() => setHrEmployeeSuggestOpen(false), 120)}
               onChange={(event) => {
                 onChangeField(field.key, event.target.value);
@@ -17715,7 +18088,44 @@ function CategoryCrudModule({
   const [moduleActionPopup, setModuleActionPopup] = useState({ open: false, title: "", message: "" });
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [ticketingClientSearchOpen, setTicketingClientSearchOpen] = useState(false);
+  const [inventoryBranchFilter, setInventoryBranchFilter] = useState("all");
+  const [inventoryBranchSearchOpen, setInventoryBranchSearchOpen] = useState(false);
+  const [inventoryBranchSearchText, setInventoryBranchSearchText] = useState("");
+  const [inventoryMainCategorySearchOpen, setInventoryMainCategorySearchOpen] = useState(false);
+  const [inventoryMainCategorySearchText, setInventoryMainCategorySearchText] = useState("");
+  const [inventorySubCategorySearchOpen, setInventorySubCategorySearchOpen] = useState(false);
+  const [inventorySubCategorySearchText, setInventorySubCategorySearchText] = useState("");
   const extraTabKeys = useMemo(() => (extraTabs || []).map((tab) => tab.key), [extraTabs]);
+  const isStocksModule = storageKey === STOCKS_STORAGE_KEY;
+  const isInventoryItemsTab = isStocksModule && activeTab === "items";
+  const inventoryBranches = useMemo(
+    () => (Array.isArray(moduleData.branches) ? moduleData.branches : []).map((row, index) => normalizeStockBranch(row, index)),
+    [moduleData.branches]
+  );
+  const inventoryDefaultBranchId = useMemo(
+    () => inventoryBranches.find((branch) => branch.isDefault)?.id || inventoryBranches[0]?.id || STOCKS_DEFAULT_BRANCH_ID,
+    [inventoryBranches]
+  );
+  const inventoryBranchMatches = useMemo(() => {
+    if (!isInventoryItemsTab) {
+      return [];
+    }
+    const query = String(inventoryBranchSearchText || "").trim().toLowerCase();
+    const rows = Array.isArray(inventoryBranches) ? inventoryBranches : [];
+    const filtered = query
+      ? rows.filter((branch) => {
+          const haystack = [
+            branch.branchName || "",
+            branch.branchCode || "",
+            branch.address || "",
+            branch.phone || "",
+            getStockBranchDisplayName(inventoryBranches, branch.id),
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        })
+      : rows;
+    return filtered.slice(0, 8);
+  }, [inventoryBranches, inventoryBranchSearchText, isInventoryItemsTab]);
 
   useEffect(() => {
     try {
@@ -17724,13 +18134,15 @@ function CategoryCrudModule({
         return;
       }
       const parsed = JSON.parse(raw);
-      if (isValidCustomTabData(parsed, tabConfig)) {
+      if (isStocksModule) {
+        setModuleData(normalizeStocksWorkspaceData(parsed));
+      } else if (isValidCustomTabData(parsed, tabConfig)) {
         setModuleData(parsed);
       }
     } catch (_error) {
       // Ignore invalid cached module data.
     }
-  }, [storageKey, tabConfig]);
+  }, [isStocksModule, storageKey, tabConfig]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(moduleData));
@@ -17770,12 +18182,18 @@ function CategoryCrudModule({
 
   useEffect(() => {
     setEditingId("");
+    setInventoryBranchSearchOpen(false);
+    setInventoryMainCategorySearchOpen(false);
+    setInventorySubCategorySearchOpen(false);
     if (activeTab === "categories" || extraTabKeys.includes(activeTab)) {
       return;
     }
     setTicketingClientSearchOpen(false);
     setFormValues(buildEmptyValues(tabConfig[activeTab].fields));
-  }, [activeTab, tabConfig, extraTabKeys]);
+    if (isInventoryItemsTab) {
+      setFormValues((prev) => ({ ...prev, branchId: inventoryDefaultBranchId }));
+    }
+  }, [activeTab, inventoryDefaultBranchId, isInventoryItemsTab, tabConfig, extraTabKeys]);
 
   useEffect(() => {
     if (!tabConfig?.tickets) {
@@ -17788,6 +18206,36 @@ function CategoryCrudModule({
     window.addEventListener("wz:ticketing-menu-click", onTicketingMenuClick);
     return () => window.removeEventListener("wz:ticketing-menu-click", onTicketingMenuClick);
   }, [tabConfig]);
+
+  useEffect(() => {
+    if (!isInventoryItemsTab) {
+      return;
+    }
+    if (inventoryBranchSearchOpen) {
+      return;
+    }
+    const selectedBranchId = String(formValues.branchId || inventoryDefaultBranchId || "").trim();
+    setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, selectedBranchId));
+  }, [activeTab, formValues.branchId, inventoryBranches, inventoryBranchSearchOpen, inventoryDefaultBranchId, isInventoryItemsTab]);
+
+  useEffect(() => {
+    if (!isInventoryItemsTab) {
+      return;
+    }
+    if (!inventoryMainCategorySearchOpen) {
+      setInventoryMainCategorySearchText(String(formValues.mainCategory || "").trim());
+    }
+    if (!inventorySubCategorySearchOpen) {
+      setInventorySubCategorySearchText(String(formValues.subCategory || "").trim());
+    }
+  }, [
+    activeTab,
+    formValues.mainCategory,
+    formValues.subCategory,
+    inventoryMainCategorySearchOpen,
+    inventorySubCategorySearchOpen,
+    isInventoryItemsTab,
+  ]);
 
   const visibleTabs = useMemo(() => {
     if (!hasCombinedCategoryTabs) {
@@ -17806,8 +18254,6 @@ function CategoryCrudModule({
   const isExtraTab = extraTabKeys.includes(activeTab);
   const config = activeTab === "categories" || isExtraTab ? null : tabConfig[activeTab];
   const currentRows = activeTab === "categories" || isExtraTab ? [] : (moduleData[activeTab] || []);
-  const isStocksModule = storageKey === STOCKS_STORAGE_KEY;
-  const isInventoryItemsTab = storageKey === STOCKS_STORAGE_KEY && activeTab === "items";
   const isTicketingTicketsTab = storageKey === TICKETING_STORAGE_KEY && activeTab === "tickets";
   const sharedTicketingCustomers = useMemo(
     () => isTicketingTicketsTab ? readSharedAccountsCustomers() : [],
@@ -17841,6 +18287,32 @@ function CategoryCrudModule({
         .filter(Boolean)
     ));
   }, [formValues.mainCategory, moduleData.subCategories]);
+  const inventoryMainCategoryMatches = useMemo(() => {
+    if (!isInventoryItemsTab) {
+      return [];
+    }
+    const query = String(inventoryMainCategorySearchText || "").trim().toLowerCase();
+    const rows = Array.isArray(inventoryMainCategoryOptions) ? inventoryMainCategoryOptions : [];
+    return (query ? rows.filter((name) => String(name || "").toLowerCase().includes(query)) : rows).slice(0, 8);
+  }, [inventoryMainCategoryOptions, inventoryMainCategorySearchText, isInventoryItemsTab]);
+  const inventorySubCategoryMatches = useMemo(() => {
+    if (!isInventoryItemsTab) {
+      return [];
+    }
+    const query = String(inventorySubCategorySearchText || "").trim().toLowerCase();
+    const rows = Array.isArray(inventorySubCategoryOptions) ? inventorySubCategoryOptions : [];
+    return (query ? rows.filter((name) => String(name || "").toLowerCase().includes(query)) : rows).slice(0, 8);
+  }, [inventorySubCategoryOptions, inventorySubCategorySearchText, isInventoryItemsTab]);
+  const inventoryFilteredRows = useMemo(() => {
+    if (!isInventoryItemsTab) {
+      return currentRows;
+    }
+    const selectedBranchId = String(inventoryBranchFilter || "all").trim();
+    if (!selectedBranchId || selectedBranchId === "all") {
+      return currentRows;
+    }
+    return currentRows.filter((row) => String(row?.branchId || inventoryDefaultBranchId).trim() === selectedBranchId);
+  }, [currentRows, inventoryBranchFilter, inventoryDefaultBranchId, isInventoryItemsTab]);
   const ticketingMainCategoryOptions = useMemo(
     () => Array.from(new Set((moduleData.mainCategories || []).map((row) => String(row?.name || "").trim()).filter(Boolean))),
     [moduleData.mainCategories]
@@ -17887,8 +18359,18 @@ function CategoryCrudModule({
 
   function onEditRow(row) {
     setEditingId(row.id);
+    if (isInventoryItemsTab) {
+      setInventoryBranchSearchOpen(false);
+      setInventoryMainCategorySearchOpen(false);
+      setInventorySubCategorySearchOpen(false);
+    }
     const nextValues = {};
     config.fields.forEach((field) => {
+      if (isInventoryItemsTab && field.key === "branchId") {
+        nextValues[field.key] = row.branchId || inventoryDefaultBranchId || "";
+        setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, row.branchId || inventoryDefaultBranchId || ""));
+        return;
+      }
       if (isTicketingTicketsTab && (field.key === "mainCategory" || field.key === "subCategory")) {
         const [mainCategory = "", subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
         nextValues.mainCategory = row.mainCategory || mainCategory || "";
@@ -17897,8 +18379,15 @@ function CategoryCrudModule({
       }
       if (isInventoryItemsTab && (field.key === "mainCategory" || field.key === "subCategory")) {
         const [mainCategory = "", subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
-        nextValues.mainCategory = row.mainCategory || mainCategory || "";
-        nextValues.subCategory = row.subCategory || subCategory || "";
+        if (field.key === "mainCategory") {
+          const resolvedMainCategory = row.mainCategory || mainCategory || "";
+          nextValues.mainCategory = resolvedMainCategory;
+          setInventoryMainCategorySearchText(resolvedMainCategory);
+          return;
+        }
+        const resolvedSubCategory = row.subCategory || subCategory || "";
+        nextValues.subCategory = resolvedSubCategory;
+        setInventorySubCategorySearchText(resolvedSubCategory);
         return;
       }
       nextValues[field.key] = row[field.key] || "";
@@ -17908,7 +18397,19 @@ function CategoryCrudModule({
 
   function onCancelEdit() {
     setEditingId("");
-    setFormValues(buildEmptyValues(config.fields));
+    if (isInventoryItemsTab) {
+      setInventoryBranchSearchOpen(false);
+      setInventoryMainCategorySearchOpen(false);
+      setInventorySubCategorySearchOpen(false);
+    }
+    const emptyValues = buildEmptyValues(config.fields);
+    if (isInventoryItemsTab) {
+      emptyValues.branchId = inventoryDefaultBranchId || "";
+      setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, inventoryDefaultBranchId || ""));
+      setInventoryMainCategorySearchText("");
+      setInventorySubCategorySearchText("");
+    }
+    setFormValues(emptyValues);
     window.requestAnimationFrame(() => {
       clearFlatpickrDisplayValues(document);
     });
@@ -17973,8 +18474,10 @@ function CategoryCrudModule({
     if (isInventoryItemsTab) {
       const mainCategory = String(payload.mainCategory || "").trim();
       const subCategory = String(payload.subCategory || "").trim();
+      const branchId = String(payload.branchId || "").trim() || inventoryDefaultBranchId || "";
       payload.mainCategory = mainCategory;
       payload.subCategory = subCategory;
+      payload.branchId = branchId;
       payload.category = [mainCategory, subCategory].filter(Boolean).join(" / ");
     }
     if (isTicketingTicketsTab) {
@@ -18275,8 +18778,9 @@ function CategoryCrudModule({
                     ? ({
                         itemName: "col-12 col-md-6 col-xl-2",
                         sku: "col-12 col-md-6 col-xl-2",
-                        mainCategory: "col-12 col-md-6 col-xl-3",
-                        subCategory: "col-12 col-md-6 col-xl-3",
+                        branchId: "col-12 col-md-6 col-xl-2",
+                        mainCategory: "col-12 col-md-6 col-xl-2",
+                        subCategory: "col-12 col-md-6 col-xl-2",
                         qty: "col-12 col-md-3 col-xl-1",
                       }[field.key] || "col-12 col-md-6 col-xl-2")
                   : isTicketingTicketsTab
@@ -18432,44 +18936,196 @@ function CategoryCrudModule({
                     </datalist>
                   </>
                 ) : isInventoryItemsTab && field.key === "mainCategory" ? (
-                  <>
+                  <div className="crm-inline-suggestions-wrap">
                     <input
                       type="text"
-                      className="form-control datalist-readable-input inventory-category-datalist"
+                      className="form-control"
+                      autoComplete="off"
                       required={isStocksModule}
-                      list="inventory-main-category-list"
                       placeholder={field.placeholder}
-                      value={formValues[field.key] || ""}
-                      maxLength={getBusinessAutopilotMaxLength(field.key)}
+                      value={inventoryMainCategorySearchText}
+                      onFocus={() => {
+                        setInventoryMainCategorySearchOpen(true);
+                        if (!String(inventoryMainCategorySearchText || "").trim()) {
+                          setInventoryMainCategorySearchText(String(formValues.mainCategory || "").trim());
+                        }
+                      }}
+                      onClick={() => {
+                        setInventoryMainCategorySearchOpen(true);
+                        if (!String(inventoryMainCategorySearchText || "").trim()) {
+                          setInventoryMainCategorySearchText(String(formValues.mainCategory || "").trim());
+                        }
+                      }}
+                      onBlur={() => window.setTimeout(() => setInventoryMainCategorySearchOpen(false), 120)}
                       onChange={(event) => {
-                        onChangeField(field.key, event.target.value);
-                        setFormValues((prev) => ({ ...prev, subCategory: "" }));
+                        const nextValue = event.target.value;
+                        setInventoryMainCategorySearchText(nextValue);
+                        setInventoryMainCategorySearchOpen(true);
+                        setInventorySubCategorySearchOpen(false);
+                        setInventorySubCategorySearchText("");
+                        setFormValues((prev) => ({ ...prev, mainCategory: nextValue, subCategory: "" }));
                       }}
                     />
-                    <datalist id="inventory-main-category-list">
-                      {inventoryMainCategoryOptions.map((name) => (
-                        <option key={`inventory-main-${name}`} value={name} />
-                      ))}
-                    </datalist>
-                  </>
-                ) : isInventoryItemsTab && field.key === "subCategory" ? (
-                  <>
+                    {inventoryMainCategorySearchOpen ? (
+                      inventoryMainCategoryMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Main Categories</div>
+                            {inventoryMainCategoryMatches.map((name) => (
+                              <button
+                                key={`inventory-main-category-${name}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  const nextValue = String(name || "").trim();
+                                  setFormValues((prev) => ({ ...prev, mainCategory: nextValue, subCategory: "" }));
+                                  setInventoryMainCategorySearchText(nextValue);
+                                  setInventoryMainCategorySearchOpen(false);
+                                  setInventorySubCategorySearchText("");
+                                  setInventorySubCategorySearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{name || "-"}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No main categories found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                ) : isInventoryItemsTab && field.key === "branchId" ? (
+                  <div className="crm-inline-suggestions-wrap">
                     <input
                       type="text"
-                      className="form-control datalist-readable-input inventory-category-datalist"
+                      className="form-control"
+                      autoComplete="off"
                       required={isStocksModule}
-                      list="inventory-sub-category-list"
-                      placeholder={field.placeholder}
-                      value={formValues[field.key] || ""}
-                      maxLength={getBusinessAutopilotMaxLength(field.key)}
-                      onChange={(event) => onChangeField(field.key, event.target.value)}
+                      placeholder="Search Branch"
+                      value={inventoryBranchSearchText}
+                      onFocus={() => {
+                        setInventoryBranchSearchOpen(true);
+                        if (!String(inventoryBranchSearchText || "").trim()) {
+                          setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, formValues.branchId || inventoryDefaultBranchId));
+                        }
+                      }}
+                      onClick={() => {
+                        setInventoryBranchSearchOpen(true);
+                        if (!String(inventoryBranchSearchText || "").trim()) {
+                          setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, formValues.branchId || inventoryDefaultBranchId));
+                        }
+                      }}
+                      onBlur={() => window.setTimeout(() => setInventoryBranchSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setInventoryBranchSearchText(nextValue);
+                        setInventoryBranchSearchOpen(true);
+                        setFormValues((prev) => ({ ...prev, branchId: "" }));
+                      }}
                     />
-                    <datalist id="inventory-sub-category-list">
-                      {inventorySubCategoryOptions.map((name) => (
-                        <option key={`inventory-sub-${name}`} value={name} />
-                      ))}
-                    </datalist>
-                  </>
+                    {inventoryBranchSearchOpen ? (
+                      inventoryBranchMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Branches</div>
+                            {inventoryBranchMatches.map((branch) => (
+                              <button
+                                key={`inventory-branch-${branch.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setFormValues((prev) => ({ ...prev, branchId: branch.id }));
+                                  setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, branch.id));
+                                  setInventoryBranchSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">
+                                  {getStockBranchDisplayName(inventoryBranches, branch.id)}
+                                </span>
+                                <span className="crm-inline-suggestions__item-sub">
+                                  {branch.address || branch.phone || "Stock location"}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No branches found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                ) : isInventoryItemsTab && field.key === "subCategory" ? (
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      autoComplete="off"
+                      required={isStocksModule}
+                      placeholder={field.placeholder}
+                      value={inventorySubCategorySearchText}
+                      onFocus={() => {
+                        setInventorySubCategorySearchOpen(true);
+                        if (!String(inventorySubCategorySearchText || "").trim()) {
+                          setInventorySubCategorySearchText(String(formValues.subCategory || "").trim());
+                        }
+                      }}
+                      onClick={() => {
+                        setInventorySubCategorySearchOpen(true);
+                        if (!String(inventorySubCategorySearchText || "").trim()) {
+                          setInventorySubCategorySearchText(String(formValues.subCategory || "").trim());
+                        }
+                      }}
+                      onBlur={() => window.setTimeout(() => setInventorySubCategorySearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setInventorySubCategorySearchText(nextValue);
+                        setInventorySubCategorySearchOpen(true);
+                        setFormValues((prev) => ({ ...prev, subCategory: nextValue }));
+                      }}
+                    />
+                    {inventorySubCategorySearchOpen ? (
+                      inventorySubCategoryMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Sub Categories</div>
+                            {inventorySubCategoryMatches.map((name) => (
+                              <button
+                                key={`inventory-sub-category-${name}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  const nextValue = String(name || "").trim();
+                                  setFormValues((prev) => ({ ...prev, subCategory: nextValue }));
+                                  setInventorySubCategorySearchText(nextValue);
+                                  setInventorySubCategorySearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{name || "-"}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No sub categories found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
                 ) : (
                   <input
                     type={field.type || "text"}
@@ -18519,13 +19175,39 @@ function CategoryCrudModule({
       {isInventoryItemsTab && !isExtraTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
-          badgeLabel={`${currentRows.length} items`}
-          rows={currentRows}
+          badgeLabel={`${inventoryFilteredRows.length} items`}
+          rows={inventoryFilteredRows}
           columns={config.columns}
           withoutOuterCard
+          headerBottom={(
+            <div className="row g-2 align-items-end">
+              <div className="col-12 col-md-4 col-xl-3">
+                <label className="form-label small text-secondary mb-1">Filter by Branch</label>
+                <select
+                  className="form-select"
+                  value={inventoryBranchFilter}
+                  onChange={(event) => setInventoryBranchFilter(event.target.value)}
+                >
+                  <option value="all">All Branches</option>
+                  {inventoryBranches.map((branch) => (
+                    <option key={`inventory-filter-branch-${branch.id}`} value={branch.id}>
+                      {getStockBranchDisplayName(inventoryBranches, branch.id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
           noRowsText={`No ${config.label.toLowerCase()} added yet.`}
-          searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
+          searchBy={(row) => [
+            row.itemName || "",
+            row.sku || "",
+            row.mainCategory || "",
+            row.subCategory || "",
+            row.qty || "",
+            getStockBranchDisplayName(inventoryBranches, row.branchId),
+          ].join(" ")}
           renderCells={(row) => config.columns.map((column) => {
             if (column.key === "mainCategory") {
               const [mainCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
@@ -18534,6 +19216,9 @@ function CategoryCrudModule({
             if (column.key === "subCategory") {
               const [, subCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
               return row.subCategory || subCategory || "-";
+            }
+            if (column.key === "branchId") {
+              return getStockBranchDisplayName(inventoryBranches, row.branchId);
             }
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
@@ -18643,6 +19328,16 @@ function StocksManagementModule() {
   });
   const [stockHistoryTab, setStockHistoryTab] = useState("all");
   const [stockSettings, setStockSettings] = useState(createDefaultStockAlertSettings());
+  const [stockBranchForm, setStockBranchForm] = useState({
+    id: "",
+    branchName: "",
+    branchCode: "",
+    address: "",
+    phone: "",
+    isActive: true,
+    isDefault: false,
+  });
+  const [editingStockBranchId, setEditingStockBranchId] = useState("");
   const [stockAlertDepartments, setStockAlertDepartments] = useState([]);
   const [stockAlertUsers, setStockAlertUsers] = useState([]);
   const [stockDepartmentSearch, setStockDepartmentSearch] = useState("");
@@ -18667,6 +19362,33 @@ function StocksManagementModule() {
     ),
     [stockHistoryPopup.rows, stockHistoryTab]
   );
+
+  function resetStockBranchForm() {
+    setEditingStockBranchId("");
+    setStockBranchForm({
+      id: "",
+      branchName: "",
+      branchCode: "",
+      address: "",
+      phone: "",
+      isActive: true,
+      isDefault: false,
+    });
+  }
+
+  function startEditingStockBranch(row) {
+    const normalizedRow = normalizeStockBranch(row);
+    setEditingStockBranchId(normalizedRow.id);
+    setStockBranchForm({
+      id: normalizedRow.id,
+      branchName: normalizedRow.branchName,
+      branchCode: normalizedRow.branchCode,
+      address: normalizedRow.address,
+      phone: normalizedRow.phone,
+      isActive: normalizedRow.isActive,
+      isDefault: normalizedRow.isDefault,
+    });
+  }
 
   useEffect(() => {
     try {
@@ -18770,10 +19492,11 @@ function StocksManagementModule() {
     try {
       const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : DEFAULT_STOCKS_DATA;
+      const normalizedWorkspace = normalizeStocksWorkspaceData(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA);
       const nextData = {
-        ...(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA),
+        ...normalizedWorkspace,
         settings: {
-          ...((parsed && typeof parsed === "object" && parsed.settings) ? parsed.settings : {}),
+          ...normalizedWorkspace.settings,
           stockAlerts: {
             ...stockSettings,
             lowStockThreshold: normalizedThreshold,
@@ -18796,189 +19519,400 @@ function StocksManagementModule() {
         storageKey={STOCKS_STORAGE_KEY}
         statsBuilder={statsBuilder}
         statIcons={["bi-box-seam", "bi-exclamation-triangle", "bi-diagram-3"]}
-        extraTabs={[{ key: "settings", label: "Setting" }]}
-        renderExtraTabContent={({ activeTab }) => (
-          activeTab === "settings" ? (
-            <div className="card p-3">
-              <h5 className="mb-2">Inventory Settings</h5>
-              <p className="text-secondary mb-3">Configure low stock alert threshold and notification targets.</p>
+        extraTabs={[{ key: "branches", label: "Branch" }, { key: "settings", label: "Setting" }]}
+        renderExtraTabContent={({ activeTab, moduleData, setModuleData }) => {
+          const normalizedWorkspace = normalizeStocksWorkspaceData(moduleData);
+          const stockBranches = Array.isArray(normalizedWorkspace.branches) ? normalizedWorkspace.branches : [];
+          const stockItems = Array.isArray(normalizedWorkspace.items) ? normalizedWorkspace.items : [];
+          const branchSummaryRows = stockBranches.map((branch) => {
+            const branchItems = stockItems.filter((item) => String(item?.branchId || "").trim() === String(branch.id || "").trim());
+            return {
+              ...branch,
+              itemCount: branchItems.length,
+              totalQty: branchItems.reduce((sum, item) => sum + Number(parseNumber(item?.qty) || 0), 0),
+            };
+          });
+          const handleBranchSubmit = (event) => {
+            event.preventDefault();
+            const branchName = String(stockBranchForm.branchName || "").trim();
+            if (!branchName) {
+              return;
+            }
+            const branchCode = String(stockBranchForm.branchCode || "").trim() || branchName.slice(0, 12).toUpperCase().replace(/\s+/g, "_");
+            const nextBranch = normalizeStockBranch({
+              id: editingStockBranchId || `branch_${Date.now()}`,
+              branchName,
+              branchCode,
+              address: String(stockBranchForm.address || "").trim(),
+              phone: String(stockBranchForm.phone || "").trim(),
+              isActive: Boolean(stockBranchForm.isActive),
+              isDefault: Boolean(stockBranchForm.isDefault),
+            }, stockBranches.length);
+            setModuleData((prev) => {
+              const previousBranches = Array.isArray(prev.branches) ? prev.branches : [];
+              const exists = previousBranches.some((row) => String(row?.id || "").trim() === nextBranch.id);
+              const nextBranches = exists
+                ? previousBranches.map((row) => (String(row?.id || "").trim() === nextBranch.id ? { ...row, ...nextBranch } : row))
+                : [nextBranch, ...previousBranches];
+              return normalizeStocksWorkspaceData({
+                ...prev,
+                branches: nextBranches,
+              });
+            });
+            resetStockBranchForm();
+          };
 
-              <div className="row g-3">
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">Low Stock Alert Below Qty *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="form-control"
-                    value={stockSettings.lowStockThreshold || ""}
-                    onChange={(event) => setStockSettings((prev) => ({ ...prev, lowStockThreshold: event.target.value }))}
-                    placeholder="5"
-                  />
-                </div>
-                <div className="col-12 col-xl-5">
-                  <label className="form-label small text-secondary mb-1">Alert Departments</label>
-                  <div className="crm-inline-suggestions-wrap">
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Search and select departments"
-                      value={stockDepartmentSearch}
-                      onFocus={() => setStockDepartmentSearchOpen(true)}
-                      onClick={() => setStockDepartmentSearchOpen(true)}
-                      onBlur={() => window.setTimeout(() => setStockDepartmentSearchOpen(false), 120)}
-                      onChange={(event) => {
-                        setStockDepartmentSearch(event.target.value);
-                        setStockDepartmentSearchOpen(true);
-                      }}
-                    />
-                    {stockDepartmentSearchOpen ? (
-                      stockDepartmentMatches.length ? (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__group">
-                            <div className="crm-inline-suggestions__title">Departments</div>
-                            {stockDepartmentMatches.map((department) => (
-                              <button
-                                key={`stock-setting-dept-${department}`}
-                                type="button"
-                                className="crm-inline-suggestions__item"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => {
-                                  toggleStockAlertSelection("departments", department);
-                                  setStockDepartmentSearch("");
-                                  setStockDepartmentSearchOpen(false);
-                                }}
-                              >
-                                <span className="crm-inline-suggestions__item-main">{department}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__item">
-                            <span className="crm-inline-suggestions__item-main">No departments found</span>
-                          </div>
-                        </div>
-                      )
-                    ) : null}
-                  </div>
-                  <div className="d-flex flex-wrap gap-2 mt-2">
-                    {(stockSettings.departments || []).length ? (stockSettings.departments || []).map((department) => (
-                      <span key={`stock-setting-dept-chip-${department}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
-                        <button
-                          type="button"
-                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
-                          onClick={() => toggleStockAlertSelection("departments", department)}
-                          aria-label={`Remove ${department}`}
-                        >
-                          &times;
-                        </button>
-                        <span>{department}</span>
-                      </span>
-                    )) : <div className="small text-secondary">No departments selected.</div>}
-                  </div>
-                </div>
-
-                <div className="col-12 col-xl-5">
-                  <label className="form-label small text-secondary mb-1">Alert Users</label>
-                  <div className="crm-inline-suggestions-wrap">
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Search and select users"
-                      value={stockUserSearch}
-                      onFocus={() => setStockUserSearchOpen(true)}
-                      onClick={() => setStockUserSearchOpen(true)}
-                      onBlur={() => window.setTimeout(() => setStockUserSearchOpen(false), 120)}
-                      onChange={(event) => {
-                        setStockUserSearch(event.target.value);
-                        setStockUserSearchOpen(true);
-                      }}
-                    />
-                    {stockUserSearchOpen ? (
-                      stockUserMatches.length ? (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__group">
-                            <div className="crm-inline-suggestions__title">Users</div>
-                            {stockUserMatches.map((user) => (
-                              <button
-                                key={`stock-setting-user-${user}`}
-                                type="button"
-                                className="crm-inline-suggestions__item"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => {
-                                  toggleStockAlertSelection("users", user);
-                                  setStockUserSearch("");
-                                  setStockUserSearchOpen(false);
-                                }}
-                              >
-                                <span className="crm-inline-suggestions__item-main">{user}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__item">
-                            <span className="crm-inline-suggestions__item-main">No users found</span>
-                          </div>
-                        </div>
-                      )
-                    ) : null}
-                  </div>
-                  <div className="d-flex flex-wrap gap-2 mt-2">
-                    {(stockSettings.users || []).length ? (stockSettings.users || []).map((user) => (
-                      <span key={`stock-setting-user-chip-${user}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
-                        <button
-                          type="button"
-                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
-                          onClick={() => toggleStockAlertSelection("users", user)}
-                          aria-label={`Remove ${user}`}
-                        >
-                          &times;
-                        </button>
-                        <span>{user}</span>
-                      </span>
-                    )) : <div className="small text-secondary">No users selected.</div>}
-                  </div>
-                </div>
-
-                <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-2">Alert Notifications</label>
-                  <div className="d-flex flex-wrap gap-3">
-                    {[
-                      { key: "email", label: "Email" },
-                      { key: "whatsapp", label: "Whatsapp" },
-                      { key: "portalInbox", label: "Portal Inbox" },
-                    ].map((channel) => (
-                      <label key={channel.key} className="form-check d-flex align-items-center gap-2 mb-0">
+          if (activeTab === "branches") {
+            return (
+              <div className="d-flex flex-column gap-3">
+                <div className="card p-3">
+                  <h5 className="mb-2">Branch Management</h5>
+                  <p className="text-secondary mb-3">
+                    Create and update stock locations for the organization. Categories remain shared at organization level.
+                  </p>
+                  <form className="d-flex flex-column gap-3" onSubmit={handleBranchSubmit}>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6 col-xl-2">
+                        <label className="form-label small text-secondary mb-1">Branch Name *</label>
                         <input
-                          type="checkbox"
-                          className="form-check-input mt-0"
-                          checked={Boolean(stockSettings.notifications?.[channel.key])}
-                          onChange={(event) => setStockSettings((prev) => ({
-                            ...prev,
-                            notifications: {
-                              ...(prev.notifications || {}),
-                              [channel.key]: event.target.checked,
-                            },
-                          }))}
+                          type="text"
+                          className="form-control"
+                          value={stockBranchForm.branchName}
+                          onChange={(event) => setStockBranchForm((prev) => ({ ...prev, branchName: event.target.value }))}
+                          placeholder="Head Office"
                         />
-                        <span>{channel.label}</span>
-                      </label>
-                    ))}
-                  </div>
+                      </div>
+                      <div className="col-12 col-md-6 col-xl-2">
+                        <label className="form-label small text-secondary mb-1">Branch Code *</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={stockBranchForm.branchCode}
+                          onChange={(event) => setStockBranchForm((prev) => ({ ...prev, branchCode: event.target.value }))}
+                          placeholder="HO / WH / ST01"
+                        />
+                      </div>
+                      <div className="col-12 col-md-6 col-xl-3">
+                        <label className="form-label small text-secondary mb-1">Address</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={stockBranchForm.address}
+                          onChange={(event) => setStockBranchForm((prev) => ({ ...prev, address: event.target.value }))}
+                          placeholder="Branch address"
+                        />
+                      </div>
+                      <div className="col-12 col-md-6 col-xl-2">
+                        <label className="form-label small text-secondary mb-1">Phone</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={stockBranchForm.phone}
+                          onChange={(event) => setStockBranchForm((prev) => ({ ...prev, phone: event.target.value }))}
+                          placeholder="Phone number"
+                        />
+                      </div>
+                      <div className="col-12 col-md-6 col-xl-3">
+                        <div className="d-flex flex-wrap flex-xl-nowrap align-items-end gap-2 w-100 h-100">
+                          <div className="form-check mb-0">
+                            <input
+                              id="stock-branch-active"
+                              className="form-check-input"
+                              type="checkbox"
+                              checked={Boolean(stockBranchForm.isActive)}
+                              onChange={(event) => setStockBranchForm((prev) => ({ ...prev, isActive: event.target.checked }))}
+                            />
+                            <label className="form-check-label small text-secondary" htmlFor="stock-branch-active">
+                              Active
+                            </label>
+                          </div>
+                          <div className="form-check mb-0">
+                            <input
+                              id="stock-branch-default"
+                              className="form-check-input"
+                              type="checkbox"
+                              checked={Boolean(stockBranchForm.isDefault)}
+                              onChange={(event) => setStockBranchForm((prev) => ({ ...prev, isDefault: event.target.checked }))}
+                            />
+                            <label className="form-check-label small text-secondary" htmlFor="stock-branch-default">
+                              Default
+                            </label>
+                          </div>
+                          <button type="submit" className="btn btn-success btn-sm px-4 align-self-end">
+                            Create
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </form>
                 </div>
 
-                <div className="col-12 col-xl-6 d-flex align-items-end justify-content-xl-end">
-                  <button type="button" className="btn btn-success btn-sm" onClick={saveStockAlertSettings}>
-                    Save Settings
-                  </button>
+                <div className="row g-3" style={{ marginTop: "20px" }}>
+                  <div className="col-12 col-xl-6">
+                    <SearchablePaginatedTableCard
+                      title="Branch List"
+                      badgeLabel={`${stockBranches.length} items`}
+                      rows={stockBranches}
+                      columns={[
+                        { key: "branchName", label: "Branch Name" },
+                        { key: "branchCode", label: "Branch Code" },
+                        { key: "address", label: "Address" },
+                        { key: "phone", label: "Phone" },
+                        { key: "isActive", label: "Status" },
+                        { key: "isDefault", label: "Default" },
+                      ]}
+                      withoutOuterCard
+                      searchPlaceholder="Search branches"
+                      noRowsText="No branches added yet."
+                      searchBy={(row) => [
+                        row.branchName || "",
+                        row.branchCode || "",
+                        row.address || "",
+                        row.phone || "",
+                        row.isActive ? "active" : "inactive",
+                        row.isDefault ? "default" : "",
+                      ].join(" ")}
+                      renderCells={(row) => [
+                        row.branchName || "-",
+                        row.branchCode || "-",
+                        row.address || "-",
+                        row.phone || "-",
+                        row.isActive ? "Active" : "Inactive",
+                        row.isDefault ? "Yes" : "No",
+                      ]}
+                      renderActions={(row) => (
+                        <div className="d-inline-flex gap-2">
+                          <button type="button" className="btn btn-sm btn-outline-info" onClick={() => startEditingStockBranch(row)}>
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    />
+                  </div>
+                  <div className="col-12 col-xl-6">
+                    <SearchablePaginatedTableCard
+                      title="Branch Stock Summary"
+                      badgeLabel={`${branchSummaryRows.length} branches`}
+                      rows={branchSummaryRows}
+                      columns={[
+                        { key: "branchName", label: "Branch Name" },
+                        { key: "branchCode", label: "Branch Code" },
+                        { key: "itemCount", label: "Items" },
+                        { key: "totalQty", label: "Qty" },
+                        { key: "isActive", label: "Status" },
+                        { key: "isDefault", label: "Default" },
+                      ]}
+                      withoutOuterCard
+                      searchPlaceholder="Search branch summary"
+                      noRowsText="No branches available yet."
+                      searchBy={(row) => [
+                        row.branchName || "",
+                        row.branchCode || "",
+                        row.itemCount ?? "",
+                        row.totalQty ?? "",
+                        row.isActive ? "active" : "inactive",
+                        row.isDefault ? "default" : "",
+                      ].join(" ")}
+                      renderCells={(row) => [
+                        row.branchName || "-",
+                        row.branchCode || "-",
+                        String(row.itemCount ?? 0),
+                        String(row.totalQty ?? 0),
+                        row.isActive ? "Active" : "Inactive",
+                        row.isDefault ? "Yes" : "No",
+                      ]}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null
-        )}
+            );
+          }
+
+          if (activeTab === "settings") {
+            return (
+              <div className="card p-3">
+                <h5 className="mb-2">Inventory Settings</h5>
+                <p className="text-secondary mb-3">Configure low stock alert threshold and notification targets.</p>
+
+                <div className="row g-3">
+                  <div className="col-12 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Low Stock Alert Below Qty *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="form-control"
+                      value={stockSettings.lowStockThreshold || ""}
+                      onChange={(event) => setStockSettings((prev) => ({ ...prev, lowStockThreshold: event.target.value }))}
+                      placeholder="5"
+                    />
+                  </div>
+                  <div className="col-12 col-xl-5">
+                    <label className="form-label small text-secondary mb-1">Alert Departments</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Search and select departments"
+                        value={stockDepartmentSearch}
+                        onFocus={() => setStockDepartmentSearchOpen(true)}
+                        onClick={() => setStockDepartmentSearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setStockDepartmentSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          setStockDepartmentSearch(event.target.value);
+                          setStockDepartmentSearchOpen(true);
+                        }}
+                      />
+                      {stockDepartmentSearchOpen ? (
+                        stockDepartmentMatches.length ? (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Departments</div>
+                              {stockDepartmentMatches.map((department) => (
+                                <button
+                                  key={`stock-setting-dept-${department}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    toggleStockAlertSelection("departments", department);
+                                    setStockDepartmentSearch("");
+                                    setStockDepartmentSearchOpen(false);
+                                  }}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{department}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No departments found</span>
+                            </div>
+                          </div>
+                        )
+                      ) : null}
+                    </div>
+                    <div className="d-flex flex-wrap gap-2 mt-2">
+                      {(stockSettings.departments || []).length ? (stockSettings.departments || []).map((department) => (
+                        <span key={`stock-setting-dept-chip-${department}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                            onClick={() => toggleStockAlertSelection("departments", department)}
+                            aria-label={`Remove ${department}`}
+                          >
+                            &times;
+                          </button>
+                          <span>{department}</span>
+                        </span>
+                      )) : <div className="small text-secondary">No departments selected.</div>}
+                    </div>
+                  </div>
+
+                  <div className="col-12 col-xl-5">
+                    <label className="form-label small text-secondary mb-1">Alert Users</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Search and select users"
+                        value={stockUserSearch}
+                        onFocus={() => setStockUserSearchOpen(true)}
+                        onClick={() => setStockUserSearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setStockUserSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          setStockUserSearch(event.target.value);
+                          setStockUserSearchOpen(true);
+                        }}
+                      />
+                      {stockUserSearchOpen ? (
+                        stockUserMatches.length ? (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Users</div>
+                              {stockUserMatches.map((user) => (
+                                <button
+                                  key={`stock-setting-user-${user}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    toggleStockAlertSelection("users", user);
+                                    setStockUserSearch("");
+                                    setStockUserSearchOpen(false);
+                                  }}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{user}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No users found</span>
+                            </div>
+                          </div>
+                        )
+                      ) : null}
+                    </div>
+                    <div className="d-flex flex-wrap gap-2 mt-2">
+                      {(stockSettings.users || []).length ? (stockSettings.users || []).map((user) => (
+                        <span key={`stock-setting-user-chip-${user}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                            onClick={() => toggleStockAlertSelection("users", user)}
+                            aria-label={`Remove ${user}`}
+                          >
+                            &times;
+                          </button>
+                          <span>{user}</span>
+                        </span>
+                      )) : <div className="small text-secondary">No users selected.</div>}
+                    </div>
+                  </div>
+
+                  <div className="col-12 col-xl-6">
+                    <label className="form-label small text-secondary mb-2">Alert Notifications</label>
+                    <div className="d-flex flex-wrap gap-3">
+                      {[
+                        { key: "email", label: "Email" },
+                        { key: "whatsapp", label: "Whatsapp" },
+                        { key: "portalInbox", label: "Portal Inbox" },
+                      ].map((channel) => (
+                        <label key={channel.key} className="form-check d-flex align-items-center gap-2 mb-0">
+                          <input
+                            type="checkbox"
+                            className="form-check-input mt-0"
+                            checked={Boolean(stockSettings.notifications?.[channel.key])}
+                            onChange={(event) => setStockSettings((prev) => ({
+                              ...prev,
+                              notifications: {
+                                ...(prev.notifications || {}),
+                                [channel.key]: event.target.checked,
+                              },
+                            }))}
+                          />
+                          <span>{channel.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="col-12 col-xl-6 d-flex align-items-end justify-content-xl-end">
+                    <button type="button" className="btn btn-success btn-sm" onClick={saveStockAlertSettings}>
+                      Save Settings
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return null;
+        }}
         renderInventoryItemActions={({ row, onEditRow, onDeleteRow }) => (
           <div className="d-inline-flex gap-2">
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
@@ -19070,8 +20004,26 @@ function StocksManagementModule() {
 }
 
 function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false, headingTitle = "Accounts" }) {
-  const [activeTab, setActiveTab] = useState(subscriptionsOnly ? "subscriptions" : (initialTab || "overview"));
-  const [overviewDocTab, setOverviewDocTab] = useState("invoice");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const accountsQueryParams = useMemo(() => new URLSearchParams(String(location.search || "")), [location.search]);
+  const accountsQueryTab = String(accountsQueryParams.get("tab") || "").trim().toLowerCase();
+  const accountsQuerySearch = String(accountsQueryParams.get("search") || "").trim();
+  const [activeTab, setActiveTab] = useState(() => {
+    if (subscriptionsOnly) {
+      return "subscriptions";
+    }
+    if (accountsQueryTab && new Set(["overview", "invoices", "estimates", "gst", "templates", "items", "customers", "subscriptions"]).has(accountsQueryTab)) {
+      return accountsQueryTab;
+    }
+    return String(initialTab || "overview").trim().toLowerCase() || "overview";
+  });
+  const [overviewDocTab, setOverviewDocTab] = useState(() => {
+    if (accountsQueryTab === "estimates") {
+      return "estimate";
+    }
+    return "invoice";
+  });
   const [moduleData, setModuleData] = useState(DEFAULT_ACCOUNTS_DATA);
   const [orgBillingCountry, setOrgBillingCountry] = useState("India");
   const [isAccountsLoading, setIsAccountsLoading] = useState(true);
@@ -19149,9 +20101,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     try {
       const raw = window.localStorage.getItem(STOCKS_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      return parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA;
+      return normalizeStocksWorkspaceData(parsed && typeof parsed === "object" ? parsed : DEFAULT_STOCKS_DATA);
     } catch {
-      return DEFAULT_STOCKS_DATA;
+      return normalizeStocksWorkspaceData(DEFAULT_STOCKS_DATA);
     }
   });
   const [orgBillingCurrency, setOrgBillingCurrency] = useState(() => getOrgCurrency());
@@ -19219,6 +20171,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   useEffect(() => {
     setAccountsFormNotice("");
   }, [activeTab]);
+
+  useEffect(() => {
+    if (normalizeCountryName(orgBillingCountry) !== "india") {
+      return;
+    }
+    setModuleData((prev) => {
+      const current = _normalizeAccountsWorkspacePayload(prev);
+      if (Array.isArray(current.gstTemplates) && current.gstTemplates.length) {
+        return prev;
+      }
+      return {
+        ...current,
+        gstTemplates: createDefaultIndiaGstTemplates(),
+      };
+    });
+  }, [orgBillingCountry]);
 
   useEffect(() => {
     let active = true;
@@ -19464,6 +20432,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     [moduleData.itemMasters]
   );
   const inventoryItems = useMemo(() => Array.isArray(inventoryWorkspace?.items) ? inventoryWorkspace.items : [], [inventoryWorkspace]);
+  const inventoryBranches = useMemo(() => Array.isArray(inventoryWorkspace?.branches) ? inventoryWorkspace.branches : [], [inventoryWorkspace]);
   const inventoryItemLookup = useMemo(
     () => new Map(inventoryItems.map((row) => [String(row.id || ""), row])),
     [inventoryItems]
@@ -20708,9 +21677,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }
 
   function saveInventoryWorkspace(nextWorkspace) {
-    setInventoryWorkspace(nextWorkspace);
+    const normalizedWorkspace = normalizeStocksWorkspaceData(nextWorkspace);
+    setInventoryWorkspace(normalizedWorkspace);
     try {
-      window.localStorage.setItem(STOCKS_STORAGE_KEY, JSON.stringify(nextWorkspace));
+      window.localStorage.setItem(STOCKS_STORAGE_KEY, JSON.stringify(normalizedWorkspace));
     } catch {
       // ignore local storage quota/storage errors
     }
@@ -21137,6 +22107,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setActiveTab("invoices");
   }
 
+  const accountsInvoiceSearchTerm = activeTab === "invoices" ? accountsQuerySearch : "";
+  const accountsEstimateSearchTerm = activeTab === "estimates" ? accountsQuerySearch : "";
+
   function deleteDocument(kind, id) {
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     setModuleData((prev) => {
@@ -21229,6 +22202,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     customerOptions,
     taxUi,
     inventoryItems,
+    inventoryBranches = [],
     itemMasterOptions,
     enableItemPicker = true,
     applyBillingTemplateToDocument,
@@ -21340,15 +22314,25 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     );
     const canAddPartialPayment = Boolean(canEditPaymentDetails && documentLineItemsComplete && hasPartialPaymentInput);
     const billingItemSource = useMemo(() => {
-      const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => ({
-        id: String(item?.id || "").trim(),
-        name: String(item?.itemName || "").trim(),
-        source: "inventory",
-        onHandQty: parseNumber(item?.qty),
-        sku: String(item?.sku || "").trim(),
-        hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
-        hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
-      })).filter((item) => item.id && item.name);
+      const inventorySource = (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => {
+        const name = String(item?.itemName || "").trim();
+        const branchId = String(item?.branchId || "").trim();
+        const branchLabel = getStockBranchDisplayName(inventoryBranches, branchId);
+        const displayName = branchLabel ? `${name} (${branchLabel})` : name;
+        return {
+          id: String(item?.id || "").trim(),
+          name,
+          displayName,
+          branchId,
+          branchName: branchLabel,
+          source: "inventory",
+          onHandQty: parseNumber(item?.qty),
+          sku: String(item?.sku || "").trim(),
+          searchText: [name, displayName, item?.id || "", item?.sku || "", branchLabel, item?.hsnSacCode || item?.hsnCode || item?.sacCode || ""].join(" ").toLowerCase(),
+          hsnSacType: inferHsnSacTypeFromItem(item, "HSN"),
+          hsnSacCode: String(item?.hsnSacCode || item?.hsnCode || item?.sacCode || "").trim(),
+        };
+      }).filter((item) => item.id && item.name);
       const masterSource = (Array.isArray(itemMasterOptions) ? itemMasterOptions : []).map((item) => ({
         id: String(item?.id || "").trim(),
         name: String(item?.name || "").trim(),
@@ -21376,16 +22360,21 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         .filter((item) => item.name);
       const seenNames = new Set();
       return [...inventorySource, ...masterSource, ...recentSource].filter((item) => {
-        const key = item.name.toLowerCase();
+        const key = `${item.source || "item"}::${String(item.id || item.displayName || item.name || "").toLowerCase()}`;
         if (seenNames.has(key)) return false;
         seenNames.add(key);
         return true;
       });
-    }, [inventoryItems, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
+    }, [inventoryItems, inventoryBranches, itemMasterOptions, moduleData.invoices, moduleData.estimates, moduleData.salesOrders]);
     const resolveLineItemByName = (value) => {
       const normalizedValue = String(value || "").trim().toLowerCase();
       if (!normalizedValue) return null;
-      return billingItemSource.find((item) => String(item?.name || "").trim().toLowerCase() === normalizedValue) || null;
+      return billingItemSource.find((item) => [
+        item.name,
+        item.displayName,
+        item.id,
+        item.sku,
+      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(normalizedValue)) || null;
     };
     const setPrimaryItemText = (lineId, rawValue) => {
       const nextValue = String(rawValue || "");
@@ -21443,7 +22432,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const itemPickerMatches = billingItemSource
       .filter((item) => {
         if (!itemPickerQueryLower) return true;
-        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
         return haystack.includes(itemPickerQueryLower);
       })
       .slice(0, 40);
@@ -21451,7 +22440,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const itemPickerMasterMatches = itemPickerMatches.filter((item) => item.source === "itemMaster");
     const itemPickerRecentMatches = itemPickerMatches.filter((item) => item.source === "recent");
     const itemPickerCanUseCustom = Boolean(itemPickerQuery)
-      && !itemPickerMatches.some((item) => String(item.name || "").toLowerCase() === itemPickerQueryLower);
+      && !itemPickerMatches.some((item) => [
+        item.name,
+        item.displayName,
+        item.id,
+        item.sku,
+      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(itemPickerQueryLower));
     const openItemPicker = (line) => {
       if (!enableItemPicker) return;
       const seed = String(line?.description || "").trim();
@@ -21664,16 +22658,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   ))}
                 </select>
               </div>
-              {kind === "invoice" ? (
-                <div className="col-12 col-md-6 col-xl-3">
-                  <label className="form-label small text-secondary mb-1">Delivery Status</label>
-                  <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
-                    {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
-                      <option key={`inv-del-${status}`} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -21703,12 +22687,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     const lineMatches = billingItemSource
                       .filter((item) => {
                         if (!lineQuery) return true;
-                        const haystack = `${item.name || ""} ${item.id || ""} ${item.sku || ""} ${item.hsnSacCode || ""}`.toLowerCase();
+                        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
                         return haystack.includes(lineQuery);
                       })
                       .slice(0, 8);
                     const canUseCustomLine = Boolean(lineQuery)
-                      && !lineMatches.some((item) => String(item.name || "").toLowerCase() === lineQuery);
+                      && !lineMatches.some((item) => [
+                        item.name,
+                        item.displayName,
+                        item.id,
+                        item.sku,
+                      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(lineQuery));
                     const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
                     return (
                       <tr key={line.id}>
@@ -21758,11 +22747,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                           className="crm-inline-suggestions__item"
                                           onMouseDown={() => applyLineItemFromSearch(line.id, item)}
                                         >
-                                          <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
+                                          <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
                                           <span className="crm-inline-suggestions__item-sub">
                                             {[
                                               item.source,
                                               item.sku ? `SKU: ${item.sku}` : "",
+                                              item.branchName ? `Branch: ${item.branchName}` : "",
                                               item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : "",
                                             ].filter(Boolean).join(" | ")}
                                           </span>
@@ -21866,41 +22856,52 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                       </div>
                     ) : null}
                   </div>
-                  <div className="wz-item-picker-modal__body">
+                  <div className="wz-item-picker-modal__body row g-3">
                     {itemPickerCanUseCustom ? (
-                      <div className="crm-inline-suggestions__group">
+                      <div className="col-12">
+                        <div className="crm-inline-suggestions__group">
                         <div className="crm-inline-suggestions__title">Custom</div>
                         <button type="button" className="crm-inline-suggestions__item" onClick={applyCustomPickedText}>
                           <span className="crm-inline-suggestions__item-main">Add your custom text: {itemPickerQuery}</span>
                           <span className="crm-inline-suggestions__item-sub">Manual entry</span>
                         </button>
                       </div>
+                      </div>
                     ) : null}
                     {itemPickerInventoryMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Inventory Items</div>
-                        {itemPickerInventoryMatches.map((item) => (
-                          <button
-                            key={`${kind}-picker-inv-${item.id || item.name}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onClick={() => applyPickedItem(item)}
-                          >
-                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
-                            <span className="crm-inline-suggestions__item-sub">
-                              Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
-                              {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
-                              {item.sku ? ` | SKU: ${item.sku}` : ""}
-                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
-                            </span>
-                          </button>
-                        ))}
+                      <div className="col-12 col-lg-5">
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Inventory Items</div>
+                          {itemPickerInventoryMatches.map((item) => (
+                            <button
+                              key={`${kind}-picker-inv-${item.id || item.name}`}
+                              type="button"
+                              className="crm-inline-suggestions__item"
+                              onClick={() => applyPickedItem(item)}
+                            >
+                              <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
+                              <span className="crm-inline-suggestions__item-sub">
+                                Available Qty: {availableInventoryQty(item.id, form, itemPickerState.lineId)}
+                                {Number.isFinite(item.onHandQty) ? ` | On hand: ${item.onHandQty}` : ""}
+                                {item.sku ? ` | SKU: ${item.sku}` : ""}
+                                {item.branchName ? (
+                                  <>
+                                    {" | Branch: "}
+                                    <span className="fw-semibold">{item.branchName}</span>
+                                  </>
+                                ) : ""}
+                                {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                     {itemPickerMasterMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Item Masters</div>
-                        <div className="row g-3">
+                      <div className="col-12 col-lg-7">
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Item Masters</div>
+                          <div className="row g-3">
                           <div className="col-12 col-md-6">
                             <div className="crm-inline-suggestions__title mb-2">Products</div>
                             {itemPickerMasterMatches
@@ -21945,26 +22946,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                           </div>
                         </div>
                       </div>
-                    ) : null}
-                    {itemPickerRecentMatches.length ? (
-                      <div className="crm-inline-suggestions__group">
-                        <div className="crm-inline-suggestions__title">Recent Items</div>
-                        {itemPickerRecentMatches.map((item) => (
-                          <button
-                            key={`${kind}-picker-recent-${item.id || item.name}`}
-                            type="button"
-                            className="crm-inline-suggestions__item"
-                            onClick={() => applyPickedItem(item)}
-                          >
-                            <span className="crm-inline-suggestions__item-main">{item.name || "-"}</span>
-                            <span className="crm-inline-suggestions__item-sub">
-                              Recent usage
-                              {item.recentQty ? ` | Qty: ${item.recentQty}` : ""}
-                              {item.recentRate ? ` | Rate: ${item.recentRate}` : ""}
-                              {item.hsnSacCode ? ` | ${normalizeHsnSacType(item.hsnSacType || "HSN")}: ${item.hsnSacCode}` : ""}
-                            </span>
-                          </button>
-                        ))}
                       </div>
                     ) : null}
                     {!itemPickerCanUseCustom && !itemPickerInventoryMatches.length && !itemPickerMasterMatches.length && !itemPickerRecentMatches.length ? (
@@ -21987,8 +22968,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
                 <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
                 <textarea className="form-control mb-3" rows="2" value={form.termsText || ""} onChange={(e) => setField("termsText", e.target.value)} placeholder="Terms and conditions" />
-                <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
-                <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+                <div className="row g-3 align-items-start">
+                  <div className="col-12 col-xl-9">
+                    <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
+                    <textarea className="form-control" rows="2" value={form.paymentStatusNotes || ""} onChange={(e) => setField("paymentStatusNotes", e.target.value)} placeholder="Internal payment follow-up notes for this bill" />
+                  </div>
+                  {kind === "invoice" ? (
+                    <div className="col-12 col-xl-3">
+                      <label className="form-label small text-secondary mb-1">Delivery Status</label>
+                      <select className="form-select" value={form.deliveryStatus || "Pending"} onChange={(e) => setField("deliveryStatus", e.target.value)}>
+                        {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+                          <option key={`inv-del-${status}`} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="border rounded p-3 mb-3" style={{ marginTop: "30px" }}>
                   <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
                     <div className="fw-semibold">Payment Details</div>
@@ -22164,7 +23159,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     );
   }
 
-  function DocumentTable({ kind, rows, statusOptions }) {
+  function DocumentTable({ kind, rows, statusOptions, initialSearchTerm = "" }) {
     const gstRows = moduleData.gstTemplates || [];
     return (
       <SearchablePaginatedTableCard
@@ -22182,7 +23177,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           { key: "issueDate", label: "Date" },
           { key: "dueDate", label: "Due Date" },
           { key: "total", label: "Total" },
-          { key: "gstTemplateId", label: taxUi.templateSingular },
+          { key: "crmReferenceId", label: "CRM" },
           { key: "paymentStatus", label: "Payment Status" },
           ...(kind === "invoice" ? [
             { key: "deliveryStatus", label: "Delivery Status" },
@@ -22191,7 +23186,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         ]}
         searchPlaceholder={`Search ${kind}s`}
         noRowsText="No records yet."
-        searchBy={(row) => [row.docNo, row.customerName, row.status, row.issueDate, row.dueDate].join(" ")}
+        initialSearchTerm={initialSearchTerm}
+        searchBy={(row) => [row.docNo, row.customerName, row.crmReferenceId, row.status, row.issueDate, row.dueDate].join(" ")}
         renderCells={(row) => {
           const totals = computeDocumentTotals(row, gstRows);
           return [
@@ -22200,7 +23196,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             formatDateLikeCellValue("issueDate", row.issueDate, "-"),
             formatDateLikeCellValue("dueDate", row.dueDate, "-"),
             formatInr(totals.grandTotal),
-            resolveGstTemplateName(row.gstTemplateId),
+            row.crmReferenceId || "-",
             (
               <select
                 className="form-select form-select-sm"
@@ -22257,11 +23253,24 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               Edit
             </button>
             {kind === "estimate" ? (
-              row.convertedInvoiceId ? (
-                <button type="button" className="btn btn-sm btn-outline-success" disabled>
-                  Converted to Invoice
-                </button>
-              ) : (
+              row.convertedInvoiceId ? (() => {
+                const linkedInvoice = (moduleData.invoices || []).find((invoiceRow) => String(invoiceRow.id || "").trim() === String(row.convertedInvoiceId || "").trim());
+                return (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-success"
+                    title={linkedInvoice ? `Open ${String(linkedInvoice.docNo || "").trim() || "converted invoice"} for editing` : "Converted invoice not found"}
+                    onClick={() => {
+                      if (linkedInvoice) {
+                        editDocument("invoice", linkedInvoice);
+                      }
+                    }}
+                    disabled={!linkedInvoice}
+                  >
+                    Converted
+                  </button>
+                );
+              })() : (
                 <button type="button" className="btn btn-sm btn-success" onClick={() => convertEstimateToInvoice(row)}>
                   Convert to Invoice
                 </button>
@@ -22380,9 +23389,19 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           </div>
           <div>
             {overviewDocTab === "invoice" ? (
-              <DocumentTable kind="invoice" rows={moduleData.invoices || []} statusOptions={INVOICE_STATUS_OPTIONS} />
+              <DocumentTable
+                kind="invoice"
+                rows={moduleData.invoices || []}
+                statusOptions={INVOICE_STATUS_OPTIONS}
+                initialSearchTerm={accountsInvoiceSearchTerm}
+              />
             ) : (
-              <DocumentTable kind="estimate" rows={moduleData.estimates || []} statusOptions={ESTIMATE_STATUS_OPTIONS} />
+              <DocumentTable
+                kind="estimate"
+                rows={moduleData.estimates || []}
+                statusOptions={ESTIMATE_STATUS_OPTIONS}
+                initialSearchTerm={accountsEstimateSearchTerm}
+              />
             )}
           </div>
         </>
@@ -23133,6 +24152,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             customerOptions={customerOptions}
             taxUi={taxUi}
             inventoryItems={inventoryItems}
+            inventoryBranches={inventoryBranches}
             itemMasterOptions={itemMasterOptions}
             applyBillingTemplateToDocument={applyBillingTemplateToDocument}
             addDocLine={addDocLine}
@@ -23166,6 +24186,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             customerOptions={customerOptions}
             taxUi={taxUi}
             inventoryItems={inventoryItems}
+            inventoryBranches={inventoryBranches}
             itemMasterOptions={itemMasterOptions}
             applyBillingTemplateToDocument={applyBillingTemplateToDocument}
             addDocLine={addDocLine}
@@ -23193,6 +24214,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </button>
             <button
               type="button"
+              className={`btn btn-sm ${subscriptionTopTab === "categories" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setSubscriptionTopTab("categories")}
+            >
+              Categories
+            </button>
+            <button
+              type="button"
               className={`btn btn-sm ${subscriptionTopTab === "alerts" ? "btn-primary" : "btn-outline-light"}`}
               onClick={() => setSubscriptionTopTab("alerts")}
             >
@@ -23200,162 +24228,164 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </button>
           </div>
 
+          {subscriptionTopTab === "categories" ? (
+            <div className="row g-3">
+              <div className="col-12 col-xl-6">
+                <div className="card p-3">
+                  <h6 className="mb-3">{editingSubscriptionCategoryId ? "Edit Category" : "Create Category"}</h6>
+                  <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionCategory}>
+                    <div className="row g-3">
+                      <div className="col-12">
+                        <label className="form-label small text-secondary mb-1">Category Name</label>
+                        <input
+                          className="form-control"
+                          value={subscriptionCategoryForm.name || ""}
+                          onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, name: event.target.value }))}
+                          placeholder="Cloud Hosting"
+                        />
+                      </div>
+                      <div className="col-12">
+                        <label className="form-label small text-secondary mb-1">Description</label>
+                        <textarea
+                          className="form-control"
+                          rows={3}
+                          value={subscriptionCategoryForm.description || ""}
+                          onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, description: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2">
+                      <button type="submit" className="btn btn-success btn-sm">
+                        {editingSubscriptionCategoryId ? "Update" : "Create"}
+                      </button>
+                      {editingSubscriptionCategoryId ? (
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          onClick={resetSubscriptionCategoryForm}
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </form>
+                </div>
+
+                <div className="mt-3" style={{ paddingTop: "25px" }}>
+                  <SearchablePaginatedTableCard
+                    title="Subscription Categories"
+                    badgeLabel={`${subscriptionCategories.length} items`}
+                    rows={subscriptionCategories}
+                    withoutOuterCard
+                    columns={[
+                      { key: "name", label: "Category" },
+                      { key: "description", label: "Description" }
+                    ]}
+                    searchPlaceholder="Search subscription categories"
+                    noRowsText="No categories yet."
+                    searchBy={(row) => `${row.name} ${row.description}`}
+                    renderCells={(row) => [row.name || "-", row.description || "-"]}
+                    renderActions={(row) => (
+                      <div className="d-inline-flex gap-2">
+                        <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionCategory(row)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionCategory(row.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  />
+                </div>
+              </div>
+
+              <div className="col-12 col-xl-6">
+                <div className="card p-3">
+                  <h6 className="mb-3">{editingSubscriptionSubCategoryId ? "Edit Sub Category" : "Create Sub Category"}</h6>
+                  <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionSubCategory}>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Category</label>
+                        <select
+                          className="form-select"
+                          value={subscriptionSubCategoryForm.categoryId || ""}
+                          onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, categoryId: event.target.value }))}
+                        >
+                          <option value="">Select Category</option>
+                          {subscriptionCategories.map((row) => (
+                            <option key={row.id} value={row.id}>{row.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Sub Category Name</label>
+                        <input
+                          className="form-control"
+                          value={subscriptionSubCategoryForm.name || ""}
+                          onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, name: event.target.value }))}
+                          placeholder="Basic Plan"
+                        />
+                      </div>
+                      <div className="col-12">
+                        <label className="form-label small text-secondary mb-1">Description</label>
+                        <textarea
+                          className="form-control"
+                          rows={3}
+                          value={subscriptionSubCategoryForm.description || ""}
+                          onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, description: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2">
+                      <button type="submit" className="btn btn-success btn-sm">
+                        {editingSubscriptionSubCategoryId ? "Update" : "Create"}
+                      </button>
+                      {editingSubscriptionSubCategoryId ? (
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          onClick={resetSubscriptionSubCategoryForm}
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </form>
+                </div>
+
+                <div className="mt-3" style={{ paddingTop: "25px" }}>
+                  <SearchablePaginatedTableCard
+                    title="Subscription Sub Categories"
+                    badgeLabel={`${subscriptionSubCategories.length} items`}
+                    rows={subscriptionSubCategories}
+                    withoutOuterCard
+                    columns={[
+                      { key: "categoryName", label: "Category" },
+                      { key: "name", label: "Sub Category" },
+                      { key: "description", label: "Description" }
+                    ]}
+                    searchPlaceholder="Search subscription sub categories"
+                    noRowsText="No sub categories yet."
+                    searchBy={(row) => `${row.categoryName || getCategoryName(row.categoryId)} ${row.name} ${row.description}`}
+                    renderCells={(row) => [row.categoryName || getCategoryName(row.categoryId) || "-", row.name || "-", row.description || "-"]}
+                    renderActions={(row) => (
+                      <div className="d-inline-flex gap-2">
+                        <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionSubCategory(row)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionSubCategory(row.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {subscriptionTopTab === "subscriptions" ? (
             <>
-          <div className="row g-3">
-            <div className="col-12 col-xl-6">
-              <div className="card p-3">
-                <h6 className="mb-3">{editingSubscriptionCategoryId ? "Edit Category" : "Create Category"}</h6>
-                <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionCategory}>
-                  <div className="row g-3">
-                    <div className="col-12">
-                      <label className="form-label small text-secondary mb-1">Category Name</label>
-                      <input
-                        className="form-control"
-                        value={subscriptionCategoryForm.name || ""}
-                        onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, name: event.target.value }))}
-                        placeholder="Cloud Hosting"
-                      />
-                    </div>
-                    <div className="col-12">
-                      <label className="form-label small text-secondary mb-1">Description</label>
-                      <textarea
-                        className="form-control"
-                        rows={3}
-                        value={subscriptionCategoryForm.description || ""}
-                        onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, description: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="d-flex gap-2">
-                    <button type="submit" className="btn btn-success btn-sm">
-                      {editingSubscriptionCategoryId ? "Update" : "Create"}
-                    </button>
-                    {editingSubscriptionCategoryId ? (
-                      <button
-                        type="button"
-                        className="btn btn-outline-light btn-sm"
-                        onClick={resetSubscriptionCategoryForm}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                </form>
-              </div>
-
-              <div className="mt-3" style={{ paddingTop: "25px" }}>
-                <SearchablePaginatedTableCard
-                  title="Subscription Categories"
-                  badgeLabel={`${subscriptionCategories.length} items`}
-                  rows={subscriptionCategories}
-                  withoutOuterCard
-                  columns={[
-                    { key: "name", label: "Category" },
-                    { key: "description", label: "Description" }
-                  ]}
-                  searchPlaceholder="Search subscription categories"
-                  noRowsText="No categories yet."
-                  searchBy={(row) => `${row.name} ${row.description}`}
-                  renderCells={(row) => [row.name || "-", row.description || "-"]}
-                  renderActions={(row) => (
-                    <div className="d-inline-flex gap-2">
-                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionCategory(row)}>
-                        Edit
-                      </button>
-                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionCategory(row.id)}>
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                />
-              </div>
-            </div>
-
-            <div className="col-12 col-xl-6">
-              <div className="card p-3">
-                <h6 className="mb-3">{editingSubscriptionSubCategoryId ? "Edit Sub Category" : "Create Sub Category"}</h6>
-                <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionSubCategory}>
-                  <div className="row g-3">
-                    <div className="col-12 col-md-6">
-                      <label className="form-label small text-secondary mb-1">Category</label>
-                      <select
-                        className="form-select"
-                        value={subscriptionSubCategoryForm.categoryId || ""}
-                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, categoryId: event.target.value }))}
-                      >
-                        <option value="">Select Category</option>
-                        {subscriptionCategories.map((row) => (
-                          <option key={row.id} value={row.id}>{row.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-12 col-md-6">
-                      <label className="form-label small text-secondary mb-1">Sub Category Name</label>
-                      <input
-                        className="form-control"
-                        value={subscriptionSubCategoryForm.name || ""}
-                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, name: event.target.value }))}
-                        placeholder="Basic Plan"
-                      />
-                    </div>
-                    <div className="col-12">
-                      <label className="form-label small text-secondary mb-1">Description</label>
-                      <textarea
-                        className="form-control"
-                        rows={3}
-                        value={subscriptionSubCategoryForm.description || ""}
-                        onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, description: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="d-flex gap-2">
-                    <button type="submit" className="btn btn-success btn-sm">
-                      {editingSubscriptionSubCategoryId ? "Update" : "Create"}
-                    </button>
-                    {editingSubscriptionSubCategoryId ? (
-                      <button
-                        type="button"
-                        className="btn btn-outline-light btn-sm"
-                        onClick={resetSubscriptionSubCategoryForm}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                </form>
-              </div>
-
-              <div className="mt-3" style={{ paddingTop: "25px" }}>
-                <SearchablePaginatedTableCard
-                  title="Subscription Sub Categories"
-                  badgeLabel={`${subscriptionSubCategories.length} items`}
-                  rows={subscriptionSubCategories}
-                  withoutOuterCard
-                  columns={[
-                    { key: "categoryName", label: "Category" },
-                    { key: "name", label: "Sub Category" },
-                    { key: "description", label: "Description" }
-                  ]}
-                  searchPlaceholder="Search subscription sub categories"
-                  noRowsText="No sub categories yet."
-                  searchBy={(row) => `${row.categoryName || getCategoryName(row.categoryId)} ${row.name} ${row.description}`}
-                  renderCells={(row) => [row.categoryName || getCategoryName(row.categoryId) || "-", row.name || "-", row.description || "-"]}
-                  renderActions={(row) => (
-                    <div className="d-inline-flex gap-2">
-                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionSubCategory(row)}>
-                        Edit
-                      </button>
-                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionSubCategory(row.id)}>
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                />
-              </div>
-            </div>
-          </div>
-
           <div className="card p-3">
             <h6 className="mb-3">{editingSubscriptionId ? "Edit Subscription" : "Create Subscription"}</h6>
             <form className="d-flex flex-column gap-3" onSubmit={saveSubscription}>
