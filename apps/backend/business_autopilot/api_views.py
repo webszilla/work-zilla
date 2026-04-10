@@ -3287,6 +3287,7 @@ def accounts_workspace(request):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
         data = _merge_accounts_workspace(workspace.data, payload.get("data"))
+        data = _seed_accounts_workspace_defaults_for_org(data, org)
         workspace.data = data
         workspace.updated_by = request.user
         workspace.save(update_fields=["data", "updated_by", "updated_at"])
