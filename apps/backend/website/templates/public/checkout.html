@@ -90,7 +90,8 @@
               <div class="col-12 col-lg-4">
                 <div class="form-group mb-0">
                   <label>Paid Date</label>
-                  <input class="form-control" type="date" name="paid_on" required>
+                  <input class="form-control" type="text" name="paid_on" placeholder="DD-MM-YYYY" inputmode="numeric" pattern="^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-[0-9]{4}$" required>
+                  <div class="form-text">Use DD-MM-YYYY format.</div>
                 </div>
               </div>
               <div class="col-12 col-lg-4">

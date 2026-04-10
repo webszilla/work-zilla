@@ -129,6 +129,18 @@ def _has_download_artifact(*candidates):
             return True
     return False
 
+
+def _parse_checkout_paid_on(value):
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(normalized, fmt).date()
+        except ValueError:
+            continue
+    return None
+
 def _prefer_arm64_mac(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     if any(token in user_agent for token in ("intel", "x86_64", "x64")):
@@ -1627,7 +1639,8 @@ def checkout_confirm(request):
         return redirect("/checkout/")
 
     utr_number = (request.POST.get("utr_number") or "").strip()
-    paid_on = request.POST.get("paid_on") or None
+    paid_on_input = request.POST.get("paid_on") or None
+    paid_on = _parse_checkout_paid_on(paid_on_input)
     notes = (request.POST.get("notes") or "").strip()
     receipt = request.FILES.get("receipt")
     if not utr_number or not paid_on:
