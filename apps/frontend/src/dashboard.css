@@ -6224,7 +6224,7 @@ html[data-theme="dark"] .wz-item-picker-modal .btn.btn-outline-light:focus-visib
   font-size: 0.845rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--text-secondary);
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }

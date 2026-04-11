@@ -204,7 +204,7 @@ class Subscription(models.Model):
     payment_description = models.TextField(blank=True, default="")
     amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     currency = models.CharField(max_length=10, default="INR")
-    start_date = models.DateField()
+    start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     next_billing_date = models.DateField(null=True, blank=True)
     email_alert_assign_to = models.JSONField(null=True, blank=True, default=list)

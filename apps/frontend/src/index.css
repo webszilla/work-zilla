@@ -180,6 +180,12 @@ input[type="file"]::-webkit-file-upload-button{
   border-top-color: var(--color-primary, #4f46e5);
 }
 
+.wz-hide-disabled-dates .flatpickr-day.flatpickr-disabled,
+.wz-hide-disabled-dates .flatpickr-day.wz-flatpickr-hidden-day{
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Keep primary form action buttons aligned to the right across products. */
 .app-shell form button[type="submit"].btn-primary:not(.w-100):not(.flex-fill),
 .app-shell form button[type="submit"].btn-success:not(.w-100):not(.flex-fill),

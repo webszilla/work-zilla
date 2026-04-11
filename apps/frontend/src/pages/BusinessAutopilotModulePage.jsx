@@ -45,6 +45,26 @@ function normalizeCountryName(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function getCurrencyDisplayLabel(currencyCode) {
+  const code = String(currencyCode || "").trim().toUpperCase();
+  if (!code) {
+    return "";
+  }
+  try {
+    const parts = new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: code,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    const symbol = parts.find((part) => part.type === "currency")?.value || code;
+    return `${symbol} ${code}`;
+  } catch (_error) {
+    return code;
+  }
+}
+
 const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function getAccountsTaxUiConfig(countryValue) {
@@ -495,11 +515,15 @@ const PROJECT_TAB_CONFIG = {
     columns: [
       { key: "name", label: "Project Name" },
       { key: "clientCompany", label: "Client / Company" },
+      { key: "startDate", label: "Start Date" },
+      { key: "completedDate", label: "Completed Date" },
       { key: "status", label: "Status" }
     ],
     fields: [
       { key: "name", label: "Project Name", placeholder: "Enter project name" },
       { key: "clientCompany", label: "Client / Company", type: "datalist", datalistSource: "accountsCustomers", placeholder: "Search client or company" },
+      { key: "startDate", label: "Start Date", type: "date" },
+      { key: "completedDate", label: "Completed Date", type: "date", optional: true },
       { key: "status", label: "Status", type: "select", options: ["Ongoing", "New", "Hold", "Completed"], defaultValue: "New" }
     ]
   },
@@ -535,16 +559,15 @@ const PROJECT_TAB_CONFIG = {
   },
   team: {
     label: "Team",
-    itemLabel: "Team Member",
+    itemLabel: "Team",
     columns: [
-      { key: "name", label: "Name" },
-      { key: "role", label: "Role" },
-      { key: "project", label: "Project" }
+      { key: "name", label: "Team Name" },
+      { key: "departmentSummary", label: "Department" },
+      { key: "employeeCount", label: "Employees" },
+      { key: "createdBy", label: "Created By" }
     ],
     fields: [
-      { key: "name", label: "Name", placeholder: "Enter member name" },
-      { key: "role", label: "Role", placeholder: "Enter role" },
-      { key: "project", label: "Project", placeholder: "Enter project name" }
+      { key: "name", label: "Team Name", placeholder: "Type a new team name" }
     ]
   },
   customers: {
@@ -567,8 +590,8 @@ const PROJECT_TAB_CONFIG = {
 
 const DEFAULT_PROJECT_DATA = {
   projects: [
-    { id: "p1", name: "ERP Rollout", clientCompany: "Ultra HD Prints", status: "Ongoing" },
-    { id: "p2", name: "HR Automation", clientCompany: "North India Jewels", status: "New" }
+    { id: "p1", name: "ERP Rollout", clientCompany: "Ultra HD Prints", startDate: "", completedDate: "", status: "Ongoing" },
+    { id: "p2", name: "HR Automation", clientCompany: "North India Jewels", startDate: "", completedDate: "", status: "New" }
   ],
   tasks: [
     { id: "t1", title: "Finalize sprint board", assignee: "Guru", startDate: "2026-02-16", dueDate: "2026-02-20" },
@@ -578,10 +601,7 @@ const DEFAULT_PROJECT_DATA = {
     { id: "m1", title: "Phase 1 Go-Live", project: "ERP Rollout", targetDate: "2026-03-10" },
     { id: "m2", title: "Payroll Cutover", project: "HR Automation", targetDate: "2026-03-25" }
   ],
-  team: [
-    { id: "u1", name: "Guru", role: "Project Manager", project: "ERP Rollout" },
-    { id: "u2", name: "Nithya", role: "Business Analyst", project: "HR Automation" }
-  ],
+  projectTeams: [],
   customers: [],
   projectDetails: {
     p1: {
@@ -931,6 +951,16 @@ const SUBSCRIPTION_PLAN_DURATION_OPTIONS = [
   { label: "2 Years", value: "730" },
   { label: "3 Years", value: "1095" }
 ];
+
+function formatSubscriptionPlanDurationLabel(value) {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return "";
+  }
+  const matchedOption = SUBSCRIPTION_PLAN_DURATION_OPTIONS.find((option) => String(option.value || "") === normalizedValue);
+  return matchedOption?.label || `${normalizedValue} Days`;
+}
+
 const SUBSCRIPTION_ALERT_OPTIONS = [
   { value: "", label: "Select" },
   { value: "15", label: "15 Days Before" },
@@ -1630,6 +1660,30 @@ function getNextBillingDateFromStart(startDate) {
   return next.toISOString().slice(0, 10);
 }
 
+function formatLocalIsoDate(date) {
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getSubscriptionEndDateFromStartAndDuration(startDate, durationDays) {
+  const normalizedStart = String(startDate || "").trim();
+  const normalizedDurationDays = Number.parseInt(String(durationDays || "").trim(), 10);
+  if (!normalizedStart || !Number.isFinite(normalizedDurationDays) || normalizedDurationDays < 1) {
+    return "";
+  }
+  const date = new Date(`${normalizedStart}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  date.setDate(date.getDate() + normalizedDurationDays);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return formatLocalIsoDate(date);
+}
+
 function getDaysUntilDate(dateValue) {
   const normalizedDate = String(dateValue || "").trim();
   if (!normalizedDate) {
@@ -1726,7 +1780,6 @@ function normalizeSubscriptionAlertDays(value) {
 }
 
 function createEmptySubscriptionForm({ currency = "INR" } = {}) {
-  const today = new Date().toISOString().slice(0, 10);
   return {
     id: "",
     categoryId: "",
@@ -1739,7 +1792,7 @@ function createEmptySubscriptionForm({ currency = "INR" } = {}) {
     paymentDescription: "",
     amount: "",
     currency: String(currency || "INR").trim().toUpperCase() || "INR",
-    startDate: today,
+    startDate: "",
     endDate: "",
     nextBillingDate: "",
     status: "Active",
@@ -1747,6 +1800,21 @@ function createEmptySubscriptionForm({ currency = "INR" } = {}) {
     whatsappAlertDays: [],
     emailAlertAssignees: [],
     whatsappAlertAssignees: []
+  };
+}
+
+function createEmptySubscriptionDraftForm({ currency = "INR" } = {}) {
+  return {
+    id: "",
+    categoryId: "",
+    subCategoryId: "",
+    subscriptionTitle: "",
+    planDuration: "30",
+    planDurationDays: "",
+    paymentDescription: "",
+    amount: "",
+    currency: String(currency || "INR").trim().toUpperCase() || "INR",
+    status: "Active"
   };
 }
 
@@ -2318,7 +2386,9 @@ function calculateSalaryIncrementPreview(currentSalaryValue, incrementType, incr
 function isValidProjectData(value) {
   return value
     && typeof value === "object"
-    && ["projects", "tasks", "milestones", "team"].every((key) => Array.isArray(value[key]))
+    && ["projects", "tasks", "milestones"].every((key) => Array.isArray(value[key]))
+    && (!("projectTeams" in value) || Array.isArray(value.projectTeams))
+    && (!("team" in value) || Array.isArray(value.team))
     && (!("customers" in value) || Array.isArray(value.customers))
     && (!("projectDetails" in value) || (value.projectDetails && typeof value.projectDetails === "object" && !Array.isArray(value.projectDetails)));
 }
@@ -2355,6 +2425,61 @@ function normalizeProjectExpenseRecord(row = {}) {
   };
 }
 
+function normalizeProjectRecord(row = {}) {
+  return {
+    ...row,
+    id: String(row.id || "").trim(),
+    name: String(row.name || "").trim(),
+    clientCompany: String(row.clientCompany || row.client_company || "").trim(),
+    startDate: normalizeMeetingDateValue(row.startDate || row.start_date || ""),
+    completedDate: normalizeMeetingDateValue(row.completedDate || row.completed_date || ""),
+    status: String(row.status || "New").trim() || "New",
+  };
+}
+
+function normalizeProjectTeamRecord(row = {}) {
+  const members = Array.isArray(row.members)
+    ? row.members.map((item) => String(item || "").trim()).filter(Boolean)
+    : parseTeamMemberList(row.members);
+  const departmentFilters = Array.isArray(row.departmentFilters)
+    ? row.departmentFilters.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.departmentFilters || row.department || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const employeeRoleFilters = Array.isArray(row.employeeRoleFilters)
+    ? row.employeeRoleFilters.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(row.employeeRoleFilters || row.employeeRole || row.role || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const isLegacySimpleTeam = !members.length && !departmentFilters.length && !employeeRoleFilters.length
+    && (String(row.project || "").trim() || String(row.role || "").trim());
+  const normalizedMembers = members.length
+    ? members
+    : (isLegacySimpleTeam && String(row.name || "").trim() ? [String(row.name || "").trim()] : []);
+  const normalizedName = String(
+    row.name
+    || row.teamName
+    || row.title
+    || (isLegacySimpleTeam && String(row.project || "").trim() ? `${String(row.project || "").trim()} Team` : "")
+  ).trim();
+  const normalizedDepartmentFilters = departmentFilters.length
+    ? departmentFilters
+    : (isLegacySimpleTeam ? ["Project Delivery"] : []);
+  const normalizedEmployeeRoleFilters = employeeRoleFilters.length
+    ? employeeRoleFilters
+    : (isLegacySimpleTeam && String(row.role || "").trim() ? [String(row.role || "").trim()] : []);
+  const departmentSummary = normalizedDepartmentFilters.join(", ")
+    || String(row.departmentSummary || row.department || "").trim()
+    || (isLegacySimpleTeam ? "Project Delivery" : "");
+  return {
+    ...row,
+    id: String(row.id || "").trim(),
+    name: normalizedName,
+    members: normalizedMembers,
+    departmentFilters: normalizedDepartmentFilters,
+    employeeRoleFilters: normalizedEmployeeRoleFilters,
+    departmentSummary,
+    employeeCount: normalizedMembers.length,
+    createdBy: String(row.createdBy || row.created_by || "Current User").trim() || "Current User",
+  };
+}
+
 function createEmptyProjectDetail(projectId = "") {
   return {
     projectId,
@@ -2385,18 +2510,20 @@ function normalizeProjectDetailRecord(row = {}, projectId = "") {
 
 function normalizeProjectData(value) {
   const base = {
-    projects: Array.isArray(DEFAULT_PROJECT_DATA.projects) ? [...DEFAULT_PROJECT_DATA.projects] : [],
+    projects: Array.isArray(DEFAULT_PROJECT_DATA.projects)
+      ? DEFAULT_PROJECT_DATA.projects.map((project) => normalizeProjectRecord(project))
+      : [],
     tasks: Array.isArray(DEFAULT_PROJECT_DATA.tasks) ? [...DEFAULT_PROJECT_DATA.tasks] : [],
     milestones: Array.isArray(DEFAULT_PROJECT_DATA.milestones) ? [...DEFAULT_PROJECT_DATA.milestones] : [],
-    team: Array.isArray(DEFAULT_PROJECT_DATA.team) ? [...DEFAULT_PROJECT_DATA.team] : [],
+    projectTeams: Array.isArray(DEFAULT_PROJECT_DATA.projectTeams) ? DEFAULT_PROJECT_DATA.projectTeams.map((row) => normalizeProjectTeamRecord(row)) : [],
     customers: Array.isArray(DEFAULT_PROJECT_DATA.customers) ? [...DEFAULT_PROJECT_DATA.customers] : [],
     projectDetails: {},
   };
   if (value && typeof value === "object") {
-    if (Array.isArray(value.projects)) base.projects = value.projects;
+    if (Array.isArray(value.projects)) base.projects = value.projects.map((project) => normalizeProjectRecord(project));
     if (Array.isArray(value.tasks)) base.tasks = value.tasks;
     if (Array.isArray(value.milestones)) base.milestones = value.milestones;
-    if (Array.isArray(value.team)) base.team = value.team;
+    if (Array.isArray(value.projectTeams)) base.projectTeams = value.projectTeams.map((row) => normalizeProjectTeamRecord(row));
     if (Array.isArray(value.customers)) base.customers = value.customers;
   }
 
@@ -12230,8 +12357,8 @@ function CrmOnePageModule() {
             </div>
           );
         }
-        return (
-		          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
+	        return (
+			          <div key={sectionKey} className={sectionKey === "teams" ? "row g-3 align-items-start" : "d-flex flex-column gap-3"}>
 		            {shouldShowCrmForm ? (
 		            <div className={sectionKey === "teams" ? "col-12 col-xl-3" : ""}>
             <div className={`card p-3 ${editingId ? "crm-form-editing-highlight" : ""}`}>
@@ -14542,6 +14669,24 @@ function ProjectManagementModule() {
   const [projectStatusTab, setProjectStatusTab] = useState("all");
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedCrmContacts, setSharedCrmContacts] = useState(() => readSharedCrmContacts());
+  const [currentUserName, setCurrentUserName] = useState("Current User");
+  const [erpUsers, setErpUsers] = useState([]);
+  const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
+  const [selectedTeamMembers, setSelectedTeamMembers] = useState([]);
+  const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
+  const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
+  const [teamCategorySearch, setTeamCategorySearch] = useState("");
+  const [teamCategorySearchOpen, setTeamCategorySearchOpen] = useState(false);
+  const [teamMemberSearch, setTeamMemberSearch] = useState("");
+  const [teamMemberSearchOpen, setTeamMemberSearchOpen] = useState(false);
+  const [projectTeamMembersPopup, setProjectTeamMembersPopup] = useState(null);
+  const visibleProjectTabs = ["projects", "tasks", "team"];
+
+  useEffect(() => {
+    if (!visibleProjectTabs.includes(activeTab)) {
+      setActiveTab("projects");
+    }
+  }, [activeTab, visibleProjectTabs]);
 
   useEffect(() => {
     function syncSharedCustomers() {
@@ -14570,6 +14715,51 @@ function ProjectManagementModule() {
   }, []);
 
   useEffect(() => {
+    function syncSharedHrEmployees() {
+      setHrEmployees(readSharedHrEmployees());
+    }
+    syncSharedHrEmployees();
+    window.addEventListener("storage", syncSharedHrEmployees);
+    window.addEventListener("focus", syncSharedHrEmployees);
+    return () => {
+      window.removeEventListener("storage", syncSharedHrEmployees);
+      window.removeEventListener("focus", syncSharedHrEmployees);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTeamDirectories() {
+      try {
+        const [authData, usersData] = await Promise.all([
+          apiFetch("/api/auth/me").catch(() => null),
+          apiFetch("/api/business-autopilot/users").catch(() => null),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setCurrentUserName(String(
+          authData?.user?.first_name
+          || authData?.user?.name
+          || authData?.user?.username
+          || authData?.profile?.name
+          || authData?.profile?.display_name
+          || "Current User"
+        ).trim() || "Current User");
+        setErpUsers(Array.isArray(usersData?.users) ? usersData.users : []);
+      } catch (_error) {
+        if (!cancelled) {
+          setErpUsers([]);
+        }
+      }
+    }
+    loadTeamDirectories();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeProjectData(moduleData)));
   }, [moduleData]);
 
@@ -14577,6 +14767,13 @@ function ProjectManagementModule() {
     setEditingId("");
     setProjectFormNotice("");
     setFormValues(buildEmptyValues(PROJECT_TAB_CONFIG[activeTab].fields));
+    setSelectedTeamMembers([]);
+    setSelectedTeamDepartments([]);
+    setSelectedTeamEmployeeRoles([]);
+    setTeamCategorySearch("");
+    setTeamCategorySearchOpen(false);
+    setTeamMemberSearch("");
+    setTeamMemberSearchOpen(false);
   }, [activeTab]);
 
   const config = PROJECT_TAB_CONFIG[activeTab];
@@ -14586,12 +14783,17 @@ function ProjectManagementModule() {
     { key: "new", label: "New" },
     { key: "hold", label: "Hold" },
     { key: "completed", label: "Completed" },
+    { key: "missing_completed_date", label: "Pending Completion" },
   ];
   const rawRows = activeTab === "customers" ? sharedCustomers : (moduleData[activeTab] || []);
   const currentRows = activeTab === "projects"
     ? (projectStatusTab === "all"
         ? rawRows
+        : projectStatusTab === "missing_completed_date"
+        ? rawRows.filter((row) => !String(row.completedDate || "").trim())
         : rawRows.filter((row) => String(row.status || "").trim().toLowerCase() === projectStatusTab))
+    : activeTab === "team"
+    ? (moduleData.projectTeams || [])
     : rawRows;
   const projectInlineSubmitTabs = new Set(["projects"]);
   const accountsCustomerOptions = useMemo(
@@ -14614,12 +14816,130 @@ function ProjectManagementModule() {
     : [];
   const projectCustomerMatches = projectClientQuery
     ? sharedCustomers.filter((customer) => {
-        const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+        const haystack = [
+          customer.companyName,
+          customer.name,
+          customer.clientName,
+          customer.email,
+          customer.phone,
+          ...(formatSharedCustomerPhones(customer)),
+          ...(formatSharedCustomerEmails(customer)),
+          customer.billingCountry,
+          customer.billingState,
+          customer.billingPincode,
+        ].join(" ").toLowerCase();
         return haystack.includes(projectClientQuery);
       }).slice(0, 6)
-    : [];
+    : sharedCustomers.slice(0, 8);
+  const projectCompletedDateBeforeStart = activeTab === "projects"
+    && String(formValues.startDate || "").trim()
+    && String(formValues.completedDate || "").trim()
+    && String(formValues.completedDate || "").trim() < String(formValues.startDate || "").trim();
+  const projectTeamDirectoryPool = useMemo(() => {
+    const source = [...(erpUsers || []), ...(hrEmployees || [])];
+    const byKey = new Map();
+    source.forEach((row) => {
+      const normalized = normalizeCrmDirectoryEntry({
+        id: row?.id || row?.sourceUserId || row?.employeeId || row?.username || row?.email || "",
+        name: row?.name || row?.full_name || row?.username || row?.employeeName || row?.email || "",
+        role: row?.role || row?.membership_role || "",
+        department: row?.department || "",
+        employeeRole: row?.employeeRole || row?.employee_role || row?.designation || "",
+        email: row?.email || row?.sourceUserEmail || "",
+      });
+      if (!normalized || !normalized.name) {
+        return;
+      }
+      const key = String(normalized.email || normalized.id || normalized.name).trim().toLowerCase();
+      if (!key || byKey.has(key)) {
+        return;
+      }
+      byKey.set(key, normalized);
+    });
+    return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [erpUsers, hrEmployees]);
+  const projectTeamDepartmentOptions = useMemo(
+    () => Array.from(new Set([
+      ...projectTeamDirectoryPool.map((row) => String(row.department || "").trim()),
+      ...Array.from(new Set((moduleData.projectTeams || []).flatMap((row) => Array.isArray(row.departmentFilters) ? row.departmentFilters : []))),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [moduleData.projectTeams, projectTeamDirectoryPool]
+  );
+  const projectTeamEmployeeRoleOptions = useMemo(
+    () => Array.from(new Set([
+      ...projectTeamDirectoryPool.map((row) => String(row.employeeRole || "").trim()),
+      ...Array.from(new Set((moduleData.projectTeams || []).flatMap((row) => Array.isArray(row.employeeRoleFilters) ? row.employeeRoleFilters : []))),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [moduleData.projectTeams, projectTeamDirectoryPool]
+  );
+  const normalizedProjectTeamCategorySearch = String(teamCategorySearch || "").trim().toLowerCase();
+  const filteredProjectTeamDepartments = useMemo(
+    () => projectTeamDepartmentOptions.filter((option) => {
+      if (!normalizedProjectTeamCategorySearch) {
+        return true;
+      }
+      return option.toLowerCase().includes(normalizedProjectTeamCategorySearch);
+    }),
+    [normalizedProjectTeamCategorySearch, projectTeamDepartmentOptions]
+  );
+  const filteredProjectTeamEmployeeRoles = useMemo(
+    () => projectTeamEmployeeRoleOptions.filter((option) => {
+      if (!normalizedProjectTeamCategorySearch) {
+        return true;
+      }
+      return option.toLowerCase().includes(normalizedProjectTeamCategorySearch);
+    }),
+    [normalizedProjectTeamCategorySearch, projectTeamEmployeeRoleOptions]
+  );
+  const showProjectTeamCategorySuggestions = activeTab === "team" && teamCategorySearchOpen;
+  const showProjectTeamMemberSuggestions = activeTab === "team" && teamMemberSearchOpen;
+  const projectTeamSelectedMemberCards = useMemo(
+    () => (selectedTeamMembers || []).map((member) => {
+      const matched = projectTeamDirectoryPool.find((row) => String(row.name || "").trim().toLowerCase() === String(member || "").trim().toLowerCase()) || null;
+      return {
+        name: member,
+        subtitle: [matched?.department, matched?.employeeRole].filter(Boolean).join(" / ") || matched?.email || "-",
+      };
+    }),
+    [projectTeamDirectoryPool, selectedTeamMembers]
+  );
+  const availableProjectTeamMembers = useMemo(
+    () => projectTeamDirectoryPool.filter((item) => {
+      const normalizedSearch = String(teamMemberSearch || "").trim().toLowerCase();
+      const matchesDepartment = !selectedTeamDepartments.length || selectedTeamDepartments.includes(String(item.department || "").trim());
+      const matchesRole = !selectedTeamEmployeeRoles.length || selectedTeamEmployeeRoles.includes(String(item.employeeRole || "").trim());
+      if (!matchesDepartment || !matchesRole) {
+        return false;
+      }
+      if (!normalizedSearch) {
+        return true;
+      }
+      const haystack = `${item.name || ""} ${item.department || ""} ${item.employeeRole || ""} ${item.email || ""}`.toLowerCase();
+      return haystack.includes(normalizedSearch);
+    }).filter((item) => !selectedTeamMembers.includes(item.name)),
+    [projectTeamDirectoryPool, selectedTeamDepartments, selectedTeamEmployeeRoles, selectedTeamMembers, teamMemberSearch]
+  );
   const projectBillingStateOptions = getStateOptionsForCountry(String(projectClientForm.billingCountry || "India"));
   const projectShippingStateOptions = getStateOptionsForCountry(String(projectClientForm.shippingCountry || "India"));
+
+  useEffect(() => {
+    if (activeTab !== "projects") {
+      return;
+    }
+    const startDate = normalizeMeetingDateValue(formValues.startDate || "");
+    const completedDateInput = document.querySelector('input[name="completedDate"]');
+    const completedDatePicker = completedDateInput?.__wzFlatpickrInstance;
+    if (!completedDatePicker) {
+      return;
+    }
+    completedDatePicker.set("minDate", startDate || null);
+    if (startDate && normalizeMeetingDateValue(formValues.completedDate || "") && String(formValues.completedDate || "").trim() < startDate) {
+      completedDatePicker.clear(false);
+      if (completedDatePicker.altInput) {
+        completedDatePicker.altInput.value = "";
+      }
+    }
+  }, [activeTab, formValues.startDate, formValues.completedDate]);
 
   const stats = useMemo(() => {
     const activeProjects = (moduleData.projects || []).filter((item) => String(item.status || "").toLowerCase() === "ongoing").length;
@@ -14639,6 +14959,8 @@ function ProjectManagementModule() {
       projectStatusTabs.reduce((acc, tab) => {
         acc[tab.key] = tab.key === "all"
           ? (moduleData.projects || []).length
+          : tab.key === "missing_completed_date"
+          ? (moduleData.projects || []).filter((item) => !String(item.completedDate || "").trim()).length
           : (moduleData.projects || []).filter(
               (item) => String(item.status || "").trim().toLowerCase() === tab.key
             ).length;
@@ -14823,6 +15145,126 @@ function ProjectManagementModule() {
     }
   }
 
+  function resetProjectTeamForm() {
+    setEditingId("");
+    setProjectFormNotice("");
+    setFormValues(buildEmptyValues(PROJECT_TAB_CONFIG.team.fields));
+    setSelectedTeamMembers([]);
+    setSelectedTeamDepartments([]);
+    setSelectedTeamEmployeeRoles([]);
+    setTeamCategorySearch("");
+    setTeamCategorySearchOpen(false);
+    setTeamMemberSearch("");
+    setTeamMemberSearchOpen(false);
+  }
+
+  function toggleProjectTeamCategory(categoryType, value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    const isDepartment = categoryType === "department";
+    const currentValues = isDepartment ? selectedTeamDepartments : selectedTeamEmployeeRoles;
+    const nextCategoryValues = currentValues.includes(normalizedValue)
+      ? currentValues.filter((item) => item !== normalizedValue)
+      : [...currentValues, normalizedValue];
+    if (isDepartment) {
+      setSelectedTeamDepartments(nextCategoryValues);
+    } else {
+      setSelectedTeamEmployeeRoles(nextCategoryValues);
+    }
+    setSelectedTeamMembers((prev) => {
+      const matches = projectTeamDirectoryPool
+        .filter((item) => (
+          isDepartment
+            ? nextCategoryValues.includes(String(item.department || "").trim())
+            : nextCategoryValues.includes(String(item.employeeRole || "").trim())
+        ))
+        .map((item) => item.name);
+      return Array.from(new Set([...prev, ...matches]));
+    });
+    setProjectFormNotice("");
+  }
+
+  function toggleProjectTeamMember(value) {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    setSelectedTeamMembers((prev) => (
+      prev.includes(normalizedValue)
+        ? prev.filter((member) => member !== normalizedValue)
+        : [...prev, normalizedValue]
+    ));
+    setProjectFormNotice("");
+  }
+
+  function editProjectTeam(row) {
+    const normalized = normalizeProjectTeamRecord(row);
+    setEditingId(normalized.id);
+    setFormValues((prev) => ({
+      ...prev,
+      name: normalized.name || "",
+    }));
+    setSelectedTeamDepartments(Array.isArray(normalized.departmentFilters) ? normalized.departmentFilters : []);
+    setSelectedTeamEmployeeRoles(Array.isArray(normalized.employeeRoleFilters) ? normalized.employeeRoleFilters : []);
+    setSelectedTeamMembers(Array.isArray(normalized.members) ? normalized.members : []);
+    setTeamCategorySearch("");
+    setTeamCategorySearchOpen(false);
+    setTeamMemberSearch("");
+    setTeamMemberSearchOpen(false);
+    setProjectFormNotice("");
+  }
+
+  function openProjectTeamMembersPopup(row) {
+    const normalized = normalizeProjectTeamRecord(row);
+    setProjectTeamMembersPopup({
+      title: "Team Employees",
+      name: normalized.name || "Team",
+      members: Array.isArray(normalized.members) ? normalized.members : [],
+      count: Number.isFinite(Number(normalized.employeeCount)) ? Number(normalized.employeeCount) : (Array.isArray(normalized.members) ? normalized.members.length : 0),
+    });
+  }
+
+  function closeProjectTeamMembersPopup() {
+    setProjectTeamMembersPopup(null);
+  }
+
+  function saveProjectTeam(event) {
+    event.preventDefault();
+    const teamName = String(formValues.name || "").trim();
+    if (!teamName) {
+      setProjectFormNotice("Please fill mandatory fields: Team Name");
+      return;
+    }
+    if (!selectedTeamMembers.length) {
+      setProjectFormNotice("Please select at least one employee.");
+      return;
+    }
+    const payload = normalizeProjectTeamRecord({
+      id: editingId || `team_${Date.now()}`,
+      name: teamName,
+      members: selectedTeamMembers,
+      departmentFilters: selectedTeamDepartments,
+      employeeRoleFilters: selectedTeamEmployeeRoles,
+      createdBy: currentUserName || "Current User",
+    });
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.projectTeams) ? prev.projectTeams : [];
+      if (editingId) {
+        return {
+          ...prev,
+          projectTeams: rows.map((row) => (String(row.id || "").trim() === String(editingId || "").trim() ? { ...row, ...payload } : row)),
+        };
+      }
+      return {
+        ...prev,
+        projectTeams: [payload, ...rows],
+      };
+    });
+    resetProjectTeamForm();
+  }
+
   function onChangeField(fieldKey, nextValue) {
     const fieldMeta = (config.fields || []).find((field) => field.key === fieldKey);
     const normalizedValue = typeof nextValue === "string"
@@ -14833,6 +15275,19 @@ function ProjectManagementModule() {
       if (activeTab === "attendance" && fieldKey === "status" && normalizedValue !== "Permission") {
         next.permissionHours = "";
       }
+      if (activeTab === "projects" && fieldKey === "startDate") {
+        const startDate = String(normalizedValue || "").trim();
+        const completedDate = String(prev.completedDate || "").trim();
+        if (startDate && completedDate && completedDate < startDate) {
+          next.completedDate = "";
+        }
+        if (startDate) {
+          setProjectFormNotice("");
+        }
+      }
+      if (activeTab === "projects" && fieldKey === "completedDate") {
+        setProjectFormNotice("");
+      }
       return next;
     });
     if (activeTab === "projects" && fieldKey === "clientCompany") {
@@ -14841,6 +15296,10 @@ function ProjectManagementModule() {
   }
 
   function onEditRow(row) {
+    if (activeTab === "team") {
+      editProjectTeam(row);
+      return;
+    }
     setEditingId(row.id);
     const nextValues = buildEmptyValues(config.fields);
     if (activeTab === "customers") {
@@ -14850,7 +15309,13 @@ function ProjectManagementModule() {
       nextValues.email = row.email || "";
     } else {
       config.fields.forEach((field) => {
-        nextValues[field.key] = row[field.key] || field.defaultValue || "";
+        if (field.type === "date") {
+          nextValues[field.key] = normalizeMeetingDateValue(row[field.key] ?? field.defaultValue ?? "");
+        } else if (field.type === "time") {
+          nextValues[field.key] = normalizeMeetingTimeValue(row[field.key] ?? field.defaultValue ?? "");
+        } else {
+          nextValues[field.key] = row[field.key] || field.defaultValue || "";
+        }
       });
     }
     setFormValues(nextValues);
@@ -14860,6 +15325,10 @@ function ProjectManagementModule() {
   function onCancelEdit() {
     setEditingId("");
     setProjectFormNotice("");
+    if (activeTab === "team") {
+      resetProjectTeamForm();
+      return;
+    }
     setFormValues(buildEmptyValues(config.fields));
     setShowProjectClientSuggestions(false);
     window.requestAnimationFrame(() => {
@@ -14868,6 +15337,16 @@ function ProjectManagementModule() {
   }
 
   function onDeleteRow(rowId) {
+    if (activeTab === "team") {
+      setModuleData((prev) => ({
+        ...prev,
+        projectTeams: (prev.projectTeams || []).filter((row) => row.id !== rowId),
+      }));
+      if (editingId === rowId) {
+        resetProjectTeamForm();
+      }
+      return;
+    }
     if (activeTab === "projects") {
       setModuleData((prev) => {
         const nextDetails = { ...(prev.projectDetails || {}) };
@@ -14901,6 +15380,10 @@ function ProjectManagementModule() {
 
   async function onSubmit(event) {
     event.preventDefault();
+    if (activeTab === "team") {
+      saveProjectTeam(event);
+      return;
+    }
     const syncedValuesResult = syncDateTimeFieldValuesFromForm(event.currentTarget, config.fields, formValues);
     const effectiveValues = syncedValuesResult.values;
     if (syncedValuesResult.changed) {
@@ -14922,9 +15405,23 @@ function ProjectManagementModule() {
       }
       return !String(effectiveValues[field.key] || "").trim();
     });
+    if (activeTab === "projects") {
+      if (!normalizeMeetingDateValue(effectiveValues.startDate)) {
+        setProjectFormNotice("Start Date is mandatory.");
+        return;
+      }
+    }
     if (missingFields.length) {
       setProjectFormNotice(`Please fill mandatory fields: ${missingFields.map((field) => field.label).join(", ")}`);
       return;
+    }
+    if (activeTab === "projects") {
+      const startDate = String(effectiveValues.startDate || "").trim();
+      const completedDate = String(effectiveValues.completedDate || "").trim();
+      if (startDate && completedDate && completedDate < startDate) {
+        setProjectFormNotice("Completed Date cannot be before Start Date.");
+        return;
+      }
     }
     if (activeTab === "customers") {
       const payload = normalizeSharedCustomerRecord({
@@ -14961,21 +15458,21 @@ function ProjectManagementModule() {
     const nextRowId = editingId || `${activeTab}_${Date.now()}`;
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
+      const normalizedPayload = activeTab === "projects" ? normalizeProjectRecord({ id: nextRowId, ...payload }) : payload;
       if (editingId) {
         return {
           ...prev,
-          [activeTab]: existing.map((row) => (row.id === editingId ? { ...row, ...payload } : row))
+          [activeTab]: existing.map((row) => (row.id === editingId ? { ...row, ...normalizedPayload } : row))
         };
       }
-      const nextId = `${activeTab}_${Date.now()}`;
       return {
         ...prev,
-        [activeTab]: [{ id: nextId, ...payload }, ...existing],
+        [activeTab]: [{ id: nextRowId, ...normalizedPayload }, ...existing],
         ...(activeTab === "projects"
           ? {
               projectDetails: {
                 ...(prev.projectDetails || {}),
-                [nextId]: normalizeProjectDetailRecord({}, nextId),
+                [nextRowId]: normalizeProjectDetailRecord({}, nextRowId),
               },
             }
           : {}),
@@ -14990,13 +15487,32 @@ function ProjectManagementModule() {
     setShowProjectClientSuggestions(false);
   }
 
+  function getProjectCustomerSummary(customer) {
+    const phones = formatSharedCustomerPhones(customer);
+    const emails = formatSharedCustomerEmails(customer);
+    const location = [
+      customer.billingState || customer.state,
+      customer.billingCountry || customer.country,
+      customer.billingPincode || customer.pincode,
+    ].filter(Boolean).join(", ");
+    return {
+      title: getSharedCustomerDisplayName(customer) || customer.companyName || customer.clientName || "-",
+      subtitle: customer.companyName || customer.clientName || customer.email || "-",
+      phoneText: phones.join(", "),
+      emailText: emails.join(", "),
+      locationText: location || "-",
+    };
+  }
+
   return (
     <div className="d-flex flex-column gap-3">
       <div>
         <h4 className="mb-2">Project Management</h4>
         <p className="text-secondary mb-3">Track project milestones, tasks, and team delivery.</p>
         <div className="d-flex flex-wrap gap-2">
-          {Object.entries(PROJECT_TAB_CONFIG).map(([tabKey, tabValue]) => (
+          {visibleProjectTabs.map((tabKey) => {
+            const tabValue = PROJECT_TAB_CONFIG[tabKey];
+            return tabValue ? (
             <button
               key={tabKey}
               type="button"
@@ -15005,7 +15521,8 @@ function ProjectManagementModule() {
             >
               {tabValue.label}
             </button>
-          ))}
+            ) : null;
+          })}
         </div>
       </div>
 
@@ -15253,6 +15770,281 @@ function ProjectManagementModule() {
             )}
           />
         </>
+      ) : activeTab === "team" ? (
+        <>
+          <div className="row g-3 align-items-start">
+            <div className="col-12 col-xl-3">
+              <div className="card p-3">
+                <h6 className="mb-3">{editingId ? "Edit Project Team" : "Create Project Team"}</h6>
+                <form className="d-flex flex-column gap-3" onSubmit={saveProjectTeam}>
+                  {projectFormNotice ? (
+                    <div className="alert alert-danger py-2 mb-0">{projectFormNotice}</div>
+                  ) : null}
+                  <div>
+                    <label className="form-label small mb-1">Team Name *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Type a new team name"
+                      value={formValues.name || ""}
+                      onChange={(event) => setFormValues((prev) => ({ ...prev, name: event.target.value }))}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label small mb-2">Select Department</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="search"
+                        className="form-control"
+                        autoComplete="off"
+                        placeholder="Search department or employee role"
+                        value={teamCategorySearch}
+                        onFocus={() => setTeamCategorySearchOpen(true)}
+                        onClick={() => setTeamCategorySearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setTeamCategorySearchOpen(false), 120)}
+                        onChange={(event) => {
+                          setTeamCategorySearch(event.target.value);
+                          setTeamCategorySearchOpen(true);
+                        }}
+                      />
+                      {showProjectTeamCategorySuggestions ? (
+                        <div className="crm-inline-suggestions" style={{ maxHeight: "320px", overflowY: "auto" }}>
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Department List</div>
+                            {filteredProjectTeamDepartments.length ? filteredProjectTeamDepartments.map((option) => (
+                              <button
+                                key={`project-team-department-checkbox-${option}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => toggleProjectTeamCategory("department", option)}
+                              >
+                                <span className="d-flex align-items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input mt-0"
+                                    checked={selectedTeamDepartments.includes(option)}
+                                    readOnly
+                                  />
+                                  <span className="crm-inline-suggestions__item-main">{option}</span>
+                                </span>
+                              </button>
+                            )) : (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No departments found</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Employee Role List</div>
+                            {filteredProjectTeamEmployeeRoles.length ? filteredProjectTeamEmployeeRoles.map((option) => (
+                              <button
+                                key={`project-team-role-checkbox-${option}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => toggleProjectTeamCategory("employeeRole", option)}
+                              >
+                                <span className="d-flex align-items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input mt-0"
+                                    checked={selectedTeamEmployeeRoles.includes(option)}
+                                    readOnly
+                                  />
+                                  <span className="crm-inline-suggestions__item-main">{option}</span>
+                                </span>
+                              </button>
+                            )) : (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No employee roles found</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    {(selectedTeamDepartments.length || selectedTeamEmployeeRoles.length) ? (
+                      <div className="d-flex flex-wrap gap-2 mt-2">
+                        {selectedTeamDepartments.map((option) => (
+                          <span
+                            key={`project-selected-team-department-${option}`}
+                            className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                          >
+                            <button
+                              type="button"
+                              className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                              aria-label={`Remove department ${option}`}
+                              onClick={() => toggleProjectTeamCategory("department", option)}
+                            >
+                              &times;
+                            </button>
+                            <span>Dept: {option}</span>
+                          </span>
+                        ))}
+                        {selectedTeamEmployeeRoles.map((option) => (
+                          <span
+                            key={`project-selected-team-role-${option}`}
+                            className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                          >
+                            <button
+                              type="button"
+                              className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                              aria-label={`Remove employee role ${option}`}
+                              onClick={() => toggleProjectTeamCategory("employeeRole", option)}
+                            >
+                              &times;
+                            </button>
+                            <span>Role: {option}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="small text-secondary mt-2">
+                      Selecting categories will add matching employees to this team. You can still remove any employee below.
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="form-label small mb-1">Available Employees *</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="search"
+                        className="form-control"
+                        autoComplete="off"
+                        placeholder="Search and select employees"
+                        value={teamMemberSearch}
+                        onFocus={() => setTeamMemberSearchOpen(true)}
+                        onClick={() => setTeamMemberSearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setTeamMemberSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          setTeamMemberSearch(event.target.value);
+                          setTeamMemberSearchOpen(true);
+                        }}
+                      />
+                      {showProjectTeamMemberSuggestions ? (
+                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Employee List</div>
+                            {availableProjectTeamMembers.length ? availableProjectTeamMembers.map((employee) => (
+                              <button
+                                key={`project-team-available-${employee.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => toggleProjectTeamMember(employee.name)}
+                              >
+                                <span className="d-flex align-items-start gap-2">
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input mt-1"
+                                    checked={selectedTeamMembers.includes(employee.name)}
+                                    readOnly
+                                  />
+                                  <span>
+                                    <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
+                                    <span className="crm-inline-suggestions__item-sub">
+                                      {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
+                                    </span>
+                                  </span>
+                                </span>
+                              </button>
+                            )) : (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No employees found</span>
+                                <span className="crm-inline-suggestions__item-sub">Try another search or change the selected categories.</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="form-label small mb-2">Selected Employees</label>
+                    <div className="d-flex flex-wrap gap-2">
+                      {projectTeamSelectedMemberCards.length ? projectTeamSelectedMemberCards.map((member) => (
+                        <span
+                          key={`project-team-selected-${member.name}`}
+                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                            aria-label={`Remove ${member.name}`}
+                            onClick={() => toggleProjectTeamMember(member.name)}
+                          >
+                            &times;
+                          </button>
+                          <span className="fw-semibold">{member.name}</span>
+                        </span>
+                      )) : (
+                        <div className="small text-secondary">No employees selected yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="d-flex gap-2 flex-wrap">
+                    <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                      {editingId ? "Update" : "Create"}
+                    </button>
+                    {editingId ? (
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={resetProjectTeamForm}>
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div className="col-12 col-xl-9">
+              <SearchablePaginatedTableCard
+                title="Project Teams"
+                badgeLabel={`${currentRows.length} items`}
+                rows={currentRows.map((row) => normalizeProjectTeamRecord(row))}
+                columns={[
+                  { key: "name", label: "Team Name" },
+                  { key: "departmentSummary", label: "Department" },
+                  { key: "employeeCount", label: "Employees" },
+                  { key: "createdBy", label: "Created By" },
+                ]}
+                searchPlaceholder="Search Project Teams"
+                noRowsText="No project teams yet."
+                searchBy={(row) => [
+                  row.name,
+                  row.departmentSummary,
+                  row.createdBy,
+                  ...(Array.isArray(row.members) ? row.members : []),
+                ].join(" ")}
+                renderCells={(row) => [
+                  <span className="fw-semibold">{row.name || "-"}</span>,
+                  <span style={{ whiteSpace: "normal" }}>{row.departmentSummary || "-"}</span>,
+                  <button
+                    type="button"
+                    className="btn btn-link p-0 text-decoration-none"
+                    onClick={() => openProjectTeamMembersPopup(row)}
+                    disabled={!Number(row.employeeCount || 0)}
+                  >
+                    {Number(row.employeeCount || 0) ? `${row.employeeCount} ${Number(row.employeeCount) === 1 ? "Employee" : "Employees"}` : "-"}
+                  </button>,
+                  row.createdBy || "-",
+                ]}
+                renderActions={(row) => (
+                  <div className="d-inline-flex gap-2">
+                    <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editProjectTeam(row)}>
+                      Edit
+                    </button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              />
+            </div>
+          </div>
+        </>
       ) : (
         <>
       <div className="card p-3">
@@ -15278,10 +16070,12 @@ function ProjectManagementModule() {
                     className={
                       isInlineProjectsTab
                         ? (
-                            field.key === "projectName" || field.key === "clientCompany"
-                              ? "col-12 col-md-6 col-xl-4"
-                              : field.key === "status"
-                              ? "col-12 col-md-6 col-xl-3"
+                            field.key === "name"
+                              ? "col-12 col-md-2"
+                              : field.key === "clientCompany"
+                              ? "col-12 col-md-3"
+                              : field.key === "startDate" || field.key === "completedDate" || field.key === "status"
+                              ? "col-12 col-md-2"
                               : "col-12 col-md-4"
                           )
                         : isTaskTab
@@ -15297,6 +16091,7 @@ function ProjectManagementModule() {
                     {field.type === "select" ? (
                       <select
                         className="form-select"
+                        name={field.key}
                         value={formValues[field.key] || ""}
                         required={isRequiredField}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
@@ -15311,18 +16106,19 @@ function ProjectManagementModule() {
                         <input
                           type="text"
                           className="form-control"
+                          name={field.key}
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
                           required={isRequiredField}
                           maxLength={getBusinessAutopilotMaxLength(field.key)}
                           onChange={(event) => onChangeField(field.key, event.target.value)}
-                          onFocus={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
-                          onClick={() => setShowProjectClientSuggestions(Boolean(String(formValues[field.key] || "").trim()))}
+                          onFocus={() => setShowProjectClientSuggestions(true)}
+                          onClick={() => setShowProjectClientSuggestions(true)}
                           onBlur={() => {
                             window.setTimeout(() => setShowProjectClientSuggestions(false), 120);
                           }}
                         />
-                        {showProjectClientSuggestions && (projectCrmContactMatches.length || projectCustomerMatches.length) ? (
+                        {showProjectClientSuggestions ? (
                           <div className="crm-inline-suggestions">
                             {projectCrmContactMatches.length ? (
                               <div className="crm-inline-suggestions__group">
@@ -15345,19 +16141,37 @@ function ProjectManagementModule() {
                               <div className="crm-inline-suggestions__group">
                                 <div className="crm-inline-suggestions__title">Clients</div>
                                 {projectCustomerMatches.map((customer) => (
+                                  (() => {
+                                    const summary = getProjectCustomerSummary(customer);
+                                    return (
                                   <button
                                     key={`project-client-${customer.id}`}
                                     type="button"
                                     className="crm-inline-suggestions__item"
                                     onMouseDown={(event) => event.preventDefault()}
-                                    onClick={() => selectProjectClientCompany(String(customer.companyName || customer.name || customer.clientName || "").trim())}
+                                    onClick={() => selectProjectClientCompany(String(summary.title || customer.companyName || customer.clientName || "").trim())}
                                   >
-                                    <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                    <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
+                                    <span className="crm-inline-suggestions__item-main d-block">{summary.title}</span>
+                                    <span className="crm-inline-suggestions__item-sub d-block">
+                                      {summary.subtitle}
+                                      {summary.phoneText ? ` | ${summary.phoneText}` : ""}
+                                      {summary.emailText ? ` | ${summary.emailText}` : ""}
+                                      {summary.locationText ? ` | ${summary.locationText}` : ""}
+                                    </span>
                                   </button>
+                                    );
+                                  })()
                                 ))}
                               </div>
-                            ) : null}
+                            ) : (
+                              <div className="crm-inline-suggestions__group">
+                                <div className="crm-inline-suggestions__title">Clients</div>
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No clients found</span>
+                                  <span className="crm-inline-suggestions__item-sub">Try another client / company name</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ) : null}
                       </div>
@@ -15367,6 +16181,7 @@ function ProjectManagementModule() {
                           type="text"
                           list={`project-${field.key}-list`}
                           className="form-control datalist-readable-input"
+                          name={field.key}
                           placeholder={field.placeholder}
                           value={formValues[field.key] || ""}
                           required={isRequiredField}
@@ -15384,10 +16199,13 @@ function ProjectManagementModule() {
                     ) : (
                       <input
                         type={field.type || "text"}
-                        className="form-control"
+                        name={field.key}
+                        data-wz-hide-disabled-dates={activeTab === "projects" && field.key === "completedDate" ? "true" : undefined}
+                        className={`form-control${activeTab === "projects" && field.key === "completedDate" && projectCompletedDateBeforeStart ? " border border-danger" : ""}`}
                         placeholder={field.placeholder}
                         value={formValues[field.key] || ""}
                         required={isRequiredField}
+                        min={activeTab === "projects" && field.key === "completedDate" ? normalizeMeetingDateValue(formValues.startDate || "") || undefined : undefined}
                         maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
                         onChange={(event) => onChangeField(field.key, event.target.value)}
                       />
@@ -15397,7 +16215,7 @@ function ProjectManagementModule() {
               })()
             ))}
             {projectInlineSubmitTabs.has(activeTab) ? (
-              <div className="col-12 col-md-6 col-xl-1 d-flex align-items-end">
+              <div className="col-12 col-md-1 d-flex align-items-end">
                 <div className="w-100 d-flex gap-2 flex-wrap">
                   <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
                     {editingId ? "Update" : "Create"}
@@ -15485,6 +16303,54 @@ function ProjectManagementModule() {
       />
         </>
       )}
+      {projectTeamMembersPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeProjectTeamMembersPopup}
+        >
+          <div
+            className="card p-3 wz-team-members-popup"
+            style={{ width: "min(420px, 92vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">{projectTeamMembersPopup.title || "Team Employees"}</h5>
+                <div className="small text-secondary">{projectTeamMembersPopup.name || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-team-members-popup-close" onClick={closeProjectTeamMembersPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div>
+              {projectTeamMembersPopup.members.length ? (
+                <div className="table-responsive">
+                  <table className="table table-sm table-bordered mb-0 align-middle">
+                    <tbody>
+                      {(() => {
+                        const half = Math.ceil(projectTeamMembersPopup.members.length / 2);
+                        const leftColumn = projectTeamMembersPopup.members.slice(0, half);
+                        const rightColumn = projectTeamMembersPopup.members.slice(half);
+                        const rows = Math.max(leftColumn.length, rightColumn.length);
+                        return Array.from({ length: rows }).map((_, rowIndex) => (
+                          <tr key={`project-team-member-row-${rowIndex}`}>
+                            <td className="p-2">{leftColumn[rowIndex] || "-"}</td>
+                            <td className="p-2">{rightColumn[rowIndex] || "-"}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="small text-secondary">No employees found.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -15501,7 +16367,8 @@ function ProjectDetailPage() {
   const [hrEmployees, setHrEmployees] = useState(() => readSharedHrEmployees());
   const [accountsVendors, setAccountsVendors] = useState(() => readSharedAccountsVendors());
   const [erpUsers, setErpUsers] = useState([]);
-  const [customTeamInput, setCustomTeamInput] = useState("");
+  const [projectTeamSearchText, setProjectTeamSearchText] = useState("");
+  const [projectTeamSearchOpen, setProjectTeamSearchOpen] = useState(false);
   const [projectEmployeeSearchText, setProjectEmployeeSearchText] = useState("");
   const [projectEmployeeSearchOpen, setProjectEmployeeSearchOpen] = useState(false);
   const [expensePayeeSearchOpen, setExpensePayeeSearchOpen] = useState(false);
@@ -15570,10 +16437,21 @@ function ProjectDetailPage() {
 
   const teamOptions = useMemo(
     () => Array.from(new Set([
-      ...crmTeams.map((row) => String(row.name || "").trim()),
+      ...((moduleData.projectTeams || []).map((row) => String(row?.name || "").trim())),
       ...(projectDetail.teams || []),
     ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [crmTeams, projectDetail.teams]
+    [moduleData.projectTeams, projectDetail.teams]
+  );
+  const selectedProjectTeams = Array.isArray(projectDetail.teams) ? projectDetail.teams : [];
+  const filteredProjectTeamOptions = useMemo(
+    () => teamOptions.filter((team) => {
+      const query = String(projectTeamSearchText || "").trim().toLowerCase();
+      if (!query) {
+        return true;
+      }
+      return team.toLowerCase().includes(query);
+    }).filter((team) => !selectedProjectTeams.includes(team)),
+    [projectTeamSearchText, selectedProjectTeams, teamOptions]
   );
 
   const employeeOptions = useMemo(
@@ -15663,6 +16541,14 @@ function ProjectDetailPage() {
       [key]: Array.from(new Set([...(Array.isArray(prev[key]) ? prev[key] : []), normalizedValue])),
     }));
     clearInput("");
+  }
+
+  function toggleProjectTeamAssignment(value) {
+    toggleSelection("teams", value);
+  }
+
+  function toggleProjectEmployeeAssignment(value) {
+    toggleSelection("employees", value);
   }
 
   function saveExpense(event) {
@@ -15815,6 +16701,14 @@ function ProjectDetailPage() {
               <span className="text-secondary small text-uppercase">Client / Company</span>
               <span className="fw-semibold">{project.clientCompany || "No client selected"}</span>
             </div>
+            <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "130px" }}>
+              <span className="text-secondary small text-uppercase">Start Date</span>
+              <span className="fw-semibold">{formatDateLikeCellValue("startDate", project.startDate, "-")}</span>
+            </div>
+            <div className="border rounded px-3 py-2 d-flex flex-column justify-content-center" style={{ minWidth: "150px" }}>
+              <span className="text-secondary small text-uppercase">Completed Date</span>
+              <span className="fw-semibold">{formatDateLikeCellValue("completedDate", project.completedDate, "-")}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -15918,20 +16812,138 @@ function ProjectDetailPage() {
                       />
                     </div>
                   </div>
-                  <div className="border rounded p-3">
-                    <div className="text-secondary small mb-2">Assigned Teams</div>
-                    <div className="d-flex flex-wrap gap-2">
-                      {(projectDetail.teams || []).length ? (projectDetail.teams || []).map((team) => (
-                        <span key={team} className="badge bg-primary-subtle text-primary-emphasis">{team}</span>
-                      )) : <span className="text-secondary small">No teams assigned yet.</span>}
+                  <div className="row g-3">
+                    <div className="col-12 col-lg-6">
+                      <div className="border rounded p-3 h-100">
+                        <div className="text-secondary small mb-2">Assigned Teams</div>
+                        <div className="crm-inline-suggestions-wrap mb-2">
+                          <input
+                            className="form-control form-control-sm"
+                            value={projectTeamSearchText}
+                            placeholder="Search and select teams"
+                            autoComplete="off"
+                            onFocus={() => setProjectTeamSearchOpen(true)}
+                            onClick={() => setProjectTeamSearchOpen(true)}
+                            onBlur={() => window.setTimeout(() => setProjectTeamSearchOpen(false), 120)}
+                            onChange={(event) => {
+                              setProjectTeamSearchText(event.target.value);
+                              setProjectTeamSearchOpen(true);
+                            }}
+                          />
+                          {projectTeamSearchOpen ? (
+                            <div className="crm-inline-suggestions">
+                              <div className="crm-inline-suggestions__group">
+                                <div className="crm-inline-suggestions__title">Project Teams</div>
+                                {filteredProjectTeamOptions.length ? filteredProjectTeamOptions.map((team) => (
+                                  <button
+                                    key={`overview-team-suggest-${team}`}
+                                    type="button"
+                                    className="crm-inline-suggestions__item"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => {
+                                      toggleProjectTeamAssignment(team);
+                                      setProjectTeamSearchText("");
+                                      setProjectTeamSearchOpen(false);
+                                    }}
+                                  >
+                                    <span className="crm-inline-suggestions__item-main">{team}</span>
+                                    <span className="crm-inline-suggestions__item-sub">Assign this team to the project</span>
+                                  </button>
+                                )) : (
+                                  <div className="crm-inline-suggestions__item">
+                                    <span className="crm-inline-suggestions__item-main">No teams found</span>
+                                    <span className="crm-inline-suggestions__item-sub">Try another search term.</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="d-flex flex-wrap gap-2">
+                          {selectedProjectTeams.length ? selectedProjectTeams.map((team) => (
+                            <span
+                              key={team}
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                                aria-label={`Remove ${team}`}
+                                onClick={() => toggleProjectTeamAssignment(team)}
+                              >
+                                &times;
+                              </button>
+                              <span>{team}</span>
+                            </span>
+                          )) : <span className="text-secondary small">No teams assigned yet.</span>}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="border rounded p-3">
-                    <div className="text-secondary small mb-2">Assigned Employees</div>
-                    <div className="d-flex flex-wrap gap-2">
-                      {(projectDetail.employees || []).length ? (projectDetail.employees || []).map((employee) => (
-                        <span key={employee} className="badge bg-info-subtle text-info-emphasis">{employee}</span>
-                      )) : <span className="text-secondary small">No employees assigned yet.</span>}
+                    <div className="col-12 col-lg-6">
+                      <div className="border rounded p-3 h-100">
+                        <div className="text-secondary small mb-2">Assigned Employees</div>
+                        <div className="crm-inline-suggestions-wrap mb-2">
+                          <input
+                            className="form-control form-control-sm"
+                            value={projectEmployeeSearchText}
+                            placeholder="Search and select employees"
+                            autoComplete="off"
+                            onFocus={() => setProjectEmployeeSearchOpen(true)}
+                            onClick={() => setProjectEmployeeSearchOpen(true)}
+                            onBlur={() => window.setTimeout(() => setProjectEmployeeSearchOpen(false), 120)}
+                            onChange={(event) => {
+                              setProjectEmployeeSearchText(event.target.value);
+                              setProjectEmployeeSearchOpen(true);
+                            }}
+                          />
+                          {projectEmployeeSearchOpen ? (
+                            <div className="crm-inline-suggestions">
+                              <div className="crm-inline-suggestions__group">
+                                <div className="crm-inline-suggestions__title">Employees</div>
+                                {filteredProjectEmployeeOptions.length ? filteredProjectEmployeeOptions.map((employee) => (
+                                  <button
+                                    key={`overview-employee-suggest-${employee}`}
+                                    type="button"
+                                    className="crm-inline-suggestions__item"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => {
+                                      toggleProjectEmployeeAssignment(employee);
+                                      setProjectEmployeeSearchText("");
+                                      setProjectEmployeeSearchOpen(false);
+                                    }}
+                                  >
+                                    <span className="crm-inline-suggestions__item-main">{employee}</span>
+                                    <span className="crm-inline-suggestions__item-sub">Assign this employee to the project</span>
+                                  </button>
+                                )) : (
+                                  <div className="crm-inline-suggestions__item">
+                                    <span className="crm-inline-suggestions__item-main">No employees found</span>
+                                    <span className="crm-inline-suggestions__item-sub">Try another search term.</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="d-flex flex-wrap gap-2">
+                          {selectedProjectEmployees.length ? selectedProjectEmployees.map((employee) => (
+                            <span
+                              key={employee}
+                              className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                                aria-label={`Remove ${employee}`}
+                                onClick={() => toggleProjectEmployeeAssignment(employee)}
+                              >
+                                &times;
+                              </button>
+                              <span>{employee}</span>
+                            </span>
+                          )) : <span className="text-secondary small">No employees assigned yet.</span>}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -16154,23 +17166,69 @@ function ProjectDetailPage() {
             <div className="card p-3 h-100">
               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
                 <h6 className="mb-0">Project Teams</h6>
-                <span className="text-secondary small">Select multiple teams or add your own.</span>
+                <span className="text-secondary small">Search and assign teams to this project.</span>
               </div>
-              <div className="d-flex gap-2 mb-3">
-                <input className="form-control" value={customTeamInput} onChange={(event) => setCustomTeamInput(event.target.value)} placeholder="Add custom team" />
-                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => addCustomSelection("teams", customTeamInput, setCustomTeamInput)}>Add</button>
+              <div className="crm-inline-suggestions-wrap">
+                <input
+                  className="form-control"
+                  value={projectTeamSearchText}
+                  placeholder="Search and select teams"
+                  autoComplete="off"
+                  onFocus={() => setProjectTeamSearchOpen(true)}
+                  onClick={() => setProjectTeamSearchOpen(true)}
+                  onBlur={() => window.setTimeout(() => setProjectTeamSearchOpen(false), 120)}
+                  onChange={(event) => {
+                    setProjectTeamSearchText(event.target.value);
+                    setProjectTeamSearchOpen(true);
+                  }}
+                />
+                {projectTeamSearchOpen ? (
+                  <div className="crm-inline-suggestions">
+                    <div className="crm-inline-suggestions__group">
+                      <div className="crm-inline-suggestions__title">Project Teams</div>
+                      {filteredProjectTeamOptions.length ? (
+                        filteredProjectTeamOptions.map((team) => (
+                          <button
+                            key={`project-team-suggest-${team}`}
+                            type="button"
+                            className="crm-inline-suggestions__item"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              toggleProjectTeamAssignment(team);
+                              setProjectTeamSearchText("");
+                              setProjectTeamSearchOpen(false);
+                            }}
+                          >
+                            <span className="crm-inline-suggestions__item-main">{team}</span>
+                            <span className="crm-inline-suggestions__item-sub">Assign this team to the project</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="crm-inline-suggestions__item">
+                          <span className="crm-inline-suggestions__item-main">No teams found</span>
+                          <span className="crm-inline-suggestions__item-sub">Try another search term.</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              <div className="d-flex flex-wrap gap-2">
-                {teamOptions.length ? teamOptions.map((team) => (
-                  <button
-                    key={team}
-                    type="button"
-                    className={`btn btn-sm ${(projectDetail.teams || []).includes(team) ? "btn-success" : "btn-outline-light"}`}
-                    onClick={() => toggleSelection("teams", team)}
-                  >
-                    {team}
-                  </button>
-                )) : <span className="text-secondary small">No team suggestions yet. Add a custom team above.</span>}
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                {selectedProjectTeams.length ? selectedProjectTeams.map((team) => (
+                  <span key={`project-team-chip-${team}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                    <button
+                      type="button"
+                      className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                      aria-label={`Remove ${team}`}
+                      onClick={() => toggleProjectTeamAssignment(team)}
+                    >
+                      &times;
+                    </button>
+                    <span>{team}</span>
+                  </span>
+                )) : (
+                  <span className="text-secondary small">No teams assigned yet.</span>
+                )}
               </div>
             </div>
           </div>
@@ -16178,7 +17236,7 @@ function ProjectDetailPage() {
             <div className="card p-3 h-100">
               <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
                 <h6 className="mb-0">Project Employees</h6>
-                <span className="text-secondary small">Assign multiple employees to this project.</span>
+                <span className="text-secondary small">Search and assign employees to this project.</span>
               </div>
               <div className="crm-inline-suggestions-wrap">
                 <input
@@ -16206,9 +17264,9 @@ function ProjectDetailPage() {
                             className="crm-inline-suggestions__item"
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => {
-                              toggleSelection("employees", employee);
+                              toggleProjectEmployeeAssignment(employee);
                               setProjectEmployeeSearchText("");
-                              setProjectEmployeeSearchOpen(true);
+                              setProjectEmployeeSearchOpen(false);
                             }}
                           >
                             <span className="crm-inline-suggestions__item-main">{employee}</span>
@@ -16232,7 +17290,7 @@ function ProjectDetailPage() {
                       type="button"
                       className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
                       aria-label={`Remove ${employee}`}
-                      onClick={() => toggleSelection("employees", employee)}
+                      onClick={() => toggleProjectEmployeeAssignment(employee)}
                     >
                       &times;
                     </button>
@@ -20113,9 +21171,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionList, setSubscriptionList] = useState([]);
   const [subscriptionCategoryForm, setSubscriptionCategoryForm] = useState(createEmptySubscriptionCategory());
   const [subscriptionSubCategoryForm, setSubscriptionSubCategoryForm] = useState(createEmptySubscriptionSubCategory());
+  const [subscriptionDraftForm, setSubscriptionDraftForm] = useState(createEmptySubscriptionDraftForm({ currency: orgBillingCurrency }));
   const [subscriptionForm, setSubscriptionForm] = useState(createEmptySubscriptionForm({ currency: orgBillingCurrency }));
+  const [subscriptionAssignmentSearch, setSubscriptionAssignmentSearch] = useState("");
+  const [subscriptionAssignmentSearchOpen, setSubscriptionAssignmentSearchOpen] = useState(false);
+  const [subscriptionDraftCategorySearch, setSubscriptionDraftCategorySearch] = useState("");
+  const [subscriptionDraftCategorySearchOpen, setSubscriptionDraftCategorySearchOpen] = useState(false);
+  const [subscriptionDraftSubCategorySearch, setSubscriptionDraftSubCategorySearch] = useState("");
+  const [subscriptionDraftSubCategorySearchOpen, setSubscriptionDraftSubCategorySearchOpen] = useState(false);
   const [editingSubscriptionCategoryId, setEditingSubscriptionCategoryId] = useState("");
   const [editingSubscriptionSubCategoryId, setEditingSubscriptionSubCategoryId] = useState("");
+  const [editingSubscriptionDraftId, setEditingSubscriptionDraftId] = useState("");
   const [editingSubscriptionId, setEditingSubscriptionId] = useState("");
   const [subscriptionView, setSubscriptionView] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
@@ -20338,6 +21404,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           const nextCurrency = applyOrgCurrency(currency);
           setOrgBillingCurrency(nextCurrency);
           setSubscriptionForm((prev) => (!editingSubscriptionId && !String(prev.id || "").trim() ? { ...prev, currency: nextCurrency } : prev));
+          setSubscriptionDraftForm((prev) => (!String(prev.id || "").trim() ? { ...prev, currency: nextCurrency } : prev));
         }
       } catch {
         // keep default India when billing profile is unavailable
@@ -20431,6 +21498,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     () => (moduleData.itemMasters || []).filter((row) => String(row?.itemType || "Product") === "Service"),
     [moduleData.itemMasters]
   );
+  const currencyCodeOptions = useMemo(() => getCurrencyCodeOptions(), []);
   const inventoryItems = useMemo(() => Array.isArray(inventoryWorkspace?.items) ? inventoryWorkspace.items : [], [inventoryWorkspace]);
   const inventoryBranches = useMemo(() => Array.isArray(inventoryWorkspace?.branches) ? inventoryWorkspace.branches : [], [inventoryWorkspace]);
   const inventoryItemLookup = useMemo(
@@ -20444,10 +21512,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       if (subscriptionCustomers.length) {
         return subscriptionCustomers;
       }
-      return (moduleData.customers || []).map((row) => ({
-        id: String(row.id || ""),
-        name: String(row.companyName || row.name || row.clientName || "").trim()
-      })).filter((row) => row.id && row.name);
+      return moduleData.customers || [];
     },
     [moduleData.customers, subscriptionCustomers]
   );
@@ -20459,25 +21524,85 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const match = (subscriptionCategories || []).find((row) => String(row?.id || "").trim() === normalizedCategoryId);
     return match ? String(match.name || "").trim() : "";
   };
-  const subscriptionSubCategoryOptions = useMemo(
+  const getSubCategoryName = (subCategoryId) => {
+    const normalizedSubCategoryId = String(subCategoryId || "").trim();
+    if (!normalizedSubCategoryId) {
+      return "";
+    }
+    const match = (subscriptionSubCategories || []).find((row) => String(row?.id || "").trim() === normalizedSubCategoryId);
+    return match ? String(match.name || "").trim() : "";
+  };
+  const subscriptionDraftSubCategoryOptions = useMemo(
     () => {
-      const categoryId = String(subscriptionForm.categoryId || "").trim();
+      const categoryId = String(subscriptionDraftForm.categoryId || "").trim();
       if (!categoryId) {
         return subscriptionSubCategories;
       }
       return subscriptionSubCategories.filter((row) => String(row?.categoryId || "").trim() === categoryId);
     },
-    [subscriptionForm.categoryId, subscriptionSubCategories]
+    [subscriptionDraftForm.categoryId, subscriptionSubCategories]
+  );
+  const normalizedSubscriptionDraftCategorySearch = String(subscriptionDraftCategorySearch || "").trim().toLowerCase();
+  const filteredSubscriptionDraftCategoryOptions = useMemo(
+    () => subscriptionCategories.filter((row) => {
+      if (!normalizedSubscriptionDraftCategorySearch) {
+        return true;
+      }
+      return String(row?.name || "").toLowerCase().includes(normalizedSubscriptionDraftCategorySearch);
+    }).slice(0, 8),
+    [normalizedSubscriptionDraftCategorySearch, subscriptionCategories]
+  );
+  const normalizedSubscriptionDraftSubCategorySearch = String(subscriptionDraftSubCategorySearch || "").trim().toLowerCase();
+  const filteredSubscriptionDraftSubCategoryOptions = useMemo(
+    () => subscriptionDraftSubCategoryOptions.filter((row) => {
+      if (!normalizedSubscriptionDraftSubCategorySearch) {
+        return true;
+      }
+      return `${String(row?.name || "")} ${String(row?.description || "")} ${String(row?.categoryName || getCategoryName(row?.categoryId) || "")}`
+        .toLowerCase()
+        .includes(normalizedSubscriptionDraftSubCategorySearch);
+    }).slice(0, 8),
+    [getCategoryName, normalizedSubscriptionDraftSubCategorySearch, subscriptionDraftSubCategoryOptions]
   );
   const subscriptionCustomerSelectOptions = useMemo(
     () => subscriptionCustomerOptions
       .map((row) => {
         const customerId = String(row?.id || "").trim();
-        const customerName = String(row?.name || "").trim();
+        const companyName = String(row?.companyName || row?.name || "").trim();
+        const clientName = String(row?.clientName || "").trim();
+        const customerName = String(row?.displayName || getSharedCustomerDisplayName(row) || companyName || clientName || "").trim();
         if (!customerId || !customerName) {
           return null;
         }
-        return { id: customerId, name: customerName };
+        const phones = formatSharedCustomerPhones(row);
+        const emails = formatSharedCustomerEmails(row);
+        const location = [
+          String(row?.billingState || row?.state || "").trim(),
+          String(row?.billingCountry || row?.country || "").trim(),
+          String(row?.billingPincode || row?.pincode || "").trim(),
+        ].filter(Boolean).join(", ");
+        const searchText = [
+          customerName,
+          companyName,
+          clientName,
+          phones.join(" "),
+          emails.join(" "),
+          location,
+          String(row?.billingAddress || "").trim(),
+          String(row?.shippingAddress || "").trim(),
+        ].join(" ").toLowerCase();
+        return {
+          ...row,
+          id: customerId,
+          name: customerName,
+          displayName: customerName,
+          companyName,
+          clientName,
+          phoneText: phones.join(" | "),
+          emailText: emails.join(" | "),
+          locationText: location,
+          searchText,
+        };
       })
       .filter(Boolean),
     [subscriptionCustomerOptions]
@@ -20489,10 +21614,60 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         return subscriptionCustomerSelectOptions;
       }
       return subscriptionCustomerSelectOptions.filter((row) =>
-        String(row.name || "").toLowerCase().includes(normalizedSubscriptionClientSearch)
+        String(row.searchText || "").includes(normalizedSubscriptionClientSearch)
       );
     },
     [normalizedSubscriptionClientSearch, subscriptionCustomerSelectOptions]
+  );
+  const assignedSubscriptionList = useMemo(
+    () => subscriptionList.filter((row) => Boolean(String(row?.customerId || "").trim())),
+    [subscriptionList]
+  );
+  const unassignedSubscriptionOptions = useMemo(
+    () => subscriptionList
+      .filter((row) => !String(row?.customerId || "").trim())
+      .map((row) => ({
+        id: String(row?.id || "").trim(),
+        label: String(row?.subscriptionTitle || "").trim(),
+        categoryName: String(row?.categoryName || "").trim(),
+        subCategoryName: String(row?.subCategoryName || "").trim()
+      }))
+      .filter((row) => row.id && row.label),
+    [subscriptionList]
+  );
+  const subscriptionAssignmentOptions = useMemo(
+    () => subscriptionList
+      .filter((row) => !String(row?.customerId || "").trim())
+      .map((row) => ({
+        id: String(row?.id || "").trim(),
+        label: String(row?.subscriptionTitle || "").trim(),
+        planDurationDays: String(row?.planDurationDays || row?.planDuration || "").trim(),
+        planDurationLabel: formatSubscriptionPlanDurationLabel(row?.planDurationDays || row?.planDuration),
+        customerName: String(row?.customerName || "").trim(),
+        categoryName: String(row?.categoryName || "").trim(),
+        subCategoryName: String(row?.subCategoryName || "").trim(),
+        isAssigned: Boolean(String(row?.customerId || "").trim())
+      }))
+      .filter((row) => row.id && row.label),
+    [subscriptionList]
+  );
+  const normalizedSubscriptionAssignmentSearch = String(subscriptionAssignmentSearch || "").trim().toLowerCase();
+  const filteredSubscriptionAssignmentOptions = useMemo(
+    () => {
+      if (!normalizedSubscriptionAssignmentSearch) {
+        return subscriptionAssignmentOptions;
+      }
+      return subscriptionAssignmentOptions.filter((row) =>
+        `${row.label} ${row.planDurationLabel} ${row.customerName} ${row.categoryName} ${row.subCategoryName} ${row.isAssigned ? "assigned" : "draft"}`
+          .toLowerCase()
+          .includes(normalizedSubscriptionAssignmentSearch)
+      );
+    },
+    [normalizedSubscriptionAssignmentSearch, subscriptionAssignmentOptions]
+  );
+  const subscriptionProductRows = useMemo(
+    () => subscriptionList.filter((row) => !String(row?.customerId || "").trim()),
+    [subscriptionList]
   );
   const subscriptionAlertDepartmentOptions = useMemo(
     () => Array.from(new Set((erpUsersForSales || []).map((row) => String(row?.department || "").trim()).filter(Boolean)))
@@ -20532,7 +21707,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const subscriptionCustomerNameById = useMemo(() => {
     const map = new Map();
     subscriptionCustomerSelectOptions.forEach((row) => {
-      map.set(String(row.id || ""), String(row.name || ""));
+      map.set(String(row.id || ""), String(row.displayName || row.name || ""));
     });
     return map;
   }, [subscriptionCustomerSelectOptions]);
@@ -20568,11 +21743,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const normalizedSubscriptionStatusTab = String(subscriptionStatusTab || "all").trim().toLowerCase();
   const filteredSubscriptionList = useMemo(() => {
     if (normalizedSubscriptionStatusTab === "all") {
-      return subscriptionList;
+      return assignedSubscriptionList;
     }
     if (normalizedSubscriptionStatusTab === "expiring_30" || normalizedSubscriptionStatusTab === "expiring_15" || normalizedSubscriptionStatusTab === "expiring_7") {
       const limitDays = Number(normalizedSubscriptionStatusTab.split("_")[1]);
-      return subscriptionList.filter((row) => {
+      return assignedSubscriptionList.filter((row) => {
         if (String(row?.status || "").trim().toLowerCase() === "cancelled") {
           return false;
         }
@@ -20580,11 +21755,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         return typeof daysToExpiry === "number" && daysToExpiry >= 0 && daysToExpiry <= limitDays;
       });
     }
-    return subscriptionList.filter((row) => String(row?.status || "").trim().toLowerCase() === normalizedSubscriptionStatusTab);
-  }, [normalizedSubscriptionStatusTab, subscriptionList]);
+    return assignedSubscriptionList.filter((row) => String(row?.status || "").trim().toLowerCase() === normalizedSubscriptionStatusTab);
+  }, [assignedSubscriptionList, normalizedSubscriptionStatusTab]);
   const subscriptionStatusTabCounts = useMemo(() => {
     const counts = {
-      all: subscriptionList.length,
+      all: assignedSubscriptionList.length,
       active: 0,
       expired: 0,
       cancelled: 0,
@@ -20592,7 +21767,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       expiring_15: 0,
       expiring_7: 0
     };
-    subscriptionList.forEach((row) => {
+    assignedSubscriptionList.forEach((row) => {
       const key = String(row?.status || "").trim().toLowerCase();
       if (key === "active" || key === "expired" || key === "cancelled") {
         counts[key] += 1;
@@ -20613,7 +21788,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       }
     });
     return counts;
-  }, [subscriptionList]);
+  }, [assignedSubscriptionList]);
 
   function toggleSubscriptionAssignee(assignee) {
     setSubscriptionForm((prev) => {
@@ -20662,10 +21837,98 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setSubscriptionSubCategoryForm(createEmptySubscriptionSubCategory());
   }
 
+  function resetSubscriptionDraftForm() {
+    setEditingSubscriptionDraftId("");
+    setAccountsFormNotice("");
+    setSubscriptionDraftForm(createEmptySubscriptionDraftForm({ currency: defaultCurrency }));
+    setSubscriptionDraftCategorySearch("");
+    setSubscriptionDraftCategorySearchOpen(false);
+    setSubscriptionDraftSubCategorySearch("");
+    setSubscriptionDraftSubCategorySearchOpen(false);
+  }
+
   function resetSubscriptionForm() {
     setEditingSubscriptionId("");
     setAccountsFormNotice("");
     setSubscriptionForm(createEmptySubscriptionForm({ currency: defaultCurrency }));
+    setSubscriptionAssignmentSearch("");
+    setSubscriptionAssignmentSearchOpen(false);
+  }
+
+  function applySubscriptionAssignmentSelection(row) {
+    const nextId = String(row?.id || "").trim();
+    const nextTitle = String(row?.label || row?.subscriptionTitle || "").trim();
+    const nextDurationDays = String(row?.planDurationDays || row?.planDuration || "").trim();
+    if (!nextId || !nextTitle) {
+      return;
+    }
+    setEditingSubscriptionId("");
+    setSubscriptionForm((prev) => ({
+      ...prev,
+      id: nextId,
+      subscriptionTitle: nextTitle,
+      planDuration: nextDurationDays || prev.planDuration || "30",
+      planDurationDays: nextDurationDays,
+      endDate: getSubscriptionEndDateFromStartAndDuration(prev.startDate, nextDurationDays),
+    }));
+    setSubscriptionAssignmentSearch(nextTitle);
+    setSubscriptionAssignmentSearchOpen(false);
+  }
+
+  function updateSubscriptionDraftFormField(key, value) {
+    setAccountsFormNotice("");
+    if (key === "planDuration") {
+      setSubscriptionDraftForm((prev) => ({
+        ...prev,
+        planDuration: value,
+        planDurationDays: value === "custom" ? prev.planDurationDays : ""
+      }));
+      return;
+    }
+    if (key === "categoryId") {
+      setSubscriptionDraftForm((prev) => ({
+        ...prev,
+        categoryId: value,
+        subCategoryId: ""
+      }));
+      setSubscriptionDraftSubCategorySearch("");
+      return;
+    }
+    if (key === "amount") {
+      setSubscriptionDraftForm((prev) => ({ ...prev, amount: sanitizeCurrencyInput(value) }));
+      return;
+    }
+    setSubscriptionDraftForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function selectSubscriptionDraftCategory(row) {
+    const nextCategoryId = String(row?.id || "").trim();
+    const nextCategoryName = String(row?.name || "").trim();
+    if (!nextCategoryId || !nextCategoryName) {
+      return;
+    }
+    updateSubscriptionDraftFormField("categoryId", nextCategoryId);
+    setSubscriptionDraftCategorySearch(nextCategoryName);
+    setSubscriptionDraftCategorySearchOpen(false);
+    setSubscriptionDraftSubCategorySearch("");
+    setSubscriptionDraftSubCategorySearchOpen(false);
+  }
+
+  function selectSubscriptionDraftSubCategory(row) {
+    const nextSubCategoryId = String(row?.id || "").trim();
+    const nextSubCategoryName = String(row?.name || "").trim();
+    if (!nextSubCategoryId || !nextSubCategoryName) {
+      return;
+    }
+    const nextCategoryId = String(row?.categoryId || "").trim();
+    if (nextCategoryId) {
+      updateSubscriptionDraftFormField("categoryId", nextCategoryId);
+      setSubscriptionDraftCategorySearch(String(row?.categoryName || getCategoryName(nextCategoryId) || "").trim());
+    }
+    updateSubscriptionDraftFormField("subCategoryId", nextSubCategoryId);
+    setSubscriptionDraftSubCategorySearch(nextSubCategoryName);
+    setSubscriptionDraftCategorySearchOpen(false);
+    setSubscriptionDraftSubCategorySearchOpen(false);
   }
 
   function updateSubscriptionFormField(key, value) {
@@ -20685,7 +21948,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setSubscriptionForm((prev) => ({
         ...prev,
         startDate: value,
-        nextBillingDate: getNextBillingDateFromStart(value)
+        nextBillingDate: getNextBillingDateFromStart(value),
+        endDate: getSubscriptionEndDateFromStartAndDuration(value, prev.planDurationDays || prev.planDuration)
       }));
       return;
     }
@@ -20710,6 +21974,87 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       return;
     }
     setSubscriptionForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveSubscriptionDraft(event) {
+    event.preventDefault();
+    const normalizedPlanDuration = String(subscriptionDraftForm.planDuration || "").trim();
+    const planDurationDays = normalizedPlanDuration === "custom"
+      ? String(subscriptionDraftForm.planDurationDays || "").trim()
+      : normalizedPlanDuration;
+    const categoryId = String(subscriptionDraftForm.categoryId || "").trim();
+    const subCategoryId = String(subscriptionDraftForm.subCategoryId || "").trim();
+    const subscriptionTitle = String(subscriptionDraftForm.subscriptionTitle || "").trim();
+    const paymentDescription = String(subscriptionDraftForm.paymentDescription || "").trim();
+    const amountValue = String(subscriptionDraftForm.amount || "").trim();
+    const currency = String(subscriptionDraftForm.currency || "").trim().toUpperCase() || defaultCurrency;
+    const payload = {
+      categoryId,
+      subCategoryId,
+      subscriptionTitle,
+      planDurationDays,
+      paymentDescription,
+      amount: sanitizeCurrencyInput(amountValue || "0"),
+      currency,
+      status: String(subscriptionDraftForm.status || "Active").trim() || "Active"
+    };
+    if (!categoryId || !subCategoryId || !subscriptionTitle || !amountValue || !currency) {
+      setAccountsFormNotice("Please fill mandatory fields: Subscription Title, Category, Sub Category, Plan Duration, Currency and Amount.");
+      return;
+    }
+    if (normalizedPlanDuration && normalizedPlanDuration !== "custom" && !/^(30|90|180|365|730|1095)$/.test(planDurationDays)) {
+      setAccountsFormNotice("Select a valid plan duration.");
+      return;
+    }
+    if (normalizedPlanDuration === "custom" && (!/^\d+$/.test(planDurationDays) || Number(planDurationDays) < 1)) {
+      setAccountsFormNotice("Enter valid custom plan duration in days.");
+      return;
+    }
+    try {
+      const isEditingDraft = Boolean(String(editingSubscriptionDraftId || "").trim());
+      const response = await apiFetch(
+        isEditingDraft ? `/api/business-autopilot/accounts/subscriptions/${editingSubscriptionDraftId}` : "/api/business-autopilot/accounts/subscriptions",
+        {
+          method: isEditingDraft ? "PUT" : "POST",
+          body: JSON.stringify(payload)
+        }
+      );
+      const saved = response?.subscription;
+      if (saved) {
+        setSubscriptionList((prev) => (
+          isEditingDraft
+            ? prev.map((row) => (String(row.id) === String(saved.id) ? saved : row))
+            : [saved, ...prev]
+        ));
+      }
+      setAccountsFormNotice("");
+      resetSubscriptionDraftForm();
+      await refreshSubscriptionData();
+    } catch (error) {
+      setAccountsFormNotice(error?.message || "Unable to save subscription.");
+    }
+  }
+
+  function editSubscriptionDraft(row) {
+    setEditingSubscriptionDraftId(String(row.id || "").trim());
+    const categoryName = String(row.categoryName || getCategoryName(row.categoryId) || "").trim();
+    const subCategoryName = String(row.subCategoryName || getSubCategoryName(row.subCategoryId) || "").trim();
+    setSubscriptionDraftForm({
+      id: row.id,
+      categoryId: String(row.categoryId || ""),
+      subCategoryId: String(row.subCategoryId || ""),
+      subscriptionTitle: String(row.subscriptionTitle || ""),
+      planDuration: String(row.planDurationDays || row.planDuration || "30"),
+      planDurationDays: String(row.planDurationDays || ""),
+      paymentDescription: String(row.paymentDescription || ""),
+      amount: String(row.amount || ""),
+      currency: String(row.currency || defaultCurrency).trim().toUpperCase() || defaultCurrency,
+      status: String(row.status || "Active")
+    });
+    setSubscriptionDraftCategorySearch(categoryName);
+    setSubscriptionDraftCategorySearchOpen(false);
+    setSubscriptionDraftSubCategorySearch(subCategoryName);
+    setSubscriptionDraftSubCategorySearchOpen(false);
   }
 
   async function saveSubscriptionCategory(event) {
@@ -20836,63 +22181,44 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   async function saveSubscription(event) {
     event.preventDefault();
-    const normalizedPlanDuration = String(subscriptionForm.planDuration || "").trim();
-    const planDurationDays = normalizedPlanDuration === "custom"
-      ? String(subscriptionForm.planDurationDays || "").trim()
-      : normalizedPlanDuration;
+    const targetSubscriptionId = String(editingSubscriptionId || subscriptionForm.id || "").trim();
+    const subscriptionTitle = String(subscriptionForm.subscriptionTitle || "").trim();
+    const planDurationDays = String(subscriptionForm.planDurationDays || subscriptionForm.planDuration || "").trim();
+    const customerId = String(subscriptionForm.customerId || "").trim();
+    const startDate = String(subscriptionForm.startDate || "").trim();
+    const endDate = String(subscriptionForm.endDate || "").trim() || "";
     const payload = {
-      categoryId: String(subscriptionForm.categoryId || "").trim(),
-      subCategoryId: String(subscriptionForm.subCategoryId || "").trim(),
-      subscriptionTitle: String(subscriptionForm.subscriptionTitle || "").trim(),
+      subscriptionTitle,
       planDurationDays,
-      customerId: String(subscriptionForm.customerId || "").trim(),
       paymentDescription: String(subscriptionForm.paymentDescription || "").trim(),
       amount: sanitizeCurrencyInput(subscriptionForm.amount || "0"),
       currency: String(subscriptionForm.currency || defaultCurrency).trim().toUpperCase() || defaultCurrency,
-      startDate: String(subscriptionForm.startDate || "").trim(),
-      endDate: String(subscriptionForm.endDate || "").trim() || "",
+      customerId,
+      startDate,
+      endDate,
       status: String(subscriptionForm.status || "Active").trim() || "Active",
       emailAlertDays: normalizeSubscriptionAlertDays(subscriptionForm.emailAlertDays),
       whatsappAlertDays: normalizeSubscriptionAlertDays(subscriptionForm.whatsappAlertDays),
       emailAlertAssignTo: normalizedSubscriptionEmailAlertAssignees,
       whatsappAlertAssignTo: normalizedSubscriptionWhatsappAlertAssignees
     };
-    if (!payload.categoryId || !payload.subCategoryId || !payload.subscriptionTitle || !payload.customerId || !payload.startDate) {
-      setAccountsFormNotice("Please fill mandatory fields: Category, Sub Category, Subscription Title, Client and Start Date.");
+    if (!targetSubscriptionId) {
+      setAccountsFormNotice("Select a subscription to assign.");
       return;
     }
-    if (normalizedPlanDuration && normalizedPlanDuration !== "custom" && !/^(30|90|180|365|730|1095)$/.test(planDurationDays)) {
-      setAccountsFormNotice("Select a valid plan duration.");
-      return;
-    }
-    if (normalizedPlanDuration === "custom" && (!/^\d+$/.test(planDurationDays) || Number(planDurationDays) < 1)) {
-      setAccountsFormNotice("Enter valid custom plan duration in days.");
+    if (!payload.subscriptionTitle || !payload.planDurationDays || !payload.customerId || !payload.startDate || !payload.endDate) {
+      setAccountsFormNotice("Please fill mandatory fields: Subscription, Duration, Client, Start Date and End Date.");
       return;
     }
     payload.nextBillingDate = getNextBillingDateFromStart(payload.startDate);
-    if (!payload.nextBillingDate) {
-      setAccountsFormNotice("Invalid start date.");
-      return;
-    }
     try {
-      if (editingSubscriptionId) {
-        const response = await apiFetch(`/api/business-autopilot/accounts/subscriptions/${editingSubscriptionId}`, {
-          method: "PUT",
-          body: JSON.stringify(payload)
-        });
-        const saved = response?.subscription;
-        if (saved) {
-          setSubscriptionList((prev) => prev.map((row) => (String(row.id) === String(saved.id) ? saved : row)));
-        }
-      } else {
-        const response = await apiFetch("/api/business-autopilot/accounts/subscriptions", {
-          method: "POST",
-          body: JSON.stringify(payload)
-        });
-        const saved = response?.subscription;
-        if (saved) {
-          setSubscriptionList((prev) => [saved, ...prev]);
-        }
+      const response = await apiFetch(`/api/business-autopilot/accounts/subscriptions/${targetSubscriptionId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+      const saved = response?.subscription;
+      if (saved) {
+        setSubscriptionList((prev) => prev.map((row) => (String(row.id) === String(saved.id) ? saved : row)));
       }
       setAccountsFormNotice("");
       resetSubscriptionForm();
@@ -20927,14 +22253,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setEditingSubscriptionId(String(row.id || "").trim());
     const existingCustomerId = String(row.customerId || "").trim();
     const normalizedDuration = String(row.planDurationDays || row.planDuration || "").trim();
-    const isPresetDuration = ["30", "90", "180", "365", "730", "1095"].includes(normalizedDuration);
     setSubscriptionForm({
       id: row.id,
       categoryId: String(row.categoryId || ""),
       subCategoryId: String(row.subCategoryId || ""),
       subscriptionTitle: row.subscriptionTitle || "",
-      planDuration: isPresetDuration ? normalizedDuration : "custom",
-      planDurationDays: isPresetDuration ? "" : normalizedDuration,
+      planDuration: normalizedDuration || "30",
+      planDurationDays: normalizedDuration,
       customerId: existingCustomerId,
       customerName: subscriptionCustomerNameById.get(existingCustomerId) || String(row.customerName || "").trim(),
       paymentDescription: row.paymentDescription || "",
@@ -20949,6 +22274,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       emailAlertAssignees: normalizeSubscriptionAlertAssignees(row.emailAlertAssignTo),
       whatsappAlertAssignees: normalizeSubscriptionAlertAssignees(row.whatsappAlertAssignTo)
     });
+    setSubscriptionAssignmentSearch(String(row.subscriptionTitle || "").trim());
+    setSubscriptionAssignmentSearchOpen(false);
     setActiveTab("subscriptions");
   }
 
@@ -24221,6 +25548,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </button>
             <button
               type="button"
+              className={`btn btn-sm ${subscriptionTopTab === "products" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setSubscriptionTopTab("products")}
+            >
+              Subscription Products
+            </button>
+            <button
+              type="button"
               className={`btn btn-sm ${subscriptionTopTab === "alerts" ? "btn-primary" : "btn-outline-light"}`}
               onClick={() => setSubscriptionTopTab("alerts")}
             >
@@ -24236,12 +25570,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionCategory}>
                     <div className="row g-3">
                       <div className="col-12">
-                        <label className="form-label small text-secondary mb-1">Category Name</label>
+                        <label className="form-label small text-secondary mb-1">Category Name *</label>
                         <input
                           className="form-control"
                           value={subscriptionCategoryForm.name || ""}
                           onChange={(event) => setSubscriptionCategoryForm((p) => ({ ...p, name: event.target.value }))}
                           placeholder="Cloud Hosting"
+                          required
                         />
                       </div>
                       <div className="col-12">
@@ -24305,11 +25640,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionSubCategory}>
                     <div className="row g-3">
                       <div className="col-12 col-md-6">
-                        <label className="form-label small text-secondary mb-1">Category</label>
+                        <label className="form-label small text-secondary mb-1">Category *</label>
                         <select
                           className="form-select"
                           value={subscriptionSubCategoryForm.categoryId || ""}
                           onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, categoryId: event.target.value }))}
+                          required
                         >
                           <option value="">Select Category</option>
                           {subscriptionCategories.map((row) => (
@@ -24318,12 +25654,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         </select>
                       </div>
                       <div className="col-12 col-md-6">
-                        <label className="form-label small text-secondary mb-1">Sub Category Name</label>
+                        <label className="form-label small text-secondary mb-1">Sub Category Name *</label>
                         <input
                           className="form-control"
                           value={subscriptionSubCategoryForm.name || ""}
                           onChange={(event) => setSubscriptionSubCategoryForm((p) => ({ ...p, name: event.target.value }))}
                           placeholder="Basic Plan"
+                          required
                         />
                       </div>
                       <div className="col-12">
@@ -24384,250 +25721,471 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             </div>
           ) : null}
 
-          {subscriptionTopTab === "subscriptions" ? (
+          {subscriptionTopTab === "products" ? (
             <>
-          <div className="card p-3">
-            <h6 className="mb-3">{editingSubscriptionId ? "Edit Subscription" : "Create Subscription"}</h6>
-            <form className="d-flex flex-column gap-3" onSubmit={saveSubscription}>
-              <div className="row g-3">
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Subscription Title</label>
-                  <input
-                    className="form-control"
-                    value={subscriptionForm.subscriptionTitle || ""}
-                    onChange={(event) => updateSubscriptionFormField("subscriptionTitle", event.target.value)}
-                    placeholder="CRM Premium Plan"
-                  />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Category</label>
-                  <select
-                    className="form-select"
-                    value={subscriptionForm.categoryId || ""}
-                    onChange={(event) => updateSubscriptionFormField("categoryId", event.target.value)}
-                  >
-                    <option value="">Select Category</option>
-                    {subscriptionCategories.map((row) => (
-                      <option key={row.id} value={row.id}>{row.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Sub Category</label>
-                  <select
-                    className="form-select"
-                    value={subscriptionForm.subCategoryId || ""}
-                    onChange={(event) => updateSubscriptionFormField("subCategoryId", event.target.value)}
-                  >
-                    <option value="">Select Sub Category</option>
-                    {subscriptionSubCategoryOptions.map((row) => (
-                        <option key={row.id} value={row.id}>{row.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Client</label>
-                  <div className="crm-inline-suggestions-wrap">
-                    <input
-                      className="form-control"
-                      autoComplete="off"
-                      value={subscriptionForm.customerName || ""}
-                      onFocus={() => setSubscriptionClientSearchOpen(true)}
-                      onClick={() => setSubscriptionClientSearchOpen(true)}
-                      onBlur={() => window.setTimeout(() => setSubscriptionClientSearchOpen(false), 120)}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        const selectedClient = subscriptionCustomerSelectOptions.find(
-                          (row) => String(row.name || "").trim().toLowerCase() === String(nextValue || "").trim().toLowerCase()
-                        );
-                        updateSubscriptionFormField("customerName", nextValue);
-                        updateSubscriptionFormField("customerId", selectedClient?.id || "");
-                        setSubscriptionClientSearchOpen(true);
-                      }}
-                      placeholder="Search client"
-                    />
-                    {subscriptionClientSearchOpen ? (
-                      filteredSubscriptionCustomerSelectOptions.length ? (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__group">
-                            <div className="crm-inline-suggestions__title">Clients</div>
-                            {filteredSubscriptionCustomerSelectOptions.map((row) => (
-                              <button
-                                key={`subscription-client-${row.id}`}
-                                type="button"
-                                className="crm-inline-suggestions__item"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => {
-                                  updateSubscriptionFormField("customerName", row.name);
-                                  updateSubscriptionFormField("customerId", row.id);
-                                  setSubscriptionClientSearchOpen(false);
-                                }}
-                              >
-                                <span className="crm-inline-suggestions__item-main">{row.name}</span>
-                              </button>
-                            ))}
+              <div className="card p-3">
+                <h6 className="mb-3">{editingSubscriptionDraftId ? "Edit Subscription Product" : "Create Subscription Product"}</h6>
+                <form className="d-flex flex-column gap-3" onSubmit={saveSubscriptionDraft}>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-2">
+                      <label className="form-label small text-secondary mb-1">Subscription Title *</label>
+                        <input
+                          className="form-control"
+                          value={subscriptionDraftForm.subscriptionTitle || ""}
+                          onChange={(event) => updateSubscriptionDraftFormField("subscriptionTitle", event.target.value)}
+                          placeholder="CRM Premium Plan"
+                          required
+                        />
+                    </div>
+                    <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Category *</label>
+                      <div className="crm-inline-suggestions-wrap">
+                          <input
+                            type="search"
+                            className="form-control"
+                            autoComplete="off"
+                            placeholder="Search Category"
+                            value={subscriptionDraftCategorySearch || ""}
+                            required
+                            onFocus={() => setSubscriptionDraftCategorySearchOpen(true)}
+                          onClick={() => setSubscriptionDraftCategorySearchOpen(true)}
+                          onBlur={() => window.setTimeout(() => setSubscriptionDraftCategorySearchOpen(false), 120)}
+                          onChange={(event) => {
+                            setSubscriptionDraftCategorySearch(event.target.value);
+                            setSubscriptionDraftCategorySearchOpen(true);
+                            updateSubscriptionDraftFormField("categoryId", "");
+                            setSubscriptionDraftSubCategorySearch("");
+                            setSubscriptionDraftSubCategorySearchOpen(false);
+                          }}
+                        />
+                        {subscriptionDraftCategorySearchOpen ? (
+                          <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Category List</div>
+                              {filteredSubscriptionDraftCategoryOptions.length ? filteredSubscriptionDraftCategoryOptions.map((row) => (
+                                <button
+                                  key={`subscription-draft-category-${row.id}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => selectSubscriptionDraftCategory(row)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{row.name}</span>
+                                  {row.description ? <span className="crm-inline-suggestions__item-sub">{row.description}</span> : null}
+                                </button>
+                              )) : (
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No categories found</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="crm-inline-suggestions">
-                          <div className="crm-inline-suggestions__item">
-                            <span className="crm-inline-suggestions__item-main">No clients found</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Sub Category *</label>
+                      <div className="crm-inline-suggestions-wrap">
+                          <input
+                            type="search"
+                            className="form-control"
+                            autoComplete="off"
+                            placeholder="Search Sub Category"
+                            value={subscriptionDraftSubCategorySearch || ""}
+                            required
+                            onFocus={() => setSubscriptionDraftSubCategorySearchOpen(true)}
+                          onClick={() => setSubscriptionDraftSubCategorySearchOpen(true)}
+                          onBlur={() => window.setTimeout(() => setSubscriptionDraftSubCategorySearchOpen(false), 120)}
+                          onChange={(event) => {
+                            setSubscriptionDraftSubCategorySearch(event.target.value);
+                            setSubscriptionDraftSubCategorySearchOpen(true);
+                            updateSubscriptionDraftFormField("subCategoryId", "");
+                          }}
+                        />
+                        {subscriptionDraftSubCategorySearchOpen ? (
+                          <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Sub Category List</div>
+                              {filteredSubscriptionDraftSubCategoryOptions.length ? filteredSubscriptionDraftSubCategoryOptions.map((row) => (
+                                <button
+                                  key={`subscription-draft-subcategory-${row.id}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => selectSubscriptionDraftSubCategory(row)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main d-block">{row.name}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {[row.categoryName || getCategoryName(row.categoryId), row.description].filter(Boolean).join(" / ") || "No details"}
+                                  </span>
+                                </button>
+                              )) : (
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No sub categories found</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-1">
+                      <label className="form-label small text-secondary mb-1">Plan Duration *</label>
+                      <select
+                        className="form-select"
+                        value={subscriptionDraftForm.planDuration || "30"}
+                        onChange={(event) => updateSubscriptionDraftFormField("planDuration", event.target.value)}
+                        required
+                      >
+                        {SUBSCRIPTION_PLAN_DURATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      {subscriptionDraftForm.planDuration === "custom" ? (
+                        <div className="mt-2">
+                          <label className="form-label small text-secondary mb-1">Duration (Days) *</label>
+                          <input
+                            className="form-control"
+                            value={subscriptionDraftForm.planDurationDays || ""}
+                            onChange={(event) => updateSubscriptionDraftFormField("planDurationDays", event.target.value)}
+                            placeholder="Enter days"
+                            type="number"
+                            min="1"
+                            step="1"
+                            required
+                          />
                         </div>
-                      )
-                    ) : null}
-                  </div>
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Plan Duration</label>
-                  <select
-                    className="form-select"
-                    value={subscriptionForm.planDuration || "30"}
-                    onChange={(event) => updateSubscriptionFormField("planDuration", event.target.value)}
-                  >
-                    {SUBSCRIPTION_PLAN_DURATION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                  {subscriptionForm.planDuration === "custom" ? (
-                    <div className="mt-2">
-                      <label className="form-label small text-secondary mb-1">Duration (Days)</label>
+                      ) : null}
+                    </div>
+                    <div className="col-12 col-md-2">
+                      <label className="form-label small text-secondary mb-1">Payment Description</label>
                       <input
                         className="form-control"
-                        value={subscriptionForm.planDurationDays || ""}
-                        onChange={(event) => updateSubscriptionFormField("planDurationDays", event.target.value)}
-                        placeholder="Enter days"
-                        type="number"
-                        min="1"
-                        step="1"
+                        value={subscriptionDraftForm.paymentDescription || ""}
+                        onChange={(event) => updateSubscriptionDraftFormField("paymentDescription", event.target.value)}
+                        placeholder="Monthly recurring payment"
                       />
                     </div>
-                  ) : null}
-                </div>
-                <div className="col-12 col-md-5">
-                  <label className="form-label small text-secondary mb-1">Payment Description</label>
-                  <input
-                    className="form-control"
-                    value={subscriptionForm.paymentDescription || ""}
-                    onChange={(event) => updateSubscriptionFormField("paymentDescription", event.target.value)}
-                    placeholder="Monthly recurring payment"
-                  />
-                </div>
-                <div className="col-12 col-md-2">
-                  <label className="form-label small text-secondary mb-1">Amount</label>
-                  <input
-                    className="form-control"
-                    value={subscriptionForm.amount || ""}
-                    onChange={(event) => updateSubscriptionFormField("amount", event.target.value)}
-                    placeholder="0.00"
-                    type="number"
-                    min="0"
-                    max={AMOUNT_MAX_NUMERIC_VALUE}
-                    step="0.01"
-                  />
-                </div>
-                <div className="col-12 col-md-2">
-                  <label className="form-label small text-secondary mb-1">Currency</label>
-                  <input
-                    className="form-control"
-                    value={subscriptionForm.currency || defaultCurrency}
-                    onChange={(event) => updateSubscriptionFormField("currency", event.target.value)}
-                    placeholder={defaultCurrency}
-                  />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={subscriptionForm.startDate || ""}
-                    onChange={(event) => updateSubscriptionFormField("startDate", event.target.value)}
-                  />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">End Date</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={subscriptionForm.endDate || ""}
-                    onChange={(event) => updateSubscriptionFormField("endDate", event.target.value)}
-                  />
-                </div>
-                <div className="col-12 col-md-3">
-                  <label className="form-label small text-secondary mb-1">Status</label>
-                  <select
-                    className="form-select"
-                    value={subscriptionForm.status || "Active"}
-                    onChange={(event) => updateSubscriptionFormField("status", event.target.value)}
-                  >
-                    {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-12 col-md-2 d-flex align-items-end">
-                  <div className="d-flex gap-2 w-100">
-                    <button type="submit" className="btn btn-success btn-sm w-100">
-                      {editingSubscriptionId ? "Update Subscription" : "Create Subscription"}
-                    </button>
-                    {editingSubscriptionId ? (
-                      <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSubscriptionForm}>
-                        Cancel
-                      </button>
-                    ) : null}
+                    <div className="col-12 col-md-1">
+                      <label className="form-label small text-secondary mb-1">Currency *</label>
+                      <select
+                        className="form-select"
+                        value={subscriptionDraftForm.currency || defaultCurrency}
+                        onChange={(event) => updateSubscriptionDraftFormField("currency", event.target.value)}
+                        required
+                      >
+                        {currencyCodeOptions.map((currencyCode) => (
+                          <option key={`draft-currency-${currencyCode}`} value={currencyCode}>
+                            {getCurrencyDisplayLabel(currencyCode)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-1">
+                      <label className="form-label small text-secondary mb-1">Amount *</label>
+                      <input
+                        className="form-control"
+                        value={subscriptionDraftForm.amount || ""}
+                        onChange={(event) => updateSubscriptionDraftFormField("amount", event.target.value)}
+                        placeholder="0.00"
+                        type="number"
+                        min="0"
+                        max={AMOUNT_MAX_NUMERIC_VALUE}
+                        step="0.01"
+                        required
+                      />
+                    </div>
+                    <div className="col-12 col-md-1 d-flex flex-column justify-content-end">
+                      <label className="form-label small text-secondary mb-1 invisible">Action</label>
+                      <div className="d-flex align-items-end justify-content-start gap-2">
+                        {editingSubscriptionDraftId ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSubscriptionDraftForm}>
+                            Cancel
+                          </button>
+                        ) : null}
+                        <button type="submit" className="btn btn-success btn-sm ms-0">
+                          {editingSubscriptionDraftId ? "Update" : "Create"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                </form>
+              </div>
+
+              <div className="mt-3">
+                <div className="card p-3">
+                  <SearchablePaginatedTableCard
+                    title="Subscription Product List"
+                    badgeLabel={`${subscriptionProductRows.length} items`}
+                    rows={subscriptionProductRows}
+                    withoutOuterCard
+                    columns={[
+                      { key: "subscriptionTitle", label: "Subscription Title" },
+                      { key: "categoryName", label: "Category" },
+                      { key: "subCategoryName", label: "Sub Category" },
+                      { key: "amount", label: "Amount" },
+                      { key: "currency", label: "Currency" },
+                      { key: "status", label: "Status" }
+                    ]}
+                    searchPlaceholder="Search subscription products"
+                    noRowsText="No subscription products yet."
+                    searchBy={(row) => `${row.subscriptionTitle} ${row.categoryName} ${row.subCategoryName} ${row.paymentDescription} ${row.amount} ${row.currency} ${row.status}`}
+                    renderCells={(row) => [
+                      <span className="fw-semibold">{row.subscriptionTitle || "-"}</span>,
+                      row.categoryName || getCategoryName(row.categoryId) || "-",
+                      row.subCategoryName || "-",
+                      `${String(row.currency || defaultCurrency).trim() || defaultCurrency} ${String(row.amount || "0").trim()}`,
+                      row.currency || defaultCurrency,
+                      row.status || "Active"
+                    ]}
+                    renderActions={(row) => (
+                      <div className="d-inline-flex gap-2">
+                        <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionDraft(row)}>Edit</button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
+                      </div>
+                    )}
+                  />
                 </div>
               </div>
-            </form>
-          </div>
+            </>
+          ) : null}
 
-          <div className="mt-4" style={{ paddingTop: "25px" }}>
-            <SearchablePaginatedTableCard
-              title="Subscription List"
-              badgeLabel={`${filteredSubscriptionList.length} records`}
-              rows={filteredSubscriptionList}
-              columns={[
-                { key: "subscriptionTitle", label: "Subscription Title" },
-                { key: "customerName", label: "Customer" },
-                { key: "amount", label: "Amount" },
-                { key: "startDate", label: "Start Date" },
-                { key: "endDate", label: "End Date" },
-                { key: "status", label: "Status" }
-              ]}
-              searchPlaceholder="Search subscriptions"
-              noRowsText="No subscriptions yet."
-              searchBy={(row) => `${row.subscriptionTitle} ${row.customerName} ${row.amount} ${row.startDate} ${row.endDate} ${row.status}`}
-              headerBottom={(
-                <div className="d-flex flex-wrap gap-2">
-                  {SUBSCRIPTION_LIST_STATUS_TABS.map((tab) => (
-                    <button
-                      key={`subscription-status-tab-${tab.key}`}
-                      type="button"
-                      className={`btn btn-sm ${subscriptionStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => setSubscriptionStatusTab(tab.key)}
-                    >
-                      {tab.label} ({subscriptionStatusTabCounts[tab.key] || 0})
-                    </button>
-                  ))}
+          {subscriptionTopTab === "subscriptions" ? (
+            <>
+            <div className="row g-3 align-items-start">
+              <div className="col-12">
+                <div className="card p-3">
+                  <h6 className="mb-3">{editingSubscriptionId ? "Edit Subscription Assignment" : "Assign Subscription to Client"}</h6>
+                  <form className="d-flex flex-column gap-3" onSubmit={saveSubscription}>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Subscription *</label>
+                        <div className="crm-inline-suggestions-wrap">
+                          <input
+                            className="form-control"
+                            autoComplete="off"
+                            required
+                            value={subscriptionForm.subscriptionTitle || ""}
+                            onFocus={() => setSubscriptionAssignmentSearchOpen(true)}
+                            onClick={() => setSubscriptionAssignmentSearchOpen(true)}
+                            onBlur={() => window.setTimeout(() => setSubscriptionAssignmentSearchOpen(false), 120)}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              const normalizedValue = String(nextValue || "").trim().toLowerCase();
+                              const selectedRow = subscriptionAssignmentOptions.find((row) =>
+                                String(row.label || "").trim().toLowerCase() === normalizedValue
+                                || String(row.categoryName || "").trim().toLowerCase() === normalizedValue
+                                || String(row.subCategoryName || "").trim().toLowerCase() === normalizedValue
+                              );
+                              updateSubscriptionFormField("subscriptionTitle", nextValue);
+                              setSubscriptionAssignmentSearch(nextValue);
+                              setSubscriptionAssignmentSearchOpen(true);
+                              setSubscriptionForm((prev) => ({
+                                ...prev,
+                                id: selectedRow?.id || "",
+                                planDuration: selectedRow?.planDurationDays || "",
+                                planDurationDays: selectedRow?.planDurationDays || "",
+                                endDate: selectedRow?.id
+                                  ? getSubscriptionEndDateFromStartAndDuration(prev.startDate, selectedRow.planDurationDays || selectedRow.planDuration)
+                                  : ""
+                              }));
+                            }}
+                            placeholder="Search subscription"
+                          />
+                          {subscriptionAssignmentSearchOpen ? (
+                            filteredSubscriptionAssignmentOptions.length ? (
+                              <div className="crm-inline-suggestions">
+                                <div className="crm-inline-suggestions__group">
+                                  <div className="crm-inline-suggestions__title">Subscriptions</div>
+                                  {filteredSubscriptionAssignmentOptions.map((row) => (
+                                    <button
+                                      key={`subscription-assign-${row.id}`}
+                                      type="button"
+                                      className="crm-inline-suggestions__item"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        applySubscriptionAssignmentSelection(row);
+                                      }}
+                                    >
+                                      <span className="crm-inline-suggestions__item-main d-block">{row.label}</span>
+                                      <span className="crm-inline-suggestions__item-sub d-block">
+                                        {[row.categoryName, row.subCategoryName, row.planDurationLabel].filter(Boolean).join(" • ") || "Draft"}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="crm-inline-suggestions">
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No subscriptions found</span>
+                                </div>
+                              </div>
+                            )
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Plan Duration *</label>
+                        <input
+                          className="form-control"
+                          readOnly
+                          tabIndex={-1}
+                          value={formatSubscriptionPlanDurationLabel(subscriptionForm.planDurationDays || subscriptionForm.planDuration || "")}
+                          placeholder="Auto loaded"
+                        />
+                      </div>
+                      <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Client *</label>
+                        <div className="crm-inline-suggestions-wrap">
+                          <input
+                            className="form-control"
+                            autoComplete="off"
+                            required
+                            value={subscriptionForm.customerName || ""}
+                            onFocus={() => setSubscriptionClientSearchOpen(true)}
+                            onClick={() => setSubscriptionClientSearchOpen(true)}
+                            onBlur={() => window.setTimeout(() => setSubscriptionClientSearchOpen(false), 120)}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              const selectedClient = subscriptionCustomerSelectOptions.find(
+                                (row) => {
+                                  const normalizedValue = String(nextValue || "").trim().toLowerCase();
+                                  return String(row.displayName || row.name || "").trim().toLowerCase() === normalizedValue
+                                    || String(row.companyName || "").trim().toLowerCase() === normalizedValue
+                                    || String(row.clientName || "").trim().toLowerCase() === normalizedValue;
+                                }
+                              );
+                              updateSubscriptionFormField("customerName", nextValue);
+                              updateSubscriptionFormField("customerId", selectedClient?.id || "");
+                              setSubscriptionClientSearchOpen(true);
+                            }}
+                            placeholder="Search client"
+                          />
+                          {subscriptionClientSearchOpen ? (
+                            filteredSubscriptionCustomerSelectOptions.length ? (
+                              <div className="crm-inline-suggestions">
+                                  <div className="crm-inline-suggestions__group">
+                                    <div className="crm-inline-suggestions__title">Clients</div>
+                                  {filteredSubscriptionCustomerSelectOptions.map((row) => (
+                                    <button
+                                      key={`subscription-client-${row.id}`}
+                                      type="button"
+                                      className="crm-inline-suggestions__item"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        updateSubscriptionFormField("customerName", row.displayName || row.name);
+                                        updateSubscriptionFormField("customerId", row.id);
+                                        setSubscriptionClientSearchOpen(false);
+                                      }}
+                                    >
+                                      <span className="crm-inline-suggestions__item-main d-block">{row.displayName || row.name}</span>
+                                      {row.phoneText ? <span className="crm-inline-suggestions__item-sub d-block">{row.phoneText}</span> : null}
+                                      {row.emailText ? <span className="crm-inline-suggestions__item-sub d-block">{row.emailText}</span> : null}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="crm-inline-suggestions">
+                                <div className="crm-inline-suggestions__item">
+                                  <span className="crm-inline-suggestions__item-main">No clients found</span>
+                                </div>
+                              </div>
+                            )
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">Start Date *</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          required
+                          value={subscriptionForm.startDate || ""}
+                          onChange={(event) => updateSubscriptionFormField("startDate", event.target.value)}
+                        />
+                      </div>
+                      <div className="col-12 col-md-2">
+                        <label className="form-label small text-secondary mb-1">End Date *</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          required
+                          readOnly
+                          tabIndex={-1}
+                          min={subscriptionForm.startDate || undefined}
+                          value={subscriptionForm.endDate || ""}
+                        />
+                      </div>
+                      <div className="col-12 col-md-2 ps-md-0">
+                        <label className="form-label small text-secondary mb-1 invisible">Action</label>
+                        <div className="d-flex align-items-end justify-content-start gap-2">
+                          {editingSubscriptionId ? (
+                            <button type="button" className="btn btn-outline-light btn-sm" onClick={resetSubscriptionForm}>
+                              Cancel
+                            </button>
+                          ) : null}
+                          <button type="submit" className="btn btn-success btn-sm ms-0">
+                            {editingSubscriptionId ? "Update Assignment" : "Assign Subscription"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </form>
                 </div>
-              )}
-              renderCells={(row) => [
-                <span className="fw-semibold">{row.subscriptionTitle || "-"}</span>,
-                row.customerName || "-",
-                `${String(row.currency || defaultCurrency).trim() || defaultCurrency} ${String(row.amount || "0").trim()}`,
-                formatDateLikeCellValue("startDate", row.startDate, "-"),
-                formatDateLikeCellValue("endDate", row.endDate, "-"),
-                row.status || "Active"
-              ]}
-              renderActions={(row) => (
-                <div className="d-inline-flex gap-2">
-                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openSubscriptionView(row)}>View</button>
-                  <button type="button" className="btn btn-sm btn-outline-success" onClick={() => editSubscription(row)}>Edit</button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
-                </div>
-              )}
-            />
-          </div>
+              </div>
+            </div>
+            <div className="mt-3">
+              <div className="card p-3">
+                <SearchablePaginatedTableCard
+                  title="Subscription List"
+                  badgeLabel={`${filteredSubscriptionList.length} records`}
+                  rows={filteredSubscriptionList}
+                  withoutOuterCard
+                  columns={[
+                    { key: "subscriptionTitle", label: "Subscription Title" },
+                    { key: "customerName", label: "Customer" },
+                    { key: "amount", label: "Amount" },
+                    { key: "startDate", label: "Start Date" },
+                    { key: "endDate", label: "End Date" },
+                    { key: "status", label: "Status" }
+                  ]}
+                  searchPlaceholder="Search subscriptions"
+                  noRowsText="No assigned subscriptions yet."
+                  searchBy={(row) => `${row.subscriptionTitle} ${row.customerName} ${row.amount} ${row.startDate} ${row.endDate} ${row.status}`}
+                  headerBottom={(
+                    <div className="d-flex flex-wrap gap-2">
+                      {SUBSCRIPTION_LIST_STATUS_TABS.map((tab) => (
+                        <button
+                          key={`subscription-status-tab-${tab.key}`}
+                          type="button"
+                          className={`btn btn-sm ${subscriptionStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                          onClick={() => setSubscriptionStatusTab(tab.key)}
+                        >
+                          {tab.label} ({subscriptionStatusTabCounts[tab.key] || 0})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  renderCells={(row) => [
+                    <span className="fw-semibold">{row.subscriptionTitle || "-"}</span>,
+                    row.customerName || "-",
+                    `${String(row.currency || defaultCurrency).trim() || defaultCurrency} ${String(row.amount || "0").trim()}`,
+                    formatDateLikeCellValue("startDate", row.startDate, "-"),
+                    formatDateLikeCellValue("endDate", row.endDate, "-"),
+                    row.status || "Active"
+                  ]}
+                  renderActions={(row) => (
+                    <div className="d-inline-flex gap-2">
+                      <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openSubscriptionView(row)}>View</button>
+                      <button type="button" className="btn btn-sm btn-outline-success" onClick={() => editSubscription(row)}>Edit</button>
+                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
+                    </div>
+                  )}
+                />
+              </div>
+            </div>
             </>
           ) : null}
 

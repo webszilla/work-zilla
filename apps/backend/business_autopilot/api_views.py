@@ -1342,6 +1342,14 @@ def _normalize_subscription_status(value):
     return mapping.get(normalized, "Active")
 
 
+def _get_accounts_customer_display_name(row):
+    company_name = str(row.get("companyName") or row.get("name") or "").strip()
+    client_name = str(row.get("clientName") or "").strip()
+    if company_name and client_name:
+        return f"{company_name} / {client_name}"
+    return company_name or client_name
+
+
 def _calculate_next_billing_date(start_date):
     if not isinstance(start_date, date):
         return None
@@ -1379,11 +1387,7 @@ def _get_accounts_customer_lookup(org):
         customer_id = str(row.get("id") or "").strip()
         if not customer_id:
             continue
-        customer_name = str(row.get("companyName") or row.get("name") or row.get("clientName") or "").strip()
-        if not customer_name:
-            contact_name = str(row.get("clientName") or "").strip()
-            if contact_name:
-                customer_name = contact_name
+        customer_name = _get_accounts_customer_display_name(row)
         if not customer_name:
             continue
         lookup[customer_id] = customer_name
@@ -3337,12 +3341,43 @@ def _serialize_accounts_customer_options(org):
         customer_id = str(row.get("id") or "").strip()
         if not customer_id:
             continue
-        customer_name = str(row.get("companyName") or row.get("name") or row.get("clientName") or "").strip()
+        customer_name = _get_accounts_customer_display_name(row)
         if not customer_name:
             continue
+        company_name = str(row.get("companyName") or row.get("name") or "").strip()
+        client_name = str(row.get("clientName") or "").strip()
+        phone_country_code = str(row.get("phoneCountryCode") or row.get("phone_country_code") or "+91").strip() or "+91"
+        phone = str(row.get("phone") or "").strip()
+        additional_phones = row.get("additionalPhones") if isinstance(row.get("additionalPhones"), list) else []
+        phone_list = row.get("phoneList") if isinstance(row.get("phoneList"), list) else additional_phones
+        email = str(row.get("email") or "").strip()
+        additional_emails = row.get("additionalEmails") if isinstance(row.get("additionalEmails"), list) else []
+        email_list = row.get("emailList") if isinstance(row.get("emailList"), list) else additional_emails
+        billing_country = str(row.get("billingCountry") or row.get("country") or "").strip()
+        billing_state = str(row.get("billingState") or row.get("state") or "").strip()
+        billing_pincode = str(row.get("billingPincode") or row.get("pincode") or "").strip()
+        shipping_country = str(row.get("shippingCountry") or row.get("country") or "").strip()
+        shipping_state = str(row.get("shippingState") or row.get("state") or "").strip()
+        shipping_pincode = str(row.get("shippingPincode") or row.get("pincode") or "").strip()
         options.append({
             "id": customer_id,
             "name": customer_name,
+            "displayName": customer_name,
+            "companyName": company_name,
+            "clientName": client_name,
+            "phoneCountryCode": phone_country_code,
+            "phone": phone,
+            "phoneList": phone_list,
+            "additionalPhones": additional_phones,
+            "email": email,
+            "emailList": email_list,
+            "additionalEmails": additional_emails,
+            "billingCountry": billing_country,
+            "billingState": billing_state,
+            "billingPincode": billing_pincode,
+            "shippingCountry": shipping_country,
+            "shippingState": shipping_state,
+            "shippingPincode": shipping_pincode,
         })
     return options
 
@@ -3564,8 +3599,6 @@ def accounts_subscriptions(request):
         return JsonResponse({"detail": "invalid_json"}, status=400)
 
     start_date = _parse_iso_date(payload.get("startDate") or payload.get("start_date"))
-    if not start_date:
-        return JsonResponse({"detail": "start_date_required"}, status=400)
 
     end_date = _parse_iso_date(payload.get("endDate") or payload.get("end_date"))
     status = _normalize_subscription_status(payload.get("status"))
@@ -3616,7 +3649,7 @@ def accounts_subscriptions(request):
     if raw_whatsapp_alert_days is not None and raw_whatsapp_alert_days != "" and whatsapp_alert_days is None:
         return JsonResponse({"detail": "whatsapp_alert_days_invalid"}, status=400)
 
-    next_billing_date = _calculate_next_billing_date(start_date)
+    next_billing_date = _calculate_next_billing_date(start_date) if start_date else None
 
     row = Subscription.objects.create(
         organization=org,
@@ -3675,7 +3708,7 @@ def accounts_subscription_detail(request, subscription_id: int):
             return JsonResponse({"detail": "invalid_json"}, status=400)
 
         start_date = _parse_iso_date(payload.get("startDate") or payload.get("start_date"))
-        if start_date:
+        if start_date is not None:
             row.start_date = start_date
         end_date = _parse_iso_date(payload.get("endDate") or payload.get("end_date"))
 
@@ -3740,10 +3773,7 @@ def accounts_subscription_detail(request, subscription_id: int):
                 return JsonResponse({"detail": "sub_category_category_mismatch"}, status=400)
             row.sub_category = sub_category
 
-        if start_date:
-            row.next_billing_date = _calculate_next_billing_date(row.start_date)
-        else:
-            row.next_billing_date = _calculate_next_billing_date(row.start_date)
+        row.next_billing_date = _calculate_next_billing_date(row.start_date) if row.start_date else None
         if end_date is not None:
             row.end_date = end_date
 

@@ -122,6 +122,29 @@ function enhanceDateInput(input) {
       setInputValueAndDispatch(input, nextValue);
     },
   };
+  if (input.dataset.wzHideDisabledDates === "true") {
+    const applyHiddenDisabledDateMode = (_selectedDates, _dateStr, instance) => {
+      instance?.calendarContainer?.classList.add("wz-hide-disabled-dates");
+    };
+    const hidePastDateCells = (_selectedDates, _dateStr, instance, dayElem) => {
+      if (!instance || !dayElem || !instance.config?.minDate) {
+        return;
+      }
+      const minDate = instance.config.minDate instanceof Date
+        ? instance.config.minDate
+        : new Date(instance.config.minDate);
+      const dayDate = dayElem.dateObj instanceof Date ? dayElem.dateObj : null;
+      if (!(minDate instanceof Date) || Number.isNaN(minDate.getTime()) || !dayDate || Number.isNaN(dayDate.getTime())) {
+        return;
+      }
+      if (dayDate < minDate) {
+        dayElem.classList.add("wz-flatpickr-hidden-day");
+      }
+    };
+    config.onReady = applyHiddenDisabledDateMode;
+    config.onOpen = applyHiddenDisabledDateMode;
+    config.onDayCreate = hidePastDateCells;
+  }
   if (input.min) {
     config.minDate = input.min;
   }
