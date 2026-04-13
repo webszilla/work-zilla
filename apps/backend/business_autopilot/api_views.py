@@ -503,6 +503,36 @@ def _crm_has_unrestricted_row_access(user: User, org: Organization):
     return _crm_section_access_level(user, org, "crm") in {"View and Edit", "Create, View and Edit", "Full Access"}
 
 
+def _crm_business_autopilot_permission(user: User):
+    if not user or not user.is_authenticated:
+        return ""
+    product = _get_business_autopilot_product()
+    if not product:
+        return ""
+    access_row = (
+        UserProductAccess.objects
+        .filter(user=user, product=product)
+        .only("permission")
+        .first()
+    )
+    return str(getattr(access_row, "permission", "") or "").strip().lower()
+
+
+def _crm_has_product_view_access(user: User):
+    return _crm_business_autopilot_permission(user) in {
+        UserProductAccess.PERMISSION_VIEW,
+        UserProductAccess.PERMISSION_EDIT,
+        UserProductAccess.PERMISSION_FULL,
+    }
+
+
+def _crm_has_product_edit_access(user: User):
+    return _crm_business_autopilot_permission(user) in {
+        UserProductAccess.PERMISSION_EDIT,
+        UserProductAccess.PERMISSION_FULL,
+    }
+
+
 def _crm_row_matches_user(user: User, row):
     user_ids = set(_crm_clean_user_id_list(getattr(row, "assigned_user_ids", [])))
     user_ids.update(_crm_clean_user_id_list(getattr(row, "owner_user_ids", [])))
@@ -518,6 +548,8 @@ def _crm_row_matches_user(user: User, row):
 def _crm_can_view_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
         return True
+    if _crm_has_product_view_access(user):
+        return True
     if _crm_has_view_access(user, org):
         return True
     return _crm_row_matches_user(user, row)
@@ -525,6 +557,8 @@ def _crm_can_view_row(user: User, org: Organization, row):
 
 def _crm_can_edit_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
+        return True
+    if _crm_has_product_edit_access(user):
         return True
     if _crm_has_edit_access(user, org):
         return True
