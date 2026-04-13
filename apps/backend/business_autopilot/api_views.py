@@ -385,11 +385,14 @@ def _can_manage_openai(user: User, org: Organization = None):
     if user.is_superuser or user.is_staff:
         return True
     profile = UserProfile.objects.filter(user=user).only("role").first()
-    role = str(profile.role or "").strip().lower() if profile else ""
-    if role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+    profile_role = _normalize_admin_role(getattr(profile, "role", ""))
+    if profile_role in {"company_admin", "org_admin", "owner", "superadmin", "super_admin"}:
         return True
     membership = _get_org_membership(user, org)
-    return bool(membership and str(membership.role or "").strip().lower() == "company_admin")
+    if not membership:
+        return False
+    membership_role = _normalize_admin_role(getattr(membership, "role", ""))
+    return membership_role in {"company_admin", "org_admin", "owner", "superadmin", "super_admin"}
 
 
 def _mask_secret(value: str):
@@ -4516,6 +4519,18 @@ def _crm_order_id(org: Organization):
     return f"{prefix}{last_seq + 1:03d}"
 
 
+def _crm_resolve_unique_order_id(org: Organization, requested_order_id: str = ""):
+    requested = str(requested_order_id or "").strip()[:30]
+    if requested:
+        if not CrmSalesOrder.objects.filter(organization=org, order_id=requested).exists():
+            return requested
+    for _ in range(25):
+        candidate = _crm_order_id(org)
+        if not CrmSalesOrder.objects.filter(organization=org, order_id=candidate).exists():
+            return candidate
+    return _crm_order_id(org)
+
+
 def _crm_reference_id_from_related_to(org: Organization, related_to: str):
     related_value = str(related_to or "").strip()
     if not related_value:
@@ -5595,30 +5610,57 @@ def crm_sales_orders(request, order_id: int = None):
         row.save()
         return JsonResponse({"sales_order": _serialize_crm_sales_order(row)})
 
-    row = CrmSalesOrder.objects.create(
-        organization=org,
-        crm_reference_id=crm_reference_id,
-        deal=deal,
-        order_id=str(payload.get("order_id") or payload.get("orderId") or _crm_order_id(org)).strip()[:30] or _crm_order_id(org),
-        customer_name=customer_name[:180],
-        company=str(payload.get("company") or "").strip()[:180],
-        phone=str(payload.get("phone") or "").strip()[:40],
-        amount=subtotal_amount,
-        products=products_payload,
-        quantity=quantity,
-        price=price,
-        tax=tax,
-        total_amount=calculated_total_amount,
-        payment_status=payment_status,
-        paid_amount=float(paid_amount),
-        payment_mode=str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip()[:50] if can_edit_payment_details else "",
-        payment_date=parse_date(str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() or "") if can_edit_payment_details else None,
-        transaction_id=str(payload.get("transaction_id") or payload.get("transactionId") or "").strip()[:100] if can_edit_payment_details else "",
-        status=str(payload.get("status") or "Pending").strip()[:20] or "Pending",
-        assigned_user=assigned_user,
-        created_by=request.user,
-        updated_by=request.user,
-    )
+    order_id = _crm_resolve_unique_order_id(org, payload.get("order_id") or payload.get("orderId"))
+    try:
+        row = CrmSalesOrder.objects.create(
+            organization=org,
+            crm_reference_id=crm_reference_id,
+            deal=deal,
+            order_id=order_id,
+            customer_name=customer_name[:180],
+            company=str(payload.get("company") or "").strip()[:180],
+            phone=str(payload.get("phone") or "").strip()[:40],
+            amount=subtotal_amount,
+            products=products_payload,
+            quantity=quantity,
+            price=price,
+            tax=tax,
+            total_amount=calculated_total_amount,
+            payment_status=payment_status,
+            paid_amount=float(paid_amount),
+            payment_mode=str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip()[:50] if can_edit_payment_details else "",
+            payment_date=parse_date(str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() or "") if can_edit_payment_details else None,
+            transaction_id=str(payload.get("transaction_id") or payload.get("transactionId") or "").strip()[:100] if can_edit_payment_details else "",
+            status=str(payload.get("status") or "Pending").strip()[:20] or "Pending",
+            assigned_user=assigned_user,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+    except IntegrityError:
+        row = CrmSalesOrder.objects.create(
+            organization=org,
+            crm_reference_id=crm_reference_id,
+            deal=deal,
+            order_id=_crm_resolve_unique_order_id(org, ""),
+            customer_name=customer_name[:180],
+            company=str(payload.get("company") or "").strip()[:180],
+            phone=str(payload.get("phone") or "").strip()[:40],
+            amount=subtotal_amount,
+            products=products_payload,
+            quantity=quantity,
+            price=price,
+            tax=tax,
+            total_amount=calculated_total_amount,
+            payment_status=payment_status,
+            paid_amount=float(paid_amount),
+            payment_mode=str(payload.get("payment_mode") or payload.get("paymentMode") or "").strip()[:50] if can_edit_payment_details else "",
+            payment_date=parse_date(str(payload.get("payment_date") or payload.get("paymentDate") or "").strip() or "") if can_edit_payment_details else None,
+            transaction_id=str(payload.get("transaction_id") or payload.get("transactionId") or "").strip()[:100] if can_edit_payment_details else "",
+            status=str(payload.get("status") or "Pending").strip()[:20] or "Pending",
+            assigned_user=assigned_user,
+            created_by=request.user,
+            updated_by=request.user,
+        )
     return JsonResponse({"sales_order": _serialize_crm_sales_order(row)}, status=201)
 
 

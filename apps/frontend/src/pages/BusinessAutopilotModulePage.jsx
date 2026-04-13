@@ -26,6 +26,10 @@ const CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_contac
 const CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY = `${CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX}__global`;
 const CRM_SALES_ORDER_DRAFT_KEY_PREFIX = "wz_business_autopilot_crm_sales_order_scope";
 const CRM_SALES_ORDER_DRAFT_GLOBAL_KEY = `${CRM_SALES_ORDER_DRAFT_KEY_PREFIX}__global`;
+const ACCOUNTS_ESTIMATE_DRAFT_KEY_PREFIX = "wz_business_autopilot_accounts_estimate_scope";
+const ACCOUNTS_ESTIMATE_DRAFT_GLOBAL_KEY = `${ACCOUNTS_ESTIMATE_DRAFT_KEY_PREFIX}__global`;
+const ACCOUNTS_INVOICE_DRAFT_KEY_PREFIX = "wz_business_autopilot_accounts_invoice_scope";
+const ACCOUNTS_INVOICE_DRAFT_GLOBAL_KEY = `${ACCOUNTS_INVOICE_DRAFT_KEY_PREFIX}__global`;
 const BA_ACTIVE_ORG_STORAGE_KEY = "wz_business_autopilot_active_org_id";
 const CRM_ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
 const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
@@ -2825,6 +2829,122 @@ function readPendingCrmSalesOrderDraft(preferredOrgId = "") {
 function clearPendingCrmSalesOrderDraft(preferredOrgId = "") {
   try {
     resolveCrmSalesOrderDraftStorageKeys(preferredOrgId).forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Ignore storage clear failures.
+  }
+}
+
+function buildScopedAccountsEstimateDraftStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${ACCOUNTS_ESTIMATE_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : ACCOUNTS_ESTIMATE_DRAFT_GLOBAL_KEY;
+}
+
+function resolveAccountsEstimateDraftStorageKeys(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  const scopedKey = buildScopedAccountsEstimateDraftStorageKey(resolvedOrgId);
+  return Array.from(new Set([scopedKey, ACCOUNTS_ESTIMATE_DRAFT_GLOBAL_KEY].filter(Boolean)));
+}
+
+function normalizePendingAccountsEstimateDraft(value = {}) {
+  const sourceSalesOrder = value?.sourceSalesOrder && typeof value.sourceSalesOrder === "object"
+    ? normalizeCrmSalesOrderRecord(value.sourceSalesOrder)
+    : null;
+  if (!sourceSalesOrder?.id) {
+    return null;
+  }
+  return {
+    sourceSalesOrder,
+    orgId: String(value?.orgId || "").trim(),
+    createdAt: String(value?.createdAt || "").trim(),
+  };
+}
+
+function readPendingAccountsEstimateDraft(preferredOrgId = "") {
+  try {
+    for (const key of resolveAccountsEstimateDraftStorageKeys(preferredOrgId)) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      const normalizedDraft = normalizePendingAccountsEstimateDraft(parsed);
+      if (normalizedDraft) {
+        return normalizedDraft;
+      }
+    }
+  } catch {
+    // Ignore invalid drafts and continue with the standard flow.
+  }
+  return null;
+}
+
+function clearPendingAccountsEstimateDraft(preferredOrgId = "") {
+  try {
+    resolveAccountsEstimateDraftStorageKeys(preferredOrgId).forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // Ignore storage clear failures.
+  }
+}
+
+function buildScopedAccountsInvoiceDraftStorageKey(orgId = "") {
+  const normalizedOrgId = String(orgId || "").replace(/[^a-z0-9_.-]/gi, "_");
+  return normalizedOrgId
+    ? `${ACCOUNTS_INVOICE_DRAFT_KEY_PREFIX}__${normalizedOrgId}`
+    : ACCOUNTS_INVOICE_DRAFT_GLOBAL_KEY;
+}
+
+function resolveAccountsInvoiceDraftStorageKeys(preferredOrgId = "") {
+  const resolvedOrgId = String(preferredOrgId || "").trim()
+    || getActiveBusinessAutopilotOrgId()
+    || getActiveCrmScopeOrgId();
+  const scopedKey = buildScopedAccountsInvoiceDraftStorageKey(resolvedOrgId);
+  return Array.from(new Set([scopedKey, ACCOUNTS_INVOICE_DRAFT_GLOBAL_KEY].filter(Boolean)));
+}
+
+function normalizePendingAccountsInvoiceDraft(value = {}) {
+  const sourceSalesOrder = value?.sourceSalesOrder && typeof value.sourceSalesOrder === "object"
+    ? normalizeCrmSalesOrderRecord(value.sourceSalesOrder)
+    : null;
+  if (!sourceSalesOrder?.id) {
+    return null;
+  }
+  return {
+    sourceSalesOrder,
+    orgId: String(value?.orgId || "").trim(),
+    createdAt: String(value?.createdAt || "").trim(),
+  };
+}
+
+function readPendingAccountsInvoiceDraft(preferredOrgId = "") {
+  try {
+    for (const key of resolveAccountsInvoiceDraftStorageKeys(preferredOrgId)) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      const normalizedDraft = normalizePendingAccountsInvoiceDraft(parsed);
+      if (normalizedDraft) {
+        return normalizedDraft;
+      }
+    }
+  } catch {
+    // Ignore invalid drafts and continue with the standard flow.
+  }
+  return null;
+}
+
+function clearPendingAccountsInvoiceDraft(preferredOrgId = "") {
+  try {
+    resolveAccountsInvoiceDraftStorageKeys(preferredOrgId).forEach((key) => {
       window.localStorage.removeItem(key);
     });
   } catch {
@@ -6080,7 +6200,7 @@ function SearchablePaginatedTableCard({
         </div>
       ) : null}
       <div className="table-responsive">
-        <table className="table table-dark table-borderless align-middle mb-0">
+        <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table">
           <thead>
             <tr>
               {columns.map((column) => (
@@ -6097,24 +6217,30 @@ function SearchablePaginatedTableCard({
                   return (
                 <th
                   key={column.key || column.label}
-                  className={column.headerClassName || ""}
-                  style={column.thStyle || undefined}
+                  className={`${column.headerClassName || ""} align-middle wz-sortable-th`}
+                  style={{
+                    verticalAlign: "middle",
+                    ...(column.thStyle || {}),
+                  }}
                   aria-sort={ariaSort}
                 >
                   {columnKey ? (
                     <button
                       type="button"
-                      className="btn btn-sm p-0 border-0 bg-transparent text-reset fw-semibold shadow-none d-inline-flex align-items-center gap-1"
+                      className="btn btn-sm p-0 border-0 bg-transparent text-reset fw-semibold shadow-none d-inline-flex align-items-center justify-content-center gap-1 align-middle wz-sortable-th-btn"
                       onClick={() => toggleSort(columnKey)}
                       title={`Sort by ${String(column.label || column.key || "")}`}
                       aria-label={`Sort by ${String(column.label || column.key || "")}`}
                       style={{
                         color: "inherit",
                         textDecoration: "none",
+                        verticalAlign: "middle",
+                        lineHeight: 1,
+                        minHeight: "1.5rem",
                       }}
                     >
                       <span>{column.label}</span>
-                      <i className={`bi ${sortIconClass}`} aria-hidden="true" />
+                      <i className={`bi ${sortIconClass}`} aria-hidden="true" style={{ fontSize: "0.625rem", lineHeight: 1 }} />
                     </button>
                   ) : (
                     column.label
@@ -10236,16 +10362,49 @@ function CrmOnePageModule() {
         return;
       }
       const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow);
-      const listKey = kind === "estimate" ? "estimates" : "invoices";
+      closeCrmSalesOrderConvertPopup();
+      if (kind === "estimate") {
+        const activeOrgId = getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId();
+        const draftKey = buildScopedAccountsEstimateDraftStorageKey(activeOrgId);
+        const draftPayload = {
+          sourceSalesOrder: normalizedRow,
+          orgId: String(activeOrgId || "").trim(),
+          createdAt: new Date().toISOString(),
+        };
+        try {
+          window.localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+          window.localStorage.setItem(ACCOUNTS_ESTIMATE_DRAFT_GLOBAL_KEY, JSON.stringify(draftPayload));
+        } catch {
+          // continue with navigation even if storage write fails
+        }
+        navigate("/app/business-autopilot/accounts?tab=estimates&resume-estimate=1");
+        return;
+      }
+      if (kind === "invoice") {
+        const activeOrgId = getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId();
+        const draftKey = buildScopedAccountsInvoiceDraftStorageKey(activeOrgId);
+        const draftPayload = {
+          sourceSalesOrder: normalizedRow,
+          orgId: String(activeOrgId || "").trim(),
+          createdAt: new Date().toISOString(),
+        };
+        try {
+          window.localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+          window.localStorage.setItem(ACCOUNTS_INVOICE_DRAFT_GLOBAL_KEY, JSON.stringify(draftPayload));
+        } catch {
+          // continue with navigation even if storage write fails
+        }
+        navigate("/app/business-autopilot/accounts?tab=invoices&resume-invoice=1");
+        return;
+      }
+      const listKey = "invoices";
       const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
       const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
       if (existingConverted) {
-        closeCrmSalesOrderConvertPopup();
-        const label = kind === "estimate" ? "Estimate" : "Invoice";
         setCrmActionPopup({
           open: true,
           title: "Already Converted",
-          message: `${label} already created for this Sales Order: ${String(existingConverted.docNo || "-").trim() || "-"}.`,
+          message: `Invoice already created for this Sales Order: ${String(existingConverted.docNo || "-").trim() || "-"}.`,
         });
         return;
       }
@@ -10254,11 +10413,10 @@ function CrmOnePageModule() {
         ...crmAccountsWorkspace,
         [listKey]: [convertedDocument, ...existingRows],
       });
-      closeCrmSalesOrderConvertPopup();
       setCrmActionPopup({
         open: true,
         title: "Converted Successfully",
-        message: `${kind === "estimate" ? "Estimate" : "Invoice"} created with number ${String(convertedDocument.docNo || "-").trim() || "-"}.`,
+        message: `Invoice created with number ${String(convertedDocument.docNo || "-").trim() || "-"}.`,
       });
     } catch (error) {
       closeCrmSalesOrderConvertPopup();
@@ -21535,6 +21693,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [accountsActionPopup, setAccountsActionPopup] = useState({ open: false, title: "", message: "" });
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
+  const shouldResumeEstimate = useMemo(() => String(accountsQueryParams.get("resume-estimate") || "").trim() === "1", [accountsQueryParams]);
+  const shouldResumeInvoice = useMemo(() => String(accountsQueryParams.get("resume-invoice") || "").trim() === "1", [accountsQueryParams]);
   const isValidAccountsTab = new Set([
     "overview",
     "invoices",
@@ -21559,6 +21719,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ];
 
   useEffect(() => {
+    if (shouldResumeEstimate || shouldResumeInvoice) {
+      return;
+    }
     const nextTab = subscriptionsOnly
       ? "subscriptions"
       : (
@@ -21569,11 +21732,39 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
-  }, [initialTab, subscriptionsOnly]);
+  }, [initialTab, subscriptionsOnly, shouldResumeEstimate, shouldResumeInvoice]);
 
   useEffect(() => {
     setAccountsFormNotice("");
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!shouldResumeEstimate && !shouldResumeInvoice) {
+      return;
+    }
+    const pendingDraft = shouldResumeEstimate
+      ? readPendingAccountsEstimateDraft()
+      : readPendingAccountsInvoiceDraft();
+    if (!pendingDraft?.sourceSalesOrder?.id) {
+      return;
+    }
+    if (shouldResumeEstimate) {
+      clearPendingAccountsEstimateDraft(pendingDraft.orgId);
+      const convertedEstimate = buildBillingDocumentFromSalesOrder(pendingDraft.sourceSalesOrder, "estimate");
+      setEstimateForm(convertedEstimate);
+      setEditingEstimateId("");
+      setActiveTab("estimates");
+      setOverviewDocTab("estimate");
+    } else {
+      clearPendingAccountsInvoiceDraft(pendingDraft.orgId);
+      const convertedInvoice = buildBillingDocumentFromSalesOrder(pendingDraft.sourceSalesOrder, "invoice");
+      setInvoiceForm(convertedInvoice);
+      setEditingInvoiceId("");
+      setActiveTab("invoices");
+      setOverviewDocTab("invoice");
+    }
+    setAccountsFormNotice("");
+  }, [location.search, shouldResumeEstimate, shouldResumeInvoice]);
 
   useEffect(() => {
     if (normalizeCountryName(orgBillingCountry) !== "india") {
@@ -23675,6 +23866,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (kind === "estimate") {
       setEditingEstimateId("");
       setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
+      setOverviewDocTab("estimate");
+      setActiveTab("overview");
     } else {
       setEditingInvoiceId("");
       setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
@@ -23740,6 +23933,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean);
+    const paymentEntries = normalizePaymentEntries(row.paymentEntries || row.payment_entries);
     const normalized = {
       ...row,
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({

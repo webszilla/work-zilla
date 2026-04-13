@@ -1542,13 +1542,34 @@ html[data-theme="light"] .wz-country-picker__empty{
   vertical-align: middle;
 }
 .app-shell .table:not(.table-borderless) thead th{
-  font-size: 0.84rem;
+  font-size: 0.965rem;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   line-height: 1.1;
   white-space: nowrap;
   background: transparent !important;
+  vertical-align: middle;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+.app-shell .table.wz-sortable-table thead th{
+  vertical-align: middle !important;
+}
+.app-shell .table.wz-sortable-table thead th > .wz-sortable-th-btn{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100%;
+  line-height: 1 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.app-shell .table.wz-sortable-table thead th > .wz-sortable-th-btn > span{
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  font-size: 0.965rem;
 }
 .app-shell .table.wz-priority-header-table thead th,
 .app-shell .table.wz-priority-header-table thead th *{
