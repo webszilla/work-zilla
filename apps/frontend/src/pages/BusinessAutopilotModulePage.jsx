@@ -10698,10 +10698,79 @@ function CrmOnePageModule() {
           });
           return;
         }
-      } catch (_error) {
+      } catch (error) {
+        const status = Number(error?.status || 0);
+        if (editingId && [403, 404].includes(status) && (sectionKey === "leads" || sectionKey === "deals")) {
+          try {
+            await refreshCrmRowsFromBackend();
+            const retryEditingId = resolveLiveCrmEditRowId(sectionKey, editingId, payload);
+            if (retryEditingId && retryEditingId !== String(editingId).trim()) {
+              if (sectionKey === "leads") {
+                const retryResponse = await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(retryEditingId)}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({
+                    crm_reference_id: payload.crmReferenceId || "",
+                    lead_name: payload.name || "",
+                    company: payload.company || "",
+                    phone: payload.phone || "",
+                    lead_amount: payload.leadAmount || 0,
+                    lead_source: payload.leadSource || "",
+                    assign_type: payload.assignType || "Users",
+                    assigned_user_id: primaryAssignedUserId,
+                    assigned_user_ids: assignedUserIds,
+                    assigned_team: payload.assignedTeam || "",
+                    stage: payload.stage || "New",
+                    status: payload.status || "Open",
+                  }),
+                });
+                const retryLead = retryResponse?.lead ? normalizeCrmLeadRecord(retryResponse.lead) : null;
+                if (retryLead) {
+                  setModuleData((prev) => ({
+                    ...prev,
+                    leads: (prev.leads || []).map((row) => (
+                      String(row.id || "") === String(retryEditingId)
+                        ? { ...row, ...retryLead }
+                        : row
+                    )),
+                  }));
+                }
+              } else if (sectionKey === "deals") {
+                const retryResponse = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(retryEditingId)}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({
+                    stage: payload.stage || "Qualified",
+                    status: payload.status || "Open",
+                    deal_value: payload.dealValueExpected || 0,
+                  }),
+                });
+                const retryDeal = retryResponse?.deal ? normalizeCrmDealRecord(retryResponse.deal) : null;
+                if (retryDeal) {
+                  setModuleData((prev) => ({
+                    ...prev,
+                    deals: (prev.deals || []).map((row) => (
+                      String(row.id || "") === String(retryEditingId)
+                        ? { ...row, ...retryDeal }
+                        : row
+                    )),
+                  }));
+                }
+              }
+              await refreshCrmRowsFromBackend();
+              resetSectionForm(sectionKey);
+              setCrmActionPopup({
+                open: true,
+                title: "Successful",
+                message: `${config.itemLabel} updated successfully.`,
+              });
+              return;
+            }
+          } catch (_retryError) {
+            // Fall through to the generic error below.
+          }
+        }
         setSectionFormErrors((prev) => ({
           ...prev,
-          [sectionKey]: "Unable to save CRM data. Please try again.",
+          [sectionKey]: "Unable to save CRM data. Please refresh and try again.",
         }));
         return;
       }
@@ -11452,6 +11521,50 @@ function CrmOnePageModule() {
     }
 
     return popupId;
+  }
+
+  function resolveLiveCrmEditRowId(sectionKey, editingId, payload = {}) {
+    const rows = Array.isArray(moduleData[sectionKey]) ? moduleData[sectionKey] : [];
+    const currentId = String(editingId || "").trim();
+    if (!currentId) {
+      return "";
+    }
+    const byId = rows.find((row) => String(row?.id || "").trim() === currentId);
+    if (byId) {
+      return String(byId.id || "").trim();
+    }
+    const crmReferenceId = String(
+      payload.crmReferenceId
+      || payload.crm_reference_id
+      || payload.crmReferenceID
+      || ""
+    ).trim().toLowerCase();
+    if (crmReferenceId) {
+      const byReference = rows.find((row) => String(row?.crmReferenceId || row?.crm_reference_id || "").trim().toLowerCase() === crmReferenceId);
+      if (byReference) {
+        return String(byReference.id || "").trim();
+      }
+    }
+    const textCandidates = [
+      payload.name,
+      payload.leadName,
+      payload.dealName,
+      payload.company,
+      payload.companyName,
+    ]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    if (textCandidates.length) {
+      const byText = rows.find((row) => {
+        const rowName = String(row?.name || row?.leadName || row?.dealName || row?.lead_name || row?.deal_name || "").trim().toLowerCase();
+        const rowCompany = String(row?.company || row?.companyName || "").trim().toLowerCase();
+        return textCandidates.some((candidate) => candidate === rowName || candidate === rowCompany);
+      });
+      if (byText) {
+        return String(byText.id || "").trim();
+      }
+    }
+    return currentId;
   }
 
   async function saveDealQuickEditPopup(event) {
