@@ -4344,12 +4344,12 @@ def _crm_is_admin(user: User, org: Organization):
     if user.is_superuser or user.is_staff:
         return True
     profile = UserProfile.objects.filter(user=user).only("role").first()
-    profile_role = str(getattr(profile, "role", "") or "").strip().lower()
-    if profile_role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
+    profile_role = _normalize_admin_role(getattr(profile, "role", ""))
+    if profile_role in {"company_admin", "org_admin", "owner", "superadmin", "super_admin"}:
         return True
     membership = _get_org_membership(user, org)
-    membership_role = str(getattr(membership, "role", "") or "").strip().lower() if membership else ""
-    return membership_role == "company_admin"
+    membership_role = _normalize_admin_role(getattr(membership, "role", "")) if membership else ""
+    return membership_role in {"company_admin", "org_admin", "owner"}
 
 
 def _crm_to_decimal(value):

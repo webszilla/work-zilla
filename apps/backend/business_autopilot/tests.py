@@ -1,7 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+import json
 
-from apps.backend.business_autopilot.models import OrganizationDepartment, OrganizationUser
+from apps.backend.business_autopilot.models import CrmDeal, OrganizationDepartment, OrganizationUser
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -202,6 +203,50 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertFalse(
             OrganizationUser.objects.filter(id=membership.id).exists()
         )
+
+    def test_crm_deal_patch_allows_company_admin_role_alias(self):
+        self.admin.userprofile.role = "Company Admin"
+        self.admin.userprofile.save(update_fields=["role"])
+        sales_rep = User.objects.create_user(
+            username="sales.rep@workzilla.test",
+            email="sales.rep@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=sales_rep,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=sales_rep,
+            role="org_user",
+            is_active=True,
+        )
+        deal = CrmDeal.objects.create(
+            organization=self.org,
+            deal_name="New Deal",
+            company="Acme",
+            phone="9999999999",
+            deal_value="5000",
+            stage="Qualified",
+            status="Open",
+            created_by=sales_rep,
+            updated_by=sales_rep,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.patch(
+            f"/api/business-autopilot/deals/{deal.id}",
+            data=json.dumps({"deal_value": "7500", "status": "Won", "stage": "Won"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["deal"]["deal_value"], 7500.0)
+        deal.refresh_from_db()
+        self.assertEqual(float(deal.deal_value), 7500.0)
 
     def test_user_list_includes_org_memberships_even_without_product_access_rows(self):
         listed_user = User.objects.create_user(
