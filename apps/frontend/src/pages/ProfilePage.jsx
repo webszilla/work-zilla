@@ -292,6 +292,10 @@ function getProfilePhotoFallbackLabel(user = {}) {
   return "U";
 }
 
+function normalizeProfileRoleToken(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
 const phoneCountries = PHONE_COUNTRIES;
 export default function ProfilePage() {
   const initialProfileTab = (() => {
@@ -410,12 +414,22 @@ export default function ProfilePage() {
       : "");
   const data = state.data || {};
   const user = data.user || {};
-  const normalizedProfileRole = String(data.profile?.role || "").trim().toLowerCase();
-  const isOrgAdminProfile = normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin";
-  const isBusinessAutopilotOrgUser = currentProductSlug === "business-autopilot-erp" && normalizedProfileRole === "org_user";
+  const normalizedProfileRole = normalizeProfileRoleToken(data.profile?.role);
+  const normalizedProfileAccessRole = normalizeProfileRoleToken(data.profile?.access_role);
+  const isOrgAdminProfile =
+    normalizedProfileRole === "company_admin" ||
+    normalizedProfileRole === "org_admin" ||
+    normalizedProfileAccessRole === "org_admin";
+  const isBusinessAutopilotOrgUser =
+    currentProductSlug === "business-autopilot-erp" &&
+    (normalizedProfileRole === "org_user" || normalizedProfileAccessRole === "employee");
   const isBusinessAutopilotOrgAdmin =
     currentProductSlug === "business-autopilot-erp" &&
-    (normalizedProfileRole === "company_admin" || normalizedProfileRole === "org_admin");
+    (
+      normalizedProfileRole === "company_admin" ||
+      normalizedProfileRole === "org_admin" ||
+      normalizedProfileAccessRole === "org_admin"
+    );
   const recentActions = data.recent_actions || [];
   const profilePhoneDisplay = `${phoneCountry || ""} ${phoneNumber || ""}`.trim();
   const profilePhotoFallback = getProfilePhotoFallbackLabel(user);

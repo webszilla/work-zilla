@@ -525,9 +525,10 @@ def auth_me(request):
             free_plan_popup = True
             request.session["free_plan_popup_date"] = today.isoformat()
 
+    access_role = get_access_role(user, profile)
     onboarding_enabled = bool(
         profile
-        and profile.role == "company_admin"
+        and access_role == "ORG_ADMIN"
         and not user.is_superuser
     )
     pending_transfer = False
@@ -623,7 +624,7 @@ def auth_me(request):
                 "is_superuser": user.is_superuser,
             },
             "profile": profile_payload,
-            "access_role": get_access_role(user, profile),
+            "access_role": access_role,
             "org_id": org.id if org else None,
             "accessible_products": list(iter_accessible_product_slugs(user)),
             "dealer": dealer_payload,

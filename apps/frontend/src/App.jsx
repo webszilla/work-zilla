@@ -238,6 +238,10 @@ function normalizeBusinessAutopilotRoleToken(value) {
     .replace(/[\s-]+/g, "_");
 }
 
+function normalizeProfileAccessRoleToken(value) {
+  return normalizeBusinessAutopilotRoleToken(value);
+}
+
 function normalizeBusinessAutopilotAccessLevel(value) {
   const normalized = String(value || "").trim();
   if (normalized === "Create/Edit") {
@@ -286,7 +290,8 @@ function hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, profileRo
   if (!isBusinessAutopilot || isAdmin) {
     return false;
   }
-  return String(profileRole || "").trim().toLowerCase() === "org_user";
+  const normalizedRole = normalizeBusinessAutopilotRoleToken(profileRole);
+  return normalizedRole === "org_user" || normalizedRole === "employee";
 }
 
 function applyThemeColors(theme) {
@@ -490,30 +495,36 @@ function AppShell({ state, productPrefix, productSlug }) {
     return stored === "light" ? "light" : "dark";
   });
   const isSuperuser = Boolean(state.user?.is_superuser);
+  const normalizedProfileRole = normalizeProfileAccessRoleToken(state.profile?.role);
+  const normalizedProfileAccessRole = normalizeProfileAccessRoleToken(state.profile?.access_role);
+  const effectiveProfileRole = normalizedProfileAccessRole || normalizedProfileRole;
   const isSaasAdmin =
     isSuperuser ||
-    state.profile?.role === "superadmin" ||
-    state.profile?.role === "super_admin";
-  const isHrView = state.profile?.role === "hr_view";
+    effectiveProfileRole === "system_admin" ||
+    normalizedProfileRole === "superadmin" ||
+    normalizedProfileRole === "super_admin";
+  const isHrView = normalizedProfileRole === "hr_view";
   const isAdmin =
-    state.profile?.role === "superadmin" ||
-    state.profile?.role === "company_admin" ||
-    state.profile?.role === "org_admin" ||
+    normalizedProfileRole === "superadmin" ||
+    normalizedProfileRole === "super_admin" ||
+    normalizedProfileRole === "company_admin" ||
+    normalizedProfileRole === "org_admin" ||
+    effectiveProfileRole === "org_admin" ||
     isSuperuser ||
     isHrView;
-  const normalizedBusinessAutopilotProfileRole = normalizeBusinessAutopilotRoleToken(state.profile?.role);
+  const normalizedBusinessAutopilotProfileRole = effectiveProfileRole;
   const normalizedBusinessAutopilotMembershipRole = normalizeBusinessAutopilotRoleToken(autopilotMembershipRole);
   const businessAutopilotIsAdmin =
     isSuperuser ||
-    normalizedBusinessAutopilotProfileRole === "superadmin" ||
-    normalizedBusinessAutopilotProfileRole === "super_admin" ||
-    normalizedBusinessAutopilotProfileRole === "company_admin" ||
+    normalizedBusinessAutopilotProfileRole === "system_admin" ||
     normalizedBusinessAutopilotProfileRole === "org_admin" ||
+    normalizedProfileRole === "company_admin" ||
+    normalizedProfileRole === "org_admin" ||
     normalizedBusinessAutopilotMembershipRole === "company_admin" ||
     normalizedBusinessAutopilotMembershipRole === "org_admin" ||
     autopilotCanManageUsers;
-  const isDealer = state.profile?.role === "dealer";
-  const isAiChatbotAgent = state.profile?.role === "ai_chatbot_agent";
+  const isDealer = normalizedProfileRole === "dealer";
+  const isAiChatbotAgent = normalizedProfileRole === "ai_chatbot_agent";
   const aiChatbotTrial = (state.subscriptions || []).find(
     (sub) => sub.product_slug === "ai-chatbot" && (sub.status || "").toLowerCase() === "trialing"
   );
@@ -852,7 +863,7 @@ function AppShell({ state, productPrefix, productSlug }) {
         setAutopilotMembershipRole(String(matchedUser?.role || "").trim());
         const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
           roleAccessMap,
-          state.profile?.role,
+          state.profile?.access_role || state.profile?.role,
           matchedUser?.employee_role || state.user?.employee_role || ""
         );
         setAutopilotAccessRecord(nextAccessRecord);
@@ -879,7 +890,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       window.removeEventListener("focus", refreshAccess);
       window.removeEventListener("wz:business-autopilot-role-access-changed", refreshAccess);
     };
-  }, [businessAutopilotIsAdmin, isBusinessAutopilot, state.profile?.role, state.user?.email, state.user?.username, state.user?.employee_role]);
+  }, [businessAutopilotIsAdmin, isBusinessAutopilot, normalizedProfileRole, normalizedProfileAccessRole, state.user?.email, state.user?.username, state.user?.employee_role]);
 
   const autopilotCurrentSectionKey = useMemo(
     () => getBusinessAutopilotSectionKey(normalizedPathname),
@@ -1130,7 +1141,7 @@ function AppShell({ state, productPrefix, productSlug }) {
     state.user?.email ||
     "Work Zilla User";
   const roleDisplayName = formatWorkspaceText(
-    isHrView ? "hr_view" : state.profile?.role || (isSaasAdmin ? "super_admin" : "member"),
+    isHrView ? "hr_view" : state.profile?.role || state.profile?.access_role || (isSaasAdmin ? "super_admin" : "member"),
     "Member"
   );
   const planLabel = formatWorkspaceText(
@@ -2665,14 +2676,9 @@ export default function App() {
     const monitorLabel =
       branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
     const location = useLocation();
-    const isDealer = state.profile?.role === "dealer";
+    const isDealer = normalizedProfileRole === "dealer";
     const isSaasAdminPath = location.pathname.startsWith("/saas-admin");
-    const isSaasAdminUser = Boolean(
-      state.user?.is_superuser ||
-      state.user?.is_staff ||
-      state.profile?.role === "superadmin" ||
-      state.profile?.role === "super_admin"
-    );
+    const isSaasAdminUser = Boolean(state.user?.is_superuser || state.user?.is_staff || isSaasAdmin);
     const archivedBillingPath = isSaasAdminUser ? "/saas-admin/billing" : "/billing";
 
     if (isSaasAdminPath) {

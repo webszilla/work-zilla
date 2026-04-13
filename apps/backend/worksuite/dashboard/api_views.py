@@ -7164,9 +7164,14 @@ def plans_rollback(request):
     })
 
 
+def _normalize_profile_role_token(value):
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
 def _is_org_admin_profile(profile):
-    role = str(getattr(profile, "role", "") or "").strip().lower()
-    return role in {"company_admin", "org_admin"}
+    raw_role = _normalize_profile_role_token(getattr(profile, "role", ""))
+    access_role = _normalize_profile_role_token(getattr(profile, "access_role", ""))
+    return raw_role in {"company_admin", "org_admin"} or access_role == "org_admin"
 
 
 def _serialize_login_activity_row(row):
@@ -7349,7 +7354,7 @@ def profile_summary(request):
         .filter(user__userprofile__organization=org)
         .select_related("user")
     )
-    if str(profile.role or "").strip().lower() != "company_admin":
+    if not _is_org_admin_profile(profile):
         recent_actions_qs = recent_actions_qs.filter(user=user)
     if requested_product_slug:
         recent_actions_qs = recent_actions_qs.filter(product_slug=requested_product_slug)
