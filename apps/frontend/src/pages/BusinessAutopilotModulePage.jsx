@@ -11407,7 +11407,9 @@ function CrmOnePageModule() {
     }
     setDealQuickEditPopup({
       id: dealId,
+      crmReferenceId: String(row?.crmReferenceId || row?.crm_reference_id || "").trim(),
       dealName: String(row?.dealName || row?.name || "").trim() || "Deal",
+      company: String(row?.company || "").trim(),
       dealValueExpected: String(row?.dealValueExpected || row?.dealValue || "").trim(),
       wonAmountFinal: String(row?.wonAmountFinal || "").trim(),
       status: String(row?.status || "Open").trim() || "Open",
@@ -11417,6 +11419,39 @@ function CrmOnePageModule() {
 
   function closeDealQuickEditPopup() {
     setDealQuickEditPopup(null);
+  }
+
+  function resolveCrmDealIdForEdit(popup) {
+    const rows = Array.isArray(moduleData.deals) ? moduleData.deals : [];
+    const popupId = String(popup?.id || "").trim();
+    const popupRef = String(popup?.crmReferenceId || "").trim().toLowerCase();
+    const popupName = String(popup?.dealName || "").trim().toLowerCase();
+    const popupCompany = String(popup?.company || "").trim().toLowerCase();
+
+    const byId = rows.find((row) => String(row?.id || "").trim() === popupId);
+    if (byId) {
+      return String(byId.id || "").trim();
+    }
+
+    if (popupRef) {
+      const byRef = rows.find((row) => String(row?.crmReferenceId || row?.crm_reference_id || "").trim().toLowerCase() === popupRef);
+      if (byRef) {
+        return String(byRef.id || "").trim();
+      }
+    }
+
+    if (popupName) {
+      const byName = rows.find((row) => {
+        const rowName = String(row?.dealName || row?.deal_name || "").trim().toLowerCase();
+        const rowCompany = String(row?.company || "").trim().toLowerCase();
+        return rowName === popupName || (popupCompany && rowCompany === popupCompany);
+      });
+      if (byName) {
+        return String(byName.id || "").trim();
+      }
+    }
+
+    return popupId;
   }
 
   async function saveDealQuickEditPopup(event) {
@@ -11452,21 +11487,23 @@ function CrmOnePageModule() {
       : nextStatus.toLowerCase() === "lost"
         ? "Lost"
         : "Qualified";
+    const resolvedDealId = resolveCrmDealIdForEdit(dealQuickEditPopup);
+    const payload = {
+      status: nextStatus,
+      stage: nextStage,
+      deal_value: dealQuickEditPopup.dealValueExpected || 0,
+    };
     try {
-      const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealQuickEditPopup.id)}`, {
+      const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(resolvedDealId)}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          status: nextStatus,
-          stage: nextStage,
-          deal_value: dealQuickEditPopup.dealValueExpected || 0,
-        }),
+        body: JSON.stringify(payload),
       });
       const backendDeal = response?.deal ? normalizeCrmDealRecord(response.deal) : null;
       if (backendDeal) {
         setModuleData((prev) => ({
           ...prev,
           deals: (prev.deals || []).map((row) => (
-            String(row.id || "").trim() === dealQuickEditPopup.id
+            String(row.id || "").trim() === String(resolvedDealId)
               ? {
                   ...row,
                   ...backendDeal,
@@ -11484,17 +11521,56 @@ function CrmOnePageModule() {
         title: "Successful",
         message: "Deal updated successfully.",
       });
-    } catch (_error) {
-      setDealQuickEditPopup((prev) => (
-        prev
-          ? {
-              ...prev,
-              error: "Unable to update deal. Please try again.",
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if ([403, 404].includes(status)) {
+        try {
+          await refreshCrmRowsFromBackend();
+          const retryDealId = resolveCrmDealIdForEdit(dealQuickEditPopup);
+          if (retryDealId && retryDealId !== String(resolvedDealId)) {
+            const retryResponse = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(retryDealId)}`, {
+              method: "PATCH",
+              body: JSON.stringify(payload),
+            });
+            const retryBackendDeal = retryResponse?.deal ? normalizeCrmDealRecord(retryResponse.deal) : null;
+            if (retryBackendDeal) {
+              setModuleData((prev) => ({
+                ...prev,
+                deals: (prev.deals || []).map((row) => (
+                  String(row.id || "").trim() === String(retryDealId)
+                    ? {
+                        ...row,
+                        ...retryBackendDeal,
+                        wonAmountFinal: normalizedWonAmount,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : row
+                )),
+              }));
             }
-          : prev
-      ));
+            await refreshCrmRowsFromBackend();
+            setDealQuickEditPopup(null);
+            setCrmActionPopup({
+              open: true,
+              title: "Successful",
+              message: "Deal updated successfully.",
+            });
+            return;
+          }
+        } catch (_retryError) {
+          // Fall through to the generic error below.
+        }
+      }
+        setDealQuickEditPopup((prev) => (
+          prev
+            ? {
+                ...prev,
+                error: "Unable to update deal. Please refresh and try again.",
+              }
+            : prev
+        ));
+      }
     }
-  }
 
   return (
     <div className="d-flex flex-column gap-3">
