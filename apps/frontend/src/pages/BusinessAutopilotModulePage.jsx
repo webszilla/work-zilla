@@ -1008,6 +1008,51 @@ function createDefaultIndiaGstTemplates() {
   ];
 }
 
+function normalizeGstTemplateText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeGstTemplateNumber(value) {
+  return String(value || "").trim();
+}
+
+function looksLikeLegacyIndiaGstTemplate(template = {}) {
+  const id = normalizeGstTemplateText(template.id);
+  const name = normalizeGstTemplateText(template.name);
+  const scope = normalizeGstTemplateText(template.taxScope || template.scope);
+  const cgst = normalizeGstTemplateNumber(template.cgst);
+  const sgst = normalizeGstTemplateNumber(template.sgst);
+  const igst = normalizeGstTemplateNumber(template.igst);
+  const cess = normalizeGstTemplateNumber(template.cess);
+
+  if (["gst_india_igst", "gst_india_cgst_sgst", "gst_default_india_igst", "gst_default_india_cgst_sgst"].includes(id)) {
+    return true;
+  }
+
+  if (name === "india gst" && scope === "intra state" && cgst === "9" && sgst === "9" && igst === "18") {
+    return true;
+  }
+
+  return name === "india gst" && cgst === "9" && sgst === "9" && igst === "18" && (cess === "" || cess === "0");
+}
+
+function applyIndiaGstDefaults(workspace, countryValue) {
+  const normalizedWorkspace = _normalizeAccountsWorkspacePayload(workspace);
+  if (normalizeCountryName(countryValue) !== "india") {
+    return normalizedWorkspace;
+  }
+  const gstTemplates = Array.isArray(normalizedWorkspace.gstTemplates) ? normalizedWorkspace.gstTemplates : [];
+  const canonicalIds = new Set(["gst_default_india_igst", "gst_default_india_cgst_sgst"]);
+  const preservedTemplates = gstTemplates.filter((template) => {
+    const id = normalizeGstTemplateText(template?.id);
+    return !canonicalIds.has(id) && !looksLikeLegacyIndiaGstTemplate(template);
+  });
+  return {
+    ...normalizedWorkspace,
+    gstTemplates: [...createDefaultIndiaGstTemplates(), ...preservedTemplates],
+  };
+}
+
 function parseNumber(value) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
@@ -8467,16 +8512,15 @@ function CrmOnePageModule() {
   async function refreshCrmAccountsWorkspace() {
     const accountsWorkspace = await apiFetch("/api/business-autopilot/accounts/workspace").catch(() => null);
     if (accountsWorkspace?.data && typeof accountsWorkspace.data === "object") {
-      const nextWorkspace = _normalizeAccountsWorkspacePayload(accountsWorkspace.data);
-      setCrmAccountsWorkspace(
-        normalizeCountryName(
-          nextWorkspace?.orgBillingCountry
-          || nextWorkspace?.organizationProfile?.country
-          || "India"
-        ) === "india" && !(nextWorkspace.gstTemplates || []).length
-          ? { ...nextWorkspace, gstTemplates: createDefaultIndiaGstTemplates() }
-          : nextWorkspace
+      const nextWorkspace = applyIndiaGstDefaults(
+        accountsWorkspace.data,
+        accountsWorkspace?.billing_country
+        || accountsWorkspace?.organization_profile?.country
+        || accountsWorkspace?.data?.orgBillingCountry
+        || accountsWorkspace?.data?.organizationProfile?.country
+        || "India"
       );
+      setCrmAccountsWorkspace(nextWorkspace);
       return;
     }
     setCrmAccountsWorkspace({ ...DEFAULT_ACCOUNTS_DATA, gstTemplates: createDefaultIndiaGstTemplates() });
@@ -21272,8 +21316,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }
         const backendData = res?.data;
         if (isValidAccountsData(backendData)) {
-          setModuleData(backendData);
-          window.localStorage.setItem(accountsStorageKey, JSON.stringify(backendData));
+          const nextWorkspace = applyIndiaGstDefaults(
+            backendData,
+            res?.billing_country
+            || res?.organization_profile?.country
+            || orgBillingCountry
+            || "India"
+          );
+          setModuleData(nextWorkspace);
+          window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextWorkspace));
           setAccountsSyncStatus("Synced from server");
         } else {
           try {

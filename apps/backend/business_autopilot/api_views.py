@@ -359,7 +359,8 @@ def _can_manage_modules(user: User):
     profile = UserProfile.objects.filter(user=user).only("role").first()
     if not profile:
         return False
-    return profile.role in {"company_admin", "org_user", "superadmin", "super_admin"}
+    normalized_role = _normalize_admin_role(profile.role)
+    return normalized_role in {"company_admin", "org_admin", "owner", "org_user", "superadmin", "super_admin"}
 
 
 def _can_manage_users(user: User, org: Organization = None):
@@ -1285,15 +1286,93 @@ def _default_india_gst_templates():
     ]
 
 
+def _normalize_gst_template_text(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _normalize_gst_template_number(value):
+    return str(value or "").strip()
+
+
+def _looks_like_legacy_india_gst_template(template):
+    if not isinstance(template, dict):
+        return False
+    template_id = _normalize_gst_template_text(template.get("id"))
+    template_name = _normalize_gst_template_text(template.get("name"))
+    template_scope = _normalize_gst_template_text(template.get("taxScope") or template.get("scope"))
+    cgst = _normalize_gst_template_number(template.get("cgst"))
+    sgst = _normalize_gst_template_number(template.get("sgst"))
+    igst = _normalize_gst_template_number(template.get("igst"))
+    cess = _normalize_gst_template_number(template.get("cess"))
+
+    if template_id in {
+        "gst_india_igst",
+        "gst_india_cgst_sgst",
+        "gst_default_india_igst",
+        "gst_default_india_cgst_sgst",
+    }:
+        return True
+
+    if template_name in {"india gst", "igst", "cgst & sgst"} and template_scope in {"inter state", "intra state"}:
+        return True
+
+    return (
+        template_name == "india gst"
+        and cgst in {"9", "9.0"}
+        and sgst in {"9", "9.0"}
+        and igst in {"18", "18.0"}
+        and cess in {"0", "0.0", ""}
+    )
+
+
+def _normalize_india_gst_templates(templates):
+    canonical = _default_india_gst_templates()
+    if not isinstance(templates, list):
+        return canonical
+
+    normalized = []
+    for row in templates:
+        row_id = _normalize_gst_template_text(row.get("id")) if isinstance(row, dict) else ""
+        if row_id in {
+            "gst_default_india_igst",
+            "gst_default_india_cgst_sgst",
+        } or _looks_like_legacy_india_gst_template(row):
+            continue
+        if isinstance(row, dict):
+            normalized.append(row)
+
+    return [*canonical, *normalized]
+
+
 def _seed_accounts_workspace_defaults_for_org(payload, org):
     base = _normalize_accounts_workspace(payload)
     billing_profile = BillingProfile.objects.filter(organization=org).only("country").first()
     country = str(
         (getattr(billing_profile, "country", "") or getattr(org, "country", "") or "India")
     ).strip().lower()
-    if country == "india" and not base.get("gstTemplates"):
-        base["gstTemplates"] = _default_india_gst_templates()
+    if country == "india":
+        base["gstTemplates"] = _normalize_india_gst_templates(base.get("gstTemplates") or [])
     return base
+
+
+def _ensure_accounts_workspace_defaults_for_org(org):
+    workspace = AccountsWorkspace.objects.filter(organization=org).first()
+    billing_profile = BillingProfile.objects.filter(organization=org).only("country").first()
+    country = str(
+        (getattr(billing_profile, "country", "") or getattr(org, "country", "") or "India")
+    ).strip().lower()
+    if not workspace:
+        if country != "india":
+            return None
+        workspace = AccountsWorkspace.objects.create(
+            organization=org,
+            data=_default_accounts_workspace(),
+        )
+    seeded_data = _seed_accounts_workspace_defaults_for_org(workspace.data, org)
+    if workspace.data != seeded_data:
+        workspace.data = seeded_data
+        workspace.save(update_fields=["data", "updated_at"])
+    return workspace
 
 
 def _normalize_accounts_workspace(payload):
@@ -3278,6 +3357,7 @@ def accounts_workspace(request):
         return JsonResponse({"authenticated": True, "organization": None, "data": _default_accounts_workspace()})
 
     workspace = _get_accounts_workspace(org)
+    billing_profile = BillingProfile.objects.filter(organization=org).only("country").first()
 
     resolved_method = request.method
     if request.method == "POST":
@@ -3304,10 +3384,12 @@ def accounts_workspace(request):
                 "name": org.name,
                 "company_key": org.company_key,
             },
+            "organization_profile": _serialize_org_payroll_profile(org),
+            "billing_country": str(getattr(billing_profile, "country", "") or "").strip(),
             "data": _normalize_accounts_workspace(workspace.data),
             "updated_at": workspace.updated_at.isoformat() if workspace.updated_at else "",
         }
-)
+    )
 
 
 def _coerce_positive_int(value):

@@ -85,6 +85,7 @@ from core.access_control import iter_accessible_product_slugs
 from saas_admin.serializers import serialize_notification
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 from apps.backend.business_autopilot.models import OrganizationDepartment, OrganizationEmployeeRole, OrganizationUser
+from apps.backend.business_autopilot.api_views import _ensure_accounts_workspace_defaults_for_org
 
 
 User = get_user_model()
@@ -6074,6 +6075,7 @@ def billing_profile(request):
     org.country = incoming["country"] or "India"
     org.currency = currency
     org.save(update_fields=["name", "country", "currency"])
+    _ensure_accounts_workspace_defaults_for_org(org)
 
     country_timezone = resolve_default_timezone(country=incoming.get("country"), browser_timezone="", fallback=current_timezone)
     next_timezone = normalize_timezone(org_timezone, fallback=country_timezone if current_timezone == "UTC" else current_timezone)

@@ -234,6 +234,82 @@ class BusinessAutopilotUserAccessTests(TestCase):
         user_emails = {row.get("email") for row in payload.get("users", [])}
         self.assertIn("listed@gmail.com", user_emails)
 
+    def test_accounts_workspace_put_allows_common_admin_role_aliases(self):
+        alias_admin = User.objects.create_user(
+            username="alias-admin@workzilla.test",
+            email="alias-admin@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=alias_admin,
+            organization=self.org,
+            role="Company Admin",
+        )
+
+        self.client.force_login(alias_admin)
+        response = self.client.put(
+            "/api/business-autopilot/accounts/workspace",
+            data='{"data":{"invoices":[],"estimates":[],"gstTemplates":[],"billingTemplates":[],"items":[],"customers":[],"vendors":[]}}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["organization"]["id"], self.org.id)
+
+    def test_accounts_workspace_get_repairs_legacy_india_gst_template(self):
+        from apps.backend.business_autopilot.models import AccountsWorkspace
+        from core.models import BillingProfile
+
+        BillingProfile.objects.create(
+            organization=self.org,
+            contact_name="GP Prakash",
+            company_name="GP Prakash",
+            email="gp.prakash@example.com",
+            mobile_phone="+91 9999999999",
+            phone="+91 8888888888",
+            address_line1="Line 1",
+            city="Chennai",
+            state="Tamil Nadu",
+            postal_code="600001",
+            country="India",
+        )
+        AccountsWorkspace.objects.create(
+            organization=self.org,
+            data={
+                "customers": [],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [
+                    {
+                        "id": "gst_legacy_india_001",
+                        "name": "India GST",
+                        "taxScope": "Intra State",
+                        "cgst": "9",
+                        "sgst": "9",
+                        "igst": "18",
+                        "cess": "0",
+                        "status": "Active",
+                        "notes": "",
+                    }
+                ],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [],
+            },
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/business-autopilot/accounts/workspace")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        gst_templates = payload["data"]["gstTemplates"]
+        self.assertEqual(len(gst_templates), 2)
+        self.assertEqual(gst_templates[0]["id"], "gst_default_india_igst")
+        self.assertEqual(gst_templates[1]["id"], "gst_default_india_cgst_sgst")
+
     def test_user_update_supports_post_action_update(self):
         product_user = User.objects.create_user(
             username="user-update@gmail.com",
