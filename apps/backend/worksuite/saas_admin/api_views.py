@@ -27,6 +27,7 @@ from django.views.decorators.http import require_http_methods
 from core.models import (
     Employee,
     Organization,
+    OrganizationProduct,
     PendingTransfer,
     Plan,
     DealerAccount,
@@ -1236,6 +1237,59 @@ def _serialize_org(org, subscription=None):
     }
 
 
+def _serialize_org_product_statuses(org, subscription=None):
+    rows = []
+    seen_slugs = set()
+
+    org_products = (
+        OrganizationProduct.objects
+        .filter(organization=org)
+        .select_related("product")
+        .order_by("product__sort_order", "product__name")
+    )
+    for row in org_products:
+        product = row.product
+        slug = str(getattr(product, "slug", "") or "").strip().lower()
+        if not slug or slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        rows.append({
+            "slug": slug,
+            "name": _product_display_name(slug, getattr(product, "name", "") or slug),
+            "status": str(row.subscription_status or "").strip().lower() or "inactive",
+        })
+
+    subs = (
+        Subscription.objects
+        .filter(organization=org)
+        .select_related("plan__product")
+        .order_by("-start_date", "-id")
+    )
+    for sub in subs:
+        product = getattr(getattr(sub, "plan", None), "product", None)
+        slug = str(getattr(product, "slug", "") or "").strip().lower()
+        if not slug or slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        rows.append({
+            "slug": slug,
+            "name": _product_display_name(slug, getattr(product, "name", "") or slug),
+            "status": _effective_subscription_status(sub.status, getattr(sub, "end_date", None)).lower(),
+        })
+
+    if subscription:
+        product = getattr(getattr(subscription, "plan", None), "product", None)
+        slug = str(getattr(product, "slug", "") or "").strip().lower()
+        if slug and slug not in seen_slugs:
+            rows.append({
+                "slug": slug,
+                "name": _product_display_name(slug, getattr(product, "name", "") or slug),
+                "status": _effective_subscription_status(subscription.status, getattr(subscription, "end_date", None)).lower(),
+            })
+
+    return rows
+
+
 def _active_orgs_queryset():
     return Organization.objects.filter(is_deleted=False)
 
@@ -1374,6 +1428,11 @@ def _get_product_org_ids(slug):
 
     catalog_product = CatalogProduct.objects.filter(slug=catalog_slug).first()
     if catalog_product:
+        org_ids.update(
+            OrganizationProduct.objects
+            .filter(product_id=catalog_product.id, subscription_status__in=("active", "trialing"))
+            .values_list("organization_id", flat=True)
+        )
         core_subs = Subscription.objects.filter(plan__product=catalog_product)
         org_ids.update(core_subs.values_list("organization_id", flat=True))
         history = SubscriptionHistory.objects.filter(plan__product=catalog_product)
@@ -2010,9 +2069,11 @@ def organizations_list(request):
     for org in orgs:
         sub = sub_by_org.get(org.id)
         row = _serialize_org(org, sub)
-        product_rows = entitlements_by_org.get(org.id, [])
+        product_rows = _serialize_org_product_statuses(org, sub)
+        if not product_rows:
+            product_rows = entitlements_by_org.get(org.id, [])
         has_monitor_entitlement = any(item["slug"] == "monitor" for item in product_rows)
-        if sub and monitor_product and not has_monitor_entitlement:
+        if sub and monitor_product and not has_monitor_entitlement and sub.plan and getattr(sub.plan, "product", None) and getattr(sub.plan.product, "slug", "") in {"monitor", "worksuite"}:
             product_rows = product_rows + [{
                 "slug": monitor_product.slug,
                 "name": _product_display_name(monitor_product.slug, monitor_product.name),

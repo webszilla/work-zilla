@@ -161,6 +161,47 @@ class ProductAuthorizationMiddlewareTests(TestCase):
         self.assertEqual(product_slugs, ["ai-chatbot", "digital-automation"])
 
 
+class SaasAdminOrganizationListTests(TestCase):
+    def test_active_business_autopilot_org_shows_product_status(self):
+        admin = User.objects.create_superuser(
+            username="saasadmin@example.com",
+            email="saasadmin@example.com",
+            password="pw123456",
+        )
+        org = Organization.objects.create(name="GP Prakash", company_key="GPKEY", owner=admin)
+        UserProfile.objects.create(user=admin, organization=org, role="company_admin")
+
+        ba_product, _ = Product.objects.get_or_create(
+            slug="business-autopilot-erp",
+            defaults={"name": "Business Autopilot"},
+        )
+        ba_plan = Plan.objects.create(name="Pro ERP", product=ba_product)
+        Subscription.objects.create(
+            user=admin,
+            organization=org,
+            plan=ba_plan,
+            status="active",
+        )
+        OrganizationProduct.objects.create(
+            organization=org,
+            product=ba_product,
+            subscription_status="active",
+            source="test",
+        )
+
+        self.client.force_login(admin)
+        response = self.client.get("/api/saas-admin/organizations")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        org_row = next((row for row in payload.get("organizations", []) if row.get("id") == org.id), None)
+        self.assertIsNotNone(org_row)
+        self.assertIn("business-autopilot-erp", org_row["products"])
+        self.assertTrue(
+            any(item.get("slug") == "business-autopilot-erp" and item.get("status") == "active" for item in org_row["product_statuses"])
+        )
+
+
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="wz-profile-photo-tests-"))
 class UserProfilePhotoCleanupTests(TestCase):
     def test_replacing_profile_photo_deletes_old_file(self):
