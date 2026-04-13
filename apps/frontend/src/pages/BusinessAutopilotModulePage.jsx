@@ -5713,6 +5713,7 @@ function SearchablePaginatedTableCard({
 }) {
   const [searchTerm, setSearchTerm] = useState(() => String(initialSearchTerm || "").trim());
   const [page, setPage] = useState(1);
+  const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" });
   const importInputRef = useRef(null);
   const [importSummary, setImportSummary] = useState({
     open: false,
@@ -5738,17 +5739,79 @@ function SearchablePaginatedTableCard({
     });
   }, [rows, searchBy, searchTerm]);
 
+  function toSortableValue(value) {
+    if (value === null || value === undefined) {
+      return "";
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+    if (typeof value === "boolean") {
+      return value ? 1 : 0;
+    }
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+    const text = String(value).trim();
+    const numericText = text.replace(/[^0-9.-]/g, "");
+    if (numericText && /^-?\d+(\.\d+)?$/.test(numericText)) {
+      const parsed = Number(numericText);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return text;
+  }
+
+  function getSortValue(row, column) {
+    if (!column) {
+      return "";
+    }
+    if (typeof column.sortValue === "function") {
+      return toSortableValue(column.sortValue(row, column));
+    }
+    return toSortableValue(row?.[column.key]);
+  }
+
+  function compareSortValues(leftRow, rightRow, column) {
+    const leftValue = getSortValue(leftRow, column);
+    const rightValue = getSortValue(rightRow, column);
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return leftValue - rightValue;
+    }
+    return String(leftValue ?? "").localeCompare(String(rightValue ?? ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  const sortedRows = useMemo(() => {
+    if (!sortConfig.key) {
+      return filteredRows;
+    }
+    const column = columns.find((item) => String(item?.key || "") === String(sortConfig.key || ""));
+    if (!column) {
+      return filteredRows;
+    }
+    const directionMultiplier = sortConfig.direction === "desc" ? -1 : 1;
+    return [...filteredRows].sort((leftRow, rightRow) => compareSortValues(leftRow, rightRow, column) * directionMultiplier);
+  }, [columns, filteredRows, sortConfig.direction, sortConfig.key]);
+
   const totalItems = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * pageSize;
-  const pagedRows = filteredRows.slice(startIndex, startIndex + pageSize);
+  const pagedRows = sortedRows.slice(startIndex, startIndex + pageSize);
   const startEntry = totalItems ? startIndex + 1 : 0;
   const endEntry = totalItems ? startIndex + pagedRows.length : 0;
 
   useEffect(() => {
     setPage(1);
   }, [searchTerm, rows.length]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sortConfig.direction, sortConfig.key]);
 
   useEffect(() => {
     setSearchTerm(String(initialSearchTerm || "").trim());
@@ -5789,7 +5852,7 @@ function SearchablePaginatedTableCard({
     };
     const lines = [
       headers.map(csvEscape).join(","),
-      ...filteredRows.map((row) =>
+      ...sortedRows.map((row) =>
         columns.map((column) => csvEscape(getExportValue(row, column))).join(",")
       ),
     ];
@@ -5815,8 +5878,8 @@ function SearchablePaginatedTableCard({
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
     const headCells = columns.map((column) => `<th>${escapeHtml(column.label || column.key || "")}</th>`).join("");
-    const bodyRows = filteredRows.length
-      ? filteredRows.map((row) => {
+    const bodyRows = sortedRows.length
+      ? sortedRows.map((row) => {
           const cells = columns.map((column) => `<td>${escapeHtml(getExportValue(row, column))}</td>`).join("");
           return `<tr>${cells}</tr>`;
         }).join("")
@@ -5863,6 +5926,17 @@ function SearchablePaginatedTableCard({
 
   function triggerImportPicker() {
     importInputRef.current?.click();
+  }
+
+  function toggleSort(columnKey) {
+    const key = String(columnKey || "");
+    if (!key) {
+      return;
+    }
+    setSortConfig((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
   }
 
   function openImportSummaryPopup(summary = {}) {
@@ -6010,13 +6084,44 @@ function SearchablePaginatedTableCard({
           <thead>
             <tr>
               {columns.map((column) => (
+                (() => {
+                  const columnKey = String(column.key || "");
+                  const isSorted = Boolean(columnKey && sortConfig.key === columnKey);
+                  const sortDirection = isSorted ? sortConfig.direction : "";
+                  const ariaSort = isSorted ? (sortDirection === "desc" ? "descending" : "ascending") : "none";
+                  const sortIconClass = !isSorted
+                    ? "bi-arrow-down-up"
+                    : sortDirection === "desc"
+                      ? "bi-arrow-down"
+                      : "bi-arrow-up";
+                  return (
                 <th
                   key={column.key || column.label}
                   className={column.headerClassName || ""}
                   style={column.thStyle || undefined}
+                  aria-sort={ariaSort}
                 >
-                  {column.label}
+                  {columnKey ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm p-0 border-0 bg-transparent text-reset fw-semibold shadow-none d-inline-flex align-items-center gap-1"
+                      onClick={() => toggleSort(columnKey)}
+                      title={`Sort by ${String(column.label || column.key || "")}`}
+                      aria-label={`Sort by ${String(column.label || column.key || "")}`}
+                      style={{
+                        color: "inherit",
+                        textDecoration: "none",
+                      }}
+                    >
+                      <span>{column.label}</span>
+                      <i className={`bi ${sortIconClass}`} aria-hidden="true" />
+                    </button>
+                  ) : (
+                    column.label
+                  )}
                 </th>
+                  );
+                })()
               ))}
               {renderActions ? <th className="text-end" style={actionHeaderStyle || undefined}>Action</th> : null}
             </tr>
