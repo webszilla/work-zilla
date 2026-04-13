@@ -349,7 +349,6 @@ const CRM_SECTION_CONFIG = {
       { key: "tag", label: "Tag" }
     ],
     fields: [
-      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
       { key: "name", label: "Name", placeholder: "Contact name" },
       { key: "company", label: "Company", placeholder: "Company name" },
       { key: "email", label: "Email", placeholder: "contact@example.com" },
