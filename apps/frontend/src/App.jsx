@@ -2676,9 +2676,17 @@ export default function App() {
     const monitorLabel =
       branding?.aliases?.ui?.monitorLabel || branding?.displayName || "Work Suite";
     const location = useLocation();
-    const isDealer = normalizedProfileRole === "dealer";
+    const productProfileRole = normalizeProfileAccessRoleToken(state.profile?.role);
+    const productAccessRole = normalizeProfileAccessRoleToken(state.profile?.access_role);
+    const isDealer = productProfileRole === "dealer";
     const isSaasAdminPath = location.pathname.startsWith("/saas-admin");
-    const isSaasAdminUser = Boolean(state.user?.is_superuser || state.user?.is_staff || isSaasAdmin);
+    const isSaasAdminUser = Boolean(
+      state.user?.is_superuser ||
+      state.user?.is_staff ||
+      productProfileRole === "superadmin" ||
+      productProfileRole === "super_admin" ||
+      productAccessRole === "system_admin"
+    );
     const archivedBillingPath = isSaasAdminUser ? "/saas-admin/billing" : "/billing";
 
     if (isSaasAdminPath) {
