@@ -50,6 +50,29 @@ def _user_profile_photo_upload_to(instance, filename):
     return f"profile_photos/{user_part}/{stamp}_{safe_name}"
 
 
+def _normalize_profile_role(value):
+    raw_value = str(value or "").strip().lower()
+    compact_value = re.sub(r"[^a-z0-9]+", "", raw_value)
+    alias_map = {
+        "companyadmin": "ORG_ADMIN",
+        "orgadmin": "ORG_ADMIN",
+        "organizationadmin": "ORG_ADMIN",
+        "owner": "ORG_ADMIN",
+        "superadmin": "SYSTEM_ADMIN",
+        "superuser": "SYSTEM_ADMIN",
+        "super_admin": "SYSTEM_ADMIN",
+        "dealer": "DEALER",
+        "orguser": "EMPLOYEE",
+        "employee": "EMPLOYEE",
+        "hrview": "EMPLOYEE",
+        "aichatbotagent": "EMPLOYEE",
+    }
+    normalized = alias_map.get(compact_value)
+    if normalized:
+        return normalized
+    return raw_value.upper() if raw_value else ""
+
+
 class Organization(models.Model):
     name = models.CharField(max_length=200)
     company_key = models.CharField(max_length=100, unique=True)
@@ -206,12 +229,7 @@ class UserProfile(models.Model):
 
     @property
     def access_role(self):
-        role = str(self.role or "").strip().lower()
-        if role in {"company_admin", "org_admin"}:
-            return "ORG_ADMIN"
-        if role in {"org_user", "employee", "hr_view", "ai_chatbot_agent"}:
-            return "EMPLOYEE"
-        return role.upper() if role else ""
+        return _normalize_profile_role(self.role)
 
 
 @receiver(pre_save, sender=UserProfile)

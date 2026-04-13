@@ -32,6 +32,11 @@ class ProductAuthorizationMiddlewareTests(TestCase):
             defaults={"name": "AI Chatbot"},
         )
         self.plan = Plan.objects.create(name="Enterprise", product=self.product)
+        self.ba_product, _ = Product.objects.get_or_create(
+            slug="business-autopilot-erp",
+            defaults={"name": "Business Autopilot"},
+        )
+        self.ba_plan = Plan.objects.create(name="Pro ERP", product=self.ba_product)
 
     def _create_subscription(self):
         owner = User.objects.create_user(username="owner@example.com", email="owner@example.com", password="pw123456")
@@ -46,6 +51,17 @@ class ProductAuthorizationMiddlewareTests(TestCase):
             product=self.product,
             defaults={"subscription_status": "active", "source": "test"},
         )
+        Subscription.objects.create(
+            user=owner,
+            organization=self.org,
+            plan=self.ba_plan,
+            status="active",
+        )
+        OrganizationProduct.objects.update_or_create(
+            organization=self.org,
+            product=self.ba_product,
+            defaults={"subscription_status": "active", "source": "test"},
+        )
 
     def test_org_admin_gets_full_access_to_subscribed_product(self):
         self._create_subscription()
@@ -54,6 +70,16 @@ class ProductAuthorizationMiddlewareTests(TestCase):
 
         self.client.force_login(user)
         response = self.client.get("/app/ai-chatbot/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_company_admin_label_gets_full_access_to_business_autopilot(self):
+        self._create_subscription()
+        user = User.objects.create_user(username="legacy-admin@example.com", email="legacy-admin@example.com", password="pw123456")
+        UserProfile.objects.create(user=user, organization=self.org, role="Company Admin")
+
+        self.client.force_login(user)
+        response = self.client.get("/app/business-autopilot/crm")
 
         self.assertEqual(response.status_code, 200)
 

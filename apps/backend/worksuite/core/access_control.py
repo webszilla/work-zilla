@@ -57,6 +57,29 @@ PERMISSION_RANK = {
 }
 
 
+def _normalize_profile_role(value: str | None) -> str:
+    raw_value = str(value or "").strip().lower()
+    compact_value = "".join(ch for ch in raw_value if ch.isalnum())
+    alias_map = {
+        "companyadmin": "ORG_ADMIN",
+        "orgadmin": "ORG_ADMIN",
+        "organizationadmin": "ORG_ADMIN",
+        "owner": "ORG_ADMIN",
+        "superadmin": "SYSTEM_ADMIN",
+        "superuser": "SYSTEM_ADMIN",
+        "super_admin": "SYSTEM_ADMIN",
+        "dealer": "DEALER",
+        "orguser": "EMPLOYEE",
+        "employee": "EMPLOYEE",
+        "hrview": "EMPLOYEE",
+        "aichatbotagent": "EMPLOYEE",
+    }
+    normalized = alias_map.get(compact_value)
+    if normalized:
+        return normalized
+    return raw_value.upper() if raw_value else ""
+
+
 def normalize_product_slug(product_slug: str | None) -> str:
     slug = str(product_slug or "").strip().lower()
     if slug in {"work-suite", "worksuite"}:
@@ -90,9 +113,10 @@ def get_user_organization(user, profile: Optional[UserProfile] = None) -> Option
     if not user or not getattr(user, "is_authenticated", False):
         return None
     profile = profile or get_user_profile(user)
-    if profile and profile.role == "dealer":
+    profile_role = _normalize_profile_role(getattr(profile, "role", ""))
+    if profile_role == "DEALER":
         return None
-    if user.is_superuser or (profile and profile.role in {"superadmin", "super_admin"}):
+    if user.is_superuser or profile_role == "SYSTEM_ADMIN":
         return None
     if profile and profile.organization_id:
         return profile.organization
@@ -106,12 +130,9 @@ def get_access_role(user, profile: Optional[UserProfile] = None) -> str:
         return "SYSTEM_ADMIN"
     profile = profile or get_user_profile(user)
     if profile:
-        if profile.role in {"superadmin", "super_admin"}:
-            return "SYSTEM_ADMIN"
-        if profile.role == "dealer":
-            return "DEALER"
-        if profile.access_role:
-            return profile.access_role
+        normalized_role = _normalize_profile_role(profile.role)
+        if normalized_role:
+            return normalized_role
     if Organization.objects.filter(owner=user).exists():
         return "ORG_ADMIN"
     return ""
