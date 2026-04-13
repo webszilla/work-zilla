@@ -443,6 +443,94 @@ def _normalize_role_access_map(payload):
     return normalized
 
 
+def _crm_resolve_role_access_record(role_access_map, profile_role, employee_role):
+    safe_map = role_access_map if isinstance(role_access_map, dict) else {}
+    normalized_profile_role = _normalize_admin_role(profile_role)
+    normalized_employee_role = _normalize_admin_role(employee_role)
+    entries = [(key, value) for key, value in safe_map.items() if isinstance(value, dict)]
+
+    if normalized_employee_role:
+        for raw_key, value in entries:
+            scope, raw_role = (str(raw_key or "").strip().split(":", 1) + [""])[:2]
+            if scope == "employee_role" and _normalize_admin_role(raw_role) == normalized_employee_role:
+                return value
+
+    if normalized_profile_role:
+        for raw_key, value in entries:
+            scope, raw_role = (str(raw_key or "").strip().split(":", 1) + [""])[:2]
+            if scope == "system" and _normalize_admin_role(raw_role) == normalized_profile_role:
+                return value
+
+    return None
+
+
+def _crm_section_access_level(user: User, org: Organization, section_key: str = "crm"):
+    if _crm_is_admin(user, org):
+        return "Full Access"
+    if not user or not user.is_authenticated or not org:
+        return "No Access"
+    settings_obj = OrganizationSettings.objects.filter(organization=org).only("business_autopilot_role_access_map").first()
+    role_access_map = _normalize_role_access_map(getattr(settings_obj, "business_autopilot_role_access_map", {}) or {})
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    membership = _get_org_membership(user, org)
+    role_access_record = _crm_resolve_role_access_record(
+        role_access_map,
+        getattr(profile, "role", ""),
+        getattr(membership, "employee_role", ""),
+    )
+    if not role_access_record:
+        return "No Access"
+    sections = role_access_record.get("sections") if isinstance(role_access_record.get("sections"), dict) else {}
+    return ROLE_ACCESS_LEVEL_ALIASES.get(str(sections.get(section_key) or "No Access").strip(), "No Access")
+
+
+def _crm_has_view_access(user: User, org: Organization):
+    access_level = _crm_section_access_level(user, org, "crm")
+    return access_level in {"View", "View and Edit", "Create, View and Edit", "Full Access"}
+
+
+def _crm_has_edit_access(user: User, org: Organization):
+    access_level = _crm_section_access_level(user, org, "crm")
+    return access_level in {"View and Edit", "Create, View and Edit", "Full Access"}
+
+
+def _crm_has_create_access(user: User, org: Organization):
+    access_level = _crm_section_access_level(user, org, "crm")
+    return access_level in {"Create, View and Edit", "Full Access"}
+
+
+def _crm_has_unrestricted_row_access(user: User, org: Organization):
+    return _crm_section_access_level(user, org, "crm") in {"View and Edit", "Create, View and Edit", "Full Access"}
+
+
+def _crm_row_matches_user(user: User, row):
+    user_ids = set(_crm_clean_user_id_list(getattr(row, "assigned_user_ids", [])))
+    user_ids.update(_crm_clean_user_id_list(getattr(row, "owner_user_ids", [])))
+    assigned_user_id = getattr(row, "assigned_user_id", None)
+    if assigned_user_id:
+        user_ids.add(int(assigned_user_id))
+    created_by_id = getattr(row, "created_by_id", None)
+    if created_by_id:
+        user_ids.add(int(created_by_id))
+    return bool(user and user.is_authenticated and int(user.id) in user_ids)
+
+
+def _crm_can_view_row(user: User, org: Organization, row):
+    if _crm_is_admin(user, org):
+        return True
+    if _crm_has_view_access(user, org):
+        return True
+    return _crm_row_matches_user(user, row)
+
+
+def _crm_can_edit_row(user: User, org: Organization, row):
+    if _crm_is_admin(user, org):
+        return True
+    if _crm_has_edit_access(user, org):
+        return True
+    return _crm_row_matches_user(user, row)
+
+
 def _serialize_openai_settings(settings_obj: OrganizationSettings):
     return {
         "enabled": bool(settings_obj.business_autopilot_openai_enabled),
@@ -4532,17 +4620,7 @@ def _crm_sales_order_totals(items):
 
 
 def _crm_can_access_row(user: User, org: Organization, row):
-    if _crm_is_admin(user, org):
-        return True
-    user_ids = set(_crm_clean_user_id_list(getattr(row, "assigned_user_ids", [])))
-    user_ids.update(_crm_clean_user_id_list(getattr(row, "owner_user_ids", [])))
-    assigned_user_id = getattr(row, "assigned_user_id", None)
-    if assigned_user_id:
-        user_ids.add(int(assigned_user_id))
-    created_by_id = getattr(row, "created_by_id", None)
-    if created_by_id:
-        user_ids.add(int(created_by_id))
-    return int(user.id) in user_ids
+    return _crm_can_edit_row(user, org, row)
 
 
 def _serialize_crm_lead(row: CrmLead):
@@ -4827,7 +4905,7 @@ def crm_leads(request, lead_id: int = None):
         rows = [
             row
             for row in CrmLead.objects.filter(organization=org).select_related("assigned_user", "created_by").order_by("-created_at")
-            if _crm_can_access_row(request.user, org, row)
+            if _crm_can_view_row(request.user, org, row)
         ]
         pipeline_value = sum((_crm_to_decimal(row.lead_amount) for row in rows if not row.is_deleted), Decimal("0"))
         return JsonResponse(
@@ -5142,7 +5220,7 @@ def crm_deals(request, deal_id: int = None):
         rows = [
         row
         for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead", "created_by").order_by("-created_at")
-        if _crm_can_access_row(request.user, org, row)
+        if _crm_can_view_row(request.user, org, row)
     ]
         pipeline_value = sum((_crm_to_decimal(row.deal_value) for row in rows if not row.is_deleted), Decimal("0"))
         return JsonResponse({"deals": [_serialize_crm_deal(row) for row in rows], "pipeline_value": float(pipeline_value)})
@@ -5238,7 +5316,7 @@ def crm_meetings(request, meeting_id: int = None):
         rows = [
             row
             for row in CrmMeeting.objects.filter(organization=org).order_by("-created_at")
-            if _crm_can_access_row(request.user, org, row)
+            if _crm_can_view_row(request.user, org, row)
         ]
         return JsonResponse({"meetings": [_serialize_crm_meeting(row) for row in rows]})
 
@@ -5371,13 +5449,13 @@ def crm_sales_orders(request, order_id: int = None):
 
     if resolved_method == "GET" and not order_id:
         rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "deal__lead", "created_by").order_by("-created_at")
-        visible_rows = [row for row in rows if _crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id]
+        visible_rows = [row for row in rows if _crm_can_view_row(request.user, org, row)]
         return JsonResponse({"sales_orders": [_serialize_crm_sales_order(row) for row in visible_rows]})
 
     row = CrmSalesOrder.objects.filter(organization=org, id=order_id).select_related("deal", "assigned_user", "created_by").first() if order_id else None
     if order_id and not row:
         return JsonResponse({"detail": "sales_order_not_found"}, status=404)
-    if row and not (_crm_is_admin(request.user, org) or row.assigned_user_id == request.user.id or row.created_by_id == request.user.id):
+    if row and not _crm_can_edit_row(request.user, org, row):
         return JsonResponse({"detail": "forbidden"}, status=403)
     can_edit_payment_details = _crm_is_admin(request.user, org)
 

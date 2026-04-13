@@ -2,9 +2,9 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 import json
 
-from apps.backend.business_autopilot.models import CrmDeal, OrganizationDepartment, OrganizationUser
+from apps.backend.business_autopilot.models import CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
 from apps.backend.products.models import Product
-from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
+from core.models import Organization, OrganizationProduct, OrganizationSettings, Plan, Subscription, UserProductAccess, UserProfile
 
 
 User = get_user_model()
@@ -236,6 +236,153 @@ class BusinessAutopilotUserAccessTests(TestCase):
         )
 
         self.client.force_login(self.admin)
+        response = self.client.patch(
+            f"/api/business-autopilot/deals/{deal.id}",
+            data=json.dumps({"deal_value": "7500", "status": "Won", "stage": "Won"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["deal"]["deal_value"], 7500.0)
+        deal.refresh_from_db()
+        self.assertEqual(float(deal.deal_value), 7500.0)
+
+    def test_crm_lead_patch_allows_role_access_map_full_access(self):
+        crm_user = User.objects.create_user(
+            username="crm-user@workzilla.test",
+            email="crm-user@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Manager",
+            is_active=True,
+        )
+        OrganizationSettings.objects.create(
+            organization=self.org,
+            business_autopilot_role_access_map={
+                "employee_role:Sales Manager": {
+                    "sections": {"crm": "Full Access"},
+                    "user_sub_sections": {},
+                    "can_export": False,
+                    "can_delete": False,
+                    "attendance_self_service": False,
+                    "remarks": "",
+                }
+            },
+        )
+        lead_owner = User.objects.create_user(
+            username="lead-owner@workzilla.test",
+            email="lead-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=lead_owner,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=lead_owner,
+            role="org_user",
+            is_active=True,
+        )
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Live Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=lead_owner,
+            assigned_user_ids=[lead_owner.id],
+            stage="New",
+            status="Open",
+            created_by=lead_owner,
+            updated_by=lead_owner,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{lead.id}",
+            data=json.dumps({"lead_amount": "7500", "status": "Closed", "stage": "Qualified"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["lead_amount"], 7500.0)
+        lead.refresh_from_db()
+        self.assertEqual(float(lead.lead_amount), 7500.0)
+
+    def test_crm_deal_patch_allows_role_access_map_full_access(self):
+        crm_user = User.objects.create_user(
+            username="crm-user2@workzilla.test",
+            email="crm-user2@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Manager",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Manager": {
+                "sections": {"crm": "Full Access"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+        deal_owner = User.objects.create_user(
+            username="deal-owner@workzilla.test",
+            email="deal-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=deal_owner,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=deal_owner,
+            role="org_user",
+            is_active=True,
+        )
+        deal = CrmDeal.objects.create(
+            organization=self.org,
+            deal_name="Live Deal",
+            company="Acme",
+            phone="9999999999",
+            deal_value="5000",
+            stage="Qualified",
+            status="Open",
+            created_by=deal_owner,
+            updated_by=deal_owner,
+        )
+
+        self.client.force_login(crm_user)
         response = self.client.patch(
             f"/api/business-autopilot/deals/{deal.id}",
             data=json.dumps({"deal_value": "7500", "status": "Won", "stage": "Won"}),
