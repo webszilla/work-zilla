@@ -5002,17 +5002,25 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
-    if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method in {"PATCH", "DELETE"}:
-            resolved_method = override_method
-
     payload = None
-    if resolved_method in {"PATCH", "DELETE"} and not lead_id:
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method in {"PATCH", "DELETE"} and not lead_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         lead_id = _crm_body_row_id(payload, "lead_id", "id")
 
     if resolved_method == "POST":
@@ -5163,7 +5171,10 @@ def crm_leads(request, lead_id: int = None):
     if resolved_method == "DELETE":
         if not _crm_can_edit_row(request.user, org, row):
             return JsonResponse({"detail": "forbidden"}, status=403)
-        permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        permanent = (
+            str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+            or bool((payload or {}).get("__crm_permanent"))
+        )
         linked_leads = _crm_collect_contacts_linked_to_contact(row)
         if permanent:
             row.delete()
@@ -5194,17 +5205,25 @@ def crm_contacts(request, contact_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
-    if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method in {"PATCH", "DELETE"}:
-            resolved_method = override_method
-
     payload = None
-    if resolved_method in {"PATCH", "DELETE"} and not contact_id:
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method in {"PATCH", "DELETE"} and not contact_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         contact_id = _crm_body_row_id(payload, "contact_id", "id")
 
     if resolved_method == "GET" and not contact_id:
@@ -5282,7 +5301,10 @@ def crm_contacts(request, contact_id: int = None):
     if resolved_method == "DELETE":
         if not _crm_can_edit_row(request.user, org, row):
             return JsonResponse({"detail": "forbidden"}, status=403)
-        permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        permanent = (
+            str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+            or bool((payload or {}).get("__crm_permanent"))
+        )
         if permanent:
             row.delete()
             return JsonResponse({"deleted": True, "permanent": True})
@@ -5382,17 +5404,25 @@ def crm_deals(request, deal_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
-    if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method in {"PATCH", "DELETE"}:
-            resolved_method = override_method
-
     payload = None
-    if resolved_method in {"PATCH", "DELETE"} and not deal_id:
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method in {"PATCH", "DELETE"} and not deal_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         deal_id = _crm_body_row_id(payload, "deal_id", "id")
 
     if resolved_method == "GET" and not deal_id:
@@ -5496,17 +5526,25 @@ def crm_meetings(request, meeting_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
-    if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method in {"PATCH", "DELETE"}:
-            resolved_method = override_method
-
     payload = None
-    if resolved_method in {"PATCH", "DELETE"} and not meeting_id:
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method in {"PATCH", "DELETE"} and not meeting_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         meeting_id = _crm_body_row_id(payload, "meeting_id", "id")
 
     if resolved_method == "GET" and not meeting_id:
@@ -5623,7 +5661,10 @@ def crm_meetings(request, meeting_id: int = None):
     if resolved_method == "DELETE":
         if not _crm_is_admin(request.user, org):
             return JsonResponse({"detail": "forbidden"}, status=403)
-        permanent = str(request.GET.get("permanent") or "").strip() in {"1", "true", "yes"}
+        permanent = (
+            str(request.GET.get("permanent") or "").strip() in {"1", "true", "yes"}
+            or bool((payload or {}).get("__crm_permanent"))
+        )
         if permanent:
             row.delete()
             return JsonResponse({"deleted": True, "permanent": True})
@@ -5646,17 +5687,25 @@ def crm_sales_orders(request, order_id: int = None):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
-    if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method in {"PATCH", "DELETE"}:
-            resolved_method = override_method
-
     payload = None
-    if resolved_method in {"PATCH", "DELETE"} and not order_id:
+    if request.method == "POST":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    if resolved_method in {"PATCH", "DELETE"} and not order_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         order_id = _crm_body_row_id(payload, "sales_order_id", "id")
 
     if resolved_method == "GET" and not order_id:
@@ -5674,6 +5723,13 @@ def crm_sales_orders(request, order_id: int = None):
     if resolved_method == "DELETE":
         if not _crm_is_admin(request.user, org):
             return JsonResponse({"detail": "forbidden"}, status=403)
+        permanent = (
+            str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+            or bool((payload or {}).get("__crm_permanent"))
+        )
+        if permanent:
+            row.delete()
+            return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True
         row.deleted_at = timezone.now()
         row.deleted_by = request.user

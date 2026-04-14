@@ -3628,9 +3628,19 @@ async function saveCrmCollectionRecord(sectionKey, method, rowId, payload = {}, 
   if (!config) {
     throw new Error(`unsupported_crm_section:${sectionKey}`);
   }
+  const normalizedMethod = String(method || "POST").trim().toUpperCase();
+  const normalizedRowId = String(rowId || "").trim();
+  const normalizedPayload = buildCrmCollectionBody(sectionKey, normalizedRowId, payload);
+  const transportMethod = normalizedMethod === "POST" ? "POST" : "POST";
+  const transportBody = normalizedMethod === "POST"
+    ? normalizedPayload
+    : {
+        ...normalizedPayload,
+        __crm_action: normalizedMethod.toLowerCase(),
+      };
   return apiFetch(`${config.endpoint}${suffix}`, {
-    method,
-    body: JSON.stringify(buildCrmCollectionBody(sectionKey, rowId, payload)),
+    method: transportMethod,
+    body: JSON.stringify(transportBody),
   });
 }
 
