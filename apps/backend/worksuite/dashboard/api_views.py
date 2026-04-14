@@ -7348,6 +7348,7 @@ def profile_summary(request):
     requested_product_slug = (request.GET.get("product") or "").strip().lower()
     if requested_product_slug == "monitor":
         requested_product_slug = "worksuite"
+    requested_user_id = (request.GET.get("activity_user_id") or "").strip()
 
     recent_actions_qs = (
         AdminActivity.objects
@@ -7356,6 +7357,8 @@ def profile_summary(request):
     )
     if not _is_org_admin_profile(profile):
         recent_actions_qs = recent_actions_qs.filter(user=user)
+    elif requested_user_id.isdigit():
+        recent_actions_qs = recent_actions_qs.filter(user_id=int(requested_user_id))
     if requested_product_slug:
         recent_actions_qs = recent_actions_qs.filter(product_slug=requested_product_slug)
     search_query = (request.GET.get("q") or "").strip()
@@ -7397,6 +7400,22 @@ def profile_summary(request):
             profile_photo_url = request.build_absolute_uri(profile.profile_photo.url)
         except Exception:
             profile_photo_url = ""
+    org_users_payload = []
+    if _is_org_admin_profile(profile):
+        org_users_payload = [
+            {
+                "id": row.id,
+                "label": (
+                    f"{row.get_full_name().strip()} ({row.username})"
+                    if row.get_full_name().strip()
+                    else row.username
+                ),
+            }
+            for row in User.objects
+            .filter(userprofile__organization=org)
+            .order_by("first_name", "username")
+            .distinct()
+        ]
     return JsonResponse({
         "org": {
             "id": org.id,
@@ -7456,6 +7475,7 @@ def profile_summary(request):
             _admin_activity_payload(row)
             for row in page_obj
         ],
+        "org_users": org_users_payload,
         "pagination": {
             "page": page_obj.number,
             "total_pages": paginator.num_pages,
@@ -7714,9 +7734,9 @@ def profile_update_photo(request):
         return _json_error("Profile photo is required.", status=400)
     if not str(upload.content_type or "").startswith("image/"):
         return _json_error("Profile photo must be an image file.", status=400)
-    max_size = 500 * 1024 * 1024
+    max_size = 500 * 1024
     if upload.size > max_size:
-        return _json_error("Profile photo must be 500MB or smaller.", status=400)
+        return _json_error("Profile photo must be 500KB or smaller.", status=400)
 
     profile = dashboard_views.get_profile(request.user)
     profile.profile_photo = upload

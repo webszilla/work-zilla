@@ -312,6 +312,8 @@ export default function ProfilePage() {
   const [adminPage, setAdminPage] = useState(1);
   const [tableSearchTerm, setTableSearchTerm] = useState("");
   const [tableSearchQuery, setTableSearchQuery] = useState("");
+  const [activityUserFilter, setActivityUserFilter] = useState("");
+  const [selectedActivityUserId, setSelectedActivityUserId] = useState("");
   const [usersModal, setUsersModal] = useState({ open: false, users: [] });
   const [email, setEmail] = useState("");
   const [emailVerified, setEmailVerified] = useState(true);
@@ -414,6 +416,7 @@ export default function ProfilePage() {
       : "");
   const data = state.data || {};
   const user = data.user || {};
+  const orgActivityUsers = Array.isArray(data.org_users) ? data.org_users : [];
   const normalizedProfileRole = normalizeProfileRoleToken(data.profile?.role);
   const normalizedProfileAccessRole = normalizeProfileRoleToken(data.profile?.access_role);
   const isOrgAdminProfile =
@@ -479,6 +482,9 @@ export default function ProfilePage() {
         if (tableSearchQuery) {
           params.set("q", tableSearchQuery);
         }
+        if (selectedActivityUserId) {
+          params.set("activity_user_id", selectedActivityUserId);
+        }
         if (currentProductSlug) {
           params.set("product", currentProductSlug);
         }
@@ -534,7 +540,7 @@ export default function ProfilePage() {
     return () => {
       active = false;
     };
-  }, [adminPage, tableSearchQuery, currentProductSlug]);
+  }, [adminPage, tableSearchQuery, currentProductSlug, selectedActivityUserId]);
 
   useEffect(() => {
     let active = true;
@@ -1817,121 +1823,127 @@ export default function ProfilePage() {
       {!isBusinessAutopilotOrgUser && profileTopTab === "profile" ? (
       <div className="row g-3 mt-1">
         <div className="col-12">
-          <div className="card p-3 h-100">
+          <div className="card p-3 h-100 wz-profile-account-card">
             <h5>Account</h5>
             <p>
               <strong>Username:</strong> {user.username || "-"}
             </p>
-
-            <div className="wz-profile-photo-card mb-3">
-              <div className="wz-profile-photo-card__preview">
-                {profilePhotoUrl ? (
-                  <img src={profilePhotoUrl} alt="Profile" className="wz-profile-photo-card__image" />
-                ) : (
-                  <div className="wz-profile-photo-card__fallback">{profilePhotoFallback}</div>
-                )}
-              </div>
-              <div className="wz-profile-photo-card__body">
-                <h6 className="mb-1">Profile Photo</h6>
-                <div className="wz-profile-photo-card__note">Recommended size: 250x250px. Maximum file size: 500KB.</div>
-                <div className="wz-profile-photo-card__actions">
-                  <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
-                    {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
-                    <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
-                  </label>
+            <div className="row g-3 align-items-stretch mt-1">
+              <div className="col-12 col-xl-6">
+                <div className="wz-profile-photo-card h-100 mb-0">
+                  <div className="wz-profile-photo-card__preview">
+                    {profilePhotoUrl ? (
+                      <img src={profilePhotoUrl} alt="Profile" className="wz-profile-photo-card__image" />
+                    ) : (
+                      <div className="wz-profile-photo-card__fallback">{profilePhotoFallback}</div>
+                    )}
+                  </div>
+                  <div className="wz-profile-photo-card__body">
+                    <h6 className="mb-1">Profile Photo</h6>
+                    <div className="wz-profile-photo-card__note">Recommended size: 250x250px. Maximum file size: 500KB.</div>
+                    <div className="wz-profile-photo-card__actions">
+                      <label className="btn btn-primary btn-sm wz-profile-photo-card__upload-btn">
+                        {photoUploadState.loading ? "Uploading..." : "Upload Photo"}
+                        <input type="file" accept="image/*" className="d-none" onChange={handleProfilePhotoChange} disabled={photoUploadState.loading} />
+                      </label>
+                    </div>
+                    {photoUploadState.error ? <div className="text-danger small mt-2">{photoUploadState.error}</div> : null}
+                    {photoUploadState.success ? <div className="text-success small mt-2">{photoUploadState.success}</div> : null}
+                  </div>
                 </div>
-                {photoUploadState.error ? <div className="text-danger small mt-2">{photoUploadState.error}</div> : null}
-                {photoUploadState.success ? <div className="text-success small mt-2">{photoUploadState.success}</div> : null}
+              </div>
+              <div className="col-12 col-xl-6">
+                <form className="h-100 d-flex flex-column" onSubmit={handleEmailSubmit}>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label">Email</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label">Mobile Number</label>
+                      <div className="input-group">
+                        <PhoneCountryCodePicker
+                          value={phoneCountry}
+                          onChange={(code) => setPhoneCountry(code)}
+                          options={phoneCountries}
+                          style={{ maxWidth: "170px" }}
+                          ariaLabel="Profile phone country code"
+                        />
+                        <input
+                          type="tel"
+                          className="form-control"
+                          value={phoneNumber}
+                          onChange={(event) => setPhoneNumber(event.target.value)}
+                          placeholder="Phone number"
+                        />
+                      </div>
+                    </div>
+                    {showTimezone ? (
+                      <div className="col-12 col-md-6">
+                        <label className="form-label">Organization Timezone</label>
+                        <select
+                          className="form-select"
+                          value={orgTimezone}
+                          onChange={(event) => setOrgTimezone(event.target.value)}
+                        >
+                          {tzList.map((tz) => (
+                            <option key={tz.value} value={tz.value}>
+                              {tz.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                    {showTimezone ? (
+                      <div className="col-12 col-md-6">
+                        <label className="form-label">Organization Currency</label>
+                        <select
+                          className="form-select"
+                          value={orgCurrency || "INR"}
+                          onChange={(event) => {
+                            const nextCurrency = applyOrgCurrency(event.target.value);
+                            setOrgCurrency(nextCurrency);
+                          }}
+                        >
+                          {currencyCodeOptions.map((currencyCode) => (
+                            <option key={`profile-currency-${currencyCode}`} value={currencyCode}>
+                              {currencyCode}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-4">
+                    <div className="d-flex flex-wrap gap-2">
+                      <button className="btn btn-primary btn-sm">Update Details</button>
+                      {!emailVerified ? (
+                        <button
+                          type="button"
+                          className="btn btn-outline-warning btn-sm"
+                          onClick={handleResendEmailVerification}
+                        >
+                          Verify Email
+                        </button>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm"
+                      onClick={() => setPasswordResetModalOpen(true)}
+                    >
+                      Password Reset
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
-
-            <form className="mt-3" onSubmit={handleEmailSubmit}>
-              <div className="row g-2 align-items-end">
-                <div className={`col-12 ${showTimezone ? "col-xl-3" : "col-xl-6"}`}>
-                  <label className="form-label">Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className={`col-12 ${showTimezone ? "col-xl-3" : "col-xl-6"}`}>
-                  <label className="form-label">Mobile Number</label>
-                  <div className="input-group">
-                    <PhoneCountryCodePicker
-                      value={phoneCountry}
-                      onChange={(code) => setPhoneCountry(code)}
-                      options={phoneCountries}
-                      style={{ maxWidth: "170px" }}
-                      ariaLabel="Profile phone country code"
-                    />
-                    <input
-                      type="tel"
-                      className="form-control"
-                      value={phoneNumber}
-                      onChange={(event) => setPhoneNumber(event.target.value)}
-                      placeholder="Phone number"
-                    />
-                  </div>
-                </div>
-                {showTimezone ? (
-                  <div className="col-12 col-xl-3">
-                    <label className="form-label">Organization Timezone</label>
-                    <select
-                      className="form-select"
-                      value={orgTimezone}
-                      onChange={(event) => setOrgTimezone(event.target.value)}
-                    >
-                      {tzList.map((tz) => (
-                        <option key={tz.value} value={tz.value}>
-                          {tz.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-                {showTimezone ? (
-                  <div className="col-12 col-xl-3">
-                    <label className="form-label">Organization Currency</label>
-                    <select
-                      className="form-select"
-                      value={orgCurrency || "INR"}
-                      onChange={(event) => {
-                        const nextCurrency = applyOrgCurrency(event.target.value);
-                        setOrgCurrency(nextCurrency);
-                      }}
-                    >
-                      {currencyCodeOptions.map((currencyCode) => (
-                        <option key={`profile-currency-${currencyCode}`} value={currencyCode}>
-                          {currencyCode}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-              </div>
-              <div className="d-flex flex-wrap gap-2 mt-3">
-                <button className="btn btn-primary btn-sm">Update Details</button>
-                {!emailVerified ? (
-                  <button
-                    type="button"
-                    className="btn btn-outline-warning btn-sm"
-                    onClick={handleResendEmailVerification}
-                  >
-                    Verify Email
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm"
-                  onClick={() => setPasswordResetModalOpen(true)}
-                >
-                  Password Reset
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       </div>
@@ -3147,20 +3159,49 @@ export default function ProfilePage() {
       ) : null}
 
       {!isBusinessAutopilotOrgUser && profileTopTab === "profile" ? (
-      <div className="mt-3">
+      <div className="mt-3" style={{ paddingTop: "30px" }}>
         <h5>Admin Activity</h5>
+        <div className="small text-secondary mb-2">
+          Up to 500 recent admin activity records are kept here. Older records are removed automatically after the 500-record limit is reached.
+        </div>
         <div className="table-controls">
           <div className="table-length">Show {pageSize} entries</div>
-          <label className="table-search" htmlFor="profile-admin-search">
-            <span>Search:</span>
-            <input
-              id="profile-admin-search"
-              type="text"
-              value={tableSearchTerm}
-              onChange={(event) => setTableSearchTerm(event.target.value)}
-              placeholder="Search activity"
-            />
-          </label>
+          <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+            <label className="table-search" htmlFor="profile-admin-user-search">
+              <span>User:</span>
+              <input
+                id="profile-admin-user-search"
+                type="text"
+                list="profile-admin-user-options"
+                value={activityUserFilter}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setActivityUserFilter(nextValue);
+                  const matchedUser = orgActivityUsers.find(
+                    (option) => option.label.toLowerCase() === nextValue.trim().toLowerCase()
+                  );
+                  setSelectedActivityUserId(matchedUser ? String(matchedUser.id) : "");
+                  setAdminPage(1);
+                }}
+                placeholder="Search and select user"
+              />
+              <datalist id="profile-admin-user-options">
+                {orgActivityUsers.map((option) => (
+                  <option key={`profile-admin-user-${option.id}`} value={option.label} />
+                ))}
+              </datalist>
+            </label>
+            <label className="table-search" htmlFor="profile-admin-search">
+              <span>Search:</span>
+              <input
+                id="profile-admin-search"
+                type="text"
+                value={tableSearchTerm}
+                onChange={(event) => setTableSearchTerm(event.target.value)}
+                placeholder="Search activity"
+              />
+            </label>
+          </div>
         </div>
         <div className="table-responsive">
           <table className="table table-dark table-striped table-hover align-middle mt-2">
@@ -3226,6 +3267,9 @@ export default function ProfilePage() {
       {isBusinessAutopilotOrgUser ? (
         <div className="mt-3">
           <h5>Your Activity</h5>
+          <div className="small text-secondary mb-2">
+            Up to 500 recent activity records are kept here. Older records are removed automatically after the 500-record limit is reached.
+          </div>
           <div className="table-controls">
             <div className="table-length">Show {pageSize} entries</div>
             <label className="table-search" htmlFor="profile-user-search">

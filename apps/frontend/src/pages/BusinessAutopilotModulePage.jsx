@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
@@ -47,6 +47,61 @@ const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
 
 function normalizeCountryName(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function getNodePlainText(node) {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => getNodePlainText(item)).join("");
+  }
+  if (isValidElement(node)) {
+    return getNodePlainText(node.props?.children);
+  }
+  return "";
+}
+
+function normalizeTableActionNode(node) {
+  if (!isValidElement(node)) {
+    if (Array.isArray(node)) {
+      return node.map((item, index) => normalizeTableActionNode(item, index));
+    }
+    return node;
+  }
+
+  const normalizedChildren = Children.map(node.props?.children, (child) => normalizeTableActionNode(child));
+  if (node.type !== "button") {
+    return cloneElement(node, undefined, normalizedChildren);
+  }
+
+  const actionText = getNodePlainText(node.props?.children).trim().toLowerCase();
+  if (actionText !== "edit" && actionText !== "delete") {
+    return cloneElement(node, undefined, normalizedChildren);
+  }
+
+  const isDelete = actionText === "delete";
+  const iconClassName = isDelete ? "bi bi-trash3" : "bi bi-pencil-square";
+  const actionLabel = node.props?.["aria-label"] || node.props?.title || (isDelete ? "Delete" : "Edit");
+  const mergedClassName = [node.props?.className || "", "d-inline-flex", "align-items-center", "justify-content-center"].filter(Boolean).join(" ");
+
+  return cloneElement(
+    node,
+    {
+      ...node.props,
+      className: mergedClassName,
+      title: node.props?.title || actionLabel,
+      "aria-label": node.props?.["aria-label"] || actionLabel,
+      style: {
+        minWidth: 38,
+        width: 38,
+        height: 38,
+        padding: 0,
+        ...(node.props?.style || {}),
+      },
+    },
+    <i className={iconClassName} aria-hidden="true" />
+  );
 }
 
 function getCurrencyDisplayLabel(currencyCode) {
@@ -318,12 +373,11 @@ const CRM_SECTION_CONFIG = {
       { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "name", label: "Lead Name" },
       { key: "company", label: "Company" },
-      { key: "leadAmount", label: "Lead Amount" },
-      { key: "phone", label: "Phone" },
+      { key: "leadAmount", label: "Amount" },
       { key: "assignedTo", label: "Assigned To" },
       { key: "createdBy", label: "Created By" },
-      { key: "stage", label: "Stage" },
-      { key: "status", label: "Status" }
+      { key: "status", label: "Status" },
+      { key: "priority", label: "Priority" }
     ],
     fields: [
       { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
@@ -337,8 +391,8 @@ const CRM_SECTION_CONFIG = {
       { key: "assignType", label: "Assign To", type: "select", options: ["Users", "Team"], defaultValue: "Users" },
       { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
       { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
-      { key: "stage", label: "Stage", type: "select", options: ["New", "Qualified", "Proposal"], defaultValue: "New" },
-      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Onhold"], defaultValue: "Open" }
+      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Onhold"], defaultValue: "Open" },
+      { key: "priority", label: "Priority", type: "select", options: ["High", "Medium", "Low"], defaultValue: "Medium" }
     ]
   },
   contacts: {
@@ -384,8 +438,8 @@ const CRM_SECTION_CONFIG = {
       { key: "crmReferenceId", label: "CRM ID", importOptional: true },
       { key: "dealName", label: "Deal Name" },
       { key: "company", label: "Company" },
-      { key: "dealValueExpected", label: "Deal Value (Expected)" },
-      { key: "wonAmountFinal", label: "Won Amount (Final)" },
+      { key: "dealValueExpected", label: "Deal Value" },
+      { key: "wonAmountFinal", label: "Won Amount" },
       { key: "status", label: "Status" }
     ],
     fields: [
@@ -3254,6 +3308,14 @@ function normalizeCrmLeadRecord(row = {}) {
     || row.assigned_team
     || (assignType.toLowerCase() === "team" ? row.assignedTo || "" : "")
   ).trim();
+  const notesHistory = Array.isArray(row.leadNotesHistory || row.notesHistory)
+    ? (row.leadNotesHistory || row.notesHistory).map((entry, index) => ({
+      id: String(entry?.id || `lead_note_${index}_${Date.now()}`).trim(),
+      noteDate: String(entry?.noteDate || entry?.date || "").trim(),
+      noteText: String(entry?.noteText || entry?.text || "").trim(),
+      createdAt: String(entry?.createdAt || "").trim(),
+    })).filter((entry) => entry.noteDate || entry.noteText)
+    : [];
   return {
     ...row,
     crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
@@ -3270,6 +3332,64 @@ function normalizeCrmLeadRecord(row = {}) {
     assignedTeam,
     assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser.join(", "))).trim(),
     createdBy: String(row.createdBy || row.created_by_name || row.owner || "").trim(),
+    leadNotesHistory: notesHistory,
+  };
+}
+
+function mergeLeadNotesHistoryEntries(...sources) {
+  const seen = new Set();
+  const merged = [];
+  sources.forEach((source) => {
+    const rows = Array.isArray(source) ? source : [];
+    rows.forEach((entry, index) => {
+      const normalizedEntry = {
+        id: String(entry?.id || `lead_note_${index}`).trim(),
+        noteDate: String(entry?.noteDate || entry?.date || "").trim(),
+        noteText: String(entry?.noteText || entry?.text || "").trim(),
+        createdAt: String(entry?.createdAt || "").trim(),
+      };
+      if (!normalizedEntry.noteDate && !normalizedEntry.noteText) {
+        return;
+      }
+      const dedupKey = [
+        normalizedEntry.id,
+        normalizedEntry.noteDate,
+        normalizedEntry.noteText,
+        normalizedEntry.createdAt,
+      ].join("|");
+      if (seen.has(dedupKey)) {
+        return;
+      }
+      seen.add(dedupKey);
+      merged.push(normalizedEntry);
+    });
+  });
+  return merged;
+}
+
+function mergeLeadRowWithLocalNotes(incomingRow, existingRows = []) {
+  const normalizedIncoming = normalizeCrmLeadRecord(incomingRow);
+  const incomingId = String(normalizedIncoming.id || "").trim();
+  const incomingReferenceId = String(normalizedIncoming.crmReferenceId || "").trim();
+  const matchedExisting = (Array.isArray(existingRows) ? existingRows : []).find((row) => {
+    const existingLead = normalizeCrmLeadRecord(row);
+    const existingId = String(existingLead.id || "").trim();
+    const existingReferenceId = String(existingLead.crmReferenceId || "").trim();
+    if (incomingId && existingId && incomingId === existingId) {
+      return true;
+    }
+    return Boolean(incomingReferenceId && existingReferenceId && incomingReferenceId === existingReferenceId);
+  });
+  if (!matchedExisting) {
+    return normalizedIncoming;
+  }
+  const normalizedExisting = normalizeCrmLeadRecord(matchedExisting);
+  return {
+    ...normalizedIncoming,
+    leadNotesHistory: mergeLeadNotesHistoryEntries(
+      normalizedExisting.leadNotesHistory,
+      normalizedIncoming.leadNotesHistory,
+    ),
   };
 }
 
@@ -6287,7 +6407,7 @@ function SearchablePaginatedTableCard({
                         ...(actionCellStyle || {}),
                       }}
                     >
-                      {renderActions(row)}
+                      {normalizeTableActionNode(renderActions(row))}
                     </td>
                   ) : null}
                 </tr>
@@ -7364,6 +7484,8 @@ function CrmOnePageModule() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [meetingPopup, setMeetingPopup] = useState(null);
+  const [leadViewPopup, setLeadViewPopup] = useState(null);
+  const [leadNotesPopup, setLeadNotesPopup] = useState(null);
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [contactTagTab, setContactTagTab] = useState("all");
   const [dealStatusTab, setDealStatusTab] = useState("all");
@@ -7759,6 +7881,12 @@ function CrmOnePageModule() {
           const prevRows = Array.isArray(prev[sectionKey]) ? prev[sectionKey] : [];
           // Backend refresh is the source of truth for these sections.
           // Do not allow stale hydrated local rows to overwrite already-fetched rows.
+          if (sectionKey === "leads") {
+            merged[sectionKey] = prevRows.length
+              ? prevRows
+              : incomingRows.map((row) => mergeLeadRowWithLocalNotes(row, prevRows));
+            return;
+          }
           merged[sectionKey] = prevRows.length ? prevRows : incomingRows;
         });
         const incomingContacts = Array.isArray(incoming.contacts) ? incoming.contacts : [];
@@ -8716,8 +8844,11 @@ function CrmOnePageModule() {
     setModuleData((prev) => {
       const next = { ...prev };
       if (leadsResult.status === "fulfilled") {
+        const previousLeads = Array.isArray(prev?.leads) ? prev.leads : [];
         next.leads = Array.isArray(leadsResult.value?.leads)
-          ? leadsResult.value.leads.map((row) => normalizeCrmLeadRecord(row)).filter((row) => !isLegacyDemoCrmRow(row))
+          ? leadsResult.value.leads
+            .map((row) => mergeLeadRowWithLocalNotes(row, previousLeads))
+            .filter((row) => !isLegacyDemoCrmRow(row))
           : [];
       }
       if (contactsResult.status === "fulfilled") {
@@ -11647,6 +11778,74 @@ function CrmOnePageModule() {
     setMeetingPopup(null);
   }
 
+  function openLeadViewPopup(row) {
+    setLeadViewPopup(row);
+  }
+
+  function closeLeadViewPopup() {
+    setLeadViewPopup(null);
+  }
+
+  function openLeadNotesPopup(row) {
+    const normalizedLead = normalizeCrmLeadRecord(row);
+    setLeadNotesPopup({
+      leadId: String(normalizedLead.id || "").trim(),
+      leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
+      crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
+      noteDate: new Date().toISOString().slice(0, 10),
+      noteText: "",
+      error: "",
+      history: Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [],
+    });
+  }
+
+  function closeLeadNotesPopup() {
+    setLeadNotesPopup(null);
+  }
+
+  function submitLeadNotesPopup(event) {
+    event.preventDefault();
+    if (!leadNotesPopup) {
+      return;
+    }
+    const noteDate = String(leadNotesPopup.noteDate || "").trim();
+    const noteText = String(leadNotesPopup.noteText || "").trim();
+    if (!noteDate || !noteText) {
+      setLeadNotesPopup((prev) => (prev ? { ...prev, error: "Date and notes are required." } : prev));
+      return;
+    }
+    const nextEntry = {
+      id: `lead_note_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      noteDate,
+      noteText,
+      createdAt: new Date().toISOString(),
+    };
+    setModuleData((prev) => ({
+      ...prev,
+      leads: (prev.leads || []).map((row) => {
+        if (String(row.id || "").trim() !== String(leadNotesPopup.leadId || "").trim()) {
+          return row;
+        }
+        const normalizedRow = normalizeCrmLeadRecord(row);
+        return {
+          ...normalizedRow,
+          leadNotesHistory: [nextEntry, ...(normalizedRow.leadNotesHistory || [])],
+        };
+      }),
+    }));
+    setLeadNotesPopup((prev) => (
+      prev
+        ? {
+            ...prev,
+            noteDate: new Date().toISOString().slice(0, 10),
+            noteText: "",
+            error: "",
+            history: [nextEntry, ...(prev.history || [])],
+          }
+        : prev
+    ));
+  }
+
   async function updateMeetingStatus(meetingId, nextStatus) {
     const status = String(nextStatus || "").trim();
     if (!meetingId || !status) return;
@@ -12070,19 +12269,7 @@ function CrmOnePageModule() {
           if (sectionKey === "leads" && column.key === "leadAmount") {
             return {
               ...column,
-              label: `Lead Amount (${crmCurrencyCode})`,
-            };
-          }
-          if (sectionKey === "deals" && (column.key === "dealValueExpected" || column.key === "wonAmountFinal")) {
-            return {
-              ...column,
-              label: `${column.label} (${crmCurrencyCode})`,
-            };
-          }
-          if (sectionKey === "salesOrders" && column.key === "amount") {
-            return {
-              ...column,
-              label: `Amount (${crmCurrencyCode})`,
+              label: "Amount",
             };
           }
           return column;
@@ -12575,7 +12762,6 @@ function CrmOnePageModule() {
                         { key: "leadName", label: "Lead Name" },
                         { key: "clients", label: "Clients" },
                         { key: "issueDate", label: "Issue Date" },
-                        { key: "dueDate", label: "Due Date" },
                         { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
                         { key: "statusDisplay", label: "Status" },
                       ]}
@@ -12600,7 +12786,6 @@ function CrmOnePageModule() {
                         row.leadName || "-",
                         row.clients || "-",
                         formatDateLikeCellValue("issueDate", row.issueDate, "-"),
-                        formatDateLikeCellValue("dueDate", row.dueDate, "-"),
                         row.amountDisplay || "-",
                         row.convertedToEstimate || row.convertedToInvoice ? (
                           <div className="d-flex flex-column justify-content-center h-100 py-1">
@@ -12634,16 +12819,25 @@ function CrmOnePageModule() {
                           </div>
                         ) : (
                           <div className="d-flex align-items-center h-100 py-1">
+                            {(() => {
+                              const statusLabel = row.statusDisplay || row.status || "Pending";
+                              const isPending = String(statusLabel).trim().toLowerCase() === "pending";
+                              return (
                             <span
-                              className={`badge d-inline-flex align-items-center justify-content-center px-3 py-2 rounded-pill ${
-                                (String(row.statusDisplay || row.status || "Pending").trim().toLowerCase() === "pending")
-                                  ? "bg-warning-subtle text-warning-emphasis border border-warning-subtle"
-                                  : "bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle"
-                              }`}
-                              style={{ minHeight: 32 }}
+                              className="badge d-inline-flex align-items-center justify-content-center px-3 py-2 rounded-pill border"
+                              style={{
+                                minHeight: 32,
+                                minWidth: 108,
+                                backgroundColor: isPending ? "rgba(34, 197, 94, 0.12)" : "rgba(148, 163, 184, 0.14)",
+                                borderColor: isPending ? "rgba(34, 197, 94, 0.28)" : "rgba(148, 163, 184, 0.24)",
+                                color: isPending ? "#dcfce7" : "#e2e8f0",
+                                boxShadow: isPending ? "inset 0 0 0 1px rgba(34, 197, 94, 0.08)" : "none",
+                              }}
                             >
-                              {row.statusDisplay || row.status || "Pending"}
+                              {statusLabel}
                             </span>
+                              );
+                            })()}
                           </div>
                         ),
                       ]}
@@ -12683,17 +12877,21 @@ function CrmOnePageModule() {
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-info"
+                            title="Edit Sales Order"
+                            aria-label="Edit Sales Order"
                             onClick={() => editCrmSalesOrder(row)}
                           >
-                            Edit
+                            <i className="bi bi-pencil-square" aria-hidden="true" />
                           </button>
                           {canDeleteCrmRow(sectionKey, row) ? (
                             <button
                               type="button"
                               className="btn btn-sm btn-outline-danger"
+                              title="Delete Sales Order"
+                              aria-label="Delete Sales Order"
                               onClick={() => onDelete(sectionKey, row.id)}
                             >
-                              Delete
+                              <i className="bi bi-trash3" aria-hidden="true" />
                             </button>
                           ) : null}
                         </div>
@@ -13132,7 +13330,7 @@ function CrmOnePageModule() {
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "assignedUser" || field.key === "assignedTeam"
                                       ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "stage" || field.key === "status"
+                                      : field.key === "status" || field.key === "priority"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : "col-12 col-md-6 col-xl-4"
                                   )
@@ -14275,7 +14473,7 @@ function CrmOnePageModule() {
                             })()}
                           </div>
                           )}
-                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "activities") && (field.key === "status" || (sectionKey === "activities" && field.key === "notes")) ? (
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "activities") && (((sectionKey === "leads" && field.key === "priority") || (sectionKey !== "leads" && field.key === "status")) || (sectionKey === "activities" && field.key === "notes")) ? (
                             <div
                               className={
                                 sectionKey === "leads"
@@ -14395,7 +14593,7 @@ function CrmOnePageModule() {
                         className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                         onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
-                        Deleted Items ({deletedRows.length})
+                        Deleted ({deletedRows.length})
                       </button>
                     ) : null}
                     {bulkActions}
@@ -14429,7 +14627,7 @@ function CrmOnePageModule() {
                         className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                         onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
-                        Deleted Items ({deletedRows.length})
+                        Deleted ({deletedRows.length})
                       </button>
                     ) : null}
                     {bulkActions}
@@ -14461,7 +14659,7 @@ function CrmOnePageModule() {
                         className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                         onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
-                        Deleted Items ({deletedRows.length})
+                        Deleted ({deletedRows.length})
                       </button>
                     ) : null}
                     {bulkActions}
@@ -14493,7 +14691,7 @@ function CrmOnePageModule() {
                         className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                         onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
-                        Deleted Items ({deletedRows.length})
+                        Deleted ({deletedRows.length})
                       </button>
                     ) : null}
                     {bulkActions}
@@ -14525,7 +14723,7 @@ function CrmOnePageModule() {
                         className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                         onClick={(event) => openDeletedItemsView(sectionKey, event)}
                       >
-                        Deleted Items ({deletedRows.length})
+                        Deleted ({deletedRows.length})
                       </button>
                     ) : null}
                     {bulkActions}
@@ -14543,7 +14741,7 @@ function CrmOnePageModule() {
                       className={`btn btn-sm ${isDeletedSectionView ? "btn-danger" : "btn-outline-danger"}`}
                       onClick={(event) => openDeletedItemsView(sectionKey, event)}
                     >
-                      Deleted Items ({deletedRows.length})
+                      Deleted ({deletedRows.length})
                     </button>
                     {bulkActions}
                   </div>
@@ -14736,6 +14934,30 @@ function CrmOnePageModule() {
                         Cancel
                       </button>
                     ) : null}
+                    {sectionKey === "leads" ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-light d-inline-flex align-items-center justify-content-center"
+                        title="View Lead"
+                        aria-label="View Lead"
+                        onClick={() => openLeadViewPopup(row)}
+                        style={{ minWidth: 38, width: 38, height: 38, padding: 0 }}
+                      >
+                        <i className="bi bi-eye" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                    {sectionKey === "leads" ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-light d-inline-flex align-items-center justify-content-center"
+                        title="Lead Notes"
+                        aria-label="Lead Notes"
+                        onClick={() => openLeadNotesPopup(row)}
+                        style={{ minWidth: 38, width: 38, height: 38, padding: 0 }}
+                      >
+                        <i className="bi bi-journal-text" aria-hidden="true" />
+                      </button>
+                    ) : null}
                     {canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
@@ -14900,6 +15122,149 @@ function CrmOnePageModule() {
                 </select>
               </div>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {leadViewPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadViewPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(560px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">{leadViewPopup.name || "Lead Details"}</h5>
+                <div className="small text-secondary">{leadViewPopup.crmReferenceId || leadViewPopup.crm_reference_id || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadViewPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="row g-3 small">
+              <div className="col-6">
+                <div className="text-secondary">Company</div>
+                <div className="fw-semibold">{leadViewPopup.company || "-"}</div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Contact Person</div>
+                <div className="fw-semibold">{leadViewPopup.contactPerson || "-"}</div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Phone</div>
+                <div className="fw-semibold">
+                  {String(leadViewPopup.phone || "").trim()
+                    ? `${String(leadViewPopup.phoneCountryCode || "+91").trim()} ${String(leadViewPopup.phone || "").trim()}`
+                    : "-"}
+                </div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Amount</div>
+                <div className="fw-semibold">
+                  {parseNumber(leadViewPopup.leadAmount) ? formatCurrencyAmount(parseNumber(leadViewPopup.leadAmount), crmCurrencyCode) : "-"}
+                </div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Lead Source</div>
+                <div className="fw-semibold">{leadViewPopup.leadSource || "-"}</div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Assigned To</div>
+                <div className="fw-semibold">
+                  {Array.isArray(leadViewPopup.assignedUser)
+                    ? leadViewPopup.assignedUser.map((item) => String(item || "").trim()).filter(Boolean).join(", ") || leadViewPopup.assignedTo || "-"
+                    : leadViewPopup.assignedTo || leadViewPopup.assignedUser || "-"}
+                </div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Status</div>
+                <div className="fw-semibold">{leadViewPopup.status || "-"}</div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Priority</div>
+                <div className="fw-semibold">{leadViewPopup.priority || "-"}</div>
+              </div>
+              <div className="col-6">
+                <div className="text-secondary">Created By</div>
+                <div className="fw-semibold">{leadViewPopup.createdBy || "-"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {leadNotesPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadNotesPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(760px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Lead Notes</h5>
+                <div className="small text-secondary">{[leadNotesPopup.leadName, leadNotesPopup.crmReferenceId].filter(Boolean).join(" • ") || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadNotesPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <form className="row g-3 mb-3 align-items-end" onSubmit={submitLeadNotesPopup}>
+              {leadNotesPopup.error ? (
+                <div className="col-12">
+                  <div className="alert alert-danger py-2 mb-0">{leadNotesPopup.error}</div>
+                </div>
+              ) : null}
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">Date</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={leadNotesPopup.noteDate || ""}
+                  onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteDate: event.target.value, error: "" } : prev))}
+                />
+              </div>
+              <div className="col-12 col-md-7">
+                <label className="form-label small text-secondary mb-1">Notes</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Enter lead follow-up update"
+                  value={leadNotesPopup.noteText || ""}
+                  onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteText: event.target.value, error: "" } : prev))}
+                />
+              </div>
+              <div className="col-12 col-md-2 d-flex flex-column">
+                <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
+                <button type="submit" className="btn btn-success w-100">Submit</button>
+              </div>
+            </form>
+            <SearchablePaginatedTableCard
+              title="Updates"
+              rows={leadNotesPopup.history || []}
+              columns={[
+                { key: "noteDate", label: "Date", thStyle: { width: "25%" }, tdStyle: { width: "25%", whiteSpace: "nowrap" } },
+                { key: "noteText", label: "Notes", thStyle: { width: "75%" }, tdStyle: { width: "75%" } },
+              ]}
+              pageSize={5}
+              withoutOuterCard
+              searchPlaceholder="Search updates"
+              noRowsText="No lead updates yet."
+              searchBy={(row) => [row.noteDate, row.noteText].join(" ")}
+              renderCells={(row) => [
+                formatDateLikeCellValue("noteDate", row.noteDate, "-"),
+                row.noteText || "-",
+              ]}
+            />
           </div>
         </div>
       ) : null}
