@@ -4541,6 +4541,16 @@ def _crm_resolve_unique_order_id(org: Organization, requested_order_id: str = ""
     return _crm_order_id(org)
 
 
+def _crm_body_row_id(payload, *keys):
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        row_id = _coerce_positive_int(payload.get(key))
+        if row_id:
+            return row_id
+    return None
+
+
 def _crm_reference_id_from_related_to(org: Organization, related_to: str):
     related_value = str(related_to or "").strip()
     if not related_value:
@@ -4997,11 +5007,20 @@ def crm_leads(request, lead_id: int = None):
         if override_method in {"PATCH", "DELETE"}:
             resolved_method = override_method
 
-    if resolved_method == "POST":
+    payload = None
+    if resolved_method in {"PATCH", "DELETE"} and not lead_id:
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        lead_id = _crm_body_row_id(payload, "lead_id", "id")
+
+    if resolved_method == "POST":
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         lead_name = str(payload.get("lead_name") or payload.get("name") or "").strip()
         if not lead_name:
             return JsonResponse({"detail": "lead_name_required"}, status=400)
@@ -5051,10 +5070,11 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"lead": _serialize_crm_lead(row)})
 
     if resolved_method == "PATCH":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         update_fields = ["updated_by", "updated_at"]
         sync_related_deal = False
         if "lead_name" in payload or "name" in payload:
@@ -5179,15 +5199,24 @@ def crm_contacts(request, contact_id: int = None):
         if override_method in {"PATCH", "DELETE"}:
             resolved_method = override_method
 
+    payload = None
+    if resolved_method in {"PATCH", "DELETE"} and not contact_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        contact_id = _crm_body_row_id(payload, "contact_id", "id")
+
     if resolved_method == "GET" and not contact_id:
         rows = CrmContact.objects.filter(organization=org).select_related("created_by").order_by("-created_at")
         return JsonResponse({"contacts": [_serialize_crm_contact(row) for row in rows]})
 
     if resolved_method == "POST" and not contact_id:
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         name = str(payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
@@ -5212,10 +5241,11 @@ def crm_contacts(request, contact_id: int = None):
         return JsonResponse({"detail": "contact_not_found"}, status=404)
 
     if resolved_method == "PATCH":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         update_fields = ["updated_by", "updated_at"]
         if "name" in payload:
             name = str(payload.get("name") or "").strip()
@@ -5357,6 +5387,14 @@ def crm_deals(request, deal_id: int = None):
         if override_method in {"PATCH", "DELETE"}:
             resolved_method = override_method
 
+    payload = None
+    if resolved_method in {"PATCH", "DELETE"} and not deal_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        deal_id = _crm_body_row_id(payload, "deal_id", "id")
+
     if resolved_method == "GET" and not deal_id:
         rows = [
         row
@@ -5367,10 +5405,11 @@ def crm_deals(request, deal_id: int = None):
         return JsonResponse({"deals": [_serialize_crm_deal(row) for row in rows], "pipeline_value": float(pipeline_value)})
 
     if resolved_method == "POST" and not deal_id:
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         deal_name = str(payload.get("deal_name") or "").strip()
         if not deal_name:
             return JsonResponse({"detail": "deal_name_required"}, status=400)
@@ -5411,10 +5450,11 @@ def crm_deals(request, deal_id: int = None):
         return JsonResponse({"deal": _serialize_crm_deal(row)})
 
     if resolved_method == "PATCH":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         if "stage" in payload:
             stage = str(payload.get("stage") or "").strip()
             if stage in {"Qualified", "Proposal", "Won", "Lost"}:
@@ -5455,7 +5495,21 @@ def crm_meetings(request, meeting_id: int = None):
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
-    if request.method == "GET" and not meeting_id:
+    resolved_method = request.method
+    if request.method == "POST":
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        if override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    payload = None
+    if resolved_method in {"PATCH", "DELETE"} and not meeting_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        meeting_id = _crm_body_row_id(payload, "meeting_id", "id")
+
+    if resolved_method == "GET" and not meeting_id:
         _dispatch_due_crm_meeting_reminders(org=org)
         rows = [
             row
@@ -5464,11 +5518,16 @@ def crm_meetings(request, meeting_id: int = None):
         ]
         return JsonResponse({"meetings": [_serialize_crm_meeting(row) for row in rows]})
 
-    if request.method == "POST" and not meeting_id:
+    if resolved_method == "POST" and not meeting_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+            meeting_id = _crm_body_row_id(payload, "meeting_id", "id")
+        except Exception:
+            meeting_id = None
         title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
         if not title:
             return JsonResponse({"detail": "title_required"}, status=400)
@@ -5508,11 +5567,12 @@ def crm_meetings(request, meeting_id: int = None):
     if not _crm_can_access_row(request.user, org, row):
         return JsonResponse({"detail": "forbidden"}, status=403)
 
-    if request.method == "PATCH":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+    if resolved_method == "PATCH":
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         related_to_changed = False
         if "title" in payload or "meeting_title" in payload:
             title = str(payload.get("title") or payload.get("meeting_title") or "").strip()
@@ -5560,7 +5620,7 @@ def crm_meetings(request, meeting_id: int = None):
         _dispatch_due_crm_meeting_reminders(org=org)
         return JsonResponse({"meeting": _serialize_crm_meeting(row)})
 
-    if request.method == "DELETE":
+    if resolved_method == "DELETE":
         if not _crm_is_admin(request.user, org):
             return JsonResponse({"detail": "forbidden"}, status=403)
         permanent = str(request.GET.get("permanent") or "").strip() in {"1", "true", "yes"}
@@ -5591,6 +5651,14 @@ def crm_sales_orders(request, order_id: int = None):
         if override_method in {"PATCH", "DELETE"}:
             resolved_method = override_method
 
+    payload = None
+    if resolved_method in {"PATCH", "DELETE"} and not order_id:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        order_id = _crm_body_row_id(payload, "sales_order_id", "id")
+
     if resolved_method == "GET" and not order_id:
         rows = CrmSalesOrder.objects.filter(organization=org).select_related("assigned_user", "deal", "deal__lead", "created_by").order_by("-created_at")
         visible_rows = [row for row in rows if _crm_can_view_row(request.user, org, row)]
@@ -5613,7 +5681,8 @@ def crm_sales_orders(request, order_id: int = None):
         return JsonResponse({"deleted": True})
 
     try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
+        if payload is None:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"detail": "invalid_json"}, status=400)
     customer_name = str(payload.get("customer_name") or "").strip()

@@ -3600,6 +3600,40 @@ function isBackendRowId(value) {
   return /^\d+$/.test(String(value || "").trim());
 }
 
+const CRM_COLLECTION_API_CONFIG = {
+  leads: { endpoint: "/api/business-autopilot/leads", idKey: "lead_id" },
+  contacts: { endpoint: "/api/business-autopilot/contacts", idKey: "contact_id" },
+  deals: { endpoint: "/api/business-autopilot/deals", idKey: "deal_id" },
+  meetings: { endpoint: "/api/business-autopilot/meetings", idKey: "meeting_id" },
+  salesOrders: { endpoint: "/api/business-autopilot/sales-orders", idKey: "sales_order_id" },
+};
+
+function getCrmCollectionApiConfig(sectionKey) {
+  return CRM_COLLECTION_API_CONFIG[String(sectionKey || "").trim()] || null;
+}
+
+function buildCrmCollectionBody(sectionKey, rowId, payload = {}) {
+  const config = getCrmCollectionApiConfig(sectionKey);
+  if (!config) {
+    return { ...payload };
+  }
+  const normalizedRowId = String(rowId || "").trim();
+  return normalizedRowId
+    ? { ...payload, [config.idKey]: normalizedRowId }
+    : { ...payload };
+}
+
+async function saveCrmCollectionRecord(sectionKey, method, rowId, payload = {}, suffix = "") {
+  const config = getCrmCollectionApiConfig(sectionKey);
+  if (!config) {
+    throw new Error(`unsupported_crm_section:${sectionKey}`);
+  }
+  return apiFetch(`${config.endpoint}${suffix}`, {
+    method,
+    body: JSON.stringify(buildCrmCollectionBody(sectionKey, rowId, payload)),
+  });
+}
+
 function normalizeCrmMeetingRecord(row = {}) {
   const reminderChannels = Array.isArray(row.reminderChannel)
     ? row.reminderChannel
@@ -9225,13 +9259,9 @@ function CrmOnePageModule() {
       return;
     }
     if (normalizedSection === "leads" || normalizedSection === "contacts") {
-      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = eligibleIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
       const backendIds = eligibleIds.filter((rowId) => {
-        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
-          return false;
-        }
-        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+        return !isTemporaryCrmRowId(normalizedSection, rowId) && isBackendRowId(rowId);
       });
       if (tempIds.length) {
         const tempIdSet = new Set(tempIds);
@@ -9254,9 +9284,7 @@ function CrmOnePageModule() {
       }
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
-            method: "DELETE",
-          })));
+          await Promise.all(backendIds.map((rowId) => saveCrmCollectionRecord(normalizedSection, "DELETE", rowId)));
           await refreshCrmRowsFromBackend();
         } catch (_error) {
           setCrmActionPopup({
@@ -9306,13 +9334,9 @@ function CrmOnePageModule() {
       return;
     }
     if (normalizedSection === "leads" || normalizedSection === "contacts") {
-      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
       const backendIds = normalizedIds.filter((rowId) => {
-        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
-          return false;
-        }
-        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+        return !isTemporaryCrmRowId(normalizedSection, rowId) && isBackendRowId(rowId);
       });
       if (tempIds.length) {
         const tempIdSet = new Set(tempIds);
@@ -9334,10 +9358,7 @@ function CrmOnePageModule() {
       }
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
-            method: "PATCH",
-            body: JSON.stringify({ is_deleted: false }),
-          })));
+          await Promise.all(backendIds.map((rowId) => saveCrmCollectionRecord(normalizedSection, "PATCH", rowId, { is_deleted: false })));
           await refreshCrmRowsFromBackend();
         } catch (_error) {
           setCrmActionPopup({
@@ -9383,19 +9404,13 @@ function CrmOnePageModule() {
       return;
     }
     if (normalizedSection === "leads" || normalizedSection === "contacts") {
-      const apiBasePath = normalizedSection === "contacts" ? "contacts" : "leads";
       const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
       const backendIds = normalizedIds.filter((rowId) => {
-        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
-          return false;
-        }
-        return normalizedSection === "contacts" ? isBackendRowId(rowId) : true;
+        return !isTemporaryCrmRowId(normalizedSection, rowId) && isBackendRowId(rowId);
       });
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}?permanent=1`, {
-            method: "DELETE",
-          })));
+          await Promise.all(backendIds.map((rowId) => saveCrmCollectionRecord(normalizedSection, "DELETE", rowId, {}, "?permanent=1")));
           await refreshCrmRowsFromBackend();
         } catch (_error) {
           setCrmActionPopup({
@@ -9492,17 +9507,17 @@ function CrmOnePageModule() {
         return;
       }
     }
-    if (sectionKey === "leads" || sectionKey === "contacts") {
-      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
-      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
+    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+      const collectionRowId = sectionKey === "meetings"
+        ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
+        : String(rowId || "").trim();
+      if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         performLocalDelete();
         toggleCrmRowSelection(sectionKey, rowId, false);
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
-          method: "DELETE",
-        });
+        await saveCrmCollectionRecord(sectionKey, "DELETE", collectionRowId);
         await refreshCrmRowsFromBackend();
       } catch (_error) {
         setCrmActionPopup({
@@ -9523,14 +9538,6 @@ function CrmOnePageModule() {
         details,
       }),
     }).catch(() => {});
-    if (sectionKey === "meetings") {
-      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
-      if (serverMeetingId) {
-        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}`, {
-          method: "DELETE",
-        }).catch(() => {});
-      }
-    }
     toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
@@ -9580,18 +9587,17 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} restored: ${primaryName}`
       : `${rowLabel} restored (ID: ${rowId})`;
-    if (sectionKey === "leads" || sectionKey === "contacts") {
-      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
-      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
+    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+      const collectionRowId = sectionKey === "meetings"
+        ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
+        : String(rowId || "").trim();
+      if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         performLocalRestore();
         toggleCrmRowSelection(sectionKey, rowId, false);
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ is_deleted: false }),
-        });
+        await saveCrmCollectionRecord(sectionKey, "PATCH", collectionRowId, { is_deleted: false });
         await refreshCrmRowsFromBackend();
       } catch (_error) {
         setCrmActionPopup({
@@ -9612,15 +9618,6 @@ function CrmOnePageModule() {
         details,
       }),
     }).catch(() => {});
-    if (sectionKey === "meetings") {
-      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
-      if (serverMeetingId) {
-        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ is_deleted: false }),
-        }).catch(() => {});
-      }
-    }
     toggleCrmRowSelection(sectionKey, rowId, false);
   }
 
@@ -9629,9 +9626,11 @@ function CrmOnePageModule() {
       return;
     }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
-    if (sectionKey === "leads" || sectionKey === "contacts") {
-      const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
-      if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
+    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+      const collectionRowId = sectionKey === "meetings"
+        ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
+        : String(rowId || "").trim();
+      if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         setModuleData((prev) => ({
           ...prev,
           [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
@@ -9640,9 +9639,7 @@ function CrmOnePageModule() {
         return;
       }
       try {
-        await apiFetch(`/api/business-autopilot/${apiBasePath}/${encodeURIComponent(rowId)}?permanent=1`, {
-          method: "DELETE",
-        });
+        await saveCrmCollectionRecord(sectionKey, "DELETE", collectionRowId, {}, "?permanent=1");
         await refreshCrmRowsFromBackend();
       } catch (_error) {
         setCrmActionPopup({
@@ -9658,14 +9655,6 @@ function CrmOnePageModule() {
         ...prev,
         [sectionKey]: (prev[sectionKey] || []).filter((row) => String(row.id) !== String(rowId)),
       }));
-    }
-    if (sectionKey === "meetings") {
-      const serverMeetingId = String(targetRow?.serverMeetingId || targetRow?.id || "").trim();
-      if (serverMeetingId) {
-        apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(serverMeetingId)}?permanent=1`, {
-          method: "DELETE",
-        }).catch(() => {});
-      }
     }
     toggleCrmRowSelection(sectionKey, rowId, false);
   }
@@ -10346,16 +10335,9 @@ function CrmOnePageModule() {
     };
     try {
       if (editingCrmSalesOrderId) {
-        await apiFetch(`/api/business-autopilot/sales-orders/${encodeURIComponent(editingCrmSalesOrderId)}`, {
-          method: "POST",
-          headers: { "X-HTTP-Method-Override": "PATCH" },
-          body: JSON.stringify(payload),
-        });
+        await saveCrmCollectionRecord("salesOrders", "PATCH", editingCrmSalesOrderId, payload);
       } else {
-        await apiFetch("/api/business-autopilot/sales-orders", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        await saveCrmCollectionRecord("salesOrders", "POST", "", payload);
       }
       await refreshCrmRowsFromBackend();
       setCrmActionPopup({
@@ -10467,28 +10449,20 @@ function CrmOnePageModule() {
     }
     try {
       try {
-        await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealId)}`, {
-          method: "DELETE",
-        });
+        await saveCrmCollectionRecord("deals", "DELETE", dealId);
       } catch (deleteError) {
         const detail = String(deleteError?.data?.detail || deleteError?.message || "").trim().toLowerCase();
         if (detail !== "forbidden") {
           throw deleteError;
         }
-        await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(dealId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            stage: "Lost",
-            status: "Lost",
-          }),
+        await saveCrmCollectionRecord("deals", "PATCH", dealId, {
+          stage: "Lost",
+          status: "Lost",
         });
       }
       const shouldPatchLead = linkedLeadId && Object.keys(leadPatchPayload).length;
       if (shouldPatchLead) {
-        await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(linkedLeadId)}`, {
-          method: "PATCH",
-          body: JSON.stringify(leadPatchPayload),
-        });
+        await saveCrmCollectionRecord("leads", "PATCH", linkedLeadId, leadPatchPayload);
       }
       await refreshCrmRowsFromBackend();
       setActiveSection("leads");
@@ -10919,24 +10893,22 @@ function CrmOnePageModule() {
     if (sectionKey === "contacts") {
       payload = normalizeCrmContactRecord(payload);
     }
+    let meetingServerId = String(payload.serverMeetingId || "").trim();
     if (sectionKey === "contacts") {
       try {
         const contactId = String(editingId || "").trim();
         const canPatchContact = Boolean(contactId && isBackendRowId(contactId));
-        const response = await apiFetch(
-          canPatchContact
-            ? `/api/business-autopilot/contacts/${encodeURIComponent(contactId)}`
-            : "/api/business-autopilot/contacts",
+        const response = await saveCrmCollectionRecord(
+          "contacts",
+          canPatchContact ? "PATCH" : "POST",
+          canPatchContact ? contactId : "",
           {
-            method: canPatchContact ? "PATCH" : "POST",
-            body: JSON.stringify({
-              name: payload.name || "",
-              company: payload.company || "",
-              email: payload.email || "",
-              phone_country_code: payload.phoneCountryCode || "+91",
-              phone: payload.phone || "",
-              tag: payload.tag || "Client",
-            }),
+            name: payload.name || "",
+            company: payload.company || "",
+            email: payload.email || "",
+            phone_country_code: payload.phoneCountryCode || "+91",
+            phone: payload.phone || "",
+            tag: payload.tag || "Client",
           },
         );
         const backendContact = response?.contact ? normalizeCrmContactRecord(response.contact) : null;
@@ -11000,6 +10972,47 @@ function CrmOnePageModule() {
       payload.reminderMinutes = parseCrmMeetingReminderMinuteValues(payload.reminderMinutes);
       payload.reminderSummary = buildCrmMeetingReminderSummary(reminderChannels, payload.reminderDays, payload.reminderMinutes);
       payload.createdBy = String(currentUserName || "Current User").trim();
+      try {
+        const existingServerId = String(existingRowForEdit?.serverMeetingId || existingRowForEdit?.id || "").trim();
+        const response = await saveCrmCollectionRecord(
+          "meetings",
+          existingServerId ? "PATCH" : "POST",
+          existingServerId,
+          {
+            crm_reference_id: payload.crmReferenceId || "",
+            title: payload.title || "",
+            company_or_client_name: payload.companyOrClientName || "",
+            related_to: payload.relatedTo || "",
+            meeting_date: payload.meetingDate || "",
+            meeting_time: payload.meetingTime || "",
+            owner: payload.owner || "",
+            owner_user_ids: Array.isArray(payload.ownerUserIds) ? payload.ownerUserIds : [],
+            meeting_mode: payload.meetingMode || "",
+            reminder_channel: Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [],
+            reminder_days: Array.isArray(payload.reminderDays) ? payload.reminderDays : [],
+            reminder_minutes: Array.isArray(payload.reminderMinutes) ? payload.reminderMinutes : [],
+            reminder_summary: payload.reminderSummary || "",
+            status: payload.status || "Scheduled",
+            is_deleted: false,
+          },
+        );
+        const backendMeeting = response?.meeting ? normalizeCrmMeetingRecord(response.meeting) : null;
+        if (backendMeeting) {
+          meetingServerId = String(backendMeeting.serverMeetingId || backendMeeting.id || "").trim();
+          payload = {
+            ...payload,
+            ...backendMeeting,
+            serverMeetingId: meetingServerId || payload.serverMeetingId || "",
+            id: String(backendMeeting.id || existingRowForEdit?.id || "").trim() || payload.id,
+          };
+        }
+      } catch (_error) {
+        setSectionFormErrors((prev) => ({
+          ...prev,
+          [sectionKey]: "Unable to save meeting reminder settings. Please try again.",
+        }));
+        return;
+      }
     }
     if (sectionKey === "activities") {
       const activityOwnersRaw = Array.isArray(payload.owner)
@@ -11041,26 +11054,24 @@ function CrmOnePageModule() {
       const primaryAssignedUserId = assignedUserIds[0] || (Number.isFinite(fallbackAssignedUserId) ? fallbackAssignedUserId : null);
       try {
         if (sectionKey === "leads") {
-          const response = await apiFetch(
-            editingId
-              ? `/api/business-autopilot/leads/${encodeURIComponent(editingId)}`
-              : "/api/business-autopilot/leads",
+          const canPatchLead = Boolean(editingId && isBackendRowId(editingId));
+          const response = await saveCrmCollectionRecord(
+            "leads",
+            canPatchLead ? "PATCH" : "POST",
+            canPatchLead ? editingId : "",
             {
-              method: editingId ? "PATCH" : "POST",
-              body: JSON.stringify({
-                crm_reference_id: payload.crmReferenceId || "",
-                lead_name: payload.name || "",
-                company: payload.company || "",
-                phone: payload.phone || "",
-                lead_amount: payload.leadAmount || 0,
-                lead_source: payload.leadSource || "",
-                assign_type: payload.assignType || "Users",
-                assigned_user_id: primaryAssignedUserId,
-                assigned_user_ids: assignedUserIds,
-                assigned_team: payload.assignedTeam || "",
-                stage: payload.stage || "New",
-                status: payload.status || "Open",
-              }),
+              crm_reference_id: payload.crmReferenceId || "",
+              lead_name: payload.name || "",
+              company: payload.company || "",
+              phone: payload.phone || "",
+              lead_amount: payload.leadAmount || 0,
+              lead_source: payload.leadSource || "",
+              assign_type: payload.assignType || "Users",
+              assigned_user_id: primaryAssignedUserId,
+              assigned_user_ids: assignedUserIds,
+              assigned_team: payload.assignedTeam || "",
+              stage: payload.stage || "New",
+              status: payload.status || "Open",
             },
           );
           const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
@@ -11088,14 +11099,12 @@ function CrmOnePageModule() {
           return;
         }
         if (sectionKey === "deals") {
-          if (editingId) {
-            const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(editingId)}`, {
-              method: "PATCH",
-              body: JSON.stringify({
-                stage: payload.stage || "Qualified",
-                status: payload.status || "Open",
-                deal_value: payload.dealValueExpected || 0,
-              }),
+          const canPatchDeal = Boolean(editingId && isBackendRowId(editingId));
+          if (canPatchDeal) {
+            const response = await saveCrmCollectionRecord("deals", "PATCH", editingId, {
+              stage: payload.stage || "Qualified",
+              status: payload.status || "Open",
+              deal_value: payload.dealValueExpected || 0,
             });
             const backendDeal = response?.deal ? normalizeCrmDealRecord(response.deal) : null;
             if (backendDeal) {
@@ -11109,20 +11118,17 @@ function CrmOnePageModule() {
               }));
             }
           } else {
-            await apiFetch("/api/business-autopilot/deals", {
-              method: "POST",
-              body: JSON.stringify({
-                crm_reference_id: payload.crmReferenceId || "",
-                deal_name: payload.dealName || "",
-                company: payload.company || "",
-                phone: payload.phone || "",
-                deal_value: payload.dealValueExpected || 0,
-                stage: payload.stage || "Qualified",
-                status: payload.status || "Open",
-                assigned_user_id: primaryAssignedUserId,
-                assigned_user_ids: assignedUserIds,
-                assigned_team: payload.assignedTeam || "",
-              }),
+            await saveCrmCollectionRecord("deals", "POST", "", {
+              crm_reference_id: payload.crmReferenceId || "",
+              deal_name: payload.dealName || "",
+              company: payload.company || "",
+              phone: payload.phone || "",
+              deal_value: payload.dealValueExpected || 0,
+              stage: payload.stage || "Qualified",
+              status: payload.status || "Open",
+              assigned_user_id: primaryAssignedUserId,
+              assigned_user_ids: assignedUserIds,
+              assigned_team: payload.assignedTeam || "",
             });
           }
           await refreshCrmRowsFromBackend();
@@ -11169,22 +11175,19 @@ function CrmOnePageModule() {
             const retryEditingId = resolveLiveCrmEditRowId(sectionKey, editingId, payload);
             if (retryEditingId && retryEditingId !== String(editingId).trim()) {
               if (sectionKey === "leads") {
-                const retryResponse = await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(retryEditingId)}`, {
-                  method: "PATCH",
-                  body: JSON.stringify({
-                    crm_reference_id: payload.crmReferenceId || "",
-                    lead_name: payload.name || "",
-                    company: payload.company || "",
-                    phone: payload.phone || "",
-                    lead_amount: payload.leadAmount || 0,
-                    lead_source: payload.leadSource || "",
-                    assign_type: payload.assignType || "Users",
-                    assigned_user_id: primaryAssignedUserId,
-                    assigned_user_ids: assignedUserIds,
-                    assigned_team: payload.assignedTeam || "",
-                    stage: payload.stage || "New",
-                    status: payload.status || "Open",
-                  }),
+                const retryResponse = await saveCrmCollectionRecord("leads", "PATCH", retryEditingId, {
+                  crm_reference_id: payload.crmReferenceId || "",
+                  lead_name: payload.name || "",
+                  company: payload.company || "",
+                  phone: payload.phone || "",
+                  lead_amount: payload.leadAmount || 0,
+                  lead_source: payload.leadSource || "",
+                  assign_type: payload.assignType || "Users",
+                  assigned_user_id: primaryAssignedUserId,
+                  assigned_user_ids: assignedUserIds,
+                  assigned_team: payload.assignedTeam || "",
+                  stage: payload.stage || "New",
+                  status: payload.status || "Open",
                 });
                 const retryLead = retryResponse?.lead ? normalizeCrmLeadRecord(retryResponse.lead) : null;
                 if (retryLead) {
@@ -11198,13 +11201,10 @@ function CrmOnePageModule() {
                   }));
                 }
               } else if (sectionKey === "deals") {
-                const retryResponse = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(retryEditingId)}`, {
-                  method: "PATCH",
-                  body: JSON.stringify({
-                    stage: payload.stage || "Qualified",
-                    status: payload.status || "Open",
-                    deal_value: payload.dealValueExpected || 0,
-                  }),
+                const retryResponse = await saveCrmCollectionRecord("deals", "PATCH", retryEditingId, {
+                  stage: payload.stage || "Qualified",
+                  status: payload.status || "Open",
+                  deal_value: payload.dealValueExpected || 0,
                 });
                 const retryDeal = retryResponse?.deal ? normalizeCrmDealRecord(retryResponse.deal) : null;
                 if (retryDeal) {
@@ -11234,54 +11234,6 @@ function CrmOnePageModule() {
         setSectionFormErrors((prev) => ({
           ...prev,
           [sectionKey]: "Unable to save CRM data. Please refresh and try again.",
-        }));
-        return;
-      }
-    }
-    let meetingServerId = "";
-    if (sectionKey === "meetings") {
-      const meetingApiPayload = {
-        crm_reference_id: payload.crmReferenceId || "",
-        title: payload.title || "",
-        company_or_client_name: payload.companyOrClientName || "",
-        related_to: payload.relatedTo || "",
-        meeting_date: payload.meetingDate || "",
-        meeting_time: payload.meetingTime || "",
-        owner: payload.owner || "",
-        owner_user_ids: Array.isArray(payload.ownerUserIds) ? payload.ownerUserIds : [],
-        meeting_mode: payload.meetingMode || "",
-        reminder_channel: Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [],
-        reminder_days: Array.isArray(payload.reminderDays) ? payload.reminderDays : [],
-        reminder_minutes: Array.isArray(payload.reminderMinutes) ? payload.reminderMinutes : [],
-        reminder_summary: payload.reminderSummary || "",
-        status: payload.status || "Scheduled",
-        is_deleted: false,
-      };
-      try {
-        const existingServerId = String(existingRowForEdit?.serverMeetingId || existingRowForEdit?.id || "").trim();
-        const response = existingServerId
-          ? await apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(existingServerId)}`, {
-              method: "PATCH",
-              body: JSON.stringify(meetingApiPayload),
-            })
-          : await apiFetch("/api/business-autopilot/meetings", {
-              method: "POST",
-              body: JSON.stringify(meetingApiPayload),
-            });
-        const backendMeeting = response?.meeting ? normalizeCrmMeetingRecord(response.meeting) : null;
-        if (backendMeeting) {
-          meetingServerId = String(backendMeeting.serverMeetingId || backendMeeting.id || "").trim();
-          payload = {
-            ...payload,
-            ...backendMeeting,
-            serverMeetingId: meetingServerId || payload.serverMeetingId || "",
-            id: String(backendMeeting.id || existingRowForEdit?.id || "").trim() || payload.id,
-          };
-        }
-      } catch (_error) {
-        setSectionFormErrors((prev) => ({
-          ...prev,
-          [sectionKey]: "Unable to save meeting reminder settings. Please try again.",
         }));
         return;
       }
@@ -11920,10 +11872,7 @@ function CrmOnePageModule() {
     const status = String(nextStatus || "").trim();
     if (!meetingId || !status) return;
     try {
-      const response = await apiFetch(`/api/business-autopilot/meetings/${encodeURIComponent(meetingId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
+      const response = await saveCrmCollectionRecord("meetings", "PATCH", meetingId, { status });
       const backendMeeting = response?.meeting ? normalizeCrmMeetingRecord(response.meeting) : null;
       setModuleData((prev) => ({
         ...prev,
@@ -12138,10 +12087,7 @@ function CrmOnePageModule() {
       deal_value: dealQuickEditPopup.dealValueExpected || 0,
     };
     try {
-      const response = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(resolvedDealId)}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const response = await saveCrmCollectionRecord("deals", "PATCH", resolvedDealId, payload);
       const backendDeal = response?.deal ? normalizeCrmDealRecord(response.deal) : null;
       if (backendDeal) {
         setModuleData((prev) => ({
@@ -12172,10 +12118,7 @@ function CrmOnePageModule() {
           await refreshCrmRowsFromBackend();
           const retryDealId = resolveCrmDealIdForEdit(dealQuickEditPopup);
           if (retryDealId && retryDealId !== String(resolvedDealId)) {
-            const retryResponse = await apiFetch(`/api/business-autopilot/deals/${encodeURIComponent(retryDealId)}`, {
-              method: "PATCH",
-              body: JSON.stringify(payload),
-            });
+            const retryResponse = await saveCrmCollectionRecord("deals", "PATCH", retryDealId, payload);
             const retryBackendDeal = retryResponse?.deal ? normalizeCrmDealRecord(retryResponse.deal) : null;
             if (retryBackendDeal) {
               setModuleData((prev) => ({

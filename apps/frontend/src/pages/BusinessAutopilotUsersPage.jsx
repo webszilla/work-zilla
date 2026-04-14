@@ -2808,8 +2808,9 @@ export default function BusinessAutopilotUsersPage() {
     let serverRemoved = false;
     if (/^\d+$/.test(sourceContactId)) {
       try {
-        await apiFetch(`/api/business-autopilot/contacts/${encodeURIComponent(sourceContactId)}`, {
+        await apiFetch("/api/business-autopilot/contacts", {
           method: "DELETE",
+          body: JSON.stringify({ contact_id: sourceContactId }),
         });
         serverRemoved = true;
       } catch {
