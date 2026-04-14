@@ -74,4 +74,8 @@ def spa_serve(request, path=""):
     index_file = DIST_DIR / "index.html"
     if not index_file.exists():
         raise Http404(f"Missing SPA build: {index_file}")
-    return FileResponse(open(index_file, "rb"), content_type="text/html")
+    response = FileResponse(open(index_file, "rb"), content_type="text/html")
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response

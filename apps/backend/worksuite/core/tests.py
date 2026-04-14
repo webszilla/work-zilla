@@ -83,6 +83,19 @@ class ProductAuthorizationMiddlewareTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_business_autopilot_app_shell_is_not_cached(self):
+        self._create_subscription()
+        user = User.objects.create_user(username="nocache@example.com", email="nocache@example.com", password="pw123456")
+        UserProfile.objects.create(user=user, organization=self.org, role="Company Admin")
+
+        self.client.force_login(user)
+        response = self.client.get("/app/business-autopilot/crm")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-store", response["Cache-Control"])
+        self.assertIn("no-cache", response["Pragma"])
+        self.assertEqual(response["Expires"], "0")
+
     def test_employee_without_product_access_is_denied(self):
         self._create_subscription()
         user = User.objects.create_user(username="employee@example.com", email="employee@example.com", password="pw123456")
