@@ -463,6 +463,74 @@ class BusinessAutopilotUserAccessTests(TestCase):
         lead.refresh_from_db()
         self.assertEqual(float(lead.lead_amount), 6500.0)
 
+    def test_crm_lead_patch_allows_business_autopilot_product_view_permission(self):
+        crm_user = User.objects.create_user(
+            username="product-view@workzilla.test",
+            email="product-view@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            is_active=True,
+        )
+        UserProductAccess.objects.create(
+            user=crm_user,
+            product=self.ba_product,
+            permission=UserProductAccess.PERMISSION_VIEW,
+            granted_by=self.admin,
+        )
+        lead_owner = User.objects.create_user(
+            username="lead-owner-view@workzilla.test",
+            email="lead-owner-view@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=lead_owner,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=lead_owner,
+            role="org_user",
+            is_active=True,
+        )
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="View Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=lead_owner,
+            assigned_user_ids=[lead_owner.id],
+            stage="New",
+            status="Open",
+            created_by=lead_owner,
+            updated_by=lead_owner,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{lead.id}",
+            data=json.dumps({"lead_amount": "6800", "status": "Closed", "stage": "Qualified"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["lead_amount"], 6800.0)
+        lead.refresh_from_db()
+        self.assertEqual(float(lead.lead_amount), 6800.0)
+
     def test_crm_deal_patch_allows_business_autopilot_product_edit_permission(self):
         crm_user = User.objects.create_user(
             username="product-edit-2@workzilla.test",

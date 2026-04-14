@@ -4679,7 +4679,7 @@ def _crm_sales_order_totals(items):
 
 
 def _crm_can_access_row(user: User, org: Organization, row):
-    return _crm_can_edit_row(user, org, row)
+    return _crm_can_view_row(user, org, row)
 
 
 def _serialize_crm_lead(row: CrmLead):
@@ -5138,6 +5138,8 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"lead": _serialize_crm_lead(row)})
 
     if resolved_method == "DELETE":
+        if not _crm_can_edit_row(request.user, org, row):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
         linked_leads = _crm_collect_contacts_linked_to_contact(row)
         if permanent:
@@ -5245,6 +5247,8 @@ def crm_contacts(request, contact_id: int = None):
         return JsonResponse({"contact": _serialize_crm_contact(row)})
 
     if resolved_method == "DELETE":
+        if not _crm_can_edit_row(request.user, org, row):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
         if permanent:
             row.delete()
@@ -5589,7 +5593,7 @@ def crm_sales_orders(request, order_id: int = None):
     row = CrmSalesOrder.objects.filter(organization=org, id=order_id).select_related("deal", "assigned_user", "created_by").first() if order_id else None
     if order_id and not row:
         return JsonResponse({"detail": "sales_order_not_found"}, status=404)
-    if row and not _crm_can_edit_row(request.user, org, row):
+    if row and not _crm_can_access_row(request.user, org, row):
         return JsonResponse({"detail": "forbidden"}, status=403)
     can_edit_payment_details = _crm_is_admin(request.user, org)
 
