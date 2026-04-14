@@ -12,6 +12,13 @@ from core.models import UserProfile
 DIST_DIR = Path(settings.BASE_DIR) / "frontend_dist"
 
 
+def _disable_cache_headers(response):
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
 def _open_dist_file(path):
     if not path:
         return None
@@ -47,7 +54,8 @@ def _open_dist_file(path):
             continue
         file_path = Path(fullpath)
         if file_path.exists() and file_path.is_file():
-            return FileResponse(open(file_path, "rb"))
+            response = FileResponse(open(file_path, "rb"))
+            return _disable_cache_headers(response)
     return None
 
 
@@ -75,7 +83,4 @@ def spa_serve(request, path=""):
     if not index_file.exists():
         raise Http404(f"Missing SPA build: {index_file}")
     response = FileResponse(open(index_file, "rb"), content_type="text/html")
-    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response["Pragma"] = "no-cache"
-    response["Expires"] = "0"
-    return response
+    return _disable_cache_headers(response)

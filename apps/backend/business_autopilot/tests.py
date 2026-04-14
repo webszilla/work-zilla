@@ -248,6 +248,108 @@ class BusinessAutopilotUserAccessTests(TestCase):
         deal.refresh_from_db()
         self.assertEqual(float(deal.deal_value), 7500.0)
 
+    def test_crm_lead_get_detail_allows_company_admin_role_alias(self):
+        self.admin.userprofile.role = "Company Admin"
+        self.admin.userprofile.save(update_fields=["role"])
+        sales_rep = User.objects.create_user(
+            username="sales.rep.detail@workzilla.test",
+            email="sales.rep.detail@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=sales_rep,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=sales_rep,
+            role="org_user",
+            is_active=True,
+        )
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Detail Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=sales_rep,
+            assigned_user_ids=[sales_rep.id],
+            stage="New",
+            status="Open",
+            created_by=sales_rep,
+            updated_by=sales_rep,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/api/business-autopilot/leads/{lead.id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["id"], lead.id)
+        self.assertEqual(payload["lead"]["lead_name"], "Detail Lead")
+
+    def test_crm_deal_get_detail_allows_business_autopilot_product_edit_permission(self):
+        crm_user = User.objects.create_user(
+            username="product-edit-detail@workzilla.test",
+            email="product-edit-detail@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            is_active=True,
+        )
+        UserProductAccess.objects.create(
+            user=crm_user,
+            product=self.ba_product,
+            permission=UserProductAccess.PERMISSION_EDIT,
+            granted_by=self.admin,
+        )
+        deal_owner = User.objects.create_user(
+            username="deal-owner-detail@workzilla.test",
+            email="deal-owner-detail@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=deal_owner,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=deal_owner,
+            role="org_user",
+            is_active=True,
+        )
+        deal = CrmDeal.objects.create(
+            organization=self.org,
+            deal_name="Detail Deal",
+            company="Acme",
+            phone="9999999999",
+            deal_value="5000",
+            stage="Qualified",
+            status="Open",
+            created_by=deal_owner,
+            updated_by=deal_owner,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.get(f"/api/business-autopilot/deals/{deal.id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["deal"]["id"], deal.id)
+        self.assertEqual(payload["deal"]["deal_name"], "Detail Deal")
+
     def test_crm_lead_patch_allows_role_access_map_full_access(self):
         crm_user = User.objects.create_user(
             username="crm-user@workzilla.test",

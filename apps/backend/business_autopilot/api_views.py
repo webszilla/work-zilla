@@ -5047,6 +5047,9 @@ def crm_leads(request, lead_id: int = None):
     if not _crm_can_access_row(request.user, org, row):
         return JsonResponse({"detail": "forbidden"}, status=403)
 
+    if resolved_method == "GET":
+        return JsonResponse({"lead": _serialize_crm_lead(row)})
+
     if resolved_method == "PATCH":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -5403,6 +5406,9 @@ def crm_deals(request, deal_id: int = None):
         return JsonResponse({"detail": "deal_not_found"}, status=404)
     if not _crm_can_access_row(request.user, org, row):
         return JsonResponse({"detail": "forbidden"}, status=403)
+
+    if resolved_method == "GET":
+        return JsonResponse({"deal": _serialize_crm_deal(row)})
 
     if resolved_method == "PATCH":
         try:
