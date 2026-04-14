@@ -3285,6 +3285,7 @@ function normalizeCrmLeadRecord(row = {}) {
   const leadName = String(row.name || row.lead_name || "").trim();
   const leadAmount = row.leadAmount ?? row.lead_amount ?? "";
   const leadSource = String(row.leadSource || row.lead_source || "").trim();
+  const priority = String(row.priority || "").trim() || "Medium";
   const normalizedStatus = String(row.status || "").trim().toLowerCase();
   const status = normalizedStatus === "converted"
     ? "Closed"
@@ -3323,6 +3324,7 @@ function normalizeCrmLeadRecord(row = {}) {
     contactPerson: String(row.contactPerson || row.contact_person || "").trim(),
     leadAmount: String(leadAmount ?? "").trim(),
     leadSource,
+    priority,
     status,
     statusUpdatedAt: String(row.statusUpdatedAt || row.status_updated_at || "").trim(),
     createdAt: String(row.createdAt || row.created_at || "").trim(),
@@ -7523,6 +7525,7 @@ function CrmOnePageModule() {
   const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"];
   const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
   const [activeSection, setActiveSection] = useState(() => getStoredCrmActiveSection(sectionOrder));
+  const [sectionSearchPrefill, setSectionSearchPrefill] = useState({});
   const [calendarMonthDate, setCalendarMonthDate] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -9773,10 +9776,21 @@ function CrmOnePageModule() {
       return;
     }
     try {
-      await apiFetch(`/api/business-autopilot/convert-to-deal/${encodeURIComponent(leadId)}`, {
+      const response = await apiFetch(`/api/business-autopilot/convert-to-deal/${encodeURIComponent(leadId)}`, {
         method: "POST",
       });
       await refreshCrmRowsFromBackend();
+      const crmReferenceId = String(
+        response?.deal?.crm_reference_id
+        || response?.deal?.crmReferenceId
+        || leadRow?.crmReferenceId
+        || leadRow?.crm_reference_id
+        || ""
+      ).trim();
+      setSectionSearchPrefill((prev) => ({
+        ...prev,
+        deals: crmReferenceId,
+      }));
     } catch (error) {
       const detail = String(error?.data?.detail || error?.message || "").trim();
       const message = detail === "lead_amount_required_for_conversion"
@@ -9790,6 +9804,49 @@ function CrmOnePageModule() {
       });
       return;
     }
+    setActiveSection("deals");
+  }
+
+  function findLinkedDealForLead(leadRow) {
+    const leadId = String(leadRow?.id || "").trim();
+    const crmReferenceId = String(leadRow?.crmReferenceId || leadRow?.crm_reference_id || "").trim().toLowerCase();
+    const leadName = String(leadRow?.name || leadRow?.lead_name || "").trim().toLowerCase();
+    const company = String(leadRow?.company || "").trim().toLowerCase();
+    return (moduleData.deals || []).find((dealRow) => {
+      const normalizedStatus = String(dealRow?.status || "").trim().toLowerCase();
+      const isDeleted = Boolean(dealRow?.isDeleted || dealRow?.is_deleted);
+      if (isDeleted || normalizedStatus === "lost" || normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
+        return false;
+      }
+      const sourceLeadId = String(dealRow?.sourceLeadId || dealRow?.lead_id || "").trim();
+      const dealReferenceId = String(dealRow?.crmReferenceId || dealRow?.crm_reference_id || "").trim().toLowerCase();
+      const dealName = String(dealRow?.dealName || dealRow?.deal_name || "").trim().toLowerCase();
+      const dealCompany = String(dealRow?.company || "").trim().toLowerCase();
+      return Boolean(
+        (leadId && sourceLeadId === leadId)
+        || (crmReferenceId && dealReferenceId === crmReferenceId)
+        || (leadName && company && dealName === leadName && dealCompany === company)
+      );
+    }) || null;
+  }
+
+  function openLinkedDealFromLead(leadRow) {
+    const linkedDeal = findLinkedDealForLead(leadRow);
+    const searchTerm = String(
+      linkedDeal?.crmReferenceId
+      || linkedDeal?.crm_reference_id
+      || leadRow?.crmReferenceId
+      || leadRow?.crm_reference_id
+      || linkedDeal?.dealName
+      || linkedDeal?.deal_name
+      || leadRow?.name
+      || leadRow?.lead_name
+      || ""
+    ).trim();
+    setSectionSearchPrefill((prev) => ({
+      ...prev,
+      deals: searchTerm,
+    }));
     setActiveSection("deals");
   }
 
@@ -11081,6 +11138,7 @@ function CrmOnePageModule() {
               assigned_user_ids: assignedUserIds,
               assigned_team: payload.assignedTeam || "",
               stage: payload.stage || "New",
+              priority: payload.priority || "Medium",
               status: payload.status || "Open",
             },
           );
@@ -11197,6 +11255,7 @@ function CrmOnePageModule() {
                   assigned_user_ids: assignedUserIds,
                   assigned_team: payload.assignedTeam || "",
                   stage: payload.stage || "New",
+                  priority: payload.priority || "Medium",
                   status: payload.status || "Open",
                 });
                 const retryLead = retryResponse?.lead ? normalizeCrmLeadRecord(retryResponse.lead) : null;
@@ -14786,6 +14845,7 @@ function CrmOnePageModule() {
                 }
                 return row[column.key] || "";
               }).join(" ")}
+              initialSearchTerm={sectionSearchPrefill[sectionKey] || ""}
               pageSize={sectionKey === "leads" ? 15 : DEFAULT_TABLE_PAGE_SIZE}
               exportCellValue={(row, column) => {
                 if (column.key === "crmReferenceId") {
@@ -14926,17 +14986,33 @@ function CrmOnePageModule() {
                         onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
                       />
                     ) : null}
-                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-success"
-                        onClick={() => onConvertLeadToDeal(row)}
-                        disabled={["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase())}
-                        title="Create deal from lead"
-                      >
-                        Convert to Deal
-                      </button>
-                    ) : null}
+                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (() => {
+                      const linkedDeal = findLinkedDealForLead(row);
+                      const isStatusBlocked = ["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase());
+                      if (linkedDeal) {
+                        return (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => openLinkedDealFromLead(row)}
+                            title="Open converted deal"
+                          >
+                            Converted to Deal
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-success"
+                          onClick={() => onConvertLeadToDeal(row)}
+                          disabled={isStatusBlocked}
+                          title="Create deal from lead"
+                        >
+                          Convert to Deal
+                        </button>
+                      );
+                    })() : null}
                     {sectionKey === "deals" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"

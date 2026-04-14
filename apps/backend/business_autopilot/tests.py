@@ -291,6 +291,29 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(payload["lead"]["id"], lead.id)
         self.assertEqual(payload["lead"]["lead_name"], "Detail Lead")
 
+    def test_crm_lead_detail_includes_priority(self):
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Priority Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            priority="High",
+            stage="New",
+            status="Open",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/api/business-autopilot/leads/{lead.id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["priority"], "High")
+
     def test_crm_deal_get_detail_allows_business_autopilot_product_edit_permission(self):
         crm_user = User.objects.create_user(
             username="product-edit-detail@workzilla.test",

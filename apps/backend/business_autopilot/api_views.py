@@ -4707,6 +4707,7 @@ def _serialize_crm_lead(row: CrmLead):
         "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
         "assigned_team": row.assigned_team,
         "stage": row.stage,
+        "priority": row.priority or "Medium",
         "status": row.status,
         "is_deleted": bool(row.is_deleted),
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
@@ -5048,6 +5049,7 @@ def crm_leads(request, lead_id: int = None):
             assigned_user_ids=_crm_clean_user_id_list(payload.get("assigned_user_ids")),
             assigned_team=str(payload.get("assigned_team") or "").strip()[:180],
             stage=str(payload.get("stage") or "New").strip()[:30] or "New",
+            priority=str(payload.get("priority") or "Medium").strip()[:30] or "Medium",
             status=str(payload.get("status") or "Open").strip()[:30] or "Open",
             created_by=request.user,
             updated_by=request.user,
@@ -5129,6 +5131,9 @@ def crm_leads(request, lead_id: int = None):
         if "stage" in payload:
             row.stage = str(payload.get("stage") or "New").strip()[:30] or "New"
             update_fields.append("stage")
+        if "priority" in payload:
+            row.priority = str(payload.get("priority") or "Medium").strip()[:30] or "Medium"
+            update_fields.append("priority")
         if "status" in payload:
             row.status = str(payload.get("status") or "Open").strip()[:30] or "Open"
             update_fields.append("status")

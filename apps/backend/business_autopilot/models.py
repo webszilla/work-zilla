@@ -413,6 +413,11 @@ class CrmLead(models.Model):
         ("Qualified", "Qualified"),
         ("Proposal", "Proposal"),
     )
+    PRIORITY_CHOICES = (
+        ("High", "High"),
+        ("Medium", "Medium"),
+        ("Low", "Low"),
+    )
     STATUS_CHOICES = (
         ("Open", "Open"),
         ("Closed", "Closed"),
@@ -448,6 +453,7 @@ class CrmLead(models.Model):
     assigned_user_ids = models.JSONField(default=list, blank=True)
     assigned_team = models.CharField(max_length=180, blank=True, default="")
     stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="New")
+    priority = models.CharField(max_length=30, choices=PRIORITY_CHOICES, default="Medium")
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="Open")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
