@@ -2340,6 +2340,8 @@ def org_user_detail(request, membership_id: int):
             permanent = permanent or permanent_raw in {"1", "true", "yes"}
         if membership.is_deleted and not permanent:
             return JsonResponse({"detail": "user_already_deleted"}, status=400)
+        linked_leads = _crm_collect_leads_linked_to_user(org, membership.user_id)
+        linked_deals = _crm_collect_deals_linked_to_user(org, membership.user_id)
         _revoke_business_autopilot_access(membership.user)
         if permanent:
             membership.delete()
@@ -2351,7 +2353,15 @@ def org_user_detail(request, membership_id: int):
             membership.save(update_fields=["is_deleted", "is_active", "deleted_at", "updated_at"])
             message = "User moved to deleted items."
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
-        return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message=message))
+        payload = _build_org_users_response_payload(org, can_manage_users, message=message)
+        payload["affected_leads"] = [_serialize_crm_lead(row) for row in linked_leads]
+        payload["affected_deals"] = [_serialize_crm_deal(row) for row in linked_deals]
+        payload["linked_records_message"] = (
+            f"{len(linked_leads)} lead(s) and {len(linked_deals)} deal(s) were linked to this user."
+            if linked_leads or linked_deals
+            else ""
+        )
+        return JsonResponse(payload)
 
     if resolved_method == "RESTORE":
         if not membership.is_deleted:
@@ -4715,6 +4725,73 @@ def _serialize_crm_contact(row: CrmContact):
     }
 
 
+def _crm_collect_leads_linked_to_user(org: Organization, user_id: int):
+    safe_user_id = _coerce_positive_int(user_id)
+    if not safe_user_id:
+        return []
+    rows = (
+        CrmLead.objects
+        .filter(organization=org, is_deleted=False)
+        .select_related("assigned_user", "created_by")
+        .order_by("-created_at", "-id")
+    )
+    linked = []
+    for row in rows:
+        assigned_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
+        if row.assigned_user_id_id:
+            assigned_ids.add(int(row.assigned_user_id))
+        if safe_user_id in assigned_ids:
+            linked.append(row)
+    return linked
+
+
+def _crm_collect_deals_linked_to_user(org: Organization, user_id: int):
+    safe_user_id = _coerce_positive_int(user_id)
+    if not safe_user_id:
+        return []
+    rows = (
+        CrmDeal.objects
+        .filter(organization=org, is_deleted=False)
+        .select_related("assigned_user", "lead", "created_by")
+        .order_by("-created_at", "-id")
+    )
+    linked = []
+    for row in rows:
+        assigned_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
+        if row.assigned_user_id_id:
+            assigned_ids.add(int(row.assigned_user_id))
+        if safe_user_id in assigned_ids:
+            linked.append(row)
+    return linked
+
+
+def _crm_collect_contacts_linked_to_contact(row: CrmContact):
+    company = str(getattr(row, "company", "") or "").strip().lower()
+    name = str(getattr(row, "name", "") or "").strip().lower()
+    email = str(getattr(row, "email", "") or "").strip().lower()
+    phone = str(getattr(row, "phone", "") or "").strip()
+    phone_code = str(getattr(row, "phone_country_code", "") or "+91").strip() or "+91"
+    leads = []
+    for lead in CrmLead.objects.filter(organization=row.organization, is_deleted=False).select_related("assigned_user", "created_by").order_by("-created_at", "-id"):
+        lead_company = str(getattr(lead, "company", "") or "").strip().lower()
+        lead_name = str(getattr(lead, "lead_name", "") or "").strip().lower()
+        lead_phone = str(getattr(lead, "phone", "") or "").strip()
+        if company and (lead_company == company or lead_name == company):
+            leads.append(lead)
+            continue
+        if name and (lead_name == name or lead_company == name):
+            leads.append(lead)
+            continue
+        if phone and lead_phone == phone:
+            leads.append(lead)
+            continue
+    if email:
+        # Email is stored on contacts, but leads do not currently persist it.
+        # Keep the helper ready for future schema support without exposing stale assumptions.
+        pass
+    return leads
+
+
 def _serialize_crm_deal(row: CrmDeal):
     crm_reference_id = str(row.crm_reference_id or "").strip()
     if not crm_reference_id and row.lead_id:
@@ -5062,15 +5139,23 @@ def crm_leads(request, lead_id: int = None):
 
     if resolved_method == "DELETE":
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+        linked_leads = _crm_collect_contacts_linked_to_contact(row)
         if permanent:
             row.delete()
-            return JsonResponse({"deleted": True, "permanent": True})
+            return JsonResponse({
+                "deleted": True,
+                "permanent": True,
+                "affected_leads": [_serialize_crm_lead(item) for item in linked_leads],
+            })
         row.is_deleted = True
         row.deleted_at = timezone.now()
         row.deleted_by = request.user
         row.updated_by = request.user
         row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
-        return JsonResponse({"deleted": True})
+        return JsonResponse({
+            "deleted": True,
+            "affected_leads": [_serialize_crm_lead(item) for item in linked_leads],
+        })
 
     return JsonResponse({"detail": "invalid_method"}, status=405)
 

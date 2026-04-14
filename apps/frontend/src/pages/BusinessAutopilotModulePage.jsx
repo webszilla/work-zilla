@@ -9425,7 +9425,7 @@ function CrmOnePageModule() {
     clearCrmSelection(normalizedSection);
   }
 
-  async function onDelete(sectionKey, rowId) {
+  async function onDelete(sectionKey, rowId, options = {}) {
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
     if (!canDeleteCrmRow(sectionKey, targetRow)) {
       return;
@@ -9474,6 +9474,24 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} deleted: ${primaryName}`
       : `${rowLabel} deleted (ID: ${rowId})`;
+    if (sectionKey === "contacts" && !options.skipLinkedWarning) {
+      const linkedRows = findLinkedCrmRowsForContact(targetRow || {});
+      const linkedCount = linkedRows.leads.length + linkedRows.deals.length + linkedRows.salesOrders.length;
+      if (linkedCount) {
+        setCrmActionPopup({
+          open: true,
+          title: "Linked CRM Records",
+          message: `This contact is referenced by ${linkedRows.leads.length} lead(s), ${linkedRows.deals.length} deal(s), and ${linkedRows.salesOrders.length} sales order(s). Deleting it will not remove those records.`,
+          confirmText: "Continue",
+          cancelText: "Cancel",
+          onConfirm: () => {
+            clearCrmActionPopup();
+            onDelete(sectionKey, rowId, { skipLinkedWarning: true });
+          },
+        });
+        return;
+      }
+    }
     if (sectionKey === "leads" || sectionKey === "contacts") {
       const apiBasePath = sectionKey === "contacts" ? "contacts" : "leads";
       if (isTemporaryCrmRowId(sectionKey, rowId) || (sectionKey === "contacts" && !isBackendRowId(rowId))) {
@@ -9708,6 +9726,35 @@ function CrmOnePageModule() {
     } catch {
       // Continue to users page even if browser storage write fails.
     }
+    const contactName = String(normalizedContact.name || "").trim().toLowerCase();
+    const contactCompany = String(normalizedContact.company || "").trim().toLowerCase();
+    const contactPhone = String(normalizedContact.phone || "").trim();
+    const patchedRows = (rows = []) => rows.map((row) => {
+      const normalizedLead = normalizeCrmLeadRecord(row);
+      const leadName = String(normalizedLead.name || "").trim().toLowerCase();
+      const leadCompany = String(normalizedLead.company || "").trim().toLowerCase();
+      const leadPhone = String(row.phone || normalizedLead.phone || "").trim();
+      const matches = Boolean(
+        (contactCompany && (leadCompany === contactCompany || leadName === contactCompany))
+        || (contactName && (leadName === contactName || leadCompany === contactName))
+        || (contactPhone && leadPhone === contactPhone)
+      );
+      if (!matches) {
+        return row;
+      }
+      return {
+        ...row,
+        contactPerson: String(row.contactPerson || row.contact_person || normalizedContact.name || "").trim(),
+        company: String(row.company || normalizedContact.company || "").trim() || String(normalizedContact.company || normalizedContact.name || "").trim(),
+        assignedTo: String(row.assignedTo || normalizedContact.name || "").trim(),
+      };
+    });
+    setModuleData((prev) => ({
+      ...prev,
+      leads: patchedRows(prev.leads || []),
+      deals: patchedRows(prev.deals || []),
+      salesOrders: patchedRows(prev.salesOrders || []),
+    }));
     navigate("../users?tab=clients&source=crm-contact", { relative: "path" });
   }
 
@@ -10136,6 +10183,29 @@ function CrmOnePageModule() {
       phoneCountryCode,
       phone: phoneNumber,
     });
+  }
+
+  function findLinkedCrmRowsForContact(contactRow = {}) {
+    const normalizedContact = normalizeCrmContactRecord(contactRow);
+    const company = String(normalizedContact.company || "").trim().toLowerCase();
+    const name = String(normalizedContact.name || "").trim().toLowerCase();
+    const phone = String(normalizedContact.phone || "").trim();
+    const matches = (row = {}) => {
+      const normalizedLead = normalizeCrmLeadRecord(row);
+      const leadName = String(normalizedLead.name || "").trim().toLowerCase();
+      const leadCompany = String(normalizedLead.company || "").trim().toLowerCase();
+      const leadPhone = String(row.phone || normalizedLead.phone || "").trim();
+      return Boolean(
+        (company && (leadCompany === company || leadName === company))
+        || (name && (leadName === name || leadCompany === name))
+        || (phone && leadPhone === phone)
+      );
+    };
+    return {
+      leads: (moduleData.leads || []).filter(matches),
+      deals: (moduleData.deals || []).filter(matches),
+      salesOrders: (moduleData.salesOrders || []).filter(matches),
+    };
   }
 
   function writePendingCrmSalesOrderDraft(dealRow = {}) {

@@ -1491,7 +1491,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const targetUser = users.find((user) => String(user?.membership_id || "") === String(membershipId));
     const confirmed = await openConfirmDialog(
-      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access. Their CRM records will be retained for admin view, but the user account will no longer access the workspace. Do you want to continue?`,
+      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access. Any CRM leads or deals assigned to this user will be shown again after deletion so you can reassign them. Do you want to continue?`,
       {
         title: "Delete User",
         confirmText: "Delete",
@@ -1511,7 +1511,13 @@ export default function BusinessAutopilotUsersPage() {
       if (String(editForm.membership_id) === String(membershipId)) {
         cancelEdit();
       }
-      setNotice(String(data?.message || "User deleted successfully."));
+      setNotice(String(data?.linked_records_message || data?.message || "User deleted successfully."));
+      if (Array.isArray(data?.affected_leads) && data.affected_leads.length) {
+        await openAlertDialog(
+          `This user was linked to ${data.affected_leads.length} lead(s) and ${Array.isArray(data?.affected_deals) ? data.affected_deals.length : 0} deal(s). Review and reassign them if needed.`,
+          { title: "Linked CRM Records" }
+        );
+      }
     } catch (error) {
       setNotice(error?.message || "Unable to delete user.");
     } finally {
