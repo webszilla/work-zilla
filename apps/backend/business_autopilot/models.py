@@ -605,6 +605,7 @@ class CrmDeal(models.Model):
     company = models.CharField(max_length=180, blank=True, default="")
     phone = models.CharField(max_length=40, blank=True, default="")
     deal_value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    won_amount_final = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="Qualified")
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="Open")
     assigned_user = models.ForeignKey(

@@ -1258,16 +1258,20 @@ function normalizePaymentStatus(value) {
 
 function normalizePaymentDetails(rawDetails, totalAmountValue) {
   const totalAmount = Math.max(0, parseNumber(totalAmountValue));
+  const requestedStatus = normalizePaymentStatus(rawDetails?.paymentStatus ?? rawDetails?.payment_status ?? "");
   const paidAmountRawInput = String(rawDetails?.paidAmount ?? rawDetails?.paid_amount ?? "").trim();
   const paidRaw = sanitizeCurrencyInput(paidAmountRawInput);
   const paidAmount = Math.max(0, parseNumber(paidRaw));
   const cappedPaidAmount = totalAmount > 0 ? Math.min(paidAmount, totalAmount) : paidAmount;
   const paidAmountText = paidRaw ? formatCurrencyNumberInput(String(cappedPaidAmount), getOrgCurrency()) : "";
-  const paymentStatus = totalAmount > 0 && cappedPaidAmount >= totalAmount
+  let paymentStatus = totalAmount > 0 && cappedPaidAmount >= totalAmount
     ? "Paid"
     : cappedPaidAmount > 0
       ? "Partial"
       : "Pending";
+  if (requestedStatus === "Partial" || requestedStatus === "Paid") {
+    paymentStatus = requestedStatus;
+  }
   const balanceAmount = Math.max(0, totalAmount - cappedPaidAmount);
   return {
     paymentStatus,
@@ -6572,12 +6576,54 @@ function BillingDocumentEditor({
     const [itemPickerState, setItemPickerState] = useState({ open: false, lineId: "" });
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
+    const buildLineTextDrafts = useCallback((items = []) => {
+      const nextDrafts = {};
+      (items || []).forEach((line) => {
+        const lineId = String(line?.id || "").trim();
+        if (!lineId) return;
+        nextDrafts[lineId] = {
+          customText: String(line?.customText || ""),
+          description: String(line?.description || ""),
+        };
+      });
+      return nextDrafts;
+    }, []);
+    const [lineTextDrafts, setLineTextDrafts] = useState(() => buildLineTextDrafts(form.items || []));
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
     const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
     const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
     const showPartialPaymentSection = paymentSummary.paymentStatus === "Partial";
     const paymentEntries = normalizePaymentEntries(form.paymentEntries);
     const showPaymentSection = Boolean(canEditPaymentDetails || showPartialPaymentSection || paymentEntries.length > 0 || editingPaymentEntryId);
+    useEffect(() => {
+      setLineTextDrafts(buildLineTextDrafts(form.items || []));
+    }, [buildLineTextDrafts, editingId, kind, form.id, form.docNo]);
+    useEffect(() => {
+      setLineTextDrafts((prev) => {
+        const nextDrafts = {};
+        (form.items || []).forEach((line) => {
+          const lineId = String(line?.id || "").trim();
+          if (!lineId) return;
+          nextDrafts[lineId] = prev[lineId] || {
+            customText: String(line?.customText || ""),
+            description: String(line?.description || ""),
+          };
+        });
+        return nextDrafts;
+      });
+    }, [form.items]);
+    const updateLineTextDraft = (lineId, key, value) => {
+      const nextLineId = String(lineId || "").trim();
+      if (!nextLineId) return;
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [nextLineId]: {
+          customText: String(prev[nextLineId]?.customText || ""),
+          description: String(prev[nextLineId]?.description || ""),
+          [key]: value,
+        },
+      }));
+    };
     const syncPaymentEntries = (entries) => {
       const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
       const totalPaid = getPaymentEntriesTotal(normalizedEntries);
@@ -6742,10 +6788,6 @@ function BillingDocumentEditor({
       }
       if (matched?.source === "recent") {
         selectRecentItemForLine(kind, lineId, matched.name || "");
-        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(matched.hsnSacType || "HSN"));
-        if (matched.hsnSacCode) {
-          updateDocLine(kind, lineId, "hsnSacCode", matched.hsnSacCode);
-        }
         return;
       }
       updateDocLineDescription(kind, lineId, nextValue);
@@ -6758,10 +6800,6 @@ function BillingDocumentEditor({
         applyItemMasterToLine(kind, lineId, item.id);
       } else {
         selectRecentItemForLine(kind, lineId, item.name || "");
-        updateDocLine(kind, lineId, "hsnSacType", normalizeHsnSacType(item.hsnSacType || "HSN"));
-        if (item.hsnSacCode) {
-          updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
-        }
       }
       setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
@@ -6819,9 +6857,6 @@ function BillingDocumentEditor({
         applyItemMasterToLine(kind, lineId, item.id);
       } else {
         selectRecentItemForLine(kind, lineId, item.name || "");
-        if (item.hsnSacCode) {
-          updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
-        }
       }
       closeItemPicker();
     };
@@ -7069,8 +7104,11 @@ function BillingDocumentEditor({
                           <input
                             className="form-control mb-2 wz-item-custom-input"
                             required={kind === "invoice"}
-                            value={line.customText || ""}
-                            onChange={(e) => updateDocLine(kind, line.id, "customText", e.target.value)}
+                            value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
+                            onChange={(e) => {
+                              updateLineTextDraft(line.id, "customText", e.target.value);
+                              updateDocLine(kind, line.id, "customText", e.target.value);
+                            }}
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
@@ -7078,14 +7116,21 @@ function BillingDocumentEditor({
                               <div className="crm-inline-suggestions-wrap">
                                 <input
                                   className="form-control wz-item-primary-input"
-                                  value={line.description || ""}
-                                  onFocus={() => openItemPicker(line)}
-                                  onClick={() => openItemPicker(line)}
+                                  value={lineTextDrafts[line.id]?.description ?? line.description ?? ""}
+                                  onFocus={() => {
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    closeItemPicker();
+                                  }}
+                                  onClick={() => {
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    closeItemPicker();
+                                  }}
                                   onBlur={() => window.setTimeout(() => {
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
                                   }, 140)}
                                   onChange={(e) => {
-                                    setPrimaryItemText(line.id, e.target.value);
+                                    updateLineTextDraft(line.id, "description", e.target.value);
+                                    updateDocLineDescription(kind, line.id, e.target.value);
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
                                   }}
                                   placeholder={enableItemPicker ? "Type or search item" : "Type item"}
@@ -7355,7 +7400,7 @@ function BillingDocumentEditor({
                   <div className="row g-3">
                     <div className="col-12 col-md-6">
                       <label className="form-label small text-secondary mb-1">Payment Status</label>
-                      <select className="form-select" value={paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
+                      <select className="form-select" value={form.paymentStatus || paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
                         {PAYMENT_STATUS_OPTIONS.map((status) => (
                           <option key={`${kind}-pay-status-${status}`} value={status}>{status}</option>
                         ))}
@@ -8747,13 +8792,21 @@ function CrmOnePageModule() {
   function openConvertedSalesOrderDocumentForEditing(salesOrderRow = {}) {
     const conversionSummary = getAccountsConversionSummaryForSalesOrder(salesOrderRow);
     const documentKind = conversionSummary.hasInvoice ? "invoice" : conversionSummary.hasEstimate ? "estimate" : "";
-    const documentRow = conversionSummary.hasInvoice
-      ? conversionSummary.linkedInvoice
-      : conversionSummary.linkedEstimate;
-    if (!documentKind || !documentRow) {
+    const documentId = String((conversionSummary.hasInvoice
+      ? conversionSummary.linkedInvoice?.id
+      : conversionSummary.linkedEstimate?.id) || "").trim();
+    if (!documentKind || !documentId) {
       return;
     }
-    editDocument(documentKind, documentRow);
+    const query = new URLSearchParams();
+    if (documentKind === "estimate") {
+      query.set("tab", "estimates");
+      query.set("edit-estimate", documentId);
+    } else {
+      query.set("tab", "invoices");
+      query.set("edit-invoice", documentId);
+    }
+    navigate(`../accounts?${query.toString()}`, { relative: "path" });
   }
 
   function openAccountsDocumentList(kind = "invoice", docNo = "") {
@@ -8763,6 +8816,23 @@ function CrmOnePageModule() {
     query.set("tab", nextKind);
     if (nextSearch) {
       query.set("search", nextSearch);
+    }
+    navigate(`../accounts?${query.toString()}`, { relative: "path" });
+  }
+
+  function openAccountsDocumentEdit(kind = "invoice", documentId = "", fallbackDocNo = "") {
+    const nextDocumentId = String(documentId || "").trim();
+    if (!nextDocumentId) {
+      openAccountsDocumentList(kind, fallbackDocNo);
+      return;
+    }
+    const query = new URLSearchParams();
+    if (kind === "estimate") {
+      query.set("tab", "estimates");
+      query.set("edit-estimate", nextDocumentId);
+    } else {
+      query.set("tab", "invoices");
+      query.set("edit-invoice", nextDocumentId);
     }
     navigate(`../accounts?${query.toString()}`, { relative: "path" });
   }
@@ -9984,6 +10054,7 @@ function CrmOnePageModule() {
               description: value,
               itemMasterId: "",
               inventoryItemId: "",
+              hsnSacCode: "",
             }
           : row
       )),
@@ -10329,6 +10400,7 @@ function CrmOnePageModule() {
     event.preventDefault();
     const form = crmSalesOrderForm;
     const paymentDetails = normalizePaymentDetails(form, crmSalesOrderTotals.grandTotal);
+    const selectedPaymentStatus = normalizePaymentStatus(form.paymentStatus || paymentDetails.paymentStatus);
     const fallbackGstTemplateId = String((crmSalesOrderGstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
     const resolvedGstTemplateId = String(form.gstTemplateId || fallbackGstTemplateId || "").trim();
     if (!String(form.customerName || "").trim()) {
@@ -10362,6 +10434,14 @@ function CrmOnePageModule() {
       setCrmSalesOrderNotice(lineValidationError);
       return;
     }
+    if (selectedPaymentStatus !== "Pending" && parseNumber(form.paidAmount) <= 0) {
+      setCrmSalesOrderNotice("Paid Amount is required when Payment Status is Partial or Paid.");
+      return;
+    }
+    if (selectedPaymentStatus !== "Pending" && !String(form.paymentMode || "").trim()) {
+      setCrmSalesOrderNotice("Payment Mode is required when Payment Status is Partial or Paid.");
+      return;
+    }
     const payload = {
       customer_name: String(form.customerName || "").trim(),
       company: String(form.company || form.customerName || "").trim(),
@@ -10379,7 +10459,7 @@ function CrmOnePageModule() {
       terms_text: String(form.termsText || "").trim(),
       payment_status_notes: String(form.paymentStatusNotes || "").trim(),
       payment_entries: normalizePaymentEntries(form.paymentEntries),
-      payment_status: paymentDetails.paymentStatus.toLowerCase(),
+      payment_status: selectedPaymentStatus.toLowerCase(),
       paid_amount: paymentDetails.paidAmountValue,
       balance_amount: paymentDetails.balanceAmount,
       payment_mode: String(form.paymentMode || "").trim(),
@@ -10606,37 +10686,35 @@ function CrmOnePageModule() {
       const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow);
       closeCrmSalesOrderConvertPopup();
       if (kind === "estimate") {
-        const activeOrgId = getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId();
-        const draftKey = buildScopedAccountsEstimateDraftStorageKey(activeOrgId);
-        const draftPayload = {
-          sourceSalesOrder: normalizedRow,
-          orgId: String(activeOrgId || "").trim(),
-          createdAt: new Date().toISOString(),
-        };
-        try {
-          window.localStorage.setItem(draftKey, JSON.stringify(draftPayload));
-          window.localStorage.setItem(ACCOUNTS_ESTIMATE_DRAFT_GLOBAL_KEY, JSON.stringify(draftPayload));
-        } catch {
-          // continue with navigation even if storage write fails
+        const listKey = "estimates";
+        const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
+        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+        if (existingConverted) {
+          navigate(`/app/business-autopilot/accounts?tab=estimates&edit-estimate=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
+          return;
         }
-        navigate("/app/business-autopilot/accounts?tab=estimates&resume-estimate=1");
+        const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
+        await persistCrmAccountsWorkspace({
+          ...crmAccountsWorkspace,
+          [listKey]: [convertedDocument, ...existingRows],
+        });
+        navigate(`/app/business-autopilot/accounts?tab=estimates&edit-estimate=${encodeURIComponent(String(convertedDocument.id || "").trim())}`);
         return;
       }
       if (kind === "invoice") {
-        const activeOrgId = getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId();
-        const draftKey = buildScopedAccountsInvoiceDraftStorageKey(activeOrgId);
-        const draftPayload = {
-          sourceSalesOrder: normalizedRow,
-          orgId: String(activeOrgId || "").trim(),
-          createdAt: new Date().toISOString(),
-        };
-        try {
-          window.localStorage.setItem(draftKey, JSON.stringify(draftPayload));
-          window.localStorage.setItem(ACCOUNTS_INVOICE_DRAFT_GLOBAL_KEY, JSON.stringify(draftPayload));
-        } catch {
-          // continue with navigation even if storage write fails
+        const listKey = "invoices";
+        const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
+        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+        if (existingConverted) {
+          navigate(`/app/business-autopilot/accounts?tab=invoices&edit-invoice=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
+          return;
         }
-        navigate("/app/business-autopilot/accounts?tab=invoices&resume-invoice=1");
+        const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
+        await persistCrmAccountsWorkspace({
+          ...crmAccountsWorkspace,
+          [listKey]: [convertedDocument, ...existingRows],
+        });
+        navigate(`/app/business-autopilot/accounts?tab=invoices&edit-invoice=${encodeURIComponent(String(convertedDocument.id || "").trim())}`);
         return;
       }
       const listKey = "invoices";
@@ -12154,6 +12232,7 @@ function CrmOnePageModule() {
       status: nextStatus,
       stage: nextStage,
       deal_value: dealQuickEditPopup.dealValueExpected || 0,
+      won_amount_final: normalizedWonAmount || 0,
     };
     try {
       const response = await saveCrmCollectionRecord("deals", "PATCH", resolvedDealId, payload);
@@ -12877,8 +12956,8 @@ function CrmOnePageModule() {
                                 <button
                                   type="button"
                                   className="btn btn-link btn-sm p-0 text-decoration-underline fw-normal text-secondary"
-                                  onClick={() => openAccountsDocumentList("estimate", row.convertedEstimateNo)}
-                                  title={`Open ${String(row.convertedEstimateNo || "").trim()}`}
+                                  onClick={() => openAccountsDocumentEdit("estimate", row.convertedEstimateId, row.convertedEstimateNo)}
+                                  title={`Open ${String(row.convertedEstimateNo || "").trim()} for editing`}
                                 >
                                   {row.convertedEstimateNo}
                                 </button>
@@ -12890,8 +12969,8 @@ function CrmOnePageModule() {
                                 <button
                                   type="button"
                                   className="btn btn-link btn-sm p-0 text-decoration-underline fw-normal text-secondary"
-                                  onClick={() => openAccountsDocumentList("invoice", row.convertedInvoiceNo)}
-                                  title={`Open ${String(row.convertedInvoiceNo || "").trim()}`}
+                                  onClick={() => openAccountsDocumentEdit("invoice", row.convertedInvoiceId, row.convertedInvoiceNo)}
+                                  title={`Open ${String(row.convertedInvoiceNo || "").trim()} for editing`}
                                 >
                                   {row.convertedInvoiceNo}
                                 </button>
@@ -12905,19 +12984,14 @@ function CrmOnePageModule() {
                               const statusLabel = row.statusDisplay || row.status || "Pending";
                               const isPending = String(statusLabel).trim().toLowerCase() === "pending";
                               return (
-                            <span
-                              className="badge d-inline-flex align-items-center justify-content-center px-3 py-2 rounded-pill border"
-                              style={{
-                                minHeight: 32,
-                                minWidth: 108,
-                                backgroundColor: isPending ? "rgba(34, 197, 94, 0.12)" : "rgba(148, 163, 184, 0.14)",
-                                borderColor: isPending ? "rgba(34, 197, 94, 0.28)" : "rgba(148, 163, 184, 0.24)",
-                                color: isPending ? "#dcfce7" : "#e2e8f0",
-                                boxShadow: isPending ? "inset 0 0 0 1px rgba(34, 197, 94, 0.08)" : "none",
-                              }}
-                            >
-                              {statusLabel}
-                            </span>
+                                <span
+                                  className={`wz-status-pill d-inline-flex align-items-center justify-content-center px-3 py-2 rounded-pill border ${
+                                    isPending ? "wz-status-pill-pending" : "wz-status-pill-neutral"
+                                  }`}
+                                  style={{ minHeight: 32, minWidth: 108 }}
+                                >
+                                  {statusLabel}
+                                </span>
                               );
                             })()}
                           </div>
@@ -22023,9 +22097,13 @@ function StocksManagementModule() {
 function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false, headingTitle = "Accounts" }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const estimateEditorRef = useRef(null);
+  const invoiceEditorRef = useRef(null);
   const accountsQueryParams = useMemo(() => new URLSearchParams(String(location.search || "")), [location.search]);
   const accountsQueryTab = String(accountsQueryParams.get("tab") || "").trim().toLowerCase();
   const accountsQuerySearch = String(accountsQueryParams.get("search") || "").trim();
+  const accountsQueryEditEstimateId = String(accountsQueryParams.get("edit-estimate") || "").trim();
+  const accountsQueryEditInvoiceId = String(accountsQueryParams.get("edit-invoice") || "").trim();
   const [activeTab, setActiveTab] = useState(() => {
     if (subscriptionsOnly) {
       return "subscriptions";
@@ -22186,17 +22264,25 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (shouldResumeEstimate || shouldResumeInvoice) {
       return;
     }
+    if (editingEstimateId && activeTab === "estimates") {
+      return;
+    }
+    if (editingInvoiceId && activeTab === "invoices") {
+      return;
+    }
     const nextTab = subscriptionsOnly
       ? "subscriptions"
       : (
-          isValidAccountsTab.has(String(initialTab || "overview").trim().toLowerCase())
+          isValidAccountsTab.has(String(accountsQueryTab || "").trim().toLowerCase())
+            ? String(accountsQueryTab || "").trim().toLowerCase()
+            : isValidAccountsTab.has(String(initialTab || "overview").trim().toLowerCase())
             ? String(initialTab || "overview").trim().toLowerCase()
             : "overview"
         );
     if (nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
-  }, [initialTab, subscriptionsOnly, shouldResumeEstimate, shouldResumeInvoice]);
+  }, [initialTab, subscriptionsOnly, shouldResumeEstimate, shouldResumeInvoice, accountsQueryTab, activeTab, editingEstimateId, editingInvoiceId]);
 
   useEffect(() => {
     setAccountsFormNotice("");
@@ -22219,6 +22305,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setEditingEstimateId("");
       setActiveTab("estimates");
       setOverviewDocTab("estimate");
+      window.setTimeout(() => {
+        estimateEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
     } else {
       clearPendingAccountsInvoiceDraft(pendingDraft.orgId);
       const convertedInvoice = buildBillingDocumentFromSalesOrder(pendingDraft.sourceSalesOrder, "invoice");
@@ -22226,9 +22315,62 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setEditingInvoiceId("");
       setActiveTab("invoices");
       setOverviewDocTab("invoice");
+      window.setTimeout(() => {
+        invoiceEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
     }
     setAccountsFormNotice("");
+    const nextQuery = new URLSearchParams(String(location.search || ""));
+    if (shouldResumeEstimate) {
+      nextQuery.delete("resume-estimate");
+    }
+    if (shouldResumeInvoice) {
+      nextQuery.delete("resume-invoice");
+    }
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextQuery.toString() ? `?${nextQuery.toString()}` : "",
+      },
+      { replace: true }
+    );
   }, [location.search, shouldResumeEstimate, shouldResumeInvoice]);
+
+  useEffect(() => {
+    if (!accountsQueryEditEstimateId && !accountsQueryEditInvoiceId) {
+      return;
+    }
+    if (accountsQueryEditEstimateId) {
+      const targetEstimate = (moduleData.estimates || []).find((row) => String(row.id || "").trim() === accountsQueryEditEstimateId);
+      if (!targetEstimate) {
+        return;
+      }
+      editDocument("estimate", targetEstimate);
+      window.setTimeout(() => {
+        estimateEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    }
+    if (accountsQueryEditInvoiceId) {
+      const targetInvoice = (moduleData.invoices || []).find((row) => String(row.id || "").trim() === accountsQueryEditInvoiceId);
+      if (!targetInvoice) {
+        return;
+      }
+      editDocument("invoice", targetInvoice);
+      window.setTimeout(() => {
+        invoiceEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    }
+    const nextQuery = new URLSearchParams(String(location.search || ""));
+    nextQuery.delete("edit-estimate");
+    nextQuery.delete("edit-invoice");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextQuery.toString() ? `?${nextQuery.toString()}` : "",
+      },
+      { replace: true }
+    );
+  }, [accountsQueryEditEstimateId, accountsQueryEditInvoiceId, moduleData.estimates, moduleData.invoices, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (normalizeCountryName(orgBillingCountry) !== "india") {
@@ -24207,6 +24349,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const form = kind === "estimate" ? estimateForm : invoiceForm;
     const documentTotals = computeDocumentTotals(form, moduleData.gstTemplates || []);
     const paymentDetails = normalizePaymentDetails(form, documentTotals.grandTotal);
+    const selectedPaymentStatus = normalizePaymentStatus(form.paymentStatus || paymentDetails.paymentStatus);
     if (!String(form.customerName || "").trim()) {
       setAccountsFormNotice("Client / Company name is required.");
       return;
@@ -24245,6 +24388,14 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setAccountsFormNotice(lineValidationError);
       return;
     }
+    if (selectedPaymentStatus !== "Pending" && parseNumber(form.paidAmount) <= 0) {
+      setAccountsFormNotice("Paid Amount is required when Payment Status is Partial or Paid.");
+      return;
+    }
+    if (selectedPaymentStatus !== "Pending" && !String(form.paymentMode || "").trim()) {
+      setAccountsFormNotice("Payment Mode is required when Payment Status is Partial or Paid.");
+      return;
+    }
     const payload = {
       ...form,
       customerName: String(form.customerName || "").trim(),
@@ -24256,7 +24407,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       notes: String(form.notes || "").trim(),
       termsText: String(form.termsText || "").trim(),
       paymentStatusNotes: String(form.paymentStatusNotes || "").trim(),
-      paymentStatus: paymentDetails.paymentStatus,
+      paymentStatus: selectedPaymentStatus,
       paidAmount: paymentDetails.paidAmount,
       balanceAmount: String(paymentDetails.balanceAmount || "").trim(),
       paymentMode: String(form.paymentMode || "").trim(),
@@ -24591,6 +24742,35 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       return name.toLowerCase().includes(q);
     }).slice(0, 8);
     const paymentEntries = normalizePaymentEntries(form.paymentEntries);
+    useEffect(() => {
+      setLineTextDrafts(buildLineTextDrafts(form.items || []));
+    }, [buildLineTextDrafts, editingId, kind, form.id, form.docNo]);
+    useEffect(() => {
+      setLineTextDrafts((prev) => {
+        const nextDrafts = {};
+        (form.items || []).forEach((line) => {
+          const lineId = String(line?.id || "").trim();
+          if (!lineId) return;
+          nextDrafts[lineId] = prev[lineId] || {
+            customText: String(line?.customText || ""),
+            description: String(line?.description || ""),
+          };
+        });
+        return nextDrafts;
+      });
+    }, [form.items]);
+    const updateLineTextDraft = (lineId, key, value) => {
+      const nextLineId = String(lineId || "").trim();
+      if (!nextLineId) return;
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [nextLineId]: {
+          customText: String(prev[nextLineId]?.customText || ""),
+          description: String(prev[nextLineId]?.description || ""),
+          [key]: value,
+        },
+      }));
+    };
     const syncPaymentEntries = (entries) => {
       const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizePaymentEntry);
       const totalPaid = getPaymentEntriesTotal(normalizedEntries);
@@ -25034,8 +25214,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                           <input
                             className="form-control mb-2 wz-item-custom-input"
                             required={kind === "invoice"}
-                            value={line.customText || ""}
-                            onChange={(e) => updateDocLine(kind, line.id, "customText", e.target.value)}
+                            value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
+                            onChange={(e) => {
+                              updateLineTextDraft(line.id, "customText", e.target.value);
+                              updateDocLine(kind, line.id, "customText", e.target.value);
+                            }}
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
@@ -25043,14 +25226,21 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                               <div className="crm-inline-suggestions-wrap">
                                 <input
                                   className="form-control wz-item-primary-input"
-                                  value={line.description || ""}
-                                  onFocus={() => openItemPicker(line)}
-                                  onClick={() => openItemPicker(line)}
+                                  value={lineTextDrafts[line.id]?.description ?? line.description ?? ""}
+                                  onFocus={() => {
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    closeItemPicker();
+                                  }}
+                                  onClick={() => {
+                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    closeItemPicker();
+                                  }}
                                   onBlur={() => window.setTimeout(() => {
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
                                   }, 140)}
                                   onChange={(e) => {
-                                    setPrimaryItemText(line.id, e.target.value);
+                                    updateLineTextDraft(line.id, "description", e.target.value);
+                                    updateDocLineDescription(kind, line.id, e.target.value);
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
                                   }}
                                   placeholder={enableItemPicker ? "Type or search item" : "Type item"}
@@ -25321,7 +25511,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   <div className="row g-3">
                     <div className="col-12 col-md-6">
                       <label className="form-label small text-secondary mb-1">Payment Status</label>
-                      <select className="form-select" value={paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
+                      <select className="form-select" value={form.paymentStatus || paymentSummary.paymentStatus} onChange={(e) => setField("paymentStatus", e.target.value)} disabled={!canEditPaymentDetails}>
                         {PAYMENT_STATUS_OPTIONS.map((status) => (
                           <option key={`${kind}-pay-status-${status}`} value={status}>{status}</option>
                         ))}
@@ -26465,69 +26655,73 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {activeTab === "estimates" ? (
         <>
-          <BillingDocumentEditor
-            kind="estimate"
-            form={estimateForm}
-            setField={(key, value) => setDocField("estimate", key, value)}
-            totals={estimateTotals}
-            onSave={(event) => saveDocument("estimate", event)}
-            onCancelEdit={() => {
-              setEditingEstimateId("");
-              setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
-            }}
-            editingId={editingEstimateId}
-            moduleData={moduleData}
-            erpUsersForSales={erpUsersForSales}
-            customerOptions={customerOptions}
-            taxUi={taxUi}
-            inventoryItems={inventoryItems}
-            inventoryBranches={inventoryBranches}
-            itemMasterOptions={itemMasterOptions}
-            applyBillingTemplateToDocument={applyBillingTemplateToDocument}
-            addDocLine={addDocLine}
-            updateDocLineDescription={updateDocLineDescription}
-            applyInventoryItemToLine={applyInventoryItemToLine}
-            applyItemMasterToLine={applyItemMasterToLine}
-            selectRecentItemForLine={selectRecentItemForLine}
-            availableInventoryQty={availableInventoryQty}
-            updateDocLine={updateDocLine}
-            removeDocLine={removeDocLine}
-            canEditPaymentDetails={true}
-          />
+          <div ref={estimateEditorRef}>
+            <BillingDocumentEditor
+              kind="estimate"
+              form={estimateForm}
+              setField={(key, value) => setDocField("estimate", key, value)}
+              totals={estimateTotals}
+              onSave={(event) => saveDocument("estimate", event)}
+              onCancelEdit={() => {
+                setEditingEstimateId("");
+                setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || []));
+              }}
+              editingId={editingEstimateId}
+              moduleData={moduleData}
+              erpUsersForSales={erpUsersForSales}
+              customerOptions={customerOptions}
+              taxUi={taxUi}
+              inventoryItems={inventoryItems}
+              inventoryBranches={inventoryBranches}
+              itemMasterOptions={itemMasterOptions}
+              applyBillingTemplateToDocument={applyBillingTemplateToDocument}
+              addDocLine={addDocLine}
+              updateDocLineDescription={updateDocLineDescription}
+              applyInventoryItemToLine={applyInventoryItemToLine}
+              applyItemMasterToLine={applyItemMasterToLine}
+              selectRecentItemForLine={selectRecentItemForLine}
+              availableInventoryQty={availableInventoryQty}
+              updateDocLine={updateDocLine}
+              removeDocLine={removeDocLine}
+              canEditPaymentDetails={true}
+            />
+          </div>
         </>
       ) : null}
 
       {activeTab === "invoices" ? (
         <>
-          <BillingDocumentEditor
-            kind="invoice"
-            form={invoiceForm}
-            setField={(key, value) => setDocField("invoice", key, value)}
-            totals={invoiceTotals}
-            onSave={(event) => saveDocument("invoice", event)}
-            onCancelEdit={() => {
-              setEditingInvoiceId("");
-              setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
-            }}
-            editingId={editingInvoiceId}
-            moduleData={moduleData}
-            erpUsersForSales={erpUsersForSales}
-            customerOptions={customerOptions}
-            taxUi={taxUi}
-            inventoryItems={inventoryItems}
-            inventoryBranches={inventoryBranches}
-            itemMasterOptions={itemMasterOptions}
-            applyBillingTemplateToDocument={applyBillingTemplateToDocument}
-            addDocLine={addDocLine}
-            updateDocLineDescription={updateDocLineDescription}
-            applyInventoryItemToLine={applyInventoryItemToLine}
-            applyItemMasterToLine={applyItemMasterToLine}
-            selectRecentItemForLine={selectRecentItemForLine}
-            availableInventoryQty={availableInventoryQty}
-            updateDocLine={updateDocLine}
-            removeDocLine={removeDocLine}
-            canEditPaymentDetails={true}
-          />
+          <div ref={invoiceEditorRef}>
+            <BillingDocumentEditor
+              kind="invoice"
+              form={invoiceForm}
+              setField={(key, value) => setDocField("invoice", key, value)}
+              totals={invoiceTotals}
+              onSave={(event) => saveDocument("invoice", event)}
+              onCancelEdit={() => {
+                setEditingInvoiceId("");
+                setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || []));
+              }}
+              editingId={editingInvoiceId}
+              moduleData={moduleData}
+              erpUsersForSales={erpUsersForSales}
+              customerOptions={customerOptions}
+              taxUi={taxUi}
+              inventoryItems={inventoryItems}
+              inventoryBranches={inventoryBranches}
+              itemMasterOptions={itemMasterOptions}
+              applyBillingTemplateToDocument={applyBillingTemplateToDocument}
+              addDocLine={addDocLine}
+              updateDocLineDescription={updateDocLineDescription}
+              applyInventoryItemToLine={applyInventoryItemToLine}
+              applyItemMasterToLine={applyItemMasterToLine}
+              selectRecentItemForLine={selectRecentItemForLine}
+              availableInventoryQty={availableInventoryQty}
+              updateDocLine={updateDocLine}
+              removeDocLine={removeDocLine}
+              canEditPaymentDetails={true}
+            />
+          </div>
         </>
       ) : null}
 

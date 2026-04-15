@@ -4815,6 +4815,7 @@ def _serialize_crm_deal(row: CrmDeal):
         "company": row.company,
         "phone": row.phone,
         "deal_value": float(row.deal_value or 0),
+        "won_amount_final": float(row.won_amount_final or 0),
         "stage": row.stage,
         "status": row.status,
         "assigned_user_id": row.assigned_user_id,
@@ -5465,6 +5466,7 @@ def crm_deals(request, deal_id: int = None):
             company=str(payload.get("company") or "").strip()[:180],
             phone=str(payload.get("phone") or "").strip()[:40],
             deal_value=_crm_to_decimal(payload.get("deal_value")),
+            won_amount_final=_crm_to_decimal(payload.get("won_amount_final")),
             stage=str(payload.get("stage") or "Qualified").strip()[:30] or "Qualified",
             status=str(payload.get("status") or "Open").strip()[:30] or "Open",
             assigned_user=assigned_user,
@@ -5500,7 +5502,11 @@ def crm_deals(request, deal_id: int = None):
                 row.status = status
         if "deal_value" in payload:
             row.deal_value = _crm_to_decimal(payload.get("deal_value"))
-        update_fields = ["stage", "status", "deal_value", "updated_by", "updated_at"]
+        if "won_amount_final" in payload or "wonAmountFinal" in payload:
+            row.won_amount_final = _crm_to_decimal(
+                payload.get("won_amount_final") if "won_amount_final" in payload else payload.get("wonAmountFinal")
+            )
+        update_fields = ["stage", "status", "deal_value", "won_amount_final", "updated_by", "updated_at"]
         if not row.crm_reference_id and row.lead_id:
             lead_ref = str(getattr(row.lead, "crm_reference_id", "") or "").strip()
             if lead_ref:

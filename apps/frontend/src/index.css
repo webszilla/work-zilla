@@ -1608,6 +1608,31 @@ html[data-theme="light"] .wz-country-picker__empty{
 .app-shell .table td .d-inline-flex:not(.flex-column){
   align-items: center;
 }
+.wz-status-pill{
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+html[data-theme="light"] .wz-status-pill-pending{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.10) !important;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.22) !important;
+  color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.96) !important;
+}
+html[data-theme="dark"] .wz-status-pill-pending{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.18) !important;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.34) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+html[data-theme="light"] .wz-status-pill-neutral{
+  background: rgba(var(--color-accent-rgb, 56, 189, 248), 0.08) !important;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.16) !important;
+  color: rgba(15, 23, 42, 0.88) !important;
+}
+html[data-theme="dark"] .wz-status-pill-neutral{
+  background: rgba(var(--color-accent-rgb, 56, 189, 248), 0.10) !important;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.24) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+}
 html[data-theme="dark"] .app-shell .table{
   --bs-table-bg: rgba(8, 15, 32, 0.74);
   --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
