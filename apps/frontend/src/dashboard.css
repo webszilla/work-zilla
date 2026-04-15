@@ -6039,6 +6039,7 @@ html[data-theme="dark"] .wz-country-picker__search {
 .wz-item-details-cell {
   position: relative;
   overflow: visible !important;
+  z-index: 2;
 }
 
 .wz-item-primary-input {
@@ -6167,26 +6168,29 @@ html[data-theme="dark"] .wz-item-picker-modal .btn.btn-outline-light:focus-visib
 }
 
 .wz-item-details-suggestions {
-  position: absolute;
+  position: absolute !important;
   left: 0;
   right: auto;
   top: calc(100% + 0.35rem);
-  width: 100%;
-  max-width: 100%;
-  max-height: 190px;
+  width: min(560px, 100%);
+  min-width: 320px;
+  max-width: calc(100vw - 120px);
+  max-height: 240px;
   overflow-x: hidden;
   overflow-y: auto;
-  z-index: 120;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  padding: 0;
+  z-index: 3000 !important;
+  display: block !important;
+  pointer-events: auto;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, #94a3b8 20%) !important;
+  border-radius: 0.75rem !important;
+  background: color-mix(in srgb, var(--surface, #ffffff) 92%, #f8fafc 8%) !important;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.14) !important;
+  backdrop-filter: blur(10px) !important;
+  padding: 0 !important;
 }
 
 .wz-item-details-suggestions .crm-inline-suggestions__group {
-  background: color-mix(in srgb, var(--surface, #ffffff) 96%, #f8fafc 4%);
+  background: transparent;
   border-radius: 0.62rem;
   overflow: hidden;
 }

@@ -1,4 +1,4 @@
-import { Children, Fragment, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
@@ -3487,8 +3487,42 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || "").trim(),
     orderId: String(row.orderId || row.order_id || "").trim(),
     docNo: String(row.orderId || row.order_id || row.docNo || row.doc_no || "").trim(),
-    customerName: String(row.customerName || row.customer_name || "").trim(),
-    company: String(row.company || "").trim(),
+    customerName: String(
+      row.customerName
+      || row.customer_name
+      || payload.customerName
+      || payload.customer_name
+      || row.leadName
+      || row.lead_name
+      || ""
+    ).trim(),
+    leadName: String(
+      row.leadName
+      || row.lead_name
+      || payload.leadName
+      || payload.lead_name
+      || row.customerName
+      || row.customer_name
+      || ""
+    ).trim(),
+    company: String(
+      row.company
+      || row.clients
+      || payload.company
+      || payload.clients
+      || payload.companyOrClientName
+      || payload.company_or_client_name
+      || ""
+    ).trim(),
+    clients: String(
+      row.clients
+      || row.company
+      || payload.clients
+      || payload.company
+      || payload.companyOrClientName
+      || payload.company_or_client_name
+      || ""
+    ).trim(),
     phone: String(row.phone || "").trim(),
     amount: String(row.amount ?? row.total_amount ?? "").trim(),
     quantity: String(row.quantity ?? "").trim(),
@@ -6599,19 +6633,8 @@ function BillingDocumentEditor({
       setLineTextDrafts(buildLineTextDrafts(form.items || []));
     }, [buildLineTextDrafts, editingId, kind, form.id, form.docNo]);
     useEffect(() => {
-      setLineTextDrafts((prev) => {
-        const nextDrafts = {};
-        (form.items || []).forEach((line) => {
-          const lineId = String(line?.id || "").trim();
-          if (!lineId) return;
-          nextDrafts[lineId] = prev[lineId] || {
-            customText: String(line?.customText || ""),
-            description: String(line?.description || ""),
-          };
-        });
-        return nextDrafts;
-      });
-    }, [form.items]);
+      setLineTextDrafts(buildLineTextDrafts(form.items || []));
+    }, [buildLineTextDrafts, form.items]);
     const updateLineTextDraft = (lineId, key, value) => {
       const nextLineId = String(lineId || "").trim();
       if (!nextLineId) return;
@@ -6801,11 +6824,25 @@ function BillingDocumentEditor({
       } else {
         selectRecentItemForLine(kind, lineId, item.name || "");
       }
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [lineId]: {
+          customText: String(prev[lineId]?.customText || ""),
+          description: String(item.displayName || item.name || ""),
+        },
+      }));
       setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const applyLineCustomTextFromSearch = (lineId, rawValue) => {
       const nextValue = String(rawValue || "");
       updateDocLineDescription(kind, lineId, nextValue);
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [lineId]: {
+          customText: String(prev[lineId]?.customText || ""),
+          description: nextValue,
+        },
+      }));
       setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const toggleSalesPerson = (name) => {
@@ -6839,10 +6876,11 @@ function BillingDocumentEditor({
       ].map((entry) => String(entry || "").trim().toLowerCase()).includes(itemPickerQueryLower));
     const openItemPicker = (line) => {
       if (!enableItemPicker) return;
-      const seed = String(line?.description || "").trim();
+      const lineId = String(line?.id || "").trim();
+      const seed = String(lineTextDrafts[lineId]?.description ?? line?.description ?? "").trim();
       setItemPickerSearch(seed);
-      setItemPickerState({ open: true, lineId: String(line?.id || "").trim() });
-      setLineItemSearchOpenById((prev) => ({ ...prev, [String(line?.id || "").trim()]: false }));
+      setItemPickerState({ open: true, lineId });
+      setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const closeItemPicker = () => {
       setItemPickerState({ open: false, lineId: "" });
@@ -7082,22 +7120,7 @@ function BillingDocumentEditor({
                 <tbody>
                   {(form.items || []).map((line, rowIndex) => {
                     const lineAmount = parseNumber(line.qty) * parseNumber(line.rate);
-                    const lineQuery = String(line.description || "").trim().toLowerCase();
-                    const lineMatches = billingItemSource
-                      .filter((item) => {
-                        if (!lineQuery) return true;
-                        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
-                        return haystack.includes(lineQuery);
-                      })
-                      .slice(0, 8);
-                    const canUseCustomLine = Boolean(lineQuery)
-                      && !lineMatches.some((item) => [
-                        item.name,
-                        item.displayName,
-                        item.id,
-                        item.sku,
-                      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(lineQuery));
-                    const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
+                    const linePrimaryDraft = String(lineTextDrafts[line.id]?.description ?? line.description ?? "");
                     return (
                       <tr key={line.id}>
                         <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
@@ -7107,69 +7130,46 @@ function BillingDocumentEditor({
                             value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
                             onChange={(e) => {
                               updateLineTextDraft(line.id, "customText", e.target.value);
-                              updateDocLine(kind, line.id, "customText", e.target.value);
+                            }}
+                            onBlur={() => {
+                              const nextCustomText = lineTextDrafts[line.id]?.customText;
+                              if (typeof nextCustomText === "string" && nextCustomText !== (line.customText || "")) {
+                                updateDocLine(kind, line.id, "customText", nextCustomText);
+                              }
                             }}
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
                             <div className="col-7">
-                              <div className="crm-inline-suggestions-wrap">
+                              <div className="crm-inline-suggestions-wrap" style={{ position: "relative", overflow: "visible" }}>
                                 <input
                                   className="form-control wz-item-primary-input"
-                                  value={lineTextDrafts[line.id]?.description ?? line.description ?? ""}
+                                  value={linePrimaryDraft}
                                   onFocus={() => {
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
-                                    closeItemPicker();
+                                    if (enableItemPicker) {
+                                      openItemPicker(line);
+                                    }
                                   }}
                                   onClick={() => {
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
-                                    closeItemPicker();
+                                    if (enableItemPicker) {
+                                      openItemPicker(line);
+                                    }
                                   }}
                                   onBlur={() => window.setTimeout(() => {
+                                    const nextDescription = String(lineTextDrafts[line.id]?.description ?? "");
+                                    if (nextDescription !== String(line.description || "")) {
+                                      setPrimaryItemText(line.id, nextDescription);
+                                    }
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
                                   }, 140)}
                                   onChange={(e) => {
-                                    updateLineTextDraft(line.id, "description", e.target.value);
-                                    updateDocLineDescription(kind, line.id, e.target.value);
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    if (!enableItemPicker) {
+                                      updateLineTextDraft(line.id, "description", e.target.value);
+                                    }
                                   }}
-                                  placeholder={enableItemPicker ? "Type or search item" : "Type item"}
+                                  readOnly={enableItemPicker}
+                                  placeholder={enableItemPicker ? "Click to search item" : "Type item"}
                                 />
-                                {showLineSearchDropdown ? (
-                                  <div className="wz-item-details-suggestions">
-                                    <div className="crm-inline-suggestions__group">
-                                      <div className="crm-inline-suggestions__title">Item Suggestions</div>
-                                      {canUseCustomLine ? (
-                                        <button
-                                          type="button"
-                                          className="crm-inline-suggestions__item"
-                                          onMouseDown={() => applyLineCustomTextFromSearch(line.id, line.description || "")}
-                                        >
-                                          <span className="crm-inline-suggestions__item-main">Add your custom text: {line.description || ""}</span>
-                                          <span className="crm-inline-suggestions__item-sub">Manual entry</span>
-                                        </button>
-                                      ) : null}
-                                      {lineMatches.map((item) => (
-                                        <button
-                                          key={`${kind}-line-search-${line.id}-${item.source}-${item.id || item.name}`}
-                                          type="button"
-                                          className="crm-inline-suggestions__item"
-                                          onMouseDown={() => applyLineItemFromSearch(line.id, item)}
-                                        >
-                                          <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
-                                          <span className="crm-inline-suggestions__item-sub">
-                                            {[
-                                              item.source,
-                                              item.sku ? `SKU: ${item.sku}` : "",
-                                              item.branchName ? `Branch: ${item.branchName}` : "",
-                                              item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : "",
-                                            ].filter(Boolean).join(" | ")}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null}
                               </div>
                             </div>
                             <div className="col-5">
@@ -8735,6 +8735,7 @@ function CrmOnePageModule() {
   }
 
   function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}) {
+    const normalize = (value) => String(value || "").trim().toLowerCase();
     const sourceId = String(salesOrderRow?.id || "").trim();
     const sourceOrderNo = String(
       salesOrderRow?.orderId
@@ -8743,14 +8744,43 @@ function CrmOnePageModule() {
       || salesOrderRow?.doc_no
       || ""
     ).trim();
+    const sourceCrmReferenceId = String(
+      salesOrderRow?.crmReferenceId
+      || salesOrderRow?.crm_reference_id
+      || ""
+    ).trim();
+    const sourceNameCandidates = new Set([
+      normalize(salesOrderRow?.customerName),
+      normalize(salesOrderRow?.leadName),
+      normalize(salesOrderRow?.company),
+      normalize(salesOrderRow?.clients),
+    ].filter(Boolean));
     return (Array.isArray(rows) ? rows : []).find((row) => {
       const rowSourceId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
       const rowSourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
+      const rowCrmReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+      const rowSourceLeadName = normalize(row?.sourceSalesOrderLeadName || row?.source_sales_order_lead_name || "");
+      const rowSourceClientName = normalize(row?.sourceSalesOrderClientName || row?.source_sales_order_client_name || "");
+      const rowCustomerName = normalize(row?.customerName || row?.customer_name || "");
       if (sourceId && rowSourceId && sourceId === rowSourceId) {
         return true;
       }
       if (sourceOrderNo && rowSourceOrderNo && sourceOrderNo === rowSourceOrderNo) {
         return true;
+      }
+      if (sourceCrmReferenceId && rowCrmReferenceId && sourceCrmReferenceId === rowCrmReferenceId) {
+        return true;
+      }
+      if (sourceNameCandidates.size) {
+        if (rowSourceLeadName && sourceNameCandidates.has(rowSourceLeadName)) {
+          return true;
+        }
+        if (rowSourceClientName && sourceNameCandidates.has(rowSourceClientName)) {
+          return true;
+        }
+        if (rowCustomerName && sourceNameCandidates.has(rowCustomerName)) {
+          return true;
+        }
       }
       return false;
     }) || null;
@@ -8895,11 +8925,39 @@ function CrmOnePageModule() {
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
     const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
+    const sourceCrmReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
+    const normalizedCustomers = (crmAccountsWorkspace?.customers || moduleData?.customers || [])
+      .map((row) => normalizeSharedCustomerRecord(row));
+    const linkedCustomer = normalizedCustomers.find((row) => {
+      const rowRef = String(row.crmReferenceId || "").trim();
+      if (sourceCrmReferenceId && rowRef && sourceCrmReferenceId === rowRef) {
+        return true;
+      }
+      const sourceClientLower = String(normalizedRow.company || normalizedRow.clients || "").trim().toLowerCase();
+      if (!sourceClientLower) {
+        return false;
+      }
+      return [
+        String(row.companyName || "").trim().toLowerCase(),
+        String(row.name || "").trim().toLowerCase(),
+        String(row.clientName || "").trim().toLowerCase(),
+      ].filter(Boolean).includes(sourceClientLower);
+    }) || null;
+    const sourceClientName = String(normalizedRow.company || normalizedRow.clients || "").trim();
+    const sourceLeadName = String(normalizedRow.leadName || normalizedRow.customerName || "").trim();
+    const resolvedCustomerName = String(
+      sourceClientName
+      || linkedCustomer?.companyName
+      || linkedCustomer?.name
+      || linkedCustomer?.clientName
+      || sourceLeadName
+      || ""
+    ).trim();
     return {
       ...baseDocument,
       id: `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       docNo: getNextBillingDocNo(kind, existingRows),
-      customerName: String(normalizedRow.customerName || normalizedRow.leadName || "").trim(),
+      customerName: resolvedCustomerName,
       customerGstin: String(normalizedRow.customerGstin || "").trim(),
       issueDate,
       dueDate,
@@ -8931,8 +8989,8 @@ function CrmOnePageModule() {
       crmReferenceId: String(normalizedRow.crmReferenceId || "").trim(),
       sourceSalesOrderId: String(normalizedRow.id || "").trim(),
       sourceSalesOrderNo: sourceOrderNo,
-      sourceSalesOrderLeadName: String(normalizedRow.customerName || normalizedRow.leadName || "").trim(),
-      sourceSalesOrderClientName: String(normalizedRow.company || normalizedRow.clients || "").trim(),
+      sourceSalesOrderLeadName: sourceLeadName,
+      sourceSalesOrderClientName: sourceClientName,
     };
   }
 
@@ -10685,11 +10743,35 @@ function CrmOnePageModule() {
       }
       const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow);
       closeCrmSalesOrderConvertPopup();
+      const resolveRepairCustomerName = (existingRow = {}) => {
+        const existingCustomerName = String(existingRow.customerName || existingRow.customer_name || "").trim();
+        if (existingCustomerName) {
+          return existingCustomerName;
+        }
+        return String(
+          normalizedRow.company
+          || normalizedRow.clients
+          || normalizedRow.customerName
+          || normalizedRow.leadName
+          || ""
+        ).trim();
+      };
       if (kind === "estimate") {
         const listKey = "estimates";
         const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
         const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
         if (existingConverted) {
+          const repairedCustomerName = resolveRepairCustomerName(existingConverted);
+          if (repairedCustomerName && !String(existingConverted.customerName || existingConverted.customer_name || "").trim()) {
+            await persistCrmAccountsWorkspace({
+              ...crmAccountsWorkspace,
+              [listKey]: existingRows.map((row) => (
+                String(row.id || "").trim() === String(existingConverted.id || "").trim()
+                  ? { ...row, customerName: repairedCustomerName }
+                  : row
+              )),
+            });
+          }
           navigate(`/app/business-autopilot/accounts?tab=estimates&edit-estimate=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
           return;
         }
@@ -10706,6 +10788,17 @@ function CrmOnePageModule() {
         const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
         const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
         if (existingConverted) {
+          const repairedCustomerName = resolveRepairCustomerName(existingConverted);
+          if (repairedCustomerName && !String(existingConverted.customerName || existingConverted.customer_name || "").trim()) {
+            await persistCrmAccountsWorkspace({
+              ...crmAccountsWorkspace,
+              [listKey]: existingRows.map((row) => (
+                String(row.id || "").trim() === String(existingConverted.id || "").trim()
+                  ? { ...row, customerName: repairedCustomerName }
+                  : row
+              )),
+            });
+          }
           navigate(`/app/business-autopilot/accounts?tab=invoices&edit-invoice=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
           return;
         }
@@ -24551,6 +24644,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const paymentEntries = normalizePaymentEntries(row.paymentEntries || row.payment_entries);
     const normalized = {
       ...row,
+      customerName: String(
+        row.customerName
+        || row.customer_name
+        || row.sourceSalesOrderClientName
+        || row.source_sales_order_client_name
+        || row.sourceSalesOrderLeadName
+        || row.source_sales_order_lead_name
+        || ""
+      ).trim(),
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         ...splitDocumentLineDescription(item.description, item.customText),
         id: item.id || createEmptyDocLine().id,
@@ -24707,6 +24809,19 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const [itemPickerState, setItemPickerState] = useState({ open: false, lineId: "" });
     const [itemPickerSearch, setItemPickerSearch] = useState("");
     const [lineItemSearchOpenById, setLineItemSearchOpenById] = useState({});
+    const buildLineTextDrafts = useCallback((items = []) => {
+      const nextDrafts = {};
+      (items || []).forEach((line) => {
+        const lineId = String(line?.id || "").trim();
+        if (!lineId) return;
+        nextDrafts[lineId] = {
+          customText: String(line?.customText || ""),
+          description: String(line?.description || ""),
+        };
+      });
+      return nextDrafts;
+    }, []);
+    const [lineTextDrafts, setLineTextDrafts] = useState(() => buildLineTextDrafts(form.items || []));
     const [customerLockedPopupOpen, setCustomerLockedPopupOpen] = useState(false);
     const [editingPaymentEntryId, setEditingPaymentEntryId] = useState("");
     const paymentSummary = normalizePaymentDetails(form, totals.grandTotal);
@@ -24746,19 +24861,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setLineTextDrafts(buildLineTextDrafts(form.items || []));
     }, [buildLineTextDrafts, editingId, kind, form.id, form.docNo]);
     useEffect(() => {
-      setLineTextDrafts((prev) => {
-        const nextDrafts = {};
-        (form.items || []).forEach((line) => {
-          const lineId = String(line?.id || "").trim();
-          if (!lineId) return;
-          nextDrafts[lineId] = prev[lineId] || {
-            customText: String(line?.customText || ""),
-            description: String(line?.description || ""),
-          };
-        });
-        return nextDrafts;
-      });
-    }, [form.items]);
+      setLineTextDrafts(buildLineTextDrafts(form.items || []));
+    }, [buildLineTextDrafts, form.items]);
     const updateLineTextDraft = (lineId, key, value) => {
       const nextLineId = String(lineId || "").trim();
       if (!nextLineId) return;
@@ -24919,11 +25023,25 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           updateDocLine(kind, lineId, "hsnSacCode", item.hsnSacCode);
         }
       }
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [lineId]: {
+          customText: String(prev[lineId]?.customText || ""),
+          description: String(item.displayName || item.name || ""),
+        },
+      }));
       setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const applyLineCustomTextFromSearch = (lineId, rawValue) => {
       const nextValue = String(rawValue || "");
       updateDocLineDescription(kind, lineId, nextValue);
+      setLineTextDrafts((prev) => ({
+        ...prev,
+        [lineId]: {
+          customText: String(prev[lineId]?.customText || ""),
+          description: nextValue,
+        },
+      }));
       setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const toggleSalesPerson = (name) => {
@@ -24957,10 +25075,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ].map((entry) => String(entry || "").trim().toLowerCase()).includes(itemPickerQueryLower));
     const openItemPicker = (line) => {
       if (!enableItemPicker) return;
-      const seed = String(line?.description || "").trim();
+      const lineId = String(line?.id || "").trim();
+      const seed = String(lineTextDrafts[lineId]?.description ?? line?.description ?? "").trim();
       setItemPickerSearch(seed);
-      setItemPickerState({ open: true, lineId: String(line?.id || "").trim() });
-      setLineItemSearchOpenById((prev) => ({ ...prev, [String(line?.id || "").trim()]: false }));
+      setItemPickerState({ open: true, lineId });
+      setLineItemSearchOpenById((prev) => ({ ...prev, [lineId]: false }));
     };
     const closeItemPicker = () => {
       setItemPickerState({ open: false, lineId: "" });
@@ -25192,22 +25311,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <tbody>
                   {(form.items || []).map((line, rowIndex) => {
                     const lineAmount = parseNumber(line.qty) * parseNumber(line.rate);
-                    const lineQuery = String(line.description || "").trim().toLowerCase();
-                    const lineMatches = billingItemSource
-                      .filter((item) => {
-                        if (!lineQuery) return true;
-                        const haystack = `${item.searchText || ""} ${item.name || ""} ${item.displayName || ""}`.toLowerCase();
-                        return haystack.includes(lineQuery);
-                      })
-                      .slice(0, 8);
-                    const canUseCustomLine = Boolean(lineQuery)
-                      && !lineMatches.some((item) => [
-                        item.name,
-                        item.displayName,
-                        item.id,
-                        item.sku,
-                      ].map((entry) => String(entry || "").trim().toLowerCase()).includes(lineQuery));
-                    const showLineSearchDropdown = enableItemPicker && Boolean(lineItemSearchOpenById[line.id]) && (lineMatches.length || canUseCustomLine);
+                    const linePrimaryDraft = String(lineTextDrafts[line.id]?.description ?? line.description ?? "");
                     return (
                       <tr key={line.id}>
                         <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
@@ -25217,69 +25321,46 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                             value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
                             onChange={(e) => {
                               updateLineTextDraft(line.id, "customText", e.target.value);
-                              updateDocLine(kind, line.id, "customText", e.target.value);
+                            }}
+                            onBlur={() => {
+                              const nextCustomText = lineTextDrafts[line.id]?.customText;
+                              if (typeof nextCustomText === "string" && nextCustomText !== (line.customText || "")) {
+                                updateDocLine(kind, line.id, "customText", nextCustomText);
+                              }
                             }}
                             placeholder="Custom Text (Bill Line 1)"
                           />
                           <div className="row g-2">
                             <div className="col-7">
-                              <div className="crm-inline-suggestions-wrap">
+                              <div className="crm-inline-suggestions-wrap" style={{ position: "relative", overflow: "visible" }}>
                                 <input
                                   className="form-control wz-item-primary-input"
-                                  value={lineTextDrafts[line.id]?.description ?? line.description ?? ""}
+                                  value={linePrimaryDraft}
                                   onFocus={() => {
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
-                                    closeItemPicker();
+                                    if (enableItemPicker) {
+                                      openItemPicker(line);
+                                    }
                                   }}
                                   onClick={() => {
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
-                                    closeItemPicker();
+                                    if (enableItemPicker) {
+                                      openItemPicker(line);
+                                    }
                                   }}
                                   onBlur={() => window.setTimeout(() => {
+                                    const nextDescription = String(lineTextDrafts[line.id]?.description ?? "");
+                                    if (nextDescription !== String(line.description || "")) {
+                                      setPrimaryItemText(line.id, nextDescription);
+                                    }
                                     setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: false }));
                                   }, 140)}
                                   onChange={(e) => {
-                                    updateLineTextDraft(line.id, "description", e.target.value);
-                                    updateDocLineDescription(kind, line.id, e.target.value);
-                                    setLineItemSearchOpenById((prev) => ({ ...prev, [line.id]: enableItemPicker }));
+                                    if (!enableItemPicker) {
+                                      updateLineTextDraft(line.id, "description", e.target.value);
+                                    }
                                   }}
-                                  placeholder={enableItemPicker ? "Type or search item" : "Type item"}
+                                  readOnly={enableItemPicker}
+                                  placeholder={enableItemPicker ? "Click to search item" : "Type item"}
                                 />
-                                {showLineSearchDropdown ? (
-                                  <div className="wz-item-details-suggestions">
-                                    <div className="crm-inline-suggestions__group">
-                                      <div className="crm-inline-suggestions__title">Item Suggestions</div>
-                                      {canUseCustomLine ? (
-                                        <button
-                                          type="button"
-                                          className="crm-inline-suggestions__item"
-                                          onMouseDown={() => applyLineCustomTextFromSearch(line.id, line.description || "")}
-                                        >
-                                          <span className="crm-inline-suggestions__item-main">Add your custom text: {line.description || ""}</span>
-                                          <span className="crm-inline-suggestions__item-sub">Manual entry</span>
-                                        </button>
-                                      ) : null}
-                                      {lineMatches.map((item) => (
-                                        <button
-                                          key={`${kind}-line-search-${line.id}-${item.source}-${item.id || item.name}`}
-                                          type="button"
-                                          className="crm-inline-suggestions__item"
-                                          onMouseDown={() => applyLineItemFromSearch(line.id, item)}
-                                        >
-                                          <span className="crm-inline-suggestions__item-main">{item.displayName || item.name || "-"}</span>
-                                          <span className="crm-inline-suggestions__item-sub">
-                                            {[
-                                              item.source,
-                                              item.sku ? `SKU: ${item.sku}` : "",
-                                              item.branchName ? `Branch: ${item.branchName}` : "",
-                                              item.hsnSacCode ? `HSN/SAC: ${item.hsnSacCode}` : "",
-                                            ].filter(Boolean).join(" | ")}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null}
                               </div>
                             </div>
                             <div className="col-5">
