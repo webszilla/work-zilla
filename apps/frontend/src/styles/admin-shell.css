@@ -10,6 +10,7 @@
   --wz-accent-soft: rgba(var(--color-accent-rgb, 56, 189, 248), 0.14);
   --wz-sidebar-width: 288px;
   --wz-sidebar-collapsed-width: 96px;
+  --wz-section-space-y: 30px;
 }
 
 html[data-theme="light"] {
@@ -442,6 +443,18 @@ html[data-theme="light"] .wz-topbar .sidebar-toggle {
   background: transparent;
   box-shadow: none;
   overflow: visible;
+}
+
+/* Common section spacing for all product dashboards.
+   Update only --wz-section-space-y to increase/decrease globally. */
+.wz-route-surface > :is(.d-flex.flex-column, .d-flex.flex-column.gap-3),
+.wz-route-surface > * > :is(.d-flex.flex-column, .d-flex.flex-column.gap-3) {
+  row-gap: var(--wz-section-space-y, 30px) !important;
+  gap: var(--wz-section-space-y, 30px) !important;
+}
+
+.wz-section-spacing {
+  margin-bottom: var(--wz-section-space-y, 30px) !important;
 }
 
 .wz-route-surface--saas-admin {

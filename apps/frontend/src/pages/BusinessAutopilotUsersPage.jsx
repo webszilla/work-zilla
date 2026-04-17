@@ -833,7 +833,7 @@ function readPendingCrmSalesOrderDraft(preferredOrgId = "") {
         continue;
       }
       const parsed = JSON.parse(raw);
-      if (parsed?.sourceDeal?.id) {
+      if (parsed?.sourceDeal?.id || parsed?.sourceSalesOrder?.id) {
         return parsed;
       }
     }
@@ -841,16 +841,6 @@ function readPendingCrmSalesOrderDraft(preferredOrgId = "") {
     // Ignore invalid pending sales-order drafts.
   }
   return null;
-}
-
-function clearPendingCrmSalesOrderDraft(preferredOrgId = "") {
-  try {
-    resolveCrmSalesOrderDraftStorageKeys(preferredOrgId).forEach((key) => {
-      window.localStorage.removeItem(key);
-    });
-  } catch {
-    // Ignore storage clear failures.
-  }
 }
 
 function writeBusinessAutopilotUserDirectory(users) {
@@ -2956,8 +2946,7 @@ export default function BusinessAutopilotUsersPage() {
       title: editingClientId ? "Client Updated" : "Client Created",
       confirmText: "OK",
     });
-    if (pendingSalesOrderDraft?.sourceDeal?.id) {
-      clearPendingCrmSalesOrderDraft(conversionDraftForThisSave?.orgId);
+    if (pendingSalesOrderDraft?.sourceDeal?.id || pendingSalesOrderDraft?.sourceSalesOrder?.id) {
       navigate("../crm?tab=sales-orders&resume-sales-order=1", { relative: "path" });
     }
   }

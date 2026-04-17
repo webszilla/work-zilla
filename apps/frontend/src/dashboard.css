@@ -6016,6 +6016,20 @@ html[data-theme="dark"] .wz-country-picker__search {
   position: relative;
 }
 
+.wz-ticketing-form-card,
+.wz-ticketing-form-card .row,
+.wz-ticketing-form-card [class*="col-"] {
+  overflow: visible !important;
+}
+
+.wz-ticketing-form-card .crm-inline-suggestions-wrap {
+  z-index: 1200;
+}
+
+.wz-ticketing-form-card .crm-inline-suggestions {
+  z-index: 3200;
+}
+
 .wz-accounts-item-table {
   overflow-x: hidden !important;
   overflow-y: visible !important;
@@ -6096,6 +6110,10 @@ html[data-theme="dark"] .wz-country-picker__search {
 .wz-item-picker-modal__body {
   padding: 0 0.95rem 0.9rem;
   overflow-y: auto;
+}
+
+.wz-item-picker-modal__body.row {
+  margin: 0;
 }
 
 .wz-item-picker-modal__body .crm-inline-suggestions__group {
