@@ -912,6 +912,26 @@ const STOCKS_TAB_CONFIG = {
       { key: "qty", label: "Qty", placeholder: "25" }
     ]
   },
+  assets: {
+    label: "Assets",
+    itemLabel: "Asset",
+    columns: [
+      { key: "assetName", label: "Asset Name" },
+      { key: "modelNumber", label: "Model Number" },
+      { key: "serialNumber", label: "Serial Number" },
+      { key: "branchId", label: "Branch" },
+      { key: "usedBy", label: "Used By" },
+      { key: "documentName", label: "Document" }
+    ],
+    fields: [
+      { key: "assetName", label: "Asset Name", placeholder: "Dell Latitude 5440" },
+      { key: "branchId", label: "Branch", placeholder: "Search and select branch" },
+      { key: "usedBy", label: "Used By", placeholder: "Search and select user" },
+      { key: "modelNumber", label: "Model Number", required: false, placeholder: "LAT-5440-I5" },
+      { key: "serialNumber", label: "Serial Number", required: false, placeholder: "SN-AX7Y22K4" },
+      { key: "documentName", label: "Upload (PDF only, max 500KB)", type: "file", required: false, placeholder: "Upload asset document" }
+    ]
+  },
   mainCategories: {
     label: "Main Category",
     itemLabel: "Main Category",
@@ -978,6 +998,18 @@ const DEFAULT_STOCKS_DATA = {
       branchId: STOCKS_DEFAULT_BRANCH_ID,
       category: "Electronics / Printers",
       qty: "4"
+    }
+  ],
+  assets: [
+    {
+      id: "sa1",
+      assetName: "Dell Latitude 5440",
+      modelNumber: "LAT-5440-I5",
+      serialNumber: "SN-DL5440-001",
+      branchId: STOCKS_DEFAULT_BRANCH_ID,
+      usedBy: "Kumar",
+      documentName: "",
+      documentDataUrl: ""
     }
   ],
   settings: {
@@ -1478,7 +1510,19 @@ function resolveDefaultGstTemplateId(gstTemplates = []) {
   return String(firstAvailable?.id || "").trim();
 }
 
-function createEmptyBillingDocument(kind = "invoice", existingRows = [], gstTemplates = []) {
+function resolveDefaultBillingTemplateId(billingTemplates = []) {
+  const rows = Array.isArray(billingTemplates) ? billingTemplates : [];
+  const firstActive = rows.find((row) => (
+    String(row?.status || "").trim().toLowerCase() === "active" && String(row?.id || "").trim()
+  ));
+  if (firstActive) {
+    return String(firstActive.id || "").trim();
+  }
+  const firstAvailable = rows.find((row) => String(row?.id || "").trim());
+  return String(firstAvailable?.id || "").trim();
+}
+
+function createEmptyBillingDocument(kind = "invoice", existingRows = [], gstTemplates = [], billingTemplates = []) {
   const today = new Date().toISOString().slice(0, 10);
   return {
     id: "",
@@ -1490,7 +1534,7 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = [], gstTemp
     dueDate: today,
     status: "Draft",
     gstTemplateId: resolveDefaultGstTemplateId(gstTemplates),
-    billingTemplateId: "",
+    billingTemplateId: resolveDefaultBillingTemplateId(billingTemplates),
     salesperson: "",
     billingAddress: "",
     notes: "Thank you for your business.",
@@ -1528,7 +1572,7 @@ function getNextCrmSalesOrderNo(existingRows = []) {
   return `${prefix}-${dayKey}-${String(maxSeq + 1).padStart(3, "0")}`;
 }
 
-function createEmptyCrmSalesOrder(existingRows = []) {
+function createEmptyCrmSalesOrder(existingRows = [], billingTemplates = []) {
   const today = new Date().toISOString().slice(0, 10);
   const nextOrderId = getNextCrmSalesOrderNo(existingRows);
   return {
@@ -1543,7 +1587,7 @@ function createEmptyCrmSalesOrder(existingRows = []) {
     dueDate: today,
     status: "Pending",
     gstTemplateId: "",
-    billingTemplateId: "",
+    billingTemplateId: resolveDefaultBillingTemplateId(billingTemplates),
     salesperson: [],
     billingAddress: "",
     notes: "Thank you for your business.",
@@ -1752,12 +1796,37 @@ function normalizeStocksWorkspaceData(payload = DEFAULT_STOCKS_DATA) {
         };
       })
     : [];
+  const assets = Array.isArray(source.assets)
+    ? source.assets.map((row, index) => {
+        const candidateId = String(row?.branchId || row?.branch_id || row?.branch || "").trim();
+        const candidateName = String(row?.branchName || row?.branch_name || "").trim().toLowerCase();
+        const candidateCode = String(row?.branchCode || row?.branch_code || "").trim().toLowerCase();
+        const branchMatch =
+          branchLookup.get(candidateId)
+          || branchNameLookup.get(candidateName)
+          || branchCodeLookup.get(candidateCode)
+          || null;
+        const branchId = branchMatch?.id || defaultBranchId;
+        return {
+          ...row,
+          id: String(row?.id || `sa_${index + 1}`).trim() || `${STOCKS_DEFAULT_BRANCH_ID}_asset_${index + 1}`,
+          assetName: String(row?.assetName || row?.itemName || row?.name || "").trim(),
+          modelNumber: String(row?.modelNumber || row?.model || "").trim(),
+          serialNumber: String(row?.serialNumber || row?.serial || "").trim(),
+          usedBy: String(row?.usedBy || row?.assignee || row?.assignedTo || "").trim(),
+          documentName: String(row?.documentName || row?.document || "").trim(),
+          documentDataUrl: String(row?.documentDataUrl || row?.documentUrl || "").trim(),
+          branchId,
+        };
+      })
+    : [];
   return {
     ...source,
     branches,
     mainCategories: Array.isArray(source.mainCategories) ? source.mainCategories : [],
     subCategories: Array.isArray(source.subCategories) ? source.subCategories : [],
     items,
+    assets,
     settings: {
       ...(source.settings || {}),
       stockAlerts: normalizeStockAlertSettings(source.settings?.stockAlerts || {}),
@@ -7145,7 +7214,7 @@ function BillingDocumentEditor({
               </div>
               <div className="col-12 col-md-6 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Billing Template *</label>
-                <select className="form-select" required value={form.billingTemplateId || ""} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
                   <option value="">Select Billing Template</option>
                   {billingTemplates.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -7719,7 +7788,7 @@ function CrmOnePageModule() {
     }
   });
   const [crmSalesOrderTab, setCrmSalesOrderTab] = useState("list");
-  const [crmSalesOrderForm, setCrmSalesOrderForm] = useState(() => createEmptyCrmSalesOrder([]));
+  const [crmSalesOrderForm, setCrmSalesOrderForm] = useState(() => createEmptyCrmSalesOrder([], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
   const [editingCrmSalesOrderId, setEditingCrmSalesOrderId] = useState("");
   const [crmSalesOrderEditorOpen, setCrmSalesOrderEditorOpen] = useState(false);
   const [crmSalesOrderNotice, setCrmSalesOrderNotice] = useState("");
@@ -7737,6 +7806,18 @@ function CrmOnePageModule() {
     notes: "",
   });
   const [editingCrmGstId, setEditingCrmGstId] = useState("");
+
+  useEffect(() => {
+    const defaultBillingTemplateId = resolveDefaultBillingTemplateId(moduleData?.billingTemplates || []);
+    if (!defaultBillingTemplateId) {
+      return;
+    }
+    setCrmSalesOrderForm((prev) => (
+      String(prev?.billingTemplateId || "").trim()
+        ? prev
+        : { ...prev, billingTemplateId: defaultBillingTemplateId }
+    ));
+  }, [moduleData?.billingTemplates]);
   const sectionFormRef = useRef(null);
   const crmSalesOrderResumeSearchRef = useRef("");
   const crmCurrencyCode = String(getOrgCurrency() || "INR").trim().toUpperCase() || "INR";
@@ -8794,7 +8875,6 @@ function CrmOnePageModule() {
   }
 
   function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}) {
-    const normalize = (value) => String(value || "").trim().toLowerCase();
     const sourceId = String(salesOrderRow?.id || "").trim();
     const sourceOrderNo = String(
       salesOrderRow?.orderId
@@ -8803,40 +8883,14 @@ function CrmOnePageModule() {
       || salesOrderRow?.doc_no
       || ""
     ).trim();
-    const sourceCrmReferenceId = String(
-      salesOrderRow?.crmReferenceId
-      || salesOrderRow?.crm_reference_id
-      || ""
-    ).trim();
-    const sourceNameCandidates = new Set([
-      normalize(salesOrderRow?.customerName),
-      normalize(salesOrderRow?.leadName),
-      normalize(salesOrderRow?.company),
-      normalize(salesOrderRow?.clients),
-    ].filter(Boolean));
     return (Array.isArray(rows) ? rows : []).find((row) => {
       const rowSourceId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
       const rowSourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
-      const rowCrmReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
-      const rowSourceLeadName = normalize(row?.sourceSalesOrderLeadName || row?.source_sales_order_lead_name || "");
-      const rowSourceClientName = normalize(row?.sourceSalesOrderClientName || row?.source_sales_order_client_name || "");
       if (sourceId && rowSourceId && sourceId === rowSourceId) {
         return true;
       }
       if (sourceOrderNo && rowSourceOrderNo && sourceOrderNo === rowSourceOrderNo) {
         return true;
-      }
-      if (sourceCrmReferenceId && rowCrmReferenceId && sourceCrmReferenceId === rowCrmReferenceId) {
-        return true;
-      }
-      const hasPipelineMeta = Boolean(rowSourceId || rowSourceOrderNo || rowSourceLeadName || rowSourceClientName);
-      if (sourceNameCandidates.size) {
-        if (hasPipelineMeta && rowSourceLeadName && sourceNameCandidates.has(rowSourceLeadName)) {
-          return true;
-        }
-        if (hasPipelineMeta && rowSourceClientName && sourceNameCandidates.has(rowSourceClientName)) {
-          return true;
-        }
       }
       return false;
     }) || null;
@@ -8976,7 +9030,12 @@ function CrmOnePageModule() {
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
-    const baseDocument = createEmptyBillingDocument(kind, existingRows, crmAccountsWorkspace?.gstTemplates || moduleData?.gstTemplates || []);
+    const baseDocument = createEmptyBillingDocument(
+      kind,
+      existingRows,
+      crmAccountsWorkspace?.gstTemplates || moduleData?.gstTemplates || [],
+      crmAccountsWorkspace?.billingTemplates || moduleData?.billingTemplates || []
+    );
     const todayIso = new Date().toISOString().slice(0, 10);
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
@@ -9018,7 +9077,7 @@ function CrmOnePageModule() {
       issueDate,
       dueDate,
       gstTemplateId: String(normalizedRow.gstTemplateId || resolveDefaultGstTemplateId(crmAccountsWorkspace?.gstTemplates || moduleData?.gstTemplates || []) || "").trim(),
-      billingTemplateId: String(normalizedRow.billingTemplateId || "").trim(),
+      billingTemplateId: String(normalizedRow.billingTemplateId || resolveDefaultBillingTemplateId(crmAccountsWorkspace?.billingTemplates || moduleData?.billingTemplates || []) || "").trim(),
       salesperson: Array.isArray(normalizedRow.salesperson)
         ? normalizedRow.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(normalizedRow.salesperson || normalizedRow.assignedTo || "").trim(),
@@ -10259,7 +10318,7 @@ function CrmOnePageModule() {
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(false);
     setCrmSalesOrderNotice("");
-    setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || []));
+    setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []));
   }
 
   function openCrmSalesOrderCreate(prefill = null) {
@@ -10267,10 +10326,16 @@ function CrmOnePageModule() {
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
-    const baseForm = prefill ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || []), ...prefill } : createEmptyCrmSalesOrder(moduleData.salesOrders || []);
+    const baseForm = prefill
+      ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []), ...prefill }
+      : createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []);
     const fallbackGstTemplateId = String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
+    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(moduleData.billingTemplates || []);
     if (!String(baseForm.gstTemplateId || "").trim() && fallbackGstTemplateId) {
       baseForm.gstTemplateId = fallbackGstTemplateId;
+    }
+    if (!String(baseForm.billingTemplateId || "").trim() && fallbackBillingTemplateId) {
+      baseForm.billingTemplateId = fallbackBillingTemplateId;
     }
     if (!String(baseForm.crmReferenceId || "").trim()) {
       baseForm.crmReferenceId = resolveCrmReferenceIdByText(baseForm.customerName || baseForm.company || "");
@@ -10336,6 +10401,7 @@ function CrmOnePageModule() {
       || ""
     ).trim(),
     gstTemplateId: String(dealRow?.gstTemplateId || fallbackGstTemplateId || "").trim(),
+    billingTemplateId: String(dealRow?.billingTemplateId || resolveDefaultBillingTemplateId(moduleData.billingTemplates || []) || "").trim(),
     docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
       customerName: matchedCustomer?.companyName || matchedCustomer?.name || companyName || String(dealRow?.dealName || "").trim(),
       customerGstin: String(matchedCustomer?.gstin || "").trim(),
@@ -10493,7 +10559,7 @@ function CrmOnePageModule() {
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
     setCrmSalesOrderForm({
-      ...createEmptyCrmSalesOrder(moduleData.salesOrders || []),
+      ...createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []),
       ...row,
       crmReferenceId: String(row?.crmReferenceId || row?.crm_reference_id || "").trim(),
       orderId: String(row?.orderId || row?.order_id || "").trim(),
@@ -20451,6 +20517,10 @@ function CategoryCrudModule({
   const [inventoryBranchFilter, setInventoryBranchFilter] = useState("all");
   const [inventoryBranchSearchOpen, setInventoryBranchSearchOpen] = useState(false);
   const [inventoryBranchSearchText, setInventoryBranchSearchText] = useState("");
+  const [assetBranchSearchOpen, setAssetBranchSearchOpen] = useState(false);
+  const [assetBranchSearchText, setAssetBranchSearchText] = useState("");
+  const [assetUserSearchOpen, setAssetUserSearchOpen] = useState(false);
+  const [assetUserSearchText, setAssetUserSearchText] = useState("");
   const [inventoryMainCategorySearchOpen, setInventoryMainCategorySearchOpen] = useState(false);
   const [inventoryMainCategorySearchText, setInventoryMainCategorySearchText] = useState("");
   const [inventorySubCategorySearchOpen, setInventorySubCategorySearchOpen] = useState(false);
@@ -20458,6 +20528,7 @@ function CategoryCrudModule({
   const extraTabKeys = useMemo(() => (extraTabs || []).map((tab) => tab.key), [extraTabs]);
   const isStocksModule = storageKey === STOCKS_STORAGE_KEY;
   const isInventoryItemsTab = isStocksModule && activeTab === "items";
+  const isInventoryAssetsTab = isStocksModule && activeTab === "assets";
   const inventoryBranches = useMemo(
     () => (Array.isArray(moduleData.branches) ? moduleData.branches : []).map((row, index) => normalizeStockBranch(row, index)),
     [moduleData.branches]
@@ -20467,7 +20538,7 @@ function CategoryCrudModule({
     [inventoryBranches]
   );
   const inventoryBranchMatches = useMemo(() => {
-    if (!isInventoryItemsTab) {
+    if (!isInventoryItemsTab && !isInventoryAssetsTab) {
       return [];
     }
     const query = String(inventoryBranchSearchText || "").trim().toLowerCase();
@@ -20485,7 +20556,27 @@ function CategoryCrudModule({
         })
       : rows;
     return filtered.slice(0, 8);
-  }, [inventoryBranches, inventoryBranchSearchText, isInventoryItemsTab]);
+  }, [inventoryBranches, inventoryBranchSearchText, isInventoryAssetsTab, isInventoryItemsTab]);
+  const assetBranchMatches = useMemo(() => {
+    if (!isInventoryAssetsTab) {
+      return [];
+    }
+    const query = String(assetBranchSearchText || "").trim().toLowerCase();
+    const rows = Array.isArray(inventoryBranches) ? inventoryBranches : [];
+    const filtered = query
+      ? rows.filter((branch) => {
+          const haystack = [
+            branch.branchName || "",
+            branch.branchCode || "",
+            branch.address || "",
+            branch.phone || "",
+            getStockBranchDisplayName(inventoryBranches, branch.id),
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        })
+      : rows;
+    return filtered.slice(0, 8);
+  }, [assetBranchSearchText, inventoryBranches, isInventoryAssetsTab]);
 
   useEffect(() => {
     try {
@@ -20514,7 +20605,7 @@ function CategoryCrudModule({
       Array.isArray(tab?.fields) && tab.fields.some((field) => field.key === "department")
     );
     const needsUserDropdown = Object.values(tabConfig).some((tab) =>
-      Array.isArray(tab?.fields) && tab.fields.some((field) => field.key === "assignedTo" || field.key === "assignee")
+      Array.isArray(tab?.fields) && tab.fields.some((field) => field.key === "assignedTo" || field.key === "assignee" || field.key === "usedBy")
     );
     if (!needsDepartmentDropdown && !needsUserDropdown) {
       return () => {
@@ -20570,6 +20661,8 @@ function CategoryCrudModule({
   useEffect(() => {
     setEditingId("");
     setInventoryBranchSearchOpen(false);
+    setAssetBranchSearchOpen(false);
+    setAssetUserSearchOpen(false);
     setInventoryMainCategorySearchOpen(false);
     setInventorySubCategorySearchOpen(false);
     if (activeTab === "categories" || extraTabKeys.includes(activeTab)) {
@@ -20583,7 +20676,10 @@ function CategoryCrudModule({
     if (isInventoryItemsTab) {
       setFormValues((prev) => ({ ...prev, branchId: inventoryDefaultBranchId }));
     }
-  }, [activeTab, inventoryDefaultBranchId, isInventoryItemsTab, tabConfig, extraTabKeys]);
+    if (isInventoryAssetsTab) {
+      setFormValues((prev) => ({ ...prev, branchId: inventoryDefaultBranchId, documentDataUrl: "" }));
+    }
+  }, [activeTab, inventoryDefaultBranchId, isInventoryAssetsTab, isInventoryItemsTab, tabConfig, extraTabKeys]);
 
   useEffect(() => {
     if (!tabConfig?.tickets) {
@@ -20607,6 +20703,25 @@ function CategoryCrudModule({
     const selectedBranchId = String(formValues.branchId || inventoryDefaultBranchId || "").trim();
     setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, selectedBranchId));
   }, [activeTab, formValues.branchId, inventoryBranches, inventoryBranchSearchOpen, inventoryDefaultBranchId, isInventoryItemsTab]);
+  useEffect(() => {
+    if (!isInventoryAssetsTab) {
+      return;
+    }
+    if (assetBranchSearchOpen) {
+      return;
+    }
+    const selectedBranchId = String(formValues.branchId || inventoryDefaultBranchId || "").trim();
+    setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, selectedBranchId));
+  }, [activeTab, assetBranchSearchOpen, formValues.branchId, inventoryBranches, inventoryDefaultBranchId, isInventoryAssetsTab]);
+  useEffect(() => {
+    if (!isInventoryAssetsTab) {
+      return;
+    }
+    if (assetUserSearchOpen) {
+      return;
+    }
+    setAssetUserSearchText(String(formValues.usedBy || "").trim());
+  }, [activeTab, assetUserSearchOpen, formValues.usedBy, isInventoryAssetsTab]);
 
   useEffect(() => {
     if (!isInventoryItemsTab) {
@@ -20634,8 +20749,23 @@ function CategoryCrudModule({
     const nonCategoryEntries = Object.entries(tabConfig)
       .filter(([tabKey]) => tabKey !== "mainCategories" && tabKey !== "subCategories")
       .map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
+    if (isStocksModule) {
+      const assetsTab = nonCategoryEntries.find((tab) => tab.key === "assets");
+      const baseTabs = nonCategoryEntries.filter((tab) => tab.key !== "assets");
+      const branchTab = (extraTabs || []).find((tab) => tab.key === "branches");
+      const settingTab = (extraTabs || []).find((tab) => tab.key === "settings");
+      const otherExtraTabs = (extraTabs || []).filter((tab) => tab.key !== "branches" && tab.key !== "settings");
+      return [
+        ...baseTabs,
+        { key: "categories", label: "Category" },
+        ...(branchTab ? [branchTab] : []),
+        ...(assetsTab ? [assetsTab] : []),
+        ...otherExtraTabs,
+        ...(settingTab ? [settingTab] : []),
+      ];
+    }
     return [...nonCategoryEntries, { key: "categories", label: "Category" }, ...(extraTabs || [])];
-  }, [hasCombinedCategoryTabs, tabConfig, extraTabs]);
+  }, [extraTabs, hasCombinedCategoryTabs, isStocksModule, tabConfig]);
   const hasOverviewTab = useMemo(
     () => Object.prototype.hasOwnProperty.call(tabConfig || {}, "overview"),
     [tabConfig]
@@ -20734,6 +20864,24 @@ function CategoryCrudModule({
     }
     return currentRows.filter((row) => String(row?.branchId || inventoryDefaultBranchId).trim() === selectedBranchId);
   }, [currentRows, inventoryBranchFilter, inventoryDefaultBranchId, isInventoryItemsTab]);
+  const inventoryAssetFilteredRows = useMemo(() => {
+    if (!isInventoryAssetsTab) {
+      return currentRows;
+    }
+    const selectedBranchId = String(inventoryBranchFilter || "all").trim();
+    if (!selectedBranchId || selectedBranchId === "all") {
+      return currentRows;
+    }
+    return currentRows.filter((row) => String(row?.branchId || inventoryDefaultBranchId).trim() === selectedBranchId);
+  }, [currentRows, inventoryBranchFilter, inventoryDefaultBranchId, isInventoryAssetsTab]);
+  const assetUserMatches = useMemo(() => {
+    if (!isInventoryAssetsTab) {
+      return [];
+    }
+    const query = String(assetUserSearchText || "").trim().toLowerCase();
+    const rows = Array.isArray(ticketingUserOptions) ? ticketingUserOptions : [];
+    return (query ? rows.filter((name) => String(name || "").toLowerCase().includes(query)) : rows).slice(0, 8);
+  }, [assetUserSearchText, isInventoryAssetsTab, ticketingUserOptions]);
   const ticketingMainCategoryOptions = useMemo(
     () => Array.from(new Set((moduleData.mainCategories || []).map((row) => String(row?.name || "").trim()).filter(Boolean))),
     [moduleData.mainCategories]
@@ -20780,8 +20928,10 @@ function CategoryCrudModule({
 
   function onEditRow(row) {
     setEditingId(row.id);
-    if (isInventoryItemsTab) {
+    if (isInventoryItemsTab || isInventoryAssetsTab) {
       setInventoryBranchSearchOpen(false);
+      setAssetBranchSearchOpen(false);
+      setAssetUserSearchOpen(false);
       setInventoryMainCategorySearchOpen(false);
       setInventorySubCategorySearchOpen(false);
     }
@@ -20813,13 +20963,20 @@ function CategoryCrudModule({
       }
       nextValues[field.key] = row[field.key] || "";
     });
+    if (isInventoryAssetsTab) {
+      nextValues.documentDataUrl = String(row.documentDataUrl || "").trim();
+      setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, row.branchId || inventoryDefaultBranchId || ""));
+      setAssetUserSearchText(String(row.usedBy || "").trim());
+    }
     setFormValues(nextValues);
   }
 
   function onCancelEdit() {
     setEditingId("");
-    if (isInventoryItemsTab) {
+    if (isInventoryItemsTab || isInventoryAssetsTab) {
       setInventoryBranchSearchOpen(false);
+      setAssetBranchSearchOpen(false);
+      setAssetUserSearchOpen(false);
       setInventoryMainCategorySearchOpen(false);
       setInventorySubCategorySearchOpen(false);
     }
@@ -20829,6 +20986,12 @@ function CategoryCrudModule({
       setInventoryBranchSearchText(getStockBranchDisplayName(inventoryBranches, inventoryDefaultBranchId || ""));
       setInventoryMainCategorySearchText("");
       setInventorySubCategorySearchText("");
+    }
+    if (isInventoryAssetsTab) {
+      emptyValues.branchId = inventoryDefaultBranchId || "";
+      emptyValues.documentDataUrl = "";
+      setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, inventoryDefaultBranchId || ""));
+      setAssetUserSearchText("");
     }
     setFormValues(emptyValues);
     window.requestAnimationFrame(() => {
@@ -20869,6 +21032,9 @@ function CategoryCrudModule({
       setFormValues((prev) => ({ ...prev, ...effectiveValues }));
     }
     const missingFields = config.fields.filter((field) => {
+      if (field.required === false) {
+        return false;
+      }
       if (field.type === "date") {
         return !normalizeMeetingDateValue(effectiveValues[field.key]);
       }
@@ -20900,6 +21066,13 @@ function CategoryCrudModule({
       payload.subCategory = subCategory;
       payload.branchId = branchId;
       payload.category = [mainCategory, subCategory].filter(Boolean).join(" / ");
+    }
+    if (isInventoryAssetsTab) {
+      const branchId = String(payload.branchId || "").trim() || inventoryDefaultBranchId || "";
+      payload.branchId = branchId;
+      payload.usedBy = String(payload.usedBy || "").trim();
+      payload.documentName = String(payload.documentName || "").trim();
+      payload.documentDataUrl = String(effectiveValues.documentDataUrl || "").trim();
     }
     if (isTicketingTicketsTab) {
       const mainCategory = String(payload.mainCategory || "").trim();
@@ -21153,7 +21326,7 @@ function CategoryCrudModule({
 
       {isExtraTab && typeof renderExtraTabContent === "function" ? renderExtraTabContent({ activeTab, moduleData, setModuleData }) : null}
 
-      {activeTab !== "categories" && !isExtraTab && activeTab !== "tickets" && !isInventoryItemsTab ? (
+      {activeTab !== "categories" && !isExtraTab && activeTab !== "tickets" && !isInventoryItemsTab && !isInventoryAssetsTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
           badgeLabel={`${currentRows.length} items`}
@@ -21204,7 +21377,16 @@ function CategoryCrudModule({
                         subCategory: "col-12 col-md-6 col-xl-2",
                         qty: "col-12 col-md-3 col-xl-1",
                       }[field.key] || "col-12 col-md-6 col-xl-2")
-                  : isTicketingTicketsTab
+                    : isInventoryAssetsTab
+                      ? ({
+                          assetName: "col-12 col-md-6 col-xl-2",
+                          branchId: "col-12 col-md-6 col-xl-2",
+                          usedBy: "col-12 col-md-6 col-xl-2",
+                          modelNumber: "col-12 col-md-6 col-xl-2",
+                          serialNumber: "col-12 col-md-6 col-xl-2",
+                          documentName: "col-12 col-md-6 col-xl-2",
+                        }[field.key] || "col-12 col-md-6 col-xl-2")
+                    : isTicketingTicketsTab
                     ? ({
                         ticketNo: "col-12 col-md-6 col-xl-1",
                         clientCompany: "col-12 col-md-6 col-xl-3",
@@ -21222,7 +21404,7 @@ function CategoryCrudModule({
                 key={field.key}
               >
                 <label className="form-label small text-secondary mb-1">
-                  {field.label}{isStocksModule ? " *" : ""}
+                  {field.label}{isStocksModule && field.required !== false ? " *" : ""}
                 </label>
                 {field.key === "department" && departmentOptions.length ? (
                   <select
@@ -21692,11 +21874,167 @@ function CategoryCrudModule({
                       )
                     ) : null}
                   </div>
+                ) : isInventoryAssetsTab && field.key === "branchId" ? (
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      autoComplete="off"
+                      required={isStocksModule}
+                      placeholder="Search Branch"
+                      value={assetBranchSearchText}
+                      onFocus={() => {
+                        setAssetBranchSearchOpen(true);
+                        if (!String(assetBranchSearchText || "").trim()) {
+                          setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, formValues.branchId || inventoryDefaultBranchId));
+                        }
+                      }}
+                      onClick={() => {
+                        setAssetBranchSearchOpen(true);
+                        if (!String(assetBranchSearchText || "").trim()) {
+                          setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, formValues.branchId || inventoryDefaultBranchId));
+                        }
+                      }}
+                      onBlur={() => window.setTimeout(() => setAssetBranchSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setAssetBranchSearchText(nextValue);
+                        setAssetBranchSearchOpen(true);
+                        setFormValues((prev) => ({ ...prev, branchId: "" }));
+                      }}
+                    />
+                    {assetBranchSearchOpen ? (
+                      assetBranchMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Branches</div>
+                            {assetBranchMatches.map((branch) => (
+                              <button
+                                key={`asset-branch-${branch.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setFormValues((prev) => ({ ...prev, branchId: branch.id }));
+                                  setAssetBranchSearchText(getStockBranchDisplayName(inventoryBranches, branch.id));
+                                  setAssetBranchSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">
+                                  {getStockBranchDisplayName(inventoryBranches, branch.id)}
+                                </span>
+                                <span className="crm-inline-suggestions__item-sub">
+                                  {branch.address || branch.phone || "Branch location"}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No branches found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                ) : isInventoryAssetsTab && field.key === "usedBy" ? (
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      autoComplete="off"
+                      required={isStocksModule}
+                      placeholder={field.placeholder}
+                      value={assetUserSearchText}
+                      onFocus={() => setAssetUserSearchOpen(true)}
+                      onClick={() => setAssetUserSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setAssetUserSearchOpen(false), 120)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setAssetUserSearchText(nextValue);
+                        setAssetUserSearchOpen(true);
+                        setFormValues((prev) => ({ ...prev, usedBy: nextValue }));
+                      }}
+                    />
+                    {assetUserSearchOpen ? (
+                      assetUserMatches.length ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Users</div>
+                            {assetUserMatches.map((user) => (
+                              <button
+                                key={`asset-user-${user}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setFormValues((prev) => ({ ...prev, usedBy: user }));
+                                  setAssetUserSearchText(user);
+                                  setAssetUserSearchOpen(false);
+                                }}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{user}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__item">
+                            <span className="crm-inline-suggestions__item-main">No users found</span>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                ) : isInventoryAssetsTab && field.key === "documentName" ? (
+                  <div className="d-flex flex-column gap-2">
+                    <input
+                      type="file"
+                      className="form-control"
+                      accept=".pdf,application/pdf"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) {
+                          return;
+                        }
+                        const isPdf = /\.pdf$/i.test(String(file.name || "")) || String(file.type || "").toLowerCase() === "application/pdf";
+                        if (!isPdf) {
+                          setCategoryNotice("Only PDF files are allowed.");
+                          event.target.value = "";
+                          return;
+                        }
+                        if (Number(file.size || 0) > 500 * 1024) {
+                          setCategoryNotice("Upload file size must be 500KB or below.");
+                          event.target.value = "";
+                          return;
+                        }
+                        setCategoryNotice("");
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const dataUrl = typeof reader.result === "string" ? reader.result : "";
+                          setFormValues((prev) => ({
+                            ...prev,
+                            documentName: String(file.name || "").trim(),
+                            documentDataUrl: dataUrl,
+                          }));
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                    {formValues.documentName ? (
+                      <div className="small text-secondary text-truncate" title={formValues.documentName}>
+                        {formValues.documentName}
+                      </div>
+                    ) : null}
+                  </div>
                 ) : (
                   <input
                     type={field.type || "text"}
                     className="form-control"
-                    required={isStocksModule}
+                    required={isStocksModule && field.required !== false}
                     placeholder={field.placeholder}
                     value={formValues[field.key] || ""}
                     maxLength={["time", "date", "number", "file"].includes(field.type) ? undefined : getBusinessAutopilotMaxLength(field.key)}
@@ -21723,8 +22061,26 @@ function CategoryCrudModule({
                 </div>
               </div>
             ) : null}
+            {isInventoryAssetsTab ? (
+              <div className="col-12 d-flex justify-content-end">
+                <div className="d-flex gap-2">
+                  <button type="submit" className="btn btn-success btn-sm single-row-form-submit-btn">
+                    {editingId ? "Update" : "Create"}
+                  </button>
+                  {editingId ? (
+                    <button
+                      type="button"
+                      className="btn btn-outline-light btn-sm single-row-form-submit-btn"
+                      onClick={onCancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
-          {!isInventoryItemsTab ? <div className="d-flex gap-2">
+          {!isInventoryItemsTab && !isInventoryAssetsTab ? <div className="d-flex gap-2">
             <button type="submit" className="btn btn-success btn-sm">
               {editingId ? "Update" : "Create"}
             </button>
@@ -21738,11 +22094,11 @@ function CategoryCrudModule({
       </div>
       ) : null}
 
-      {isInventoryItemsTab && !isExtraTab ? (
+      {(isInventoryItemsTab || isInventoryAssetsTab) && !isExtraTab ? (
         <SearchablePaginatedTableCard
           title={`${config.label} List`}
-          badgeLabel={`${inventoryFilteredRows.length} items`}
-          rows={inventoryFilteredRows}
+          badgeLabel={`${(isInventoryAssetsTab ? inventoryAssetFilteredRows : inventoryFilteredRows).length} items`}
+          rows={isInventoryAssetsTab ? inventoryAssetFilteredRows : inventoryFilteredRows}
           columns={config.columns}
           withoutOuterCard
           headerBottom={(
@@ -21766,15 +22122,38 @@ function CategoryCrudModule({
           )}
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
           noRowsText={`No ${config.label.toLowerCase()} added yet.`}
-          searchBy={(row) => [
-            row.itemName || "",
-            row.sku || "",
-            row.mainCategory || "",
-            row.subCategory || "",
-            row.qty || "",
-            getStockBranchDisplayName(inventoryBranches, row.branchId),
-          ].join(" ")}
+          searchBy={(row) => (
+            isInventoryAssetsTab
+              ? [
+                  row.assetName || "",
+                  row.modelNumber || "",
+                  row.serialNumber || "",
+                  row.usedBy || "",
+                  row.documentName || "",
+                  getStockBranchDisplayName(inventoryBranches, row.branchId),
+                ].join(" ")
+              : [
+                  row.itemName || "",
+                  row.sku || "",
+                  row.mainCategory || "",
+                  row.subCategory || "",
+                  row.qty || "",
+                  getStockBranchDisplayName(inventoryBranches, row.branchId),
+                ].join(" ")
+          )}
           renderCells={(row) => config.columns.map((column) => {
+            if (isInventoryAssetsTab && column.key === "branchId") {
+              return getStockBranchDisplayName(inventoryBranches, row.branchId);
+            }
+            if (isInventoryAssetsTab && column.key === "documentName") {
+              return row.documentDataUrl
+                ? (
+                  <a href={row.documentDataUrl} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-light">
+                    {row.documentName || "View"}
+                  </a>
+                )
+                : (row.documentName || "-");
+            }
             if (column.key === "mainCategory") {
               const [mainCategory = ""] = String(row.category || "").split("/").map((v) => String(v || "").trim());
               return row.mainCategory || mainCategory || "-";
@@ -21789,7 +22168,7 @@ function CategoryCrudModule({
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={(row) => (
-            renderInventoryItemActions
+            isInventoryItemsTab && renderInventoryItemActions
               ? renderInventoryItemActions({
                   row,
                   onEditRow,
@@ -22628,8 +23007,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     status: "Active"
   });
   const [editingTemplateId, setEditingTemplateId] = useState("");
-  const [estimateForm, setEstimateForm] = useState(createEmptyBillingDocument("estimate", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || []));
-  const [invoiceForm, setInvoiceForm] = useState(createEmptyBillingDocument("invoice", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || []));
+  const [estimateForm, setEstimateForm] = useState(createEmptyBillingDocument("estimate", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || [], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
+  const [invoiceForm, setInvoiceForm] = useState(createEmptyBillingDocument("invoice", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || [], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
   const [editingEstimateId, setEditingEstimateId] = useState("");
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [customerForm, setCustomerForm] = useState({
@@ -22739,7 +23118,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
-    const baseDocument = createEmptyBillingDocument(kind, existingRows, moduleData?.gstTemplates || []);
+    const baseDocument = createEmptyBillingDocument(kind, existingRows, moduleData?.gstTemplates || [], moduleData?.billingTemplates || []);
     const todayIso = new Date().toISOString().slice(0, 10);
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
@@ -22782,7 +23161,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       issueDate,
       dueDate,
       gstTemplateId: String(normalizedRow.gstTemplateId || resolveDefaultGstTemplateId(moduleData?.gstTemplates || []) || "").trim(),
-      billingTemplateId: String(normalizedRow.billingTemplateId || "").trim(),
+      billingTemplateId: String(normalizedRow.billingTemplateId || resolveDefaultBillingTemplateId(moduleData?.billingTemplates || []) || "").trim(),
       salesperson: Array.isArray(normalizedRow.salesperson)
         ? normalizedRow.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(normalizedRow.salesperson || normalizedRow.assignedTo || "").trim(),
@@ -22890,6 +23269,23 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         : { ...prev, gstTemplateId: defaultGstTemplateId }
     ));
   }, [moduleData?.gstTemplates]);
+
+  useEffect(() => {
+    const defaultBillingTemplateId = resolveDefaultBillingTemplateId(moduleData?.billingTemplates || []);
+    if (!defaultBillingTemplateId) {
+      return;
+    }
+    setEstimateForm((prev) => (
+      String(prev?.billingTemplateId || "").trim()
+        ? prev
+        : { ...prev, billingTemplateId: defaultBillingTemplateId }
+    ));
+    setInvoiceForm((prev) => (
+      String(prev?.billingTemplateId || "").trim()
+        ? prev
+        : { ...prev, billingTemplateId: defaultBillingTemplateId }
+    ));
+  }, [moduleData?.billingTemplates]);
 
   useEffect(() => {
     if (!shouldResumeEstimate && !shouldResumeInvoice) {
@@ -23095,7 +23491,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (!salesOrders.length && !leads.length) {
       return;
     }
-    const normalizeText = (value) => String(value || "").trim().toLowerCase();
     const salesOrderById = new Map();
     const salesOrderByNo = new Map();
     salesOrders.forEach((order) => {
@@ -23123,28 +23518,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         const sourceSalesOrderId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
         const sourceSalesOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
         const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
-        const rowCustomerName = normalizeText(row?.customerName || row?.customer_name || "");
         const sourceOrder = (sourceSalesOrderId && salesOrderById.get(sourceSalesOrderId))
           || (sourceSalesOrderNo && salesOrderByNo.get(sourceSalesOrderNo))
-          || (rowReferenceId
-            ? salesOrders.find((order) => {
-                const normalizedOrder = normalizeCrmSalesOrderRecord(order);
-                const orderReferenceId = String(normalizedOrder?.crmReferenceId || normalizedOrder?.crm_reference_id || "").trim();
-                if (orderReferenceId && orderReferenceId === rowReferenceId) {
-                  return true;
-                }
-                if (!rowCustomerName) {
-                  return false;
-                }
-                const sourceCandidates = [
-                  normalizeText(normalizedOrder?.company),
-                  normalizeText(normalizedOrder?.clients),
-                  normalizeText(normalizedOrder?.customerName),
-                  normalizeText(normalizedOrder?.leadName),
-                ].filter(Boolean);
-                return sourceCandidates.includes(rowCustomerName);
-              }) || null
-            : null);
+          || null;
         const isPipelineRow = Boolean(sourceSalesOrderId || sourceSalesOrderNo || sourceOrder);
         if (!isPipelineRow) {
           return row;
@@ -25342,12 +25718,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     setAccountsFormNotice("");
     if (kind === "estimate") {
       setEditingEstimateId("");
-      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || []));
+      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
       setOverviewDocTab("estimate");
       setActiveTab("overview");
     } else {
       setEditingInvoiceId("");
-      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || []));
+      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
       setOverviewDocTab("invoice");
       setActiveTab("overview");
       setAccountsActionPopup({
@@ -25476,11 +25852,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     });
     if (kind === "estimate" && editingEstimateId === id) {
       setEditingEstimateId("");
-      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || []));
+      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
     }
     if (kind === "invoice" && editingInvoiceId === id) {
       setEditingInvoiceId("");
-      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || []));
+      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
     }
   }
 
@@ -26054,7 +26430,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
               <div className="col-12 col-md-6 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Billing Template *</label>
-                <select className="form-select" required value={form.billingTemplateId || ""} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
                   <option value="">Select Billing Template</option>
                   {billingTemplates.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -27522,7 +27898,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               onSave={(event) => saveDocument("estimate", event)}
               onCancelEdit={() => {
                 setEditingEstimateId("");
-                setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || []));
+                setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
               }}
               editingId={editingEstimateId}
               moduleData={moduleData}
@@ -27558,7 +27934,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               onSave={(event) => saveDocument("invoice", event)}
               onCancelEdit={() => {
                 setEditingInvoiceId("");
-                setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || []));
+                setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
               }}
               editingId={editingInvoiceId}
               moduleData={moduleData}
