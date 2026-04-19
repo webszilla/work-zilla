@@ -1573,7 +1573,7 @@ function getNextCrmSalesOrderNo(existingRows = []) {
   return `${prefix}-${dayKey}-${String(maxSeq + 1).padStart(3, "0")}`;
 }
 
-function createEmptyCrmSalesOrder(existingRows = [], billingTemplates = []) {
+function createEmptyCrmSalesOrder(existingRows = []) {
   const today = new Date().toISOString().slice(0, 10);
   const nextOrderId = getNextCrmSalesOrderNo(existingRows);
   return {
@@ -1588,7 +1588,7 @@ function createEmptyCrmSalesOrder(existingRows = [], billingTemplates = []) {
     dueDate: today,
     status: "Pending",
     gstTemplateId: "",
-    billingTemplateId: resolveDefaultBillingTemplateId(billingTemplates),
+    billingTemplateId: "",
     salesperson: [],
     billingAddress: "",
     notes: "Thank you for your business.",
@@ -7259,13 +7259,13 @@ function BillingDocumentEditor({
                   )}
                 </div>
               </div>
-              <div className="col-12 col-md-6 col-xl-1">
+              <div className={`col-12 col-md-6 ${kind === "salesOrder" ? "col-xl-2" : "col-xl-1"}`}>
                 <label className="form-label small text-secondary mb-1">
                   Issue Date{requireIssueDate ? " *" : ""}
                 </label>
                 <input type="date" className="form-control" required={requireIssueDate} value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
               </div>
-              <div className="col-12 col-md-6 col-xl-1">
+              <div className={`col-12 col-md-6 ${kind === "salesOrder" ? "col-xl-2" : "col-xl-1"}`}>
                 <label className="form-label small text-secondary mb-1">Due Date</label>
                 <input type="date" className="form-control" value={form.dueDate || ""} onChange={(e) => setField("dueDate", e.target.value)} />
               </div>
@@ -7280,15 +7280,17 @@ function BillingDocumentEditor({
                   ))}
                 </select>
               </div>
-              <div className="col-12 col-md-6 col-xl-2">
-                <label className="form-label small text-secondary mb-1">Billing Template *</label>
-                <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
-                  <option value="">Select Billing Template</option>
-                  {billingTemplates.map((row) => (
-                    <option key={row.id} value={row.id}>{row.name}</option>
-                  ))}
-                </select>
-              </div>
+              {kind !== "salesOrder" ? (
+                <div className="col-12 col-md-6 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Billing Template *</label>
+                  <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                    <option value="">Select Billing Template</option>
+                    {billingTemplates.map((row) => (
+                      <option key={row.id} value={row.id}>{row.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -7856,7 +7858,7 @@ function CrmOnePageModule() {
     }
   });
   const [crmSalesOrderTab, setCrmSalesOrderTab] = useState("list");
-  const [crmSalesOrderForm, setCrmSalesOrderForm] = useState(() => createEmptyCrmSalesOrder([], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
+  const [crmSalesOrderForm, setCrmSalesOrderForm] = useState(() => createEmptyCrmSalesOrder([]));
   const [editingCrmSalesOrderId, setEditingCrmSalesOrderId] = useState("");
   const [crmSalesOrderEditorOpen, setCrmSalesOrderEditorOpen] = useState(false);
   const [crmSalesOrderNotice, setCrmSalesOrderNotice] = useState("");
@@ -7875,17 +7877,6 @@ function CrmOnePageModule() {
   });
   const [editingCrmGstId, setEditingCrmGstId] = useState("");
 
-  useEffect(() => {
-    const defaultBillingTemplateId = resolveDefaultBillingTemplateId(moduleData?.billingTemplates || []);
-    if (!defaultBillingTemplateId) {
-      return;
-    }
-    setCrmSalesOrderForm((prev) => (
-      String(prev?.billingTemplateId || "").trim()
-        ? prev
-        : { ...prev, billingTemplateId: defaultBillingTemplateId }
-    ));
-  }, [moduleData?.billingTemplates]);
   const sectionFormRef = useRef(null);
   const crmSalesOrderResumeSearchRef = useRef("");
   const crmCurrencyCode = String(getOrgCurrency() || "INR").trim().toUpperCase() || "INR";
@@ -8719,10 +8710,6 @@ function CrmOnePageModule() {
   );
   const crmSalesOrderGstTemplates = useMemo(
     () => Array.isArray(crmAccountsWorkspace?.gstTemplates) ? crmAccountsWorkspace.gstTemplates : [],
-    [crmAccountsWorkspace]
-  );
-  const crmSalesOrderBillingTemplates = useMemo(
-    () => Array.isArray(crmAccountsWorkspace?.billingTemplates) ? crmAccountsWorkspace.billingTemplates : [],
     [crmAccountsWorkspace]
   );
   const crmSalesOrderTaxUi = useMemo(
@@ -10378,16 +10365,6 @@ function CrmOnePageModule() {
     syncCrmSalesOrderPaymentEntries((crmSalesOrderForm.paymentEntries || []).filter((entry) => entry.id !== entryId));
   }
 
-  function applyCrmSalesOrderBillingTemplate(templateId) {
-    const selectedTemplate = crmSalesOrderBillingTemplates.find((row) => String(row?.id || "").trim() === String(templateId || "").trim());
-    setCrmSalesOrderForm((prev) => ({
-      ...prev,
-      billingTemplateId: String(templateId || "").trim(),
-      notes: String(selectedTemplate?.footerNote || prev.notes || "").trim(),
-      termsText: String(selectedTemplate?.termsText || prev.termsText || "").trim(),
-    }));
-  }
-
   function addCrmSalesOrderLine() {
     setCrmSalesOrderForm((prev) => ({ ...prev, items: [...(prev.items || []), createEmptyDocLine()] }));
   }
@@ -10508,7 +10485,7 @@ function CrmOnePageModule() {
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(false);
     setCrmSalesOrderNotice("");
-    setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []));
+    setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || []));
   }
 
   function openCrmSalesOrderCreate(prefill = null) {
@@ -10517,15 +10494,11 @@ function CrmOnePageModule() {
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
     const baseForm = prefill
-      ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []), ...prefill }
-      : createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []);
+      ? { ...createEmptyCrmSalesOrder(moduleData.salesOrders || []), ...prefill }
+      : createEmptyCrmSalesOrder(moduleData.salesOrders || []);
     const fallbackGstTemplateId = String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
-    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(moduleData.billingTemplates || []);
     if (!String(baseForm.gstTemplateId || "").trim() && fallbackGstTemplateId) {
       baseForm.gstTemplateId = fallbackGstTemplateId;
-    }
-    if (!String(baseForm.billingTemplateId || "").trim() && fallbackBillingTemplateId) {
-      baseForm.billingTemplateId = fallbackBillingTemplateId;
     }
     if (!String(baseForm.crmReferenceId || "").trim()) {
       baseForm.crmReferenceId = resolveCrmReferenceIdByText(baseForm.customerName || baseForm.company || "");
@@ -10591,7 +10564,7 @@ function CrmOnePageModule() {
       || ""
     ).trim(),
     gstTemplateId: String(dealRow?.gstTemplateId || fallbackGstTemplateId || "").trim(),
-    billingTemplateId: String(dealRow?.billingTemplateId || resolveDefaultBillingTemplateId(moduleData.billingTemplates || []) || "").trim(),
+    billingTemplateId: "",
     docNo: getNextCrmSalesOrderNo(moduleData.salesOrders || []),
       customerName: matchedCustomer?.companyName || matchedCustomer?.name || companyName || String(dealRow?.dealName || "").trim(),
       customerGstin: String(matchedCustomer?.gstin || "").trim(),
@@ -10834,7 +10807,7 @@ function CrmOnePageModule() {
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
     setCrmSalesOrderForm({
-      ...createEmptyCrmSalesOrder(moduleData.salesOrders || [], moduleData.billingTemplates || []),
+      ...createEmptyCrmSalesOrder(moduleData.salesOrders || []),
       ...row,
       crmReferenceId: String(row?.crmReferenceId || row?.crm_reference_id || "").trim(),
       orderId: String(row?.orderId || row?.order_id || "").trim(),
@@ -10868,12 +10841,6 @@ function CrmOnePageModule() {
     const selectedPaymentStatus = normalizePaymentStatus(form.paymentStatus || paymentDetails.paymentStatus);
     const fallbackGstTemplateId = String((crmSalesOrderGstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
     const resolvedGstTemplateId = String(form.gstTemplateId || fallbackGstTemplateId || "").trim();
-    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(
-      (crmSalesOrderBillingTemplates && crmSalesOrderBillingTemplates.length)
-        ? crmSalesOrderBillingTemplates
-        : (moduleData.billingTemplates || [])
-    );
-    const resolvedBillingTemplateId = String(form.billingTemplateId || fallbackBillingTemplateId || "").trim();
     if (!String(form.customerName || "").trim()) {
       setCrmSalesOrderNotice("Customer / Company name is required.");
       return;
@@ -10884,10 +10851,6 @@ function CrmOnePageModule() {
     }
     if (!resolvedGstTemplateId) {
       setCrmSalesOrderNotice("GST template is required.");
-      return;
-    }
-    if (!resolvedBillingTemplateId) {
-      setCrmSalesOrderNotice("Billing template is required.");
       return;
     }
     const lineValidationError = (form.items || []).reduce((message, row, index) => {
@@ -10923,7 +10886,6 @@ function CrmOnePageModule() {
       issue_date: String(form.issueDate || "").trim(),
       due_date: String(form.dueDate || "").trim(),
       gst_template_id: resolvedGstTemplateId,
-      billing_template_id: resolvedBillingTemplateId,
       salesperson: Array.isArray(form.salesperson)
         ? form.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(form.salesperson || "").trim(),
@@ -13543,7 +13505,7 @@ function CrmOnePageModule() {
         });
           const crmSalesOrderEditorModuleData = {
             gstTemplates: crmSalesOrderGstTemplates,
-            billingTemplates: crmSalesOrderBillingTemplates,
+            billingTemplates: crmAccountsWorkspace.billingTemplates || [],
             invoices: crmAccountsWorkspace.invoices || [],
             estimates: crmAccountsWorkspace.estimates || [],
             salesOrders: moduleData.salesOrders || [],
@@ -13554,7 +13516,6 @@ function CrmOnePageModule() {
                 {[
                   { key: "list", label: "SO List" },
                   { key: "gst", label: "GST Templates" },
-                  { key: "billing", label: "Billing Templates" },
                 ].map((tab) => (
                   <button
                     key={`crm-sales-order-tab-${tab.key}`}
@@ -13595,7 +13556,6 @@ function CrmOnePageModule() {
                       inventoryBranches={crmSalesOrderInventoryBranches}
                       itemMasterOptions={crmSalesOrderItemMasterOptions}
                       enableItemPicker={false}
-                      applyBillingTemplateToDocument={(_kind, templateId) => applyCrmSalesOrderBillingTemplate(templateId)}
                       addDocLine={() => addCrmSalesOrderLine()}
                       updateDocLineDescription={(_kind, lineId, value) => updateCrmSalesOrderLineDescription(lineId, value)}
                       applyInventoryItemToLine={(_kind, lineId, itemId) => applyCrmSalesOrderInventoryItemToLine(lineId, itemId)}
@@ -13769,6 +13729,59 @@ function CrmOnePageModule() {
                   {crmSalesOrderNotice ? (
                     <div className="alert alert-danger py-2 mb-0">{crmSalesOrderNotice}</div>
                   ) : null}
+                  <div className="card p-3">
+                    <h6 className="mb-1">{editingCrmGstId ? crmSalesOrderTaxUi.editTitle : crmSalesOrderTaxUi.createTitle}</h6>
+                    <div className="small text-secondary mb-3">{crmSalesOrderTaxUi.helperText}</div>
+                    <form className="d-flex flex-column gap-3" onSubmit={saveCrmGstTemplate}>
+                      <div className="row g-3">
+                        <div className="col-12 col-xl-4">
+                          <label className="form-label small text-secondary mb-1">Template Name</label>
+                          <input className="form-control" value={crmGstForm.name || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, name: event.target.value }))} placeholder={crmSalesOrderTaxUi.namePlaceholder} />
+                        </div>
+                        <div className="col-12 col-xl-2">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.scopeLabel}</label>
+                          <select className="form-select" value={crmGstForm.taxScope || crmSalesOrderTaxUi.defaultScope} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, taxScope: event.target.value }))}>
+                            {Array.from(new Set([...(crmSalesOrderTaxUi.scopeOptions || []), String(crmGstForm.taxScope || "").trim()].filter(Boolean))).map((scope) => (
+                              <option key={`crm-gst-scope-${scope}`} value={scope}>{scope}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cgstLabel}</label>
+                          <input className="form-control" value={crmGstForm.cgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cgst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.sgstLabel}</label>
+                          <input className="form-control" value={crmGstForm.sgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, sgst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.igstLabel}</label>
+                          <input className="form-control" value={crmGstForm.igst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, igst: event.target.value }))} />
+                        </div>
+                        <div className="col-6 col-md-3 col-xl-1">
+                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cessLabel}</label>
+                          <input className="form-control" value={crmGstForm.cess || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cess: event.target.value }))} />
+                        </div>
+                        <div className="col-12 col-xl-2">
+                          <label className="form-label small text-secondary mb-1">Status</label>
+                          <select className="form-select" value={crmGstForm.status || "Active"} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, status: event.target.value }))}>
+                            {GST_STATUS_OPTIONS.map((status) => (
+                              <option key={`crm-gst-form-status-${status}`} value={status}>{status}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-12">
+                          <label className="form-label small text-secondary mb-1">Notes</label>
+                          <textarea className="form-control" rows="2" value={crmGstForm.notes || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder={crmSalesOrderTaxUi.notesPlaceholder} />
+                        </div>
+                      </div>
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-success btn-sm">{editingCrmGstId ? crmSalesOrderTaxUi.editActionLabel : crmSalesOrderTaxUi.createActionLabel}</button>
+                        {editingCrmGstId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetCrmGstForm}>Cancel</button> : null}
+                      </div>
+                    </form>
+                  </div>
+
                   <SearchablePaginatedTableCard
                     title="GST Template List"
                     badgeLabel={`${crmSalesOrderGstTemplates.length} templates`}
@@ -13825,90 +13838,7 @@ function CrmOnePageModule() {
                       </div>
                     )}
                   />
-
-                  <div className="card p-3">
-                    <h6 className="mb-1">{editingCrmGstId ? crmSalesOrderTaxUi.editTitle : crmSalesOrderTaxUi.createTitle}</h6>
-                    <div className="small text-secondary mb-3">{crmSalesOrderTaxUi.helperText}</div>
-                    <form className="d-flex flex-column gap-3" onSubmit={saveCrmGstTemplate}>
-                      <div className="row g-3">
-                        <div className="col-12 col-xl-4">
-                          <label className="form-label small text-secondary mb-1">Template Name</label>
-                          <input className="form-control" value={crmGstForm.name || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, name: event.target.value }))} placeholder={crmSalesOrderTaxUi.namePlaceholder} />
-                        </div>
-                        <div className="col-12 col-xl-2">
-                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.scopeLabel}</label>
-                          <select className="form-select" value={crmGstForm.taxScope || crmSalesOrderTaxUi.defaultScope} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, taxScope: event.target.value }))}>
-                            {Array.from(new Set([...(crmSalesOrderTaxUi.scopeOptions || []), String(crmGstForm.taxScope || "").trim()].filter(Boolean))).map((scope) => (
-                              <option key={`crm-gst-scope-${scope}`} value={scope}>{scope}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="col-6 col-md-3 col-xl-1">
-                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cgstLabel}</label>
-                          <input className="form-control" value={crmGstForm.cgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cgst: event.target.value }))} />
-                        </div>
-                        <div className="col-6 col-md-3 col-xl-1">
-                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.sgstLabel}</label>
-                          <input className="form-control" value={crmGstForm.sgst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, sgst: event.target.value }))} />
-                        </div>
-                        <div className="col-6 col-md-3 col-xl-1">
-                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.igstLabel}</label>
-                          <input className="form-control" value={crmGstForm.igst || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, igst: event.target.value }))} />
-                        </div>
-                        <div className="col-6 col-md-3 col-xl-1">
-                          <label className="form-label small text-secondary mb-1">{crmSalesOrderTaxUi.cessLabel}</label>
-                          <input className="form-control" value={crmGstForm.cess || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, cess: event.target.value }))} />
-                        </div>
-                        <div className="col-12 col-xl-2">
-                          <label className="form-label small text-secondary mb-1">Status</label>
-                          <select className="form-select" value={crmGstForm.status || "Active"} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, status: event.target.value }))}>
-                            {GST_STATUS_OPTIONS.map((status) => (
-                              <option key={`crm-gst-form-status-${status}`} value={status}>{status}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="col-12">
-                          <label className="form-label small text-secondary mb-1">Notes</label>
-                          <textarea className="form-control" rows="2" value={crmGstForm.notes || ""} onChange={(event) => setCrmGstForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder={crmSalesOrderTaxUi.notesPlaceholder} />
-                        </div>
-                      </div>
-                      <div className="d-flex gap-2">
-                        <button type="submit" className="btn btn-success btn-sm">{editingCrmGstId ? crmSalesOrderTaxUi.editActionLabel : crmSalesOrderTaxUi.createActionLabel}</button>
-                        {editingCrmGstId ? <button type="button" className="btn btn-outline-light btn-sm" onClick={resetCrmGstForm}>Cancel</button> : null}
-                      </div>
-                    </form>
-                  </div>
                 </>
-              ) : null}
-
-              {crmSalesOrderTab === "billing" ? (
-                <SearchablePaginatedTableCard
-                  title="Billing Template List"
-                  rows={crmSalesOrderBillingTemplates}
-                  columns={[
-                    { key: "name", label: "Template Name" },
-                    { key: "docTypeLabel", label: "Document Type" },
-                    { key: "footerNote", label: "Footer Note" },
-                    { key: "termsText", label: "Terms" },
-                  ]}
-                  emptyMessage="No billing templates available."
-                  searchPlaceholder="Search Billing Templates"
-                  pageSize={DEFAULT_TABLE_PAGE_SIZE}
-                  withoutOuterCard
-                  searchBy={(row) => [
-                    row.name,
-                    row.docType,
-                    row.footerNote,
-                    row.termsText,
-                  ].join(" ")}
-                  renderCells={(row) => [
-                    String(row.name || "").trim() || "-",
-                    String(row.docType || "General").trim() || "General",
-                    String(row.footerNote || "-").trim() || "-",
-                    String(row.termsText || "-").trim() || "-",
-                  ]}
-                  renderActions={() => null}
-                />
               ) : null}
             </div>
           );
@@ -26876,13 +26806,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   )}
                 </div>
               </div>
-              <div className="col-12 col-md-6 col-xl-1">
+              <div className={`col-12 col-md-6 ${kind === "salesOrder" ? "col-xl-2" : "col-xl-1"}`}>
                 <label className="form-label small text-secondary mb-1">
                   Issue Date{requireIssueDate ? " *" : ""}
                 </label>
                 <input type="date" className="form-control" required={requireIssueDate} value={form.issueDate || ""} onChange={(e) => setField("issueDate", e.target.value)} />
               </div>
-              <div className="col-12 col-md-6 col-xl-1">
+              <div className={`col-12 col-md-6 ${kind === "salesOrder" ? "col-xl-2" : "col-xl-1"}`}>
                 <label className="form-label small text-secondary mb-1">Due Date</label>
                 <input type="date" className="form-control" value={form.dueDate || ""} onChange={(e) => setField("dueDate", e.target.value)} />
               </div>
@@ -26897,15 +26827,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   ))}
                 </select>
               </div>
-              <div className="col-12 col-md-6 col-xl-2">
-                <label className="form-label small text-secondary mb-1">Billing Template *</label>
-                <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
-                  <option value="">Select Billing Template</option>
-                  {billingTemplates.map((row) => (
-                    <option key={row.id} value={row.id}>{row.name}</option>
-                  ))}
-                </select>
-              </div>
+              {kind !== "salesOrder" ? (
+                <div className="col-12 col-md-6 col-xl-2">
+                  <label className="form-label small text-secondary mb-1">Billing Template *</label>
+                  <select className="form-select" required value={form.billingTemplateId || resolveDefaultBillingTemplateId(billingTemplates || [])} onChange={(e) => applyBillingTemplateToDocument(kind, e.target.value)}>
+                    <option value="">Select Billing Template</option>
+                    {billingTemplates.map((row) => (
+                      <option key={row.id} value={row.id}>{row.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
             </div>
           </div>
 
