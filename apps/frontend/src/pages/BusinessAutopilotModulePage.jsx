@@ -1528,6 +1528,7 @@ function createEmptyBillingDocument(kind = "invoice", existingRows = [], gstTemp
     id: "",
     sourceEstimateId: "",
     docNo: getNextBillingDocNo(kind, existingRows),
+    customerId: "",
     customerName: "",
     customerGstin: "",
     issueDate: today,
@@ -2947,6 +2948,7 @@ function normalizePendingCrmSalesOrderDraft(value = {}) {
   return {
     sourceDeal: sourceDeal || null,
     sourceSalesOrder: sourceSalesOrder || null,
+    convertKind: String(value?.convertKind || "").trim().toLowerCase(),
     orgId: String(value?.orgId || "").trim(),
     createdAt: String(value?.createdAt || "").trim(),
   };
@@ -3610,8 +3612,16 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     customerName: String(
       row.customerName
       || row.customer_name
+      || row.clientName
+      || row.client_name
+      || row.company
+      || row.clients
       || payload.customerName
       || payload.customer_name
+      || payload.clientName
+      || payload.client_name
+      || payload.company
+      || payload.clients
       || row.leadName
       || row.lead_name
       || ""
@@ -3628,8 +3638,14 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     company: String(
       row.company
       || row.clients
+      || row.clientName
+      || row.client_name
+      || row.sourceSalesOrderClientName
+      || row.source_sales_order_client_name
       || payload.company
       || payload.clients
+      || payload.clientName
+      || payload.client_name
       || payload.companyOrClientName
       || payload.company_or_client_name
       || ""
@@ -3637,8 +3653,14 @@ function normalizeCrmSalesOrderRecord(row = {}) {
     clients: String(
       row.clients
       || row.company
+      || row.clientName
+      || row.client_name
+      || row.sourceSalesOrderClientName
+      || row.source_sales_order_client_name
       || payload.clients
       || payload.company
+      || payload.clientName
+      || payload.client_name
       || payload.companyOrClientName
       || payload.company_or_client_name
       || ""
@@ -4035,6 +4057,49 @@ function normalizeSharedCustomerRecord(row = {}) {
     state: String(row.billingState || row.state || "").trim(),
     pincode: String(row.billingPincode || row.pincode || "").trim(),
   };
+}
+
+function findBestCustomerMatch(customers = [], {
+  crmReferenceId = "",
+  companyName = "",
+  leadName = "",
+  customerName = "",
+} = {}) {
+  const normalizedCustomers = (Array.isArray(customers) ? customers : [])
+    .map((row) => normalizeSharedCustomerRecord(row));
+  if (!normalizedCustomers.length) {
+    return null;
+  }
+  const sourceReference = normalizePlaceholderText(String(crmReferenceId || "").trim());
+  if (sourceReference) {
+    const byReference = normalizedCustomers.find((row) => (
+      normalizePlaceholderText(String(row.crmReferenceId || row.crm_reference_id || "").trim()) === sourceReference
+    )) || null;
+    if (byReference) {
+      return byReference;
+    }
+  }
+  const targetNames = new Set([
+    String(companyName || "").trim().toLowerCase(),
+    String(leadName || "").trim().toLowerCase(),
+    String(customerName || "").trim().toLowerCase(),
+  ].filter(Boolean));
+  if (!targetNames.size) {
+    return null;
+  }
+  return normalizedCustomers.find((row) => {
+    const customerNames = [
+      String(row.companyName || "").trim().toLowerCase(),
+      String(row.clientName || "").trim().toLowerCase(),
+      String(row.name || "").trim().toLowerCase(),
+    ].filter(Boolean);
+    return customerNames.some((value) => targetNames.has(value));
+  }) || null;
+}
+
+function normalizePlaceholderText(value = "") {
+  const normalizedValue = String(value || "").trim();
+  return normalizedValue === "-" ? "" : normalizedValue;
 }
 
 function hasSalesOrderReadyCustomerDetails(row = {}) {
@@ -6723,7 +6788,10 @@ function BillingDocumentEditor({
     const requireCustomer = kind !== "estimate";
     const requireIssueDate = kind !== "estimate";
     const customerLocked = Boolean(
-      String(form.sourceDealId || form.source_deal_id || "").trim()
+      form.convertedFromSalesOrder
+      || form.converted_from_sales_order
+      || String(form.sourceSalesOrderConversionMode || form.source_sales_order_conversion_mode || "").trim().toLowerCase() === "manual"
+      || String(form.sourceDealId || form.source_deal_id || "").trim()
       || String(form.sourceSalesOrderId || form.source_sales_order_id || "").trim()
       || String(form.sourceSalesOrderNo || form.source_sales_order_no || "").trim()
       || String(form.sourceSalesOrderLeadName || form.source_sales_order_lead_name || "").trim()
@@ -8874,7 +8942,23 @@ function CrmOnePageModule() {
     return String(crmReferenceLookup.get(key) || "").trim();
   }
 
-  function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}) {
+  function isManualSalesOrderConversionRow(row = {}) {
+    const mode = String(
+      row?.sourceSalesOrderConversionMode
+      || row?.source_sales_order_conversion_mode
+      || ""
+    ).trim().toLowerCase();
+    if (mode === "manual") {
+      return true;
+    }
+    return Boolean(
+      row?.convertedFromSalesOrder
+      || row?.converted_from_sales_order
+    );
+  }
+
+  function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}, options = {}) {
+    const requireManualMarker = options?.requireManualMarker !== false;
     const sourceId = String(salesOrderRow?.id || "").trim();
     const sourceOrderNo = String(
       salesOrderRow?.orderId
@@ -8884,6 +8968,9 @@ function CrmOnePageModule() {
       || ""
     ).trim();
     return (Array.isArray(rows) ? rows : []).find((row) => {
+      if (requireManualMarker && !isManualSalesOrderConversionRow(row)) {
+        return false;
+      }
       const rowSourceId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
       const rowSourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
       if (sourceId && rowSourceId && sourceId === rowSourceId) {
@@ -8929,7 +9016,7 @@ function CrmOnePageModule() {
     };
   }
 
-  function openConvertedSalesOrderDocumentForEditing(salesOrderRow = {}) {
+  async function openConvertedSalesOrderDocumentForEditing(salesOrderRow = {}) {
     const conversionSummary = getAccountsConversionSummaryForSalesOrder(salesOrderRow);
     const documentKind = conversionSummary.hasInvoice ? "invoice" : conversionSummary.hasEstimate ? "estimate" : "";
     const documentId = String((conversionSummary.hasInvoice
@@ -8938,6 +9025,89 @@ function CrmOnePageModule() {
     if (!documentKind || !documentId) {
       return;
     }
+    const normalizedSalesOrder = normalizeCrmSalesOrderRecord(salesOrderRow || {});
+    const listKey = documentKind === "estimate" ? "estimates" : "invoices";
+    const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
+    const sourceOrderNo = String(normalizedSalesOrder.orderId || normalizedSalesOrder.docNo || "").trim();
+    const sourceLeadName = normalizePlaceholderText(String(normalizedSalesOrder.leadName || normalizedSalesOrder.customerName || "").trim());
+    const sourceClientName = normalizePlaceholderText(String(
+      normalizedSalesOrder.company
+      || normalizedSalesOrder.clients
+      || normalizedSalesOrder.customerName
+      || normalizedSalesOrder.companyOrClientName
+      || normalizedSalesOrder.company_or_client_name
+      || normalizedSalesOrder.clientName
+      || normalizedSalesOrder.client_name
+      || sourceLeadName
+      || ""
+    ).trim());
+    const sourceCrmReferenceId = normalizePlaceholderText(
+      String(normalizedSalesOrder.crmReferenceId || normalizedSalesOrder.crm_reference_id || "").trim()
+    );
+    const linkedCustomer = findBestCustomerMatch(
+      (Array.isArray(crmAccountsWorkspace?.customers) && crmAccountsWorkspace.customers.length)
+        ? crmAccountsWorkspace.customers
+        : (moduleData?.customers || []),
+      {
+        crmReferenceId: sourceCrmReferenceId,
+        companyName: sourceClientName,
+        leadName: sourceLeadName,
+        customerName: String(normalizedSalesOrder.customerName || "").trim(),
+      }
+    );
+    const targetRow = existingRows.find((row) => String(row?.id || "").trim() === documentId) || null;
+    if (targetRow) {
+      const patchedRow = {
+        ...targetRow,
+        customerId: String(targetRow?.customerId || targetRow?.customer_id || linkedCustomer?.id || "").trim(),
+        customerName: normalizePlaceholderText(
+          String(targetRow?.customerName || targetRow?.customer_name || sourceClientName || sourceLeadName || "").trim()
+        ),
+        crmReferenceId: normalizePlaceholderText(
+          String(targetRow?.crmReferenceId || targetRow?.crm_reference_id || sourceCrmReferenceId || "").trim()
+        ),
+        sourceSalesOrderId: String(targetRow?.sourceSalesOrderId || targetRow?.source_sales_order_id || normalizedSalesOrder.id || "").trim(),
+        sourceSalesOrderNo: String(targetRow?.sourceSalesOrderNo || targetRow?.source_sales_order_no || sourceOrderNo || "").trim(),
+        sourceSalesOrderLeadName: normalizePlaceholderText(
+          String(targetRow?.sourceSalesOrderLeadName || targetRow?.source_sales_order_lead_name || sourceLeadName || "").trim()
+        ),
+        sourceSalesOrderClientName: normalizePlaceholderText(
+          String(targetRow?.sourceSalesOrderClientName || targetRow?.source_sales_order_client_name || sourceClientName || "").trim()
+        ),
+        convertedFromSalesOrder: true,
+        converted_from_sales_order: true,
+        sourceSalesOrderConversionMode: "manual",
+        source_sales_order_conversion_mode: "manual",
+      };
+      const shouldPatch = [
+        "customerId",
+        "customerName",
+        "crmReferenceId",
+        "sourceSalesOrderId",
+        "sourceSalesOrderNo",
+        "sourceSalesOrderLeadName",
+        "sourceSalesOrderClientName",
+      ].some((key) => String(targetRow?.[key] || "").trim() !== String(patchedRow?.[key] || "").trim())
+      || !Boolean(targetRow?.convertedFromSalesOrder || targetRow?.converted_from_sales_order)
+      || String(targetRow?.sourceSalesOrderConversionMode || targetRow?.source_sales_order_conversion_mode || "").trim().toLowerCase() !== "manual";
+      if (shouldPatch) {
+        const nextRows = existingRows.map((row) => (
+          String(row?.id || "").trim() === documentId ? patchedRow : row
+        ));
+        try {
+          await persistCrmAccountsWorkspace({ ...crmAccountsWorkspace, [listKey]: nextRows });
+        } catch {
+          setCrmAccountsWorkspace((prev) => ({ ...prev, [listKey]: nextRows }));
+        }
+        setModuleData((prev) => ({
+          ...prev,
+          [listKey]: (Array.isArray(prev?.[listKey]) ? prev[listKey] : []).map((row) => (
+            String(row?.id || "").trim() === documentId ? { ...row, ...patchedRow } : row
+          )),
+        }));
+      }
+    }
+    writePendingAccountsBillingDraft(documentKind, normalizedSalesOrder, "", documentId);
     const query = new URLSearchParams();
     if (documentKind === "estimate") {
       query.set("tab", "estimates");
@@ -9040,26 +9210,41 @@ function CrmOnePageModule() {
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
     const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
-    const sourceCrmReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
-    const normalizedCustomers = (crmAccountsWorkspace?.customers || moduleData?.customers || [])
-      .map((row) => normalizeSharedCustomerRecord(row));
-    const linkedCustomer = normalizedCustomers.find((row) => {
-      const rowRef = String(row.crmReferenceId || "").trim();
-      if (sourceCrmReferenceId && rowRef && sourceCrmReferenceId === rowRef) {
-        return true;
-      }
-      const sourceClientLower = String(normalizedRow.company || normalizedRow.clients || "").trim().toLowerCase();
-      if (!sourceClientLower) {
-        return false;
-      }
-      return [
-        String(row.companyName || "").trim().toLowerCase(),
-        String(row.name || "").trim().toLowerCase(),
-        String(row.clientName || "").trim().toLowerCase(),
-      ].filter(Boolean).includes(sourceClientLower);
-    }) || null;
-    const sourceClientName = String(normalizedRow.company || normalizedRow.clients || "").trim();
-    const sourceLeadName = String(normalizedRow.leadName || normalizedRow.customerName || "").trim();
+    const sourceCrmReferenceId = normalizePlaceholderText(
+      String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()
+    );
+    const customerPool = Array.isArray(crmAccountsWorkspace?.customers) && crmAccountsWorkspace.customers.length
+      ? crmAccountsWorkspace.customers
+      : (moduleData?.customers || []);
+    const linkedCustomer = findBestCustomerMatch(customerPool, {
+      crmReferenceId: sourceCrmReferenceId,
+      companyName: String(
+        normalizedRow.company
+        || normalizedRow.clients
+        || normalizedRow.companyOrClientName
+        || normalizedRow.company_or_client_name
+        || normalizedRow.clientName
+        || normalizedRow.client_name
+        || ""
+      ).trim(),
+      leadName: String(normalizedRow.leadName || "").trim(),
+      customerName: String(normalizedRow.customerName || "").trim(),
+    });
+    const sourceClientName = normalizePlaceholderText(String(
+      normalizedRow.company
+      || normalizedRow.clients
+      || normalizedRow.companyOrClientName
+      || normalizedRow.company_or_client_name
+      || normalizedRow.clientName
+      || normalizedRow.client_name
+      || linkedCustomer?.companyName
+      || linkedCustomer?.clientName
+      || linkedCustomer?.name
+      || normalizedRow.customerName
+      || normalizedRow.leadName
+      || ""
+    ).trim());
+    const sourceLeadName = normalizePlaceholderText(String(normalizedRow.leadName || normalizedRow.customerName || "").trim());
     const resolvedCustomerName = String(
       sourceClientName
       || linkedCustomer?.companyName
@@ -9072,6 +9257,7 @@ function CrmOnePageModule() {
       ...baseDocument,
       id: `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       docNo: getNextBillingDocNo(kind, existingRows),
+      customerId: String(linkedCustomer?.id || "").trim(),
       customerName: resolvedCustomerName,
       customerGstin: String(normalizedRow.customerGstin || "").trim(),
       issueDate,
@@ -9106,6 +9292,10 @@ function CrmOnePageModule() {
       sourceSalesOrderNo: sourceOrderNo,
       sourceSalesOrderLeadName: sourceLeadName,
       sourceSalesOrderClientName: sourceClientName,
+      convertedFromSalesOrder: true,
+      converted_from_sales_order: true,
+      sourceSalesOrderConversionMode: "manual",
+      source_sales_order_conversion_mode: "manual",
     };
   }
 
@@ -10502,6 +10692,80 @@ function CrmOnePageModule() {
     });
   }
 
+  function findExistingSalesOrderCustomerForSalesOrder(salesOrderRow = {}) {
+    const normalizedRow = normalizeCrmSalesOrderRecord(salesOrderRow);
+    const customerPool = [
+      ...(moduleData?.customers || []),
+      ...readSharedAccountsCustomers(),
+      ...crmSalesOrderCustomerOptions,
+      ...sharedCustomerOptions,
+    ];
+    const matchedCustomer = findBestCustomerMatch(customerPool, {
+      crmReferenceId: normalizePlaceholderText(String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()),
+      companyName: normalizePlaceholderText(String(normalizedRow.company || normalizedRow.clients || "").trim()),
+      leadName: normalizePlaceholderText(String(normalizedRow.leadName || "").trim()),
+      customerName: normalizePlaceholderText(String(normalizedRow.customerName || "").trim()),
+    });
+    if (!matchedCustomer) {
+      return null;
+    }
+    if (hasSalesOrderReadyCustomerDetails(matchedCustomer)) {
+      return matchedCustomer;
+    }
+    // Allow existing client match even if profile is partial.
+    // This prevents repeated "convert contact to client" prompts.
+    return matchedCustomer;
+  }
+
+  function findConvertibleCrmContactForSalesOrder(salesOrderRow = {}) {
+    const normalizedRow = normalizeCrmSalesOrderRecord(salesOrderRow);
+    const crmReferenceId = normalizePlaceholderText(String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim());
+    const companyName = normalizePlaceholderText(String(normalizedRow.company || normalizedRow.clients || "").trim().toLowerCase());
+    const leadName = normalizePlaceholderText(String(normalizedRow.customerName || normalizedRow.leadName || "").trim().toLowerCase());
+    return activeCrmContacts.find((row) => {
+      const normalizedContact = normalizeCrmContactRecord(row);
+      const contactReferenceId = String(normalizedContact.crmReferenceId || normalizedContact.crm_reference_id || "").trim();
+      if (crmReferenceId && contactReferenceId && crmReferenceId === contactReferenceId) {
+        return true;
+      }
+      const contactCompany = String(normalizedContact.company || "").trim().toLowerCase();
+      const contactName = String(normalizedContact.name || "").trim().toLowerCase();
+      if (companyName) {
+        return contactCompany === companyName || contactName === companyName;
+      }
+      return Boolean(
+        leadName && (contactName === leadName || contactCompany === leadName)
+      );
+    }) || null;
+  }
+
+  function buildFallbackContactFromSalesOrder(salesOrderRow = {}) {
+    const normalizedRow = normalizeCrmSalesOrderRecord(salesOrderRow);
+    const contactName = String(
+      normalizedRow.leadName
+      || normalizedRow.customerName
+      || normalizedRow.company
+      || normalizedRow.clients
+      || "Client Contact"
+    ).trim();
+    const companyName = String(
+      normalizedRow.company
+      || normalizedRow.clients
+      || normalizedRow.customerName
+      || normalizedRow.leadName
+      || contactName
+    ).trim();
+    return normalizeCrmContactRecord({
+      id: "",
+      name: contactName,
+      company: companyName,
+      email: "",
+      phoneCountryCode: "+91",
+      phone: String(normalizedRow.phone || "").trim(),
+      crmReferenceId: normalizePlaceholderText(String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()),
+    });
+  }
+
   function findLinkedCrmRowsForContact(contactRow = {}) {
     const normalizedContact = normalizeCrmContactRecord(contactRow);
     const company = String(normalizedContact.company || "").trim().toLowerCase();
@@ -10525,10 +10789,19 @@ function CrmOnePageModule() {
     };
   }
 
-  function writePendingCrmSalesOrderDraft(dealRow = {}) {
-    const sourceDeal = normalizeCrmDealRecord(dealRow);
-    const sourceDealId = String(sourceDeal.id || "").trim();
-    if (!sourceDealId) {
+  function writePendingCrmSalesOrderDraft(draftValue = {}) {
+    const explicitSourceDeal = draftValue?.sourceDeal && typeof draftValue.sourceDeal === "object"
+      ? normalizeCrmDealRecord(draftValue.sourceDeal)
+      : null;
+    const explicitSourceSalesOrder = draftValue?.sourceSalesOrder && typeof draftValue.sourceSalesOrder === "object"
+      ? normalizeCrmSalesOrderRecord(draftValue.sourceSalesOrder)
+      : null;
+    const fallbackSourceDeal = explicitSourceDeal ? null : normalizeCrmDealRecord(draftValue);
+    const sourceDeal = explicitSourceDeal || fallbackSourceDeal || null;
+    const sourceSalesOrder = explicitSourceSalesOrder || null;
+    const sourceDealId = String(sourceDeal?.id || "").trim();
+    const sourceSalesOrderId = String(sourceSalesOrder?.id || "").trim();
+    if (!sourceDealId && !sourceSalesOrderId) {
       return;
     }
     const activeOrgId = getCrmOrgIdFromStorageKey(crmStorageKey)
@@ -10537,7 +10810,9 @@ function CrmOnePageModule() {
       || getActiveCrmScopeOrgId();
     const scopedDraftKey = buildScopedCrmSalesOrderDraftStorageKey(activeOrgId);
     const payload = {
-      sourceDeal,
+      sourceDeal: sourceDeal || null,
+      sourceSalesOrder: sourceSalesOrder || null,
+      convertKind: String(draftValue?.convertKind || "").trim().toLowerCase(),
       orgId: String(activeOrgId || "").trim(),
       createdAt: new Date().toISOString(),
     };
@@ -10593,6 +10868,12 @@ function CrmOnePageModule() {
     const selectedPaymentStatus = normalizePaymentStatus(form.paymentStatus || paymentDetails.paymentStatus);
     const fallbackGstTemplateId = String((crmSalesOrderGstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim();
     const resolvedGstTemplateId = String(form.gstTemplateId || fallbackGstTemplateId || "").trim();
+    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(
+      (crmSalesOrderBillingTemplates && crmSalesOrderBillingTemplates.length)
+        ? crmSalesOrderBillingTemplates
+        : (moduleData.billingTemplates || [])
+    );
+    const resolvedBillingTemplateId = String(form.billingTemplateId || fallbackBillingTemplateId || "").trim();
     if (!String(form.customerName || "").trim()) {
       setCrmSalesOrderNotice("Customer / Company name is required.");
       return;
@@ -10605,7 +10886,7 @@ function CrmOnePageModule() {
       setCrmSalesOrderNotice("GST template is required.");
       return;
     }
-    if (!String(form.billingTemplateId || "").trim()) {
+    if (!resolvedBillingTemplateId) {
       setCrmSalesOrderNotice("Billing template is required.");
       return;
     }
@@ -10642,7 +10923,7 @@ function CrmOnePageModule() {
       issue_date: String(form.issueDate || "").trim(),
       due_date: String(form.dueDate || "").trim(),
       gst_template_id: resolvedGstTemplateId,
-      billing_template_id: String(form.billingTemplateId || "").trim(),
+      billing_template_id: resolvedBillingTemplateId,
       salesperson: Array.isArray(form.salesperson)
         ? form.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(form.salesperson || "").trim(),
@@ -10871,8 +11152,8 @@ function CrmOnePageModule() {
     setCrmSalesOrderConvertBusy(false);
   }
 
-  async function convertCrmSalesOrderToBillingDocument(kind = "estimate") {
-    const sourceRow = crmSalesOrderConvertPopup?.row;
+  async function convertCrmSalesOrderToBillingDocument(kind = "estimate", sourceRowOverride = null) {
+    const sourceRow = sourceRowOverride ? normalizeCrmSalesOrderRecord(sourceRowOverride) : crmSalesOrderConvertPopup?.row;
     if (!sourceRow || crmSalesOrderConvertBusy) {
       return;
     }
@@ -10901,6 +11182,25 @@ function CrmOnePageModule() {
         return;
       }
       const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow);
+      const matchedCustomer = findExistingSalesOrderCustomerForSalesOrder(normalizedRow);
+      if (!matchedCustomer) {
+        const matchedContact = findConvertibleCrmContactForSalesOrder(normalizedRow);
+        const fallbackContact = matchedContact || buildFallbackContactFromSalesOrder(normalizedRow);
+        writePendingCrmSalesOrderDraft({
+          sourceSalesOrder: normalizedRow,
+          convertKind: kind,
+        });
+        closeCrmSalesOrderConvertPopup();
+        setCrmActionPopup({
+          open: true,
+          title: "Convert to Client",
+          message: "This Sales Order is linked to a CRM contact. Convert the contact to client first, then continue Estimate/Invoice conversion.",
+          confirmText: "Convert to Client",
+          cancelText: "Cancel",
+          onConfirm: () => onConvertContactToClient(fallbackContact),
+        });
+        return;
+      }
       closeCrmSalesOrderConvertPopup();
       const resolveRepairCustomerName = (existingRow = {}) => {
         const existingCustomerName = String(existingRow.customerName || existingRow.customer_name || "").trim();
@@ -10918,7 +11218,17 @@ function CrmOnePageModule() {
       const buildLinkedSalesOrderDocumentPatch = (existingRow = {}) => {
         const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
         const sourceLeadName = String(normalizedRow.leadName || normalizedRow.customerName || "").trim();
-        const sourceClientName = String(normalizedRow.company || normalizedRow.clients || "").trim();
+        const sourceClientName = String(
+          normalizedRow.company
+          || normalizedRow.clients
+          || normalizedRow.customerName
+          || normalizedRow.companyOrClientName
+          || normalizedRow.company_or_client_name
+          || normalizedRow.clientName
+          || normalizedRow.client_name
+          || sourceLeadName
+          || ""
+        ).trim();
         const sourceCrmReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
         const repairedCustomerName = resolveRepairCustomerName(existingRow);
         const resolvedId = String(existingRow.id || "").trim() || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -10931,6 +11241,10 @@ function CrmOnePageModule() {
           sourceSalesOrderNo: String(existingRow.sourceSalesOrderNo || existingRow.source_sales_order_no || sourceOrderNo || "").trim(),
           sourceSalesOrderLeadName: String(existingRow.sourceSalesOrderLeadName || existingRow.source_sales_order_lead_name || sourceLeadName || "").trim(),
           sourceSalesOrderClientName: String(existingRow.sourceSalesOrderClientName || existingRow.source_sales_order_client_name || sourceClientName || "").trim(),
+          convertedFromSalesOrder: true,
+          converted_from_sales_order: true,
+          sourceSalesOrderConversionMode: "manual",
+          source_sales_order_conversion_mode: "manual",
         };
       };
       const hasLinkedSalesOrderFields = (row = {}) => Boolean(
@@ -10955,7 +11269,7 @@ function CrmOnePageModule() {
       if (kind === "estimate") {
         const listKey = "estimates";
         const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
-        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow, { requireManualMarker: false });
         if (existingConverted) {
           const patchedConverted = buildLinkedSalesOrderDocumentPatch(existingConverted);
           const shouldRepair = !hasLinkedSalesOrderFields(existingConverted)
@@ -10974,7 +11288,7 @@ function CrmOnePageModule() {
             upsertConvertedDocIntoModuleData(listKey, existingConverted);
           }
           writePendingAccountsBillingDraft(kind, normalizedRow, "", String(existingConverted.id || "").trim());
-          navigate(`/app/business-autopilot/accounts?tab=estimates&edit-estimate=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
+          openAccountsDocumentEdit("estimate", String(existingConverted.id || "").trim());
           return;
         }
         const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
@@ -10984,13 +11298,13 @@ function CrmOnePageModule() {
         });
         upsertConvertedDocIntoModuleData(listKey, convertedDocument);
         writePendingAccountsBillingDraft(kind, normalizedRow, "", String(convertedDocument.id || "").trim());
-        navigate(`/app/business-autopilot/accounts?tab=estimates&edit-estimate=${encodeURIComponent(String(convertedDocument.id || "").trim())}&resume-estimate=1`);
+        openAccountsDocumentEdit("estimate", String(convertedDocument.id || "").trim());
         return;
       }
       if (kind === "invoice") {
         const listKey = "invoices";
         const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
-        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+        const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow, { requireManualMarker: false });
         if (existingConverted) {
           const patchedConverted = buildLinkedSalesOrderDocumentPatch(existingConverted);
           const shouldRepair = !hasLinkedSalesOrderFields(existingConverted)
@@ -11009,7 +11323,7 @@ function CrmOnePageModule() {
             upsertConvertedDocIntoModuleData(listKey, existingConverted);
           }
           writePendingAccountsBillingDraft(kind, normalizedRow, "", String(existingConverted.id || "").trim());
-          navigate(`/app/business-autopilot/accounts?tab=invoices&edit-invoice=${encodeURIComponent(String(existingConverted.id || "").trim())}`);
+          openAccountsDocumentEdit("invoice", String(existingConverted.id || "").trim());
           return;
         }
         const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
@@ -11019,12 +11333,12 @@ function CrmOnePageModule() {
         });
         upsertConvertedDocIntoModuleData(listKey, convertedDocument);
         writePendingAccountsBillingDraft(kind, normalizedRow, "", String(convertedDocument.id || "").trim());
-        navigate(`/app/business-autopilot/accounts?tab=invoices&edit-invoice=${encodeURIComponent(String(convertedDocument.id || "").trim())}&resume-invoice=1`);
+        openAccountsDocumentEdit("invoice", String(convertedDocument.id || "").trim());
         return;
       }
       const listKey = "invoices";
       const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
-      const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow);
+      const existingConverted = findAccountsDocumentForSalesOrder(existingRows, normalizedRow, { requireManualMarker: false });
       if (existingConverted) {
         setCrmActionPopup({
           open: true,
@@ -11072,21 +11386,37 @@ function CrmOnePageModule() {
       return;
     }
     crmSalesOrderResumeSearchRef.current = location.search;
-    clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
     const draftSalesOrderId = String(pendingDraft?.sourceSalesOrder?.id || "").trim();
+    const draftSalesOrderNo = String(
+      pendingDraft?.sourceSalesOrder?.orderId
+      || pendingDraft?.sourceSalesOrder?.order_id
+      || pendingDraft?.sourceSalesOrder?.docNo
+      || pendingDraft?.sourceSalesOrder?.doc_no
+      || ""
+    ).trim();
+    const draftConvertKind = String(pendingDraft?.convertKind || "").trim().toLowerCase();
     const sourceDealId = String(pendingDraft?.sourceDeal?.id || "").trim();
     const sourceDealReferenceId = String(
       pendingDraft?.sourceDeal?.crmReferenceId
       || pendingDraft?.sourceDeal?.crm_reference_id
       || ""
     ).trim();
+    const sourceSalesOrderReferenceId = String(
+      pendingDraft?.sourceSalesOrder?.crmReferenceId
+      || pendingDraft?.sourceSalesOrder?.crm_reference_id
+      || ""
+    ).trim();
     const existingSalesOrder = (moduleData.salesOrders || [])
       .map((row) => normalizeCrmSalesOrderRecord(row))
       .find((row) => {
         const rowId = String(row?.id || "").trim();
+        const rowOrderNo = String(row?.orderId || row?.order_id || row?.docNo || row?.doc_no || "").trim();
         const rowSourceDealId = String(row?.sourceDealId || row?.source_deal_id || "").trim();
         const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
         if (draftSalesOrderId && rowId && rowId === draftSalesOrderId) {
+          return true;
+        }
+        if (draftSalesOrderNo && rowOrderNo && rowOrderNo === draftSalesOrderNo) {
           return true;
         }
         if (sourceDealId && rowSourceDealId && rowSourceDealId === sourceDealId) {
@@ -11095,8 +11425,38 @@ function CrmOnePageModule() {
         if (sourceDealReferenceId && rowReferenceId && rowReferenceId === sourceDealReferenceId) {
           return true;
         }
+        if (sourceSalesOrderReferenceId && rowReferenceId && rowReferenceId === sourceSalesOrderReferenceId) {
+          return true;
+        }
         return false;
       }) || null;
+    if (existingSalesOrder && (draftConvertKind === "estimate" || draftConvertKind === "invoice")) {
+      clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
+      setActiveSection("salesOrders");
+      window.setTimeout(() => {
+        convertCrmSalesOrderToBillingDocument(draftConvertKind, existingSalesOrder);
+      }, 0);
+      setCrmActionPopup({
+        open: true,
+        title: "Client Created",
+        message: "Client converted successfully. Continuing to selected billing conversion.",
+      });
+      return;
+    }
+    if (!existingSalesOrder && pendingDraft?.sourceSalesOrder?.id && (draftConvertKind === "estimate" || draftConvertKind === "invoice")) {
+      clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
+      setActiveSection("salesOrders");
+      window.setTimeout(() => {
+        convertCrmSalesOrderToBillingDocument(draftConvertKind, pendingDraft.sourceSalesOrder);
+      }, 0);
+      setCrmActionPopup({
+        open: true,
+        title: "Client Created",
+        message: "Client converted successfully. Continuing to selected billing conversion.",
+      });
+      return;
+    }
+    clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
     if (existingSalesOrder) {
       editCrmSalesOrder(existingSalesOrder);
     } else if (pendingDraft?.sourceDeal?.id) {
@@ -13147,16 +13507,26 @@ function CrmOnePageModule() {
           : [];
         if (sectionKey === "salesOrders") {
         const salesOrderRows = filteredRows.map((row) => {
+          const normalizedSalesOrder = normalizeCrmSalesOrderRecord(row);
           const totals = computeDocumentTotals(row, crmSalesOrderGstTemplates || []);
           const conversionSummary = getAccountsConversionSummaryForSalesOrder(row);
           return {
-            ...row,
-            crmReferenceId: String(row.crmReferenceId || row.crm_reference_id || resolveCrmReferenceIdByText(row.customerName || row.company || "") || "").trim(),
-            orderId: String(row.orderId || row.order_id || "").trim() || "-",
-            leadName: String(row.customerName || row.customer_name || row.company || "").trim() || "-",
-              clients: String(row.company || "").trim() || "-",
-              issueDate: String(row.issueDate || row.issue_date || "").trim(),
-            dueDate: String(row.dueDate || row.due_date || "").trim(),
+            ...normalizedSalesOrder,
+            crmReferenceId: String(
+              normalizedSalesOrder.crmReferenceId
+              || resolveCrmReferenceIdByText(
+                normalizedSalesOrder.customerName
+                || normalizedSalesOrder.company
+                || normalizedSalesOrder.clients
+                || ""
+              )
+              || ""
+            ).trim(),
+            orderId: String(normalizedSalesOrder.orderId || normalizedSalesOrder.docNo || "").trim(),
+            leadName: String(normalizedSalesOrder.leadName || normalizedSalesOrder.customerName || "").trim(),
+            clients: String(normalizedSalesOrder.clients || normalizedSalesOrder.company || "").trim(),
+            issueDate: String(normalizedSalesOrder.issueDate || "").trim(),
+            dueDate: String(normalizedSalesOrder.dueDate || "").trim(),
             amountDisplay: totals.grandTotal > 0 ? formatCurrencyAmount(totals.grandTotal, crmCurrencyCode) : "-",
             statusDisplay: conversionSummary.statusLabel,
             statusDetail: conversionSummary.statusDetail,
@@ -15925,9 +16295,13 @@ function CrmOnePageModule() {
             <div className="text-secondary mb-3">
               <div><strong>Order ID:</strong> {String(crmSalesOrderConvertPopup.row?.orderId || crmSalesOrderConvertPopup.row?.order_id || "-").trim() || "-"}</div>
               <div><strong>Lead Name:</strong> {String(crmSalesOrderConvertPopup.row?.customerName || crmSalesOrderConvertPopup.row?.customer_name || "-").trim() || "-"}</div>
-              <div><strong>Client:</strong> {String(crmSalesOrderConvertPopup.row?.company || "-").trim() || "-"}</div>
+              <div><strong>Client:</strong> {String(
+                crmSalesOrderConvertPopup.row?.company
+                || crmSalesOrderConvertPopup.row?.clients
+                || "-"
+              ).trim() || "-"}</div>
             </div>
-            <div className="d-flex flex-wrap justify-content-end align-items-stretch gap-2">
+            <div className="d-flex flex-wrap justify-content-start align-items-stretch gap-2">
               <button
                 type="button"
                 className="btn btn-success btn-sm"
@@ -23123,26 +23497,38 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
     const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
-    const sourceCrmReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
-    const normalizedCustomers = (moduleData?.customers || [])
-      .map((row) => normalizeSharedCustomerRecord(row));
-    const linkedCustomer = normalizedCustomers.find((row) => {
-      const rowRef = String(row.crmReferenceId || "").trim();
-      if (sourceCrmReferenceId && rowRef && sourceCrmReferenceId === rowRef) {
-        return true;
-      }
-      const sourceClientLower = String(normalizedRow.company || normalizedRow.clients || "").trim().toLowerCase();
-      if (!sourceClientLower) {
-        return false;
-      }
-      return [
-        String(row.companyName || "").trim().toLowerCase(),
-        String(row.name || "").trim().toLowerCase(),
-        String(row.clientName || "").trim().toLowerCase(),
-      ].filter(Boolean).includes(sourceClientLower);
-    }) || null;
-    const sourceClientName = String(normalizedRow.company || normalizedRow.clients || "").trim();
-    const sourceLeadName = String(normalizedRow.leadName || normalizedRow.customerName || "").trim();
+    const sourceCrmReferenceId = normalizePlaceholderText(
+      String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()
+    );
+    const linkedCustomer = findBestCustomerMatch(moduleData?.customers || [], {
+      crmReferenceId: sourceCrmReferenceId,
+      companyName: String(
+        normalizedRow.company
+        || normalizedRow.clients
+        || normalizedRow.companyOrClientName
+        || normalizedRow.company_or_client_name
+        || normalizedRow.clientName
+        || normalizedRow.client_name
+        || ""
+      ).trim(),
+      leadName: String(normalizedRow.leadName || "").trim(),
+      customerName: String(normalizedRow.customerName || "").trim(),
+    });
+    const sourceClientName = normalizePlaceholderText(String(
+      normalizedRow.company
+      || normalizedRow.clients
+      || normalizedRow.companyOrClientName
+      || normalizedRow.company_or_client_name
+      || normalizedRow.clientName
+      || normalizedRow.client_name
+      || linkedCustomer?.companyName
+      || linkedCustomer?.clientName
+      || linkedCustomer?.name
+      || normalizedRow.customerName
+      || normalizedRow.leadName
+      || ""
+    ).trim());
+    const sourceLeadName = normalizePlaceholderText(String(normalizedRow.leadName || normalizedRow.customerName || "").trim());
     const resolvedCustomerName = String(
       sourceClientName
       || linkedCustomer?.companyName
@@ -23156,6 +23542,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ...baseDocument,
       id: resolvedDocumentId || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       docNo: getNextBillingDocNo(kind, existingRows),
+      customerId: String(linkedCustomer?.id || "").trim(),
       customerName: resolvedCustomerName,
       customerGstin: String(normalizedRow.customerGstin || "").trim(),
       issueDate,
@@ -23190,6 +23577,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       sourceSalesOrderNo: sourceOrderNo,
       sourceSalesOrderLeadName: sourceLeadName,
       sourceSalesOrderClientName: sourceClientName,
+      convertedFromSalesOrder: true,
+      converted_from_sales_order: true,
+      sourceSalesOrderConversionMode: "manual",
+      source_sales_order_conversion_mode: "manual",
     };
   }
 
@@ -23493,15 +23884,20 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }
     const salesOrderById = new Map();
     const salesOrderByNo = new Map();
+    const salesOrderByReference = new Map();
     salesOrders.forEach((order) => {
       const normalizedOrder = normalizeCrmSalesOrderRecord(order);
       const orderId = String(normalizedOrder.id || "").trim();
       const orderNo = String(normalizedOrder.orderId || normalizedOrder.docNo || "").trim();
+      const orderReferenceId = String(normalizedOrder.crmReferenceId || normalizedOrder.crm_reference_id || "").trim();
       if (orderId) {
         salesOrderById.set(orderId, normalizedOrder);
       }
       if (orderNo) {
         salesOrderByNo.set(orderNo, normalizedOrder);
+      }
+      if (orderReferenceId) {
+        salesOrderByReference.set(orderReferenceId, normalizedOrder);
       }
     });
     const leadByReference = new Map();
@@ -23520,6 +23916,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
         const sourceOrder = (sourceSalesOrderId && salesOrderById.get(sourceSalesOrderId))
           || (sourceSalesOrderNo && salesOrderByNo.get(sourceSalesOrderNo))
+          || (rowReferenceId && salesOrderByReference.get(rowReferenceId))
           || null;
         const isPipelineRow = Boolean(sourceSalesOrderId || sourceSalesOrderNo || sourceOrder);
         if (!isPipelineRow) {
@@ -25588,6 +25985,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const documentTotals = computeDocumentTotals(form, moduleData.gstTemplates || []);
     const paymentDetails = normalizePaymentDetails(form, documentTotals.grandTotal);
     const selectedPaymentStatus = normalizePaymentStatus(form.paymentStatus || paymentDetails.paymentStatus);
+    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(moduleData.billingTemplates || []);
+    const resolvedBillingTemplateId = String(form.billingTemplateId || fallbackBillingTemplateId || "").trim();
     if (!String(form.customerName || "").trim()) {
       setAccountsFormNotice("Client / Company name is required.");
       return;
@@ -25596,7 +25995,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setAccountsFormNotice("GST template is required.");
       return;
     }
-    if (!String(form.billingTemplateId || "").trim()) {
+    if (!resolvedBillingTemplateId) {
       setAccountsFormNotice("Billing template is required.");
       return;
     }
@@ -25636,6 +26035,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }
     const payload = {
       ...form,
+      billingTemplateId: resolvedBillingTemplateId,
       customerName: String(form.customerName || "").trim(),
       customerGstin: String(form.customerGstin || "").trim(),
       billingAddress: String(form.billingAddress || "").trim(),
@@ -25780,6 +26180,45 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }
 
   function editDocument(kind, row) {
+    const sourceOrderId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
+    const sourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
+    const sourceReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+    const linkedSourceOrder = (moduleData?.salesOrders || [])
+      .map((salesOrder) => normalizeCrmSalesOrderRecord(salesOrder))
+      .find((salesOrder) => {
+        const salesOrderId = String(salesOrder?.id || "").trim();
+        const salesOrderNo = String(salesOrder?.orderId || salesOrder?.docNo || "").trim();
+        const salesOrderRef = String(salesOrder?.crmReferenceId || salesOrder?.crm_reference_id || "").trim();
+        if (sourceOrderId && salesOrderId && sourceOrderId === salesOrderId) {
+          return true;
+        }
+        if (sourceOrderNo && salesOrderNo && sourceOrderNo === salesOrderNo) {
+          return true;
+        }
+        return Boolean(sourceReferenceId && salesOrderRef && sourceReferenceId === salesOrderRef);
+      }) || null;
+    const resolvedSourceClientName = String(
+      row?.sourceSalesOrderClientName
+      || row?.source_sales_order_client_name
+      || row?.customerName
+      || row?.customer_name
+      || row?.companyOrClientName
+      || row?.company_or_client_name
+      || row?.company
+      || row?.clients
+      || row?.clientName
+      || row?.client_name
+      || linkedSourceOrder?.company
+      || linkedSourceOrder?.clients
+      || linkedSourceOrder?.customerName
+      || linkedSourceOrder?.companyOrClientName
+      || linkedSourceOrder?.company_or_client_name
+      || linkedSourceOrder?.clientName
+      || linkedSourceOrder?.client_name
+      || row?.sourceSalesOrderLeadName
+      || row?.source_sales_order_lead_name
+      || ""
+    ).trim();
     const parsedSalesperson = Array.isArray(row.salesperson)
       ? row.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean)
       : String(row.salesperson || "")
@@ -25792,11 +26231,38 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       customerName: String(
         row.customerName
         || row.customer_name
-        || row.sourceSalesOrderClientName
-        || row.source_sales_order_client_name
+        || row.companyOrClientName
+        || row.company_or_client_name
+        || row.company
+        || row.clients
+        || row.clientName
+        || row.client_name
+        || resolvedSourceClientName
         || row.sourceSalesOrderLeadName
         || row.source_sales_order_lead_name
         || ""
+      ).trim(),
+      sourceSalesOrderId: sourceOrderId || String(linkedSourceOrder?.id || "").trim(),
+      sourceSalesOrderNo: sourceOrderNo || String(linkedSourceOrder?.orderId || linkedSourceOrder?.docNo || "").trim(),
+      sourceSalesOrderLeadName: String(
+        row.sourceSalesOrderLeadName
+        || row.source_sales_order_lead_name
+        || linkedSourceOrder?.leadName
+        || linkedSourceOrder?.customerName
+        || ""
+      ).trim(),
+      sourceSalesOrderClientName: resolvedSourceClientName,
+      convertedFromSalesOrder: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order),
+      converted_from_sales_order: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order),
+      sourceSalesOrderConversionMode: String(
+        row.sourceSalesOrderConversionMode
+        || row.source_sales_order_conversion_mode
+        || (row.convertedFromSalesOrder || row.converted_from_sales_order ? "manual" : "")
+      ).trim(),
+      source_sales_order_conversion_mode: String(
+        row.source_sales_order_conversion_mode
+        || row.sourceSalesOrderConversionMode
+        || (row.convertedFromSalesOrder || row.converted_from_sales_order ? "manual" : "")
       ).trim(),
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         ...splitDocumentLineDescription(item.description, item.customText),
@@ -25947,7 +26413,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const requireCustomer = kind !== "estimate";
     const requireIssueDate = kind !== "estimate";
     const customerLocked = Boolean(
-      String(form.sourceDealId || form.source_deal_id || "").trim()
+      form.convertedFromSalesOrder
+      || form.converted_from_sales_order
+      || String(form.sourceSalesOrderConversionMode || form.source_sales_order_conversion_mode || "").trim().toLowerCase() === "manual"
+      || String(form.sourceDealId || form.source_deal_id || "").trim()
       || String(form.sourceSalesOrderId || form.source_sales_order_id || "").trim()
       || String(form.sourceSalesOrderNo || form.source_sales_order_no || "").trim()
       || String(form.sourceSalesOrderLeadName || form.source_sales_order_lead_name || "").trim()
