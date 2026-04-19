@@ -56,6 +56,7 @@ urlpatterns = [
     path("organizations/<int:org_id>/email-manual-verify", api_views.organization_email_manual_verify, name="saas_admin_org_email_manual_verify"),
     path("organizations/<int:org_id>/restore", api_views.organization_restore, name="saas_admin_org_restore"),
     path("organizations/<int:org_id>/permanent-delete", api_views.organization_permanent_delete, name="saas_admin_org_permanent_delete"),
+    path("deleted-accounts/<int:account_id>/restore", api_views.deleted_account_restore, name="saas_admin_deleted_account_restore"),
     path("deleted-accounts/<int:account_id>", api_views.deleted_account_detail, name="saas_admin_deleted_account_detail"),
     path("inbox", api_views.inbox_list, name="saas_admin_inbox"),
     path("inbox/read", api_views.inbox_mark_read, name="saas_admin_inbox_read"),

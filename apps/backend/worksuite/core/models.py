@@ -836,37 +836,39 @@ def ai_media_library_delete_file(sender, instance, **kwargs):
 
 @receiver(pre_delete, sender=Organization)
 def delete_org_users(sender, instance, **kwargs):
-    BillingProfile.objects.filter(organization=instance).filter(
-        Q(org_display_name="") | Q(org_display_name__isnull=True)
-    ).update(
-        org_display_name=instance.name,
-        org_company_key=instance.company_key,
-    )
-    BillingProfile.objects.filter(organization=instance).filter(
-        Q(org_company_key="") | Q(org_company_key__isnull=True)
-    ).update(org_company_key=instance.company_key)
-    PendingTransfer.objects.filter(organization=instance).filter(
-        Q(org_display_name="") | Q(org_display_name__isnull=True)
-    ).update(
-        org_display_name=instance.name,
-        org_company_key=instance.company_key,
-    )
-    PendingTransfer.objects.filter(organization=instance).filter(
-        Q(org_company_key="") | Q(org_company_key__isnull=True)
-    ).update(org_company_key=instance.company_key)
-    SubscriptionHistory.objects.filter(organization=instance).filter(
-        Q(org_display_name="") | Q(org_display_name__isnull=True)
-    ).update(
-        org_display_name=instance.name,
-        org_company_key=instance.company_key,
-    )
-    SubscriptionHistory.objects.filter(organization=instance).filter(
-        Q(org_company_key="") | Q(org_company_key__isnull=True)
-    ).update(org_company_key=instance.company_key)
+    hard_delete = bool(getattr(instance, "_hard_delete_no_archive", False))
+    if not hard_delete:
+        BillingProfile.objects.filter(organization=instance).filter(
+            Q(org_display_name="") | Q(org_display_name__isnull=True)
+        ).update(
+            org_display_name=instance.name,
+            org_company_key=instance.company_key,
+        )
+        BillingProfile.objects.filter(organization=instance).filter(
+            Q(org_company_key="") | Q(org_company_key__isnull=True)
+        ).update(org_company_key=instance.company_key)
+        PendingTransfer.objects.filter(organization=instance).filter(
+            Q(org_display_name="") | Q(org_display_name__isnull=True)
+        ).update(
+            org_display_name=instance.name,
+            org_company_key=instance.company_key,
+        )
+        PendingTransfer.objects.filter(organization=instance).filter(
+            Q(org_company_key="") | Q(org_company_key__isnull=True)
+        ).update(org_company_key=instance.company_key)
+        SubscriptionHistory.objects.filter(organization=instance).filter(
+            Q(org_display_name="") | Q(org_display_name__isnull=True)
+        ).update(
+            org_display_name=instance.name,
+            org_company_key=instance.company_key,
+        )
+        SubscriptionHistory.objects.filter(organization=instance).filter(
+            Q(org_company_key="") | Q(org_company_key__isnull=True)
+        ).update(org_company_key=instance.company_key)
 
-    BillingProfile.objects.filter(organization=instance).update(organization=None)
-    PendingTransfer.objects.filter(organization=instance).update(organization=None)
-    SubscriptionHistory.objects.filter(organization=instance).update(organization=None)
+        BillingProfile.objects.filter(organization=instance).update(organization=None)
+        PendingTransfer.objects.filter(organization=instance).update(organization=None)
+        SubscriptionHistory.objects.filter(organization=instance).update(organization=None)
 
     profiles = UserProfile.objects.select_related("user").filter(organization=instance)
     for profile in profiles:

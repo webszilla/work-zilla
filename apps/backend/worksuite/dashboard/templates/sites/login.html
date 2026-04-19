@@ -81,7 +81,7 @@
 
             <p class="mt-3 text-center text-secondary">
                 Don't have an account?
-                <a href="/auth/signup/">Create Account</a>
+                <a href="/auth/signup/?next={{ next|default:'/my-account/'|urlencode }}">Create Account</a>
             </p>
 
         </form>

@@ -27,6 +27,58 @@ function titleCase(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function formatAddonUserCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "-";
+  }
+  return String(Math.trunc(parsed));
+}
+
+function normalizeProductStatuses(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function formatRemainingDays(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "-";
+  }
+  return `${Math.max(0, Math.trunc(parsed))} day(s)`;
+}
+
+function formatConfiguredDays(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return "-";
+  }
+  return String(Math.trunc(parsed));
+}
+
+function getRestoreActionTitle(org) {
+  if (org?.can_restore) {
+    return "Restore Organization";
+  }
+  if (org?.storage_retention?.retention_crossed) {
+    return "Restore window expired after hard-delete date";
+  }
+  return "Restore unavailable: deleted organization record not found";
+}
+
+function getPermanentDeleteActionTitle(org) {
+  if (org?.can_permanent_delete) {
+    return "Permanent Delete";
+  }
+  const hardDeleteAt = org?.storage_retention?.hard_delete_at;
+  if (hardDeleteAt) {
+    return `Permanent delete available after ${hardDeleteAt}`;
+  }
+  return "Permanent delete unavailable";
+}
+
 export default function SaasAdminOrganizationsPage() {
   const [state, setState] = useState(emptyState);
   const [searchTerm, setSearchTerm] = useState("");
@@ -55,6 +107,14 @@ export default function SaasAdminOrganizationsPage() {
   const [deletedDealerQuery, setDeletedDealerQuery] = useState("");
   const [deletedDealerPage, setDeletedDealerPage] = useState(1);
   const [viewModal, setViewModal] = useState({ open: false, loading: false, data: null, error: "" });
+  const [productModal, setProductModal] = useState({ open: false, orgName: "", rows: [] });
+  const [storageModal, setStorageModal] = useState({
+    open: false,
+    orgName: "",
+    rows: [],
+    dataAvailable: true,
+    retentionCrossed: false
+  });
   const [editModal, setEditModal] = useState({
     open: false,
     loading: false,
@@ -416,11 +476,80 @@ export default function SaasAdminOrganizationsPage() {
     setViewModal({ open: false, loading: false, data: null, error: "" });
   }
 
+  function closeProductModal() {
+    setProductModal({ open: false, orgName: "", rows: [] });
+  }
+
+  function closeStorageModal() {
+    setStorageModal({ open: false, orgName: "", rows: [], dataAvailable: true, retentionCrossed: false });
+  }
+
+  function openProductModal(org) {
+    const rows = normalizeProductStatuses(org?.product_statuses).map((item) => ({
+      slug: item.slug || "",
+      name: item.name || "-",
+      plan_name: item.plan_name || "-",
+      start_date: item.start_date || "-",
+      end_date: item.end_date || "-",
+      addon_user_count: formatAddonUserCount(item.addon_user_count),
+      status: titleCase(item.status || "-")
+    }));
+    const fallbackRows = rows.length
+      ? rows
+      : [{ slug: "", name: "-", plan_name: "-", start_date: "-", end_date: "-", addon_user_count: "-", status: "-" }];
+    setProductModal({
+      open: true,
+      orgName: org?.name || "Organization",
+      rows: fallbackRows
+    });
+  }
+
+  function openStorageModal(org) {
+    const retention = org?.storage_retention || {};
+    const rows = [
+      {
+        phase: "Grace Days",
+        configured: formatConfiguredDays(retention.grace_days),
+        remaining: formatRemainingDays(retention.grace_remaining_days),
+        until: retention.grace_until || "-"
+      },
+      {
+        phase: "Active Days",
+        configured: formatConfiguredDays(retention.active_days),
+        remaining: formatRemainingDays(retention.active_remaining_days),
+        until: retention.active_until || "-"
+      },
+      {
+        phase: "Hard Delete Days",
+        configured: formatConfiguredDays(retention.hard_delete_days),
+        remaining:
+          Number(retention.hard_delete_days || 0) > 0
+            ? formatRemainingDays(retention.hard_delete_remaining_days)
+            : "-",
+        until: Number(retention.hard_delete_days || 0) > 0 ? (retention.hard_delete_at || "-") : "Never"
+      }
+    ];
+    setStorageModal({
+      open: true,
+      orgName: org?.organization_name || org?.name || "Organization",
+      rows,
+      dataAvailable: retention.data_available !== false,
+      retentionCrossed: retention.retention_crossed === true
+    });
+  }
+
   function closeEdit() {
     setEditModal({ open: false, loading: false, data: null, error: "", form: {} });
   }
 
   async function handleDelete(org) {
+    if (org?.can_delete === false) {
+      setState((prev) => ({
+        ...prev,
+        error: "Django/SaaS Admin organization cannot be deleted."
+      }));
+      return;
+    }
     const confirmed = await confirm({
       title: "Delete Organization",
       message: `Delete ${org.name}? It will move to Deleted ORG and can be restored later.`,
@@ -444,9 +573,11 @@ export default function SaasAdminOrganizationsPage() {
   }
 
   async function handleDeletedOrgRestore(org) {
-    if (!org?.id || !org.can_restore) {
+    if (!org?.can_restore) {
       return;
     }
+    const restoreOrgId = org?.id;
+    const legacyId = org?.legacy_deleted_account_id;
     const confirmed = await confirm({
       title: "Restore Organization",
       message: `Restore ${org.organization_name || "this organization"} to active/inactive lists?`,
@@ -457,9 +588,17 @@ export default function SaasAdminOrganizationsPage() {
       return;
     }
     try {
-      await apiFetch(`/api/saas-admin/organizations/${org.id}/restore`, {
-        method: "POST"
-      });
+      if (restoreOrgId) {
+        await apiFetch(`/api/saas-admin/organizations/${restoreOrgId}/restore`, {
+          method: "POST"
+        });
+      } else if (legacyId) {
+        await apiFetch(`/api/saas-admin/deleted-accounts/${legacyId}/restore`, {
+          method: "POST"
+        });
+      } else {
+        return;
+      }
       await refreshOrganizations();
     } catch (error) {
       setState((prev) => ({
@@ -639,15 +778,24 @@ export default function SaasAdminOrganizationsPage() {
                 </thead>
                 <tbody>
                   {pagedOrgs.length ? (
-                    pagedOrgs.map((org) => (
-                      <tr key={org.id}>
+                    pagedOrgs.map((org) => {
+                      return (
+                        <tr key={org.id}>
                         <td>{org.name}</td>
                         <td>{formatValue(org.owner_name)}</td>
                         <td>{formatValue(org.owner_email)}</td>
                         <td>
-                          {org.product_statuses && org.product_statuses.length
-                            ? org.product_statuses.map((item) => item.name).join(", ")
-                            : "-"}
+                          <div className="saas-org-products-cell">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => openProductModal(org)}
+                              title="View Product Details"
+                              aria-label="View Product Details"
+                            >
+                              <i className="bi bi-eye" aria-hidden="true" />
+                            </button>
+                          </div>
                         </td>
                         <td>{org.subscription?.plan_name || "-"}</td>
                         <td>{org.subscription?.end_date || "-"}</td>
@@ -667,17 +815,20 @@ export default function SaasAdminOrganizationsPage() {
                             >
                               Edit
                             </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleDelete(org)}
-                            >
-                              Delete
-                            </button>
+                            {org.can_delete !== false ? (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDelete(org)}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
                           </div>
                         </td>
-                      </tr>
-                    ))
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="7">No organizations found.</td>
@@ -940,15 +1091,24 @@ export default function SaasAdminOrganizationsPage() {
                 </thead>
                 <tbody>
                   {inactivePagedOrgs.length ? (
-                    inactivePagedOrgs.map((org) => (
-                      <tr key={`inactive-${org.id}`}>
+                    inactivePagedOrgs.map((org) => {
+                      return (
+                        <tr key={`inactive-${org.id}`}>
                         <td>{org.name}</td>
                         <td>{formatValue(org.owner_name)}</td>
                         <td>{formatValue(org.owner_email)}</td>
                         <td>
-                          {org.product_statuses && org.product_statuses.length
-                            ? org.product_statuses.map((item) => item.name).join(", ")
-                            : "-"}
+                          <div className="saas-org-products-cell">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => openProductModal(org)}
+                              title="View Product Details"
+                              aria-label="View Product Details"
+                            >
+                              <i className="bi bi-eye" aria-hidden="true" />
+                            </button>
+                          </div>
                         </td>
                         <td>{org.subscription?.plan_name || "-"}</td>
                         <td>{org.subscription?.end_date || "-"}</td>
@@ -968,17 +1128,20 @@ export default function SaasAdminOrganizationsPage() {
                             >
                               Edit
                             </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleDelete(org)}
-                            >
-                              Delete
-                            </button>
+                            {org.can_delete !== false ? (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDelete(org)}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
                           </div>
                         </td>
-                      </tr>
-                    ))
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="7">No inactive organizations found.</td>
@@ -1153,22 +1316,44 @@ export default function SaasAdminOrganizationsPage() {
                         <td>{formatValue(org.reason)}</td>
                         <td className="table-actions">
                           <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
-                            {org.can_restore ? (
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => handleDeletedOrgRestore(org)}
-                              >
-                                Restore
-                              </button>
-                            ) : null}
                             <button
                               type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleDeletedOrgPermanentDelete(org)}
-                              disabled={!org.can_permanent_delete}
+                              className={`btn btn-outline-light btn-sm saas-org-icon-btn ${org.can_restore ? "" : "disabled"}`}
+                              onClick={() => {
+                                if (!org.can_restore) {
+                                  return;
+                                }
+                                handleDeletedOrgRestore(org);
+                              }}
+                              title={getRestoreActionTitle(org)}
+                              aria-label="Restore Organization"
+                              aria-disabled={!org.can_restore}
                             >
-                              Permanent Delete
+                              <i className="bi bi-arrow-counterclockwise" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm saas-org-icon-btn"
+                              onClick={() => openStorageModal(org)}
+                              title="Storage Retention Details"
+                              aria-label="Storage Retention Details"
+                            >
+                              <i className="bi bi-hdd-stack" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className={`${org.can_permanent_delete ? "btn btn-danger" : "btn btn-outline-danger disabled"} btn-sm saas-org-icon-btn`}
+                              onClick={() => {
+                                if (!org.can_permanent_delete) {
+                                  return;
+                                }
+                                handleDeletedOrgPermanentDelete(org);
+                              }}
+                              title={getPermanentDeleteActionTitle(org)}
+                              aria-label="Permanent Delete"
+                              aria-disabled={!org.can_permanent_delete}
+                            >
+                              <i className="bi bi-trash3-fill" aria-hidden="true" />
                             </button>
                           </div>
                         </td>
@@ -1263,6 +1448,89 @@ export default function SaasAdminOrganizationsPage() {
             <div className="text-secondary">Use the separate organization page to view and edit details.</div>
             <div className="d-flex justify-content-end mt-3">
               <button type="button" className="btn btn-secondary" onClick={closeView}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {productModal.open ? (
+        <div className="modal-overlay" onClick={closeProductModal}>
+          <div className="modal-panel" onClick={(event) => event.stopPropagation()} style={{ maxWidth: "980px", width: "96%" }}>
+            <h5 className="mb-2">Products & Plans</h5>
+            <div className="text-secondary mb-3">
+              {productModal.orgName}
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Plan</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Add-on Users</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productModal.rows.map((item, index) => (
+                    <tr key={`${item.slug || "product"}-${index}`}>
+                      <td>{item.name || "-"}</td>
+                      <td>{item.plan_name || "-"}</td>
+                      <td>{item.start_date || "-"}</td>
+                      <td>{item.end_date || "-"}</td>
+                      <td>{item.addon_user_count || "-"}</td>
+                      <td>{item.status || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-secondary" onClick={closeProductModal}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {storageModal.open ? (
+        <div className="modal-overlay" onClick={closeStorageModal}>
+          <div className="modal-panel" onClick={(event) => event.stopPropagation()} style={{ maxWidth: "860px", width: "96%" }}>
+            <h5 className="mb-2">Storage Retention Timeline</h5>
+            <div className="text-secondary mb-2">{storageModal.orgName}</div>
+            <div className={`mb-3 ${storageModal.dataAvailable ? "text-success" : "text-danger"}`}>
+              {storageModal.dataAvailable && !storageModal.retentionCrossed
+                ? "Data is within retention window. Restore and renew can continue."
+                : "Retention window crossed. Storage data may not be available."}
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Retention Phase</th>
+                    <th>Configured Days</th>
+                    <th>Remaining Days</th>
+                    <th>Until</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {storageModal.rows.map((row, index) => (
+                    <tr key={`retention-row-${index}`}>
+                      <td>{row.phase}</td>
+                      <td>{row.configured}</td>
+                      <td>{row.remaining}</td>
+                      <td>{row.until}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-secondary" onClick={closeStorageModal}>
                 Close
               </button>
             </div>

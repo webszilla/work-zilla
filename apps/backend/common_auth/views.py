@@ -17,6 +17,7 @@ from django.views.decorators.http import require_GET
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.encoding import force_bytes, force_str
 from django.utils import timezone
 
@@ -33,6 +34,19 @@ from .signals import user_registration_success
 LOGIN_MAX_FAILED_ATTEMPTS = 4
 LOGIN_LOCK_SECONDS = 15 * 60
 LOGIN_LOCK_SESSION_KEY = "login_lock_until"
+
+
+def _safe_next_url(request, value, default="/my-account/"):
+    target = str(value or "").strip()
+    if not target:
+        return default
+    if url_has_allowed_host_and_scheme(
+        url=target,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return target
+    return default
 
 
 @require_GET
@@ -194,10 +208,14 @@ def _build_login_captcha(request):
 @never_cache
 @ensure_csrf_cookie
 def login_view(request):
-    next_url = request.GET.get("next") or request.POST.get("next") or "/my-account/"
+    next_url = _safe_next_url(
+        request,
+        request.GET.get("next") or request.POST.get("next"),
+        default="/my-account/",
+    )
     if request.method == "GET":
         if request.user.is_authenticated:
-            return redirect("/my-account/")
+            return redirect(next_url)
         captcha_question = _build_login_captcha(request)
         lock_remaining_seconds = _get_session_login_lock_remaining(request)
         context = {
@@ -284,17 +302,22 @@ def login_view(request):
     org_for_security = get_user_organization(user, profile)
     apply_request_session_timeout(request, org=org_for_security)
     log_user_login_activity(request, user, org=org_for_security, profile=profile)
-    return redirect("/my-account/")
+    return redirect(next_url)
 
 
 @ensure_csrf_cookie
 def csrf_failure_view(request, reason=""):
     captcha_question = _build_login_captcha(request)
+    next_url = _safe_next_url(
+        request,
+        request.GET.get("next") or request.POST.get("next"),
+        default="/my-account/",
+    )
     return render(
         request,
         "sites/login.html",
         {
-            "next": request.GET.get("next") or request.POST.get("next") or "/my-account/",
+            "next": next_url,
             "captcha_question": captcha_question,
             "error": "Your session expired or the browser blocked the security token. Please refresh the page and try again.",
             "csrf_failure_reason": reason,
@@ -315,9 +338,18 @@ def logout_view(request):
 
 @require_http_methods(["GET", "POST"])
 def signup_view(request):
+    next_url = _safe_next_url(
+        request,
+        request.GET.get("next") or request.POST.get("next"),
+        default="/my-account/",
+    )
     if request.method == "GET":
         captcha_question = _build_signup_captcha(request)
-        return render(request, "sites/signup.html", {"captcha_question": captcha_question})
+        return render(
+            request,
+            "sites/signup.html",
+            {"captcha_question": captcha_question, "next": next_url},
+        )
 
     form = SignupForm(request.POST)
     expected_answer = str(request.session.get("signup_captcha_answer") or "").strip()
@@ -329,7 +361,11 @@ def signup_view(request):
 
     if not form.is_valid() or not captcha_valid:
         captcha_question = _build_signup_captcha(request)
-        return render(request, "sites/signup.html", {"form": form, "captcha_question": captcha_question})
+        return render(
+            request,
+            "sites/signup.html",
+            {"form": form, "captcha_question": captcha_question, "next": next_url},
+        )
 
     username = form.cleaned_data["username"]
     first_name = form.cleaned_data["first_name"]
@@ -384,7 +420,7 @@ def signup_view(request):
             request,
             "Account created, but verification email could not be sent right now. Please use resend verification from My Account.",
         )
-    return redirect("/my-account/")
+    return redirect(next_url)
 
 
 @require_http_methods(["GET", "POST"])

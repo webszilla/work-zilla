@@ -999,7 +999,7 @@
             return;
           }
           if (!isLoggedIn) {
-            window.location.href = "/auth/login/?next=/pricing/";
+            submitCheckout(plan.id, data.product.slug);
             return;
           }
           if (trialLikePlan) {

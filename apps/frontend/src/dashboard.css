@@ -2185,7 +2185,24 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 }
 .saas-org-table .table th:nth-child(4),
 .saas-org-table .table td:nth-child(4){
-  min-width:140px;
+  min-width:90px;
+}
+.saas-org-products-cell{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.saas-org-products-cell .btn{
+  flex-shrink:0;
+}
+.saas-org-icon-btn{
+  min-width:34px;
+  width:34px;
+  height:30px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0;
 }
 .saas-org-table .table th.table-actions,
 .saas-org-table .table td.table-actions{

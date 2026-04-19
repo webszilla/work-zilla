@@ -11,7 +11,9 @@ import zipfile
 import urllib.parse
 import urllib.request
 
+from django.apps import apps as django_apps
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import models
 from django.db.models import Sum
@@ -96,6 +98,7 @@ from apps.backend.storage.services import (
     storage_gb_to_bytes,
 )
 from apps.backend.storage import services_admin as storage_admin_services
+from apps.backend.storage.events import hard_delete_file
 from apps.backend.storage.usage_cache import rebuild_all_usage, rebuild_usage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -104,6 +107,62 @@ from reportlab.pdfgen import canvas
 
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+User = get_user_model()
+
+
+def _delete_storage_keys(keys):
+    for raw_key in keys:
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        try:
+            hard_delete_file(key)
+        except Exception:
+            # Permanent delete should continue even if one stale object key fails.
+            continue
+
+
+def _purge_org_media_objects(org):
+    keys = set(
+        StorageFile.objects
+        .filter(organization=org)
+        .exclude(storage_key="")
+        .values_list("storage_key", flat=True)
+    )
+    try:
+        from apps.backend.modules.whatsapp_automation.models import CataloguePage, DigitalCardEntry
+        for entry in DigitalCardEntry.objects.filter(organization=org).only("logo_storage_key", "hero_banner_storage_key"):
+            logo_key = str(getattr(entry, "logo_storage_key", "") or "").strip()
+            banner_key = str(getattr(entry, "hero_banner_storage_key", "") or "").strip()
+            if logo_key:
+                keys.add(logo_key)
+            if banner_key:
+                keys.add(banner_key)
+        for page in CataloguePage.objects.filter(company_profile__organization=org).only("gallery_items"):
+            gallery_items = getattr(page, "gallery_items", [])
+            if not isinstance(gallery_items, list):
+                continue
+            for row in gallery_items:
+                if not isinstance(row, dict):
+                    continue
+                item_key = str(row.get("storage_key") or "").strip()
+                if item_key:
+                    keys.add(item_key)
+    except Exception:
+        pass
+    _delete_storage_keys(keys)
+
+
+def _purge_models_with_org_reference(org):
+    for model_cls in django_apps.get_models():
+        if model_cls is Organization:
+            continue
+        org_fields = []
+        for field in model_cls._meta.fields:
+            if isinstance(field, (models.ForeignKey, models.OneToOneField)) and getattr(field, "related_model", None) is Organization:
+                org_fields.append(field.name)
+        for field_name in org_fields:
+            model_cls._default_manager.filter(**{field_name: org}).delete()
 
 
 def _is_saas_admin_user(user):
@@ -116,6 +175,30 @@ def _is_saas_admin_user(user):
     profile = UserProfile.objects.filter(user=user).first()
     role = str(getattr(profile, "role", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
     return bool(profile and role in ("superadmin", "super_admin", "saas_admin", "saasadmin"))
+
+
+def _is_protected_org_for_delete(org):
+    if not org:
+        return False
+    owner = getattr(org, "owner", None)
+    if owner and (getattr(owner, "is_superuser", False) or getattr(owner, "is_staff", False)):
+        return True
+    if owner:
+        profile = UserProfile.objects.filter(user=owner).only("role").first()
+        role = str(getattr(profile, "role", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if role in {"superadmin", "super_admin", "saas_admin", "saasadmin", "django_admin", "djangoadmin"}:
+            return True
+    org_name = str(getattr(org, "name", "") or "").strip().lower().replace("-", " ").replace("_", " ")
+    if org_name in {"django", "django admin", "saas admin", "saasadmin"}:
+        return True
+    return False
+
+
+def _protected_org_delete_error():
+    return JsonResponse(
+        {"error": "protected_organization", "message": "Django/SaaS Admin organization cannot be deleted."},
+        status=403,
+    )
 
 
 def _require_saas_admin(request):
@@ -1109,6 +1192,21 @@ def _serialize_subscription(subscription):
     }
 
 
+def _effective_subscription_status(status, end_date, now=None):
+    raw_status = str(status or "").strip().lower()
+    if raw_status in {"cancelled", "canceled"}:
+        return "cancelled"
+    if raw_status in {"pending", "inactive", "paused", "draft"}:
+        return raw_status
+    today = (now or timezone.now()).date()
+    end_day = end_date.date() if isinstance(end_date, datetime) else end_date
+    if end_day and end_day < today:
+        return "expired"
+    if raw_status == "trialing":
+        return "trial"
+    return "active"
+
+
 def _serialize_storage_subscription(subscription):
     if not subscription:
         return None
@@ -1218,9 +1316,29 @@ def _product_description(product):
     return product.description if product else ""
 
 
+def _canonical_product_slug(value):
+    slug = str(value or "").strip().lower()
+    if slug in {"monitor", "worksuite", "work-suite"}:
+        return "monitor"
+    if slug in {"business-autopilot", "business-autopilot-erp"}:
+        return "business-autopilot-erp"
+    if slug in {"storage", "online-storage"}:
+        return "storage"
+    return slug
+
+
+def _addon_user_count_display(value):
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        parsed = 0
+    return str(parsed) if parsed > 0 else "-"
+
+
 def _serialize_org(org, subscription=None):
     owner = org.owner
     owner_name = (owner.get_full_name() if owner else "").strip()
+    protected_org = _is_protected_org_for_delete(org)
     return {
         "id": org.id,
         "name": org.name,
@@ -1233,13 +1351,39 @@ def _serialize_org(org, subscription=None):
         "owner_email_verified": bool(owner.email_verified) if owner else False,
         "owner_email_verified_at": _format_datetime(owner.email_verified_at) if owner else "",
         "owner_email_verification_sent_at": _format_datetime(owner.email_verification_sent_at) if owner else "",
+        "is_protected": protected_org,
+        "can_delete": not protected_org,
         "subscription": _serialize_subscription(subscription),
     }
 
 
 def _serialize_org_product_statuses(org, subscription=None):
     rows = []
-    seen_slugs = set()
+    seen_keys = set()
+    subs = (
+        Subscription.objects
+        .filter(organization=org)
+        .select_related("plan__product")
+        .order_by("-start_date", "-id")
+    )
+    sub_details_by_key = {}
+    for sub in subs:
+        product = getattr(getattr(sub, "plan", None), "product", None)
+        slug = str(getattr(product, "slug", "") or "").strip().lower()
+        if not slug:
+            continue
+        key = _canonical_product_slug(slug)
+        if key in sub_details_by_key:
+            continue
+        sub_details_by_key[key] = {
+            "slug": slug,
+            "name": _product_display_name(slug, getattr(product, "name", "") or slug),
+            "status": _effective_subscription_status(sub.status, getattr(sub, "end_date", None)).lower(),
+            "plan_name": getattr(getattr(sub, "plan", None), "name", "") or "-",
+            "start_date": _format_date(getattr(sub, "start_date", None)) or "-",
+            "end_date": _format_date(getattr(sub, "end_date", None)) or "-",
+            "addon_user_count": _addon_user_count_display(getattr(sub, "addon_count", 0)),
+        }
 
     org_products = (
         OrganizationProduct.objects
@@ -1250,41 +1394,48 @@ def _serialize_org_product_statuses(org, subscription=None):
     for row in org_products:
         product = row.product
         slug = str(getattr(product, "slug", "") or "").strip().lower()
-        if not slug or slug in seen_slugs:
+        key = _canonical_product_slug(slug)
+        if not slug or key in seen_keys:
             continue
-        seen_slugs.add(slug)
+        seen_keys.add(key)
+        sub_detail = sub_details_by_key.get(key, {})
         rows.append({
             "slug": slug,
             "name": _product_display_name(slug, getattr(product, "name", "") or slug),
-            "status": str(row.subscription_status or "").strip().lower() or "inactive",
+            "status": sub_detail.get("status") or str(row.subscription_status or "").strip().lower() or "inactive",
+            "plan_name": sub_detail.get("plan_name", "-"),
+            "start_date": sub_detail.get("start_date", "-"),
+            "end_date": sub_detail.get("end_date", "-"),
+            "addon_user_count": sub_detail.get("addon_user_count", "-"),
         })
 
-    subs = (
-        Subscription.objects
-        .filter(organization=org)
-        .select_related("plan__product")
-        .order_by("-start_date", "-id")
-    )
-    for sub in subs:
-        product = getattr(getattr(sub, "plan", None), "product", None)
-        slug = str(getattr(product, "slug", "") or "").strip().lower()
-        if not slug or slug in seen_slugs:
+    for key, detail in sub_details_by_key.items():
+        if key in seen_keys:
             continue
-        seen_slugs.add(slug)
+        seen_keys.add(key)
         rows.append({
-            "slug": slug,
-            "name": _product_display_name(slug, getattr(product, "name", "") or slug),
-            "status": _effective_subscription_status(sub.status, getattr(sub, "end_date", None)).lower(),
+            "slug": detail["slug"],
+            "name": detail["name"],
+            "status": detail["status"],
+            "plan_name": detail["plan_name"],
+            "start_date": detail["start_date"],
+            "end_date": detail["end_date"],
+            "addon_user_count": detail["addon_user_count"],
         })
 
     if subscription:
         product = getattr(getattr(subscription, "plan", None), "product", None)
         slug = str(getattr(product, "slug", "") or "").strip().lower()
-        if slug and slug not in seen_slugs:
+        key = _canonical_product_slug(slug)
+        if slug and key not in seen_keys:
             rows.append({
                 "slug": slug,
                 "name": _product_display_name(slug, getattr(product, "name", "") or slug),
                 "status": _effective_subscription_status(subscription.status, getattr(subscription, "end_date", None)).lower(),
+                "plan_name": getattr(getattr(subscription, "plan", None), "name", "") or "-",
+                "start_date": _format_date(getattr(subscription, "start_date", None)) or "-",
+                "end_date": _format_date(getattr(subscription, "end_date", None)) or "-",
+                "addon_user_count": _addon_user_count_display(getattr(subscription, "addon_count", 0)),
             })
 
     return rows
@@ -1298,8 +1449,130 @@ def _deleted_orgs_queryset():
     return Organization.objects.filter(is_deleted=True)
 
 
-def _serialize_deleted_org(org):
+def _remaining_days(until_value, now=None):
+    if not until_value:
+        return "-"
+    current = now or timezone.now()
+    delta = until_value - current
+    if delta.total_seconds() <= 0:
+        return 0
+    return int(math.ceil(delta.total_seconds() / 86400))
+
+
+def _storage_retention_payload(*, deleted_at=None, policy=None, now=None):
+    current = now or timezone.now()
+    base_deleted_at = _parse_datetime(deleted_at)
+    if not base_deleted_at:
+        return {
+            "grace_days": int(getattr(policy, "grace_days", 0) or 0),
+            "active_days": int(getattr(policy, "archive_days", 0) or 0),
+            "hard_delete_days": int(getattr(policy, "hard_delete_days", 0) or 0),
+            "grace_remaining_days": "-",
+            "active_remaining_days": "-",
+            "hard_delete_remaining_days": "-",
+            "grace_until": "",
+            "active_until": "",
+            "hard_delete_at": "",
+            "data_available": False,
+            "retention_crossed": True,
+            "hard_delete_crossed": True,
+        }
+
+    grace_days = int(getattr(policy, "grace_days", 0) or 0)
+    active_days = int(getattr(policy, "archive_days", 0) or 0)
+    hard_delete_days = int(getattr(policy, "hard_delete_days", 0) or 0)
+
+    grace_until = base_deleted_at + timedelta(days=grace_days)
+    active_until = grace_until + timedelta(days=active_days)
+    hard_delete_at = active_until + timedelta(days=hard_delete_days) if hard_delete_days > 0 else None
+
+    grace_remaining_days = _remaining_days(grace_until, now=current)
+    active_remaining_days = _remaining_days(active_until, now=current)
+    hard_delete_remaining_days = _remaining_days(hard_delete_at, now=current) if hard_delete_days > 0 else "-"
+
+    if hard_delete_days > 0:
+        data_available = hard_delete_remaining_days != 0
+    else:
+        data_available = True
+
+    retention_crossed = not data_available if hard_delete_days > 0 else False
+
+    return {
+        "grace_days": grace_days,
+        "active_days": active_days,
+        "hard_delete_days": hard_delete_days,
+        "grace_remaining_days": grace_remaining_days,
+        "active_remaining_days": active_remaining_days,
+        "hard_delete_remaining_days": hard_delete_remaining_days,
+        "grace_until": _format_datetime(grace_until),
+        "active_until": _format_datetime(active_until),
+        "hard_delete_at": _format_datetime(hard_delete_at),
+        "data_available": data_available,
+        "retention_crossed": retention_crossed,
+        "hard_delete_crossed": retention_crossed,
+    }
+
+
+def _can_restore_from_retention(*, has_tombstone, storage_retention):
+    if not has_tombstone:
+        return False
+    return not bool((storage_retention or {}).get("retention_crossed"))
+
+
+def _can_permanent_delete_from_retention(*, is_protected, storage_retention):
+    if is_protected:
+        return False
+    hard_delete_days = int((storage_retention or {}).get("hard_delete_days") or 0)
+    if hard_delete_days <= 0:
+        return False
+    return bool((storage_retention or {}).get("retention_crossed"))
+
+
+def _retention_not_crossed_error(storage_retention):
+    hard_delete_at = (storage_retention or {}).get("hard_delete_at") or ""
+    remaining = (storage_retention or {}).get("hard_delete_remaining_days")
+    if hard_delete_at:
+        message = f"Permanent delete is allowed only after hard-delete date ({hard_delete_at})."
+    else:
+        message = "Permanent delete is not allowed before hard-delete retention window ends."
+    if isinstance(remaining, int) and remaining > 0:
+        message = f"{message} Remaining: {remaining} day(s)."
+    return JsonResponse(
+        {"error": "retention_not_crossed", "message": message, "storage_retention": storage_retention or {}},
+        status=400,
+    )
+
+
+def _resolve_deleted_account_org(row):
+    if not row:
+        return None
+    org_name = str(getattr(row, "organization_name", "") or "").strip()
+    owner_email = str(getattr(row, "owner_email", "") or "").strip()
+    owner_username = str(getattr(row, "owner_username", "") or "").strip()
+
+    queryset = Organization.objects.select_related("owner").filter(is_deleted=True)
+    if org_name:
+        queryset = queryset.filter(name__iexact=org_name)
+    if owner_email:
+        queryset = queryset.filter(owner__email__iexact=owner_email)
+    elif owner_username:
+        queryset = queryset.filter(owner__username__iexact=owner_username)
+    return queryset.order_by("-deleted_at", "-id").first()
+
+
+def _serialize_deleted_org(org, retention_policy=None, now=None):
     owner = org.owner
+    protected_org = _is_protected_org_for_delete(org)
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(org, "deleted_at", None),
+        policy=retention_policy or GlobalRetentionPolicy.get_solo(),
+        now=now,
+    )
+    can_restore = _can_restore_from_retention(has_tombstone=True, storage_retention=storage_retention)
+    can_permanent_delete = _can_permanent_delete_from_retention(
+        is_protected=protected_org,
+        storage_retention=storage_retention,
+    )
     return {
         "id": org.id,
         "organization_name": org.name,
@@ -1307,23 +1580,39 @@ def _serialize_deleted_org(org):
         "owner_email": owner.email if owner else "",
         "deleted_at": _format_datetime(org.deleted_at),
         "reason": org.deleted_reason or "Admin deleted organization",
-        "can_restore": True,
-        "can_permanent_delete": True,
+        "can_restore": can_restore,
+        "can_permanent_delete": can_permanent_delete,
+        "is_protected": protected_org,
         "legacy_deleted_account_id": None,
+        "storage_retention": storage_retention,
     }
 
 
-def _serialize_deleted_account_entry(row):
+def _serialize_deleted_account_entry(row, linked_org=None, retention_policy=None, now=None):
+    linked = linked_org or _resolve_deleted_account_org(row)
+    protected_org = _is_protected_org_for_delete(linked) if linked else False
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(linked, "deleted_at", None) if linked else getattr(row, "deleted_at", None),
+        policy=retention_policy or GlobalRetentionPolicy.get_solo(),
+        now=now,
+    )
+    can_restore = _can_restore_from_retention(has_tombstone=bool(linked), storage_retention=storage_retention)
+    can_permanent_delete = _can_permanent_delete_from_retention(
+        is_protected=protected_org,
+        storage_retention=storage_retention,
+    )
     return {
-        "id": None,
+        "id": linked.id if linked else None,
         "organization_name": row.organization_name,
         "owner_username": row.owner_username,
         "owner_email": row.owner_email or "",
         "deleted_at": _format_datetime(row.deleted_at),
         "reason": row.reason or "",
-        "can_restore": False,
-        "can_permanent_delete": True,
+        "can_restore": can_restore,
+        "can_permanent_delete": can_permanent_delete,
+        "is_protected": protected_org,
         "legacy_deleted_account_id": row.id,
+        "storage_retention": storage_retention,
     }
 
 
@@ -2071,13 +2360,28 @@ def organizations_list(request):
         row = _serialize_org(org, sub)
         product_rows = _serialize_org_product_statuses(org, sub)
         if not product_rows:
-            product_rows = entitlements_by_org.get(org.id, [])
+            product_rows = [
+                {
+                    "slug": item.get("slug", ""),
+                    "name": item.get("name", ""),
+                    "status": item.get("status", "inactive"),
+                    "plan_name": "-",
+                    "start_date": "-",
+                    "end_date": "-",
+                    "addon_user_count": "-",
+                }
+                for item in entitlements_by_org.get(org.id, [])
+            ]
         has_monitor_entitlement = any(item["slug"] == "monitor" for item in product_rows)
         if sub and monitor_product and not has_monitor_entitlement and sub.plan and getattr(sub.plan, "product", None) and getattr(sub.plan.product, "slug", "") in {"monitor", "worksuite"}:
             product_rows = product_rows + [{
                 "slug": monitor_product.slug,
                 "name": _product_display_name(monitor_product.slug, monitor_product.name),
-                "status": "active",
+                "status": _effective_subscription_status(sub.status, getattr(sub, "end_date", None)).lower(),
+                "plan_name": getattr(sub.plan, "name", "") or "-",
+                "start_date": _format_date(getattr(sub, "start_date", None)) or "-",
+                "end_date": _format_date(getattr(sub, "end_date", None)) or "-",
+                "addon_user_count": _addon_user_count_display(getattr(sub, "addon_count", 0)),
             }]
         row["products"] = [item["slug"] for item in product_rows]
         row["product_statuses"] = product_rows
@@ -2115,14 +2419,28 @@ def organizations_list(request):
         }
         for dealer in dealers
     ]
-    deleted_payload = [
-        _serialize_deleted_org(row)
-        for row in _deleted_orgs_queryset().select_related("owner").order_by("-deleted_at", "-id")[:500]
-    ]
-    deleted_payload.extend(
-        _serialize_deleted_account_entry(row)
-        for row in DeletedAccount.objects.order_by("-deleted_at", "-id")[:500]
+    now = timezone.now()
+    retention_policy = GlobalRetentionPolicy.get_solo()
+    deleted_org_rows = list(
+        _deleted_orgs_queryset().select_related("owner").order_by("-deleted_at", "-id")[:500]
     )
+    deleted_payload = [
+        _serialize_deleted_org(row, retention_policy=retention_policy, now=now)
+        for row in deleted_org_rows
+    ]
+    seen_deleted_org_ids = {row.id for row in deleted_org_rows}
+    for row in DeletedAccount.objects.order_by("-deleted_at", "-id")[:500]:
+        linked_org = _resolve_deleted_account_org(row)
+        if linked_org and linked_org.id in seen_deleted_org_ids:
+            continue
+        deleted_payload.append(
+            _serialize_deleted_account_entry(
+                row,
+                linked_org=linked_org,
+                retention_policy=retention_policy,
+                now=now,
+            )
+        )
 
     return JsonResponse({
         "organizations": payload,
@@ -2309,6 +2627,20 @@ def organization_restore(request, org_id):
         return HttpResponseForbidden("Access denied.")
 
     org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id, is_deleted=True)
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(org, "deleted_at", None),
+        policy=GlobalRetentionPolicy.get_solo(),
+        now=timezone.now(),
+    )
+    if not _can_restore_from_retention(has_tombstone=True, storage_retention=storage_retention):
+        return JsonResponse(
+            {
+                "error": "restore_window_expired",
+                "message": "Restore window expired after hard-delete date.",
+                "storage_retention": storage_retention,
+            },
+            status=400,
+        )
     org.is_deleted = False
     org.deleted_at = None
     org.deleted_reason = ""
@@ -2319,18 +2651,43 @@ def organization_restore(request, org_id):
     return JsonResponse({"status": "restored"})
 
 
+def _hard_delete_org(org, request_user=None):
+    owner = org.owner
+    related_user_ids = list(
+        UserProfile.objects.filter(organization=org).values_list("user_id", flat=True)
+    )
+    if owner and owner.id:
+        related_user_ids.append(owner.id)
+
+    _purge_org_media_objects(org)
+    org._hard_delete_no_archive = True
+    _purge_models_with_org_reference(org)
+    org.delete()
+
+    unique_user_ids = {int(user_id) for user_id in related_user_ids if user_id}
+    users_qs = User.objects.filter(id__in=unique_user_ids).exclude(is_superuser=True)
+    if request_user and request_user.is_authenticated:
+        users_qs = users_qs.exclude(id=request_user.id)
+    users_qs.delete()
+
+
 @login_required
 @require_http_methods(["DELETE"])
 def organization_permanent_delete(request, org_id):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")
 
-    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id)
-    owner = org.owner
-    if owner:
-        owner.delete()
-    else:
-        org.delete()
+    org = get_object_or_404(Organization.objects.select_related("owner"), id=org_id, is_deleted=True)
+    if _is_protected_org_for_delete(org):
+        return _protected_org_delete_error()
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(org, "deleted_at", None),
+        policy=GlobalRetentionPolicy.get_solo(),
+        now=timezone.now(),
+    )
+    if not _can_permanent_delete_from_retention(is_protected=False, storage_retention=storage_retention):
+        return _retention_not_crossed_error(storage_retention)
+    _hard_delete_org(org, request_user=request.user)
     return JsonResponse({"status": "deleted"})
 
 
@@ -2343,8 +2700,65 @@ def deleted_account_detail(request, account_id):
     account = DeletedAccount.objects.filter(id=account_id).first()
     if not account:
         return JsonResponse({"error": "not_found"}, status=404)
+    linked_org = _resolve_deleted_account_org(account)
+    if linked_org and _is_protected_org_for_delete(linked_org):
+        return _protected_org_delete_error()
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(linked_org, "deleted_at", None) if linked_org else getattr(account, "deleted_at", None),
+        policy=GlobalRetentionPolicy.get_solo(),
+        now=timezone.now(),
+    )
+    if not _can_permanent_delete_from_retention(
+        is_protected=False,
+        storage_retention=storage_retention,
+    ):
+        return _retention_not_crossed_error(storage_retention)
+    if linked_org and linked_org.is_deleted:
+        _hard_delete_org(linked_org, request_user=request.user)
     account.delete()
     return JsonResponse({"status": "deleted"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def deleted_account_restore(request, account_id):
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    account = DeletedAccount.objects.filter(id=account_id).first()
+    if not account:
+        return JsonResponse({"error": "not_found"}, status=404)
+
+    org = _resolve_deleted_account_org(account)
+    if not org:
+        return JsonResponse(
+            {"error": "restore_not_available", "message": "Restore is not available for this deleted account."},
+            status=404,
+        )
+    storage_retention = _storage_retention_payload(
+        deleted_at=getattr(org, "deleted_at", None),
+        policy=GlobalRetentionPolicy.get_solo(),
+        now=timezone.now(),
+    )
+    if not _can_restore_from_retention(has_tombstone=True, storage_retention=storage_retention):
+        return JsonResponse(
+            {
+                "error": "restore_window_expired",
+                "message": "Restore window expired after hard-delete date.",
+                "storage_retention": storage_retention,
+            },
+            status=400,
+        )
+
+    org.is_deleted = False
+    org.deleted_at = None
+    org.deleted_reason = ""
+    org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+    if org.owner and not org.owner.is_active:
+        org.owner.is_active = True
+        org.owner.save(update_fields=["is_active"])
+    account.delete()
+    return JsonResponse({"status": "restored", "organization_id": org.id})
 
 
 @login_required
@@ -2647,6 +3061,8 @@ def organization_detail(request, org_id):
         return JsonResponse(_organization_detail_payload(org, subscription))
 
     if request.method == "DELETE":
+        if _is_protected_org_for_delete(org):
+            return _protected_org_delete_error()
         owner = org.owner
         if not org.is_deleted:
             send_templated_email(
@@ -4809,7 +5225,7 @@ def ai_chatbot_openai_settings(request):
 
 
 @login_required
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["GET", "PUT", "POST"])
 def retention_policy_settings(request):
     if not _is_saas_admin_user(request.user):
         return HttpResponseForbidden("Access denied.")

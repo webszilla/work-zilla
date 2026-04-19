@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete, pre_save
+from django.dispatch import receiver
 from django.utils.text import slugify
 
 from core.models import Organization
@@ -453,3 +455,43 @@ def build_unique_public_slug(model_cls, base_text, fallback_prefix="page"):
         candidate = f"{base[: max(1, 220 - len(suffix))]}{suffix}"
         counter += 1
     return candidate
+
+
+def _delete_field_file(instance, field_name):
+    file_obj = getattr(instance, field_name, None)
+    if file_obj:
+        file_obj.delete(save=False)
+
+
+@receiver(pre_save, sender=CompanyProfile)
+def company_profile_replace_logo(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    try:
+        previous = CompanyProfile.objects.get(pk=instance.pk)
+    except CompanyProfile.DoesNotExist:
+        return
+    if previous.logo and previous.logo != instance.logo:
+        previous.logo.delete(save=False)
+
+
+@receiver(post_delete, sender=CompanyProfile)
+def company_profile_delete_logo(sender, instance, **kwargs):
+    _delete_field_file(instance, "logo")
+
+
+@receiver(pre_save, sender=CatalogueProduct)
+def catalogue_product_replace_image(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    try:
+        previous = CatalogueProduct.objects.get(pk=instance.pk)
+    except CatalogueProduct.DoesNotExist:
+        return
+    if previous.image and previous.image != instance.image:
+        previous.image.delete(save=False)
+
+
+@receiver(post_delete, sender=CatalogueProduct)
+def catalogue_product_delete_image(sender, instance, **kwargs):
+    _delete_field_file(instance, "image")

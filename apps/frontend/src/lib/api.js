@@ -67,7 +67,7 @@ export async function apiFetch(url, options = {}) {
   const normalizedPath = String(url || "").trim().toLowerCase();
   const isSaasAdminApi = normalizedPath.startsWith("/api/saas-admin/");
   const requestedMethod = String(options.method || "GET").toUpperCase();
-  const methodOverride = ["PUT", "PATCH", "DELETE"].includes(requestedMethod)
+  const methodOverride = !isSaasAdminApi && ["PUT", "PATCH", "DELETE"].includes(requestedMethod)
     ? requestedMethod
     : "";
   const fetchOptions = {

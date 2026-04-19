@@ -7,7 +7,7 @@ import json
 import re
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden, JsonResponse
-from core.models import Organization, Subscription, DeletedAccount, UserProfile, OrganizationSettings
+from core.models import Organization, Subscription, UserProfile, OrganizationSettings
 from core.access_control import get_user_organization
 from core.session_security import apply_request_session_timeout
 from core.timezone_utils import normalize_timezone
@@ -207,6 +207,12 @@ class OrganizationRequiredMiddleware:
             org = Organization.objects.filter(owner=request.user).first()
 
         if org:
+            if org.is_deleted:
+                if request.user == org.owner:
+                    logout(request)
+                messages.warning(request, "Organization is deleted. Contact SaaS Admin to restore access.")
+                return redirect("/accounts/login/")
+
             latest_sub = (
                 Subscription.objects.filter(organization=org)
                 .order_by("-start_date")
@@ -217,18 +223,17 @@ class OrganizationRequiredMiddleware:
                 cutoff = timezone.now() - timedelta(days=15)
                 if effective_end and effective_end < cutoff:
                     owner = org.owner
-                    DeletedAccount.objects.create(
-                        organization_name=org.name,
-                        owner_username=owner.username if owner else "-",
-                        owner_email=owner.email if owner else "",
-                        reason="This account not renewed after expired."
-                    )
-                    org.delete()
+                    if not org.is_deleted:
+                        org.is_deleted = True
+                        org.deleted_at = timezone.now()
+                        org.deleted_reason = "This account not renewed after expired."
+                        org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+                    if owner and owner.is_active:
+                        owner.is_active = False
+                        owner.save(update_fields=["is_active"])
                     if owner and owner == request.user:
                         logout(request)
-                    if owner:
-                        owner.delete()
-                    messages.warning(request, "Account removed due to plan expiry.")
+                    messages.warning(request, "Account archived due to plan expiry. Contact SaaS Admin to restore.")
                     return redirect("/accounts/login/")
 
             sub = (

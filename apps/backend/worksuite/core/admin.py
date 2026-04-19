@@ -116,30 +116,36 @@ class OrganizationAdmin(admin.ModelAdmin):
 
     def delete_model(self, request, obj):
         owner = obj.owner
-        DeletedAccount.objects.create(
-            organization_name=obj.name,
-            owner_username=owner.username if owner else "-",
-            owner_email=owner.email if owner else "",
-            reason="Admin deleted organization"
+        if not obj.is_deleted:
+            obj.is_deleted = True
+            obj.deleted_at = timezone.now()
+            obj.deleted_reason = "Admin deleted organization"
+            obj.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+        if owner and owner.is_active:
+            owner.is_active = False
+            owner.save(update_fields=["is_active"])
+        self.message_user(
+            request,
+            f"Organization '{obj.name}' moved to deleted state (tombstone retained).",
+            level=messages.INFO,
         )
-        if owner:
-            owner.delete()
-        else:
-            obj.delete()
 
     def delete_queryset(self, request, queryset):
         for org in queryset:
             owner = org.owner
-            DeletedAccount.objects.create(
-                organization_name=org.name,
-                owner_username=owner.username if owner else "-",
-                owner_email=owner.email if owner else "",
-                reason="Admin deleted organization"
-            )
-            if owner:
-                owner.delete()
-            else:
-                org.delete()
+            if not org.is_deleted:
+                org.is_deleted = True
+                org.deleted_at = timezone.now()
+                org.deleted_reason = "Admin deleted organization"
+                org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
+            if owner and owner.is_active:
+                owner.is_active = False
+                owner.save(update_fields=["is_active"])
+        self.message_user(
+            request,
+            "Selected organizations moved to deleted state (tombstones retained).",
+            level=messages.INFO,
+        )
 
 
 @admin.register(Subscription)
