@@ -2942,7 +2942,7 @@ function normalizePendingCrmSalesOrderDraft(value = {}) {
   const sourceSalesOrder = value?.sourceSalesOrder && typeof value.sourceSalesOrder === "object"
     ? normalizeCrmSalesOrderRecord(value.sourceSalesOrder)
     : null;
-  if (!sourceDeal?.id && !sourceSalesOrder?.id) {
+  if (!sourceDeal?.id && !hasSalesOrderIdentity(sourceSalesOrder)) {
     return null;
   }
   return {
@@ -3003,7 +3003,7 @@ function normalizePendingAccountsEstimateDraft(value = {}) {
   const sourceSalesOrder = value?.sourceSalesOrder && typeof value.sourceSalesOrder === "object"
     ? normalizeCrmSalesOrderRecord(value.sourceSalesOrder)
     : null;
-  if (!sourceSalesOrder?.id) {
+  if (!hasSalesOrderIdentity(sourceSalesOrder)) {
     return null;
   }
   return {
@@ -3062,7 +3062,7 @@ function normalizePendingAccountsInvoiceDraft(value = {}) {
   const sourceSalesOrder = value?.sourceSalesOrder && typeof value.sourceSalesOrder === "object"
     ? normalizeCrmSalesOrderRecord(value.sourceSalesOrder)
     : null;
-  if (!sourceSalesOrder?.id) {
+  if (!hasSalesOrderIdentity(sourceSalesOrder)) {
     return null;
   }
   return {
@@ -3104,8 +3104,7 @@ function clearPendingAccountsInvoiceDraft(preferredOrgId = "") {
 
 function writePendingAccountsBillingDraft(kind = "estimate", salesOrderRow = {}, preferredOrgId = "", documentId = "") {
   const normalizedSalesOrder = normalizeCrmSalesOrderRecord(salesOrderRow || {});
-  const sourceSalesOrderId = String(normalizedSalesOrder.id || "").trim();
-  if (!sourceSalesOrderId) {
+  if (!hasSalesOrderIdentity(normalizedSalesOrder)) {
     return;
   }
   const resolvedOrgId = String(preferredOrgId || "").trim()
@@ -4100,6 +4099,24 @@ function findBestCustomerMatch(customers = [], {
 function normalizePlaceholderText(value = "") {
   const normalizedValue = String(value || "").trim();
   return normalizedValue === "-" ? "" : normalizedValue;
+}
+
+function pickFirstMeaningfulValue(...values) {
+  for (const value of values) {
+    const normalizedValue = normalizePlaceholderText(String(value ?? "").trim());
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+  return "";
+}
+
+function hasSalesOrderIdentity(row = {}) {
+  const normalized = normalizeCrmSalesOrderRecord(row || {});
+  const sourceId = String(normalized.id || "").trim();
+  const sourceOrderNo = String(normalized.orderId || normalized.order_id || normalized.docNo || normalized.doc_no || "").trim();
+  const sourceReferenceId = String(normalized.crmReferenceId || normalized.crm_reference_id || "").trim();
+  return Boolean(sourceId || sourceOrderNo || sourceReferenceId);
 }
 
 function hasSalesOrderReadyCustomerDetails(row = {}) {
@@ -8935,6 +8952,7 @@ function CrmOnePageModule() {
 
   function findAccountsDocumentForSalesOrder(rows = [], salesOrderRow = {}, options = {}) {
     const requireManualMarker = options?.requireManualMarker !== false;
+    const allowBlankCustomer = options?.allowBlankCustomer === true;
     const sourceId = String(salesOrderRow?.id || "").trim();
     const sourceOrderNo = String(
       salesOrderRow?.orderId
@@ -8947,12 +8965,17 @@ function CrmOnePageModule() {
       if (requireManualMarker && !isManualSalesOrderConversionRow(row)) {
         return false;
       }
+      const rowCustomerName = normalizePlaceholderText(String(row?.customerName || row?.customer_name || "").trim());
+      if (!allowBlankCustomer && !rowCustomerName) {
+        return false;
+      }
       const rowSourceId = String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
       const rowSourceOrderNo = String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
-      if (sourceId && rowSourceId && sourceId === rowSourceId) {
-        return true;
+      if (sourceId && rowSourceId) {
+        return sourceId === rowSourceId;
       }
-      if (sourceOrderNo && rowSourceOrderNo && sourceOrderNo === rowSourceOrderNo) {
+      // Fallback to order number matching only when either side has no stable source-id.
+      if (sourceOrderNo && rowSourceOrderNo && sourceOrderNo === rowSourceOrderNo && (!sourceId || !rowSourceId)) {
         return true;
       }
       return false;
@@ -9106,6 +9129,18 @@ function CrmOnePageModule() {
     navigate(`../accounts?${query.toString()}`, { relative: "path" });
   }
 
+  function openAccountsDocumentDraft(kind = "estimate") {
+    const query = new URLSearchParams();
+    if (kind === "invoice") {
+      query.set("tab", "invoices");
+      query.set("resume-invoice", "1");
+    } else {
+      query.set("tab", "estimates");
+      query.set("resume-estimate", "1");
+    }
+    navigate(`../accounts?${query.toString()}`, { relative: "path" });
+  }
+
   function openAccountsDocumentEdit(kind = "invoice", documentId = "", fallbackDocNo = "") {
     const nextDocumentId = String(documentId || "").trim();
     if (!nextDocumentId) {
@@ -9172,7 +9207,7 @@ function CrmOnePageModule() {
     };
   }
 
-  function buildBillingDocumentFromSalesOrder(sourceRow, kind = "estimate") {
+  function buildBillingDocumentFromSalesOrder(sourceRow, kind = "estimate", linkedCustomerOverride = null) {
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
@@ -9189,53 +9224,58 @@ function CrmOnePageModule() {
     const sourceCrmReferenceId = normalizePlaceholderText(
       String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()
     );
-    const customerPool = Array.isArray(crmAccountsWorkspace?.customers) && crmAccountsWorkspace.customers.length
-      ? crmAccountsWorkspace.customers
-      : (moduleData?.customers || []);
-    const linkedCustomer = findBestCustomerMatch(customerPool, {
+    const customerPool = [
+      ...(Array.isArray(crmAccountsWorkspace?.customers) ? crmAccountsWorkspace.customers : []),
+      ...(Array.isArray(moduleData?.customers) ? moduleData.customers : []),
+      ...(Array.isArray(sharedCustomerOptions) ? sharedCustomerOptions : []),
+      ...(Array.isArray(crmSalesOrderCustomerOptions) ? crmSalesOrderCustomerOptions : []),
+    ];
+    const linkedCustomer = normalizeSharedCustomerRecord(
+      linkedCustomerOverride
+      || findBestCustomerMatch(customerPool, {
       crmReferenceId: sourceCrmReferenceId,
-      companyName: String(
+      companyName: pickFirstMeaningfulValue(
         normalizedRow.company
-        || normalizedRow.clients
-        || normalizedRow.companyOrClientName
-        || normalizedRow.company_or_client_name
-        || normalizedRow.clientName
-        || normalizedRow.client_name
-        || ""
-      ).trim(),
-      leadName: String(normalizedRow.leadName || "").trim(),
-      customerName: String(normalizedRow.customerName || "").trim(),
-    });
-    const sourceClientName = normalizePlaceholderText(String(
-      normalizedRow.company
-      || normalizedRow.clients
-      || normalizedRow.companyOrClientName
-      || normalizedRow.company_or_client_name
-      || normalizedRow.clientName
-      || normalizedRow.client_name
-      || linkedCustomer?.companyName
-      || linkedCustomer?.clientName
-      || linkedCustomer?.name
-      || normalizedRow.customerName
-      || normalizedRow.leadName
-      || ""
-    ).trim());
-    const sourceLeadName = normalizePlaceholderText(String(normalizedRow.leadName || normalizedRow.customerName || "").trim());
-    const resolvedCustomerName = String(
-      sourceClientName
-      || linkedCustomer?.companyName
+        , normalizedRow.clients
+        , normalizedRow.companyOrClientName
+        , normalizedRow.company_or_client_name
+        , normalizedRow.clientName
+        , normalizedRow.client_name
+      ),
+      leadName: pickFirstMeaningfulValue(normalizedRow.leadName, normalizedRow.customerName),
+      customerName: pickFirstMeaningfulValue(normalizedRow.customerName, normalizedRow.leadName),
+      })
+      || {}
+    );
+    const linkedCustomerId = String(linkedCustomer?.id || "").trim();
+    const linkedCustomerName = String(
+      linkedCustomer?.companyName
       || linkedCustomer?.name
       || linkedCustomer?.clientName
-      || sourceLeadName
       || ""
     ).trim();
+    const linkedCustomerGstin = String(linkedCustomer?.gstin || "").trim();
+    const linkedCustomerBillingAddress = String(linkedCustomer?.billingAddress || "").trim();
+    const sourceClientName = pickFirstMeaningfulValue(
+      normalizedRow.company
+      , normalizedRow.clients
+      , normalizedRow.companyOrClientName
+      , normalizedRow.company_or_client_name
+      , normalizedRow.clientName
+      , normalizedRow.client_name
+      , linkedCustomerName
+      , normalizedRow.customerName
+      , normalizedRow.leadName
+    );
+    const sourceLeadName = pickFirstMeaningfulValue(normalizedRow.leadName, normalizedRow.customerName, sourceClientName);
+    const resolvedCustomerName = pickFirstMeaningfulValue(linkedCustomerName, sourceClientName, sourceLeadName);
     return {
       ...baseDocument,
       id: `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       docNo: getNextBillingDocNo(kind, existingRows),
-      customerId: String(linkedCustomer?.id || "").trim(),
+      customerId: linkedCustomerId,
       customerName: resolvedCustomerName,
-      customerGstin: String(normalizedRow.customerGstin || "").trim(),
+      customerGstin: pickFirstMeaningfulValue(normalizedRow.customerGstin, linkedCustomerGstin),
       issueDate,
       dueDate,
       gstTemplateId: String(normalizedRow.gstTemplateId || resolveDefaultGstTemplateId(crmAccountsWorkspace?.gstTemplates || moduleData?.gstTemplates || []) || "").trim(),
@@ -9243,7 +9283,7 @@ function CrmOnePageModule() {
       salesperson: Array.isArray(normalizedRow.salesperson)
         ? normalizedRow.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(normalizedRow.salesperson || normalizedRow.assignedTo || "").trim(),
-      billingAddress: String(normalizedRow.billingAddress || "").trim(),
+      billingAddress: pickFirstMeaningfulValue(normalizedRow.billingAddress, linkedCustomerBillingAddress),
       notes: String(normalizedRow.notes || baseDocument.notes || "").trim(),
       termsText: String(normalizedRow.termsText || baseDocument.termsText || "").trim(),
       paymentStatusNotes: String(normalizedRow.paymentStatusNotes || "").trim(),
@@ -10762,8 +10802,7 @@ function CrmOnePageModule() {
     const sourceDeal = explicitSourceDeal || fallbackSourceDeal || null;
     const sourceSalesOrder = explicitSourceSalesOrder || null;
     const sourceDealId = String(sourceDeal?.id || "").trim();
-    const sourceSalesOrderId = String(sourceSalesOrder?.id || "").trim();
-    if (!sourceDealId && !sourceSalesOrderId) {
+    if (!sourceDealId && !hasSalesOrderIdentity(sourceSalesOrder)) {
       return;
     }
     const activeOrgId = getCrmOrgIdFromStorageKey(crmStorageKey)
@@ -11152,41 +11191,81 @@ function CrmOnePageModule() {
         });
         return;
       }
+      const normalizedMatchedCustomer = normalizeSharedCustomerRecord(matchedCustomer || {});
       closeCrmSalesOrderConvertPopup();
       const resolveRepairCustomerName = (existingRow = {}) => {
+        const matchedCustomerName = String(
+          normalizedMatchedCustomer?.companyName
+          || normalizedMatchedCustomer?.name
+          || normalizedMatchedCustomer?.clientName
+          || ""
+        ).trim();
+        if (matchedCustomerName) {
+          return matchedCustomerName;
+        }
         const existingCustomerName = String(existingRow.customerName || existingRow.customer_name || "").trim();
         if (existingCustomerName) {
           return existingCustomerName;
         }
-        return String(
+        return pickFirstMeaningfulValue(
           normalizedRow.company
-          || normalizedRow.clients
-          || normalizedRow.customerName
-          || normalizedRow.leadName
-          || ""
-        ).trim();
+          , normalizedRow.clients
+          , normalizedRow.customerName
+          , normalizedRow.leadName
+        );
       };
       const buildLinkedSalesOrderDocumentPatch = (existingRow = {}) => {
         const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
-        const sourceLeadName = String(normalizedRow.leadName || normalizedRow.customerName || "").trim();
-        const sourceClientName = String(
-          normalizedRow.company
-          || normalizedRow.clients
-          || normalizedRow.customerName
-          || normalizedRow.companyOrClientName
-          || normalizedRow.company_or_client_name
-          || normalizedRow.clientName
-          || normalizedRow.client_name
-          || sourceLeadName
+        const sourceLeadName = pickFirstMeaningfulValue(normalizedRow.leadName, normalizedRow.customerName);
+        const matchedCustomerName = String(
+          normalizedMatchedCustomer?.companyName
+          || normalizedMatchedCustomer?.name
+          || normalizedMatchedCustomer?.clientName
           || ""
         ).trim();
-        const sourceCrmReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
+        const sourceClientName = pickFirstMeaningfulValue(
+          normalizedRow.company
+          , normalizedRow.clients
+          , normalizedRow.customerName
+          , normalizedRow.companyOrClientName
+          , normalizedRow.company_or_client_name
+          , normalizedRow.clientName
+          , normalizedRow.client_name
+          , matchedCustomerName
+          , sourceLeadName
+        );
+        const sourceCrmReferenceId = normalizePlaceholderText(
+          String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()
+        );
         const repairedCustomerName = resolveRepairCustomerName(existingRow);
         const resolvedId = String(existingRow.id || "").trim() || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const resolvedCustomerId = String(
+          existingRow.customerId
+          || existingRow.customer_id
+          || normalizedMatchedCustomer?.id
+          || ""
+        ).trim();
+        const resolvedCustomerGstin = String(
+          existingRow.customerGstin
+          || existingRow.customer_gstin
+          || normalizedRow.customerGstin
+          || normalizedMatchedCustomer?.gstin
+          || ""
+        ).trim();
+        const resolvedBillingAddress = String(
+          existingRow.billingAddress
+          || existingRow.billing_address
+          || normalizedRow.billingAddress
+          || normalizedMatchedCustomer?.billingAddress
+          || ""
+        ).trim();
         return {
           ...existingRow,
           id: resolvedId,
+          customerId: resolvedCustomerId,
           customerName: repairedCustomerName,
+          customerGstin: resolvedCustomerGstin,
+          billingAddress: resolvedBillingAddress,
           crmReferenceId: String(existingRow.crmReferenceId || existingRow.crm_reference_id || sourceCrmReferenceId || "").trim(),
           sourceSalesOrderId: String(existingRow.sourceSalesOrderId || existingRow.source_sales_order_id || normalizedRow.id || "").trim(),
           sourceSalesOrderNo: String(existingRow.sourceSalesOrderNo || existingRow.source_sales_order_no || sourceOrderNo || "").trim(),
@@ -11224,7 +11303,21 @@ function CrmOnePageModule() {
         if (existingConverted) {
           const patchedConverted = buildLinkedSalesOrderDocumentPatch(existingConverted);
           const shouldRepair = !hasLinkedSalesOrderFields(existingConverted)
-            || String(existingConverted.customerName || existingConverted.customer_name || "").trim() !== String(patchedConverted.customerName || "").trim();
+            || [
+              "customerId",
+              "customerName",
+              "customerGstin",
+              "billingAddress",
+              "crmReferenceId",
+              "sourceSalesOrderId",
+              "sourceSalesOrderNo",
+              "sourceSalesOrderLeadName",
+              "sourceSalesOrderClientName",
+              "sourceSalesOrderConversionMode",
+              "source_sales_order_conversion_mode",
+            ].some((key) => String(existingConverted?.[key] || "").trim() !== String(patchedConverted?.[key] || "").trim())
+            || !Boolean(existingConverted?.convertedFromSalesOrder || existingConverted?.converted_from_sales_order)
+            || String(existingConverted?.sourceSalesOrderConversionMode || existingConverted?.source_sales_order_conversion_mode || "").trim().toLowerCase() !== "manual";
           if (shouldRepair) {
             await persistCrmAccountsWorkspace({
               ...crmAccountsWorkspace,
@@ -11236,20 +11329,15 @@ function CrmOnePageModule() {
             });
             upsertConvertedDocIntoModuleData(listKey, { ...existingConverted, ...patchedConverted });
           } else {
-            upsertConvertedDocIntoModuleData(listKey, existingConverted);
+            upsertConvertedDocIntoModuleData(listKey, { ...existingConverted, ...patchedConverted });
           }
           writePendingAccountsBillingDraft(kind, normalizedRow, "", String(existingConverted.id || "").trim());
           openAccountsDocumentEdit("estimate", String(existingConverted.id || "").trim());
           return;
         }
-        const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
-        await persistCrmAccountsWorkspace({
-          ...crmAccountsWorkspace,
-          [listKey]: [convertedDocument, ...existingRows],
-        });
-        upsertConvertedDocIntoModuleData(listKey, convertedDocument);
-        writePendingAccountsBillingDraft(kind, normalizedRow, "", String(convertedDocument.id || "").trim());
-        openAccountsDocumentEdit("estimate", String(convertedDocument.id || "").trim());
+        // For estimate conversion, open a prefilled draft and create the row only on Save.
+        writePendingAccountsBillingDraft(kind, normalizedRow, "", "");
+        openAccountsDocumentDraft("estimate");
         return;
       }
       if (kind === "invoice") {
@@ -11259,7 +11347,21 @@ function CrmOnePageModule() {
         if (existingConverted) {
           const patchedConverted = buildLinkedSalesOrderDocumentPatch(existingConverted);
           const shouldRepair = !hasLinkedSalesOrderFields(existingConverted)
-            || String(existingConverted.customerName || existingConverted.customer_name || "").trim() !== String(patchedConverted.customerName || "").trim();
+            || [
+              "customerId",
+              "customerName",
+              "customerGstin",
+              "billingAddress",
+              "crmReferenceId",
+              "sourceSalesOrderId",
+              "sourceSalesOrderNo",
+              "sourceSalesOrderLeadName",
+              "sourceSalesOrderClientName",
+              "sourceSalesOrderConversionMode",
+              "source_sales_order_conversion_mode",
+            ].some((key) => String(existingConverted?.[key] || "").trim() !== String(patchedConverted?.[key] || "").trim())
+            || !Boolean(existingConverted?.convertedFromSalesOrder || existingConverted?.converted_from_sales_order)
+            || String(existingConverted?.sourceSalesOrderConversionMode || existingConverted?.source_sales_order_conversion_mode || "").trim().toLowerCase() !== "manual";
           if (shouldRepair) {
             await persistCrmAccountsWorkspace({
               ...crmAccountsWorkspace,
@@ -11271,20 +11373,15 @@ function CrmOnePageModule() {
             });
             upsertConvertedDocIntoModuleData(listKey, { ...existingConverted, ...patchedConverted });
           } else {
-            upsertConvertedDocIntoModuleData(listKey, existingConverted);
+            upsertConvertedDocIntoModuleData(listKey, { ...existingConverted, ...patchedConverted });
           }
           writePendingAccountsBillingDraft(kind, normalizedRow, "", String(existingConverted.id || "").trim());
           openAccountsDocumentEdit("invoice", String(existingConverted.id || "").trim());
           return;
         }
-        const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
-        await persistCrmAccountsWorkspace({
-          ...crmAccountsWorkspace,
-          [listKey]: [convertedDocument, ...existingRows],
-        });
-        upsertConvertedDocIntoModuleData(listKey, convertedDocument);
-        writePendingAccountsBillingDraft(kind, normalizedRow, "", String(convertedDocument.id || "").trim());
-        openAccountsDocumentEdit("invoice", String(convertedDocument.id || "").trim());
+        // For invoice conversion, open a prefilled draft and create the row only on Save.
+        writePendingAccountsBillingDraft(kind, normalizedRow, "", "");
+        openAccountsDocumentDraft("invoice");
         return;
       }
       const listKey = "invoices";
@@ -11298,7 +11395,7 @@ function CrmOnePageModule() {
         });
         return;
       }
-      const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind);
+      const convertedDocument = buildBillingDocumentFromSalesOrder(normalizedRow, kind, normalizedMatchedCustomer);
       await persistCrmAccountsWorkspace({
         ...crmAccountsWorkspace,
         [listKey]: [convertedDocument, ...existingRows],
@@ -11332,7 +11429,7 @@ function CrmOnePageModule() {
       return;
     }
     const pendingDraft = readPendingCrmSalesOrderDraft();
-    if (!pendingDraft?.sourceDeal?.id && !pendingDraft?.sourceSalesOrder?.id) {
+    if (!pendingDraft?.sourceDeal?.id && !hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
       crmSalesOrderResumeSearchRef.current = location.search;
       return;
     }
@@ -11394,7 +11491,7 @@ function CrmOnePageModule() {
       });
       return;
     }
-    if (!existingSalesOrder && pendingDraft?.sourceSalesOrder?.id && (draftConvertKind === "estimate" || draftConvertKind === "invoice")) {
+    if (!existingSalesOrder && hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {}) && (draftConvertKind === "estimate" || draftConvertKind === "invoice")) {
       clearPendingCrmSalesOrderDraft(pendingDraft.orgId);
       setActiveSection("salesOrders");
       window.setTimeout(() => {
@@ -23409,61 +23506,105 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   function buildAccountsBillingDocumentFromSalesOrder(sourceRow, kind = "estimate", preferredDocumentId = "") {
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
+    const sourceOrderId = String(normalizedRow.id || "").trim();
+    const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
+    const sourceReferenceId = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
+    const linkedSourceOrder = (moduleData?.salesOrders || [])
+      .map((row) => normalizeCrmSalesOrderRecord(row))
+      .find((row) => {
+        const rowId = String(row?.id || "").trim();
+        const rowOrderNo = String(row?.orderId || row?.docNo || "").trim();
+        const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+        if (sourceOrderId && rowId && sourceOrderId === rowId) {
+          return true;
+        }
+        if (sourceOrderNo && rowOrderNo && sourceOrderNo === rowOrderNo) {
+          return true;
+        }
+        return Boolean(sourceReferenceId && rowReferenceId && sourceReferenceId === rowReferenceId);
+      }) || null;
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
     const baseDocument = createEmptyBillingDocument(kind, existingRows, moduleData?.gstTemplates || [], moduleData?.billingTemplates || []);
     const todayIso = new Date().toISOString().slice(0, 10);
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
-    const sourceOrderNo = String(normalizedRow.orderId || normalizedRow.docNo || "").trim();
     const sourceCrmReferenceId = normalizePlaceholderText(
       String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim()
     );
-    const linkedCustomer = findBestCustomerMatch(moduleData?.customers || [], {
+    const customerPool = [
+      ...(Array.isArray(moduleData?.customers) ? moduleData.customers : []),
+      ...readSharedAccountsCustomers(),
+    ];
+    const linkedCustomer = findBestCustomerMatch(customerPool, {
       crmReferenceId: sourceCrmReferenceId,
-      companyName: String(
+      companyName: pickFirstMeaningfulValue(
         normalizedRow.company
-        || normalizedRow.clients
-        || normalizedRow.companyOrClientName
-        || normalizedRow.company_or_client_name
-        || normalizedRow.clientName
-        || normalizedRow.client_name
-        || ""
-      ).trim(),
-      leadName: String(normalizedRow.leadName || "").trim(),
-      customerName: String(normalizedRow.customerName || "").trim(),
+        , normalizedRow.clients
+        , normalizedRow.companyOrClientName
+        , normalizedRow.company_or_client_name
+        , normalizedRow.clientName
+        , normalizedRow.client_name
+        , normalizedRow.sourceSalesOrderClientName
+        , normalizedRow.source_sales_order_client_name
+        , linkedSourceOrder?.company
+        , linkedSourceOrder?.clients
+        , linkedSourceOrder?.companyOrClientName
+        , linkedSourceOrder?.company_or_client_name
+        , linkedSourceOrder?.clientName
+        , linkedSourceOrder?.client_name
+      ),
+      leadName: pickFirstMeaningfulValue(normalizedRow.leadName, linkedSourceOrder?.leadName, normalizedRow.customerName, linkedSourceOrder?.customerName),
+      customerName: pickFirstMeaningfulValue(normalizedRow.customerName, linkedSourceOrder?.customerName, normalizedRow.leadName, linkedSourceOrder?.leadName),
     });
-    const sourceClientName = normalizePlaceholderText(String(
-      normalizedRow.company
-      || normalizedRow.clients
-      || normalizedRow.companyOrClientName
-      || normalizedRow.company_or_client_name
-      || normalizedRow.clientName
-      || normalizedRow.client_name
-      || linkedCustomer?.companyName
-      || linkedCustomer?.clientName
-      || linkedCustomer?.name
-      || normalizedRow.customerName
-      || normalizedRow.leadName
-      || ""
-    ).trim());
-    const sourceLeadName = normalizePlaceholderText(String(normalizedRow.leadName || normalizedRow.customerName || "").trim());
-    const resolvedCustomerName = String(
-      sourceClientName
-      || linkedCustomer?.companyName
-      || linkedCustomer?.name
-      || linkedCustomer?.clientName
-      || sourceLeadName
+    const normalizedLinkedCustomer = normalizeSharedCustomerRecord(linkedCustomer || {});
+    const linkedCustomerName = String(
+      normalizedLinkedCustomer?.companyName
+      || normalizedLinkedCustomer?.name
+      || normalizedLinkedCustomer?.clientName
       || ""
     ).trim();
+    const linkedCustomerGstin = String(normalizedLinkedCustomer?.gstin || "").trim();
+    const linkedCustomerBillingAddress = String(normalizedLinkedCustomer?.billingAddress || "").trim();
+    const sourceClientName = pickFirstMeaningfulValue(
+      normalizedRow.company
+      , normalizedRow.clients
+      , normalizedRow.companyOrClientName
+      , normalizedRow.company_or_client_name
+      , normalizedRow.clientName
+      , normalizedRow.client_name
+      , normalizedRow.sourceSalesOrderClientName
+      , normalizedRow.source_sales_order_client_name
+      , linkedSourceOrder?.company
+      , linkedSourceOrder?.clients
+      , linkedSourceOrder?.companyOrClientName
+      , linkedSourceOrder?.company_or_client_name
+      , linkedSourceOrder?.clientName
+      , linkedSourceOrder?.client_name
+      , linkedCustomerName
+      , normalizedRow.customerName
+      , linkedSourceOrder?.customerName
+      , normalizedRow.leadName
+      , linkedSourceOrder?.leadName
+    );
+    const sourceLeadName = pickFirstMeaningfulValue(
+      normalizedRow.leadName
+      , linkedSourceOrder?.leadName
+      , normalizedRow.customerName
+      , linkedSourceOrder?.customerName
+      , normalizedRow.sourceSalesOrderLeadName
+      , normalizedRow.source_sales_order_lead_name
+      , sourceClientName
+    );
+    const resolvedCustomerName = pickFirstMeaningfulValue(sourceClientName, linkedCustomerName, sourceLeadName);
     const resolvedDocumentId = String(preferredDocumentId || "").trim();
     return {
       ...baseDocument,
       id: resolvedDocumentId || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       docNo: getNextBillingDocNo(kind, existingRows),
-      customerId: String(linkedCustomer?.id || "").trim(),
+      customerId: String(normalizedLinkedCustomer?.id || "").trim(),
       customerName: resolvedCustomerName,
-      customerGstin: String(normalizedRow.customerGstin || "").trim(),
+      customerGstin: pickFirstMeaningfulValue(normalizedRow.customerGstin, linkedSourceOrder?.customerGstin, linkedCustomerGstin),
       issueDate,
       dueDate,
       gstTemplateId: String(normalizedRow.gstTemplateId || resolveDefaultGstTemplateId(moduleData?.gstTemplates || []) || "").trim(),
@@ -23471,7 +23612,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       salesperson: Array.isArray(normalizedRow.salesperson)
         ? normalizedRow.salesperson.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
         : String(normalizedRow.salesperson || normalizedRow.assignedTo || "").trim(),
-      billingAddress: String(normalizedRow.billingAddress || "").trim(),
+      billingAddress: pickFirstMeaningfulValue(normalizedRow.billingAddress, linkedSourceOrder?.billingAddress, linkedCustomerBillingAddress),
       notes: String(normalizedRow.notes || baseDocument.notes || "").trim(),
       termsText: String(normalizedRow.termsText || baseDocument.termsText || "").trim(),
       paymentStatusNotes: String(normalizedRow.paymentStatusNotes || "").trim(),
@@ -23604,23 +23745,29 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const pendingDraft = shouldResumeEstimate
       ? readPendingAccountsEstimateDraft()
       : readPendingAccountsInvoiceDraft();
-    if (!pendingDraft?.sourceSalesOrder?.id) {
+    if (!hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
       return;
     }
     if (shouldResumeEstimate) {
       clearPendingAccountsEstimateDraft(pendingDraft.orgId);
+      const preferredEstimateId = String(pendingDraft.documentId || "").trim();
       const convertedEstimate = buildAccountsBillingDocumentFromSalesOrder(
         pendingDraft.sourceSalesOrder,
         "estimate",
-        pendingDraft.documentId
+        preferredEstimateId
       );
-      setModuleData((prev) => {
-        const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
-        const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
-        return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
-      });
-      setEstimateForm(convertedEstimate);
-      setEditingEstimateId(String(convertedEstimate.id || "").trim());
+      if (preferredEstimateId) {
+        setModuleData((prev) => {
+          const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
+          const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
+          return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
+        });
+        setEstimateForm(convertedEstimate);
+        setEditingEstimateId(String(convertedEstimate.id || "").trim());
+      } else {
+        setEstimateForm({ ...convertedEstimate, id: "" });
+        setEditingEstimateId("");
+      }
       setActiveTab("estimates");
       setOverviewDocTab("estimate");
       window.setTimeout(() => {
@@ -23628,18 +23775,24 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       }, 0);
     } else {
       clearPendingAccountsInvoiceDraft(pendingDraft.orgId);
+      const preferredInvoiceId = String(pendingDraft.documentId || "").trim();
       const convertedInvoice = buildAccountsBillingDocumentFromSalesOrder(
         pendingDraft.sourceSalesOrder,
         "invoice",
-        pendingDraft.documentId
+        preferredInvoiceId
       );
-      setModuleData((prev) => {
-        const rows = Array.isArray(prev?.invoices) ? prev.invoices : [];
-        const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedInvoice.id || "").trim());
-        return exists ? prev : { ...prev, invoices: [convertedInvoice, ...rows] };
-      });
-      setInvoiceForm(convertedInvoice);
-      setEditingInvoiceId(String(convertedInvoice.id || "").trim());
+      if (preferredInvoiceId) {
+        setModuleData((prev) => {
+          const rows = Array.isArray(prev?.invoices) ? prev.invoices : [];
+          const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedInvoice.id || "").trim());
+          return exists ? prev : { ...prev, invoices: [convertedInvoice, ...rows] };
+        });
+        setInvoiceForm(convertedInvoice);
+        setEditingInvoiceId(String(convertedInvoice.id || "").trim());
+      } else {
+        setInvoiceForm({ ...convertedInvoice, id: "" });
+        setEditingInvoiceId("");
+      }
       setActiveTab("invoices");
       setOverviewDocTab("invoice");
       window.setTimeout(() => {
@@ -23679,22 +23832,28 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       return;
     }
     const pendingDraft = readPendingAccountsEstimateDraft();
-    if (!pendingDraft?.sourceSalesOrder?.id) {
+    if (!hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
       return;
     }
     clearPendingAccountsEstimateDraft(pendingDraft.orgId);
+    const preferredEstimateId = String(pendingDraft.documentId || "").trim();
     const convertedEstimate = buildAccountsBillingDocumentFromSalesOrder(
       pendingDraft.sourceSalesOrder,
       "estimate",
-      pendingDraft.documentId
+      preferredEstimateId
     );
-    setModuleData((prev) => {
-      const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
-      const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
-      return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
-    });
-    setEstimateForm(convertedEstimate);
-    setEditingEstimateId(String(convertedEstimate.id || "").trim());
+    if (preferredEstimateId) {
+      setModuleData((prev) => {
+        const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
+        const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
+        return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
+      });
+      setEstimateForm(convertedEstimate);
+      setEditingEstimateId(String(convertedEstimate.id || "").trim());
+    } else {
+      setEstimateForm({ ...convertedEstimate, id: "" });
+      setEditingEstimateId("");
+    }
     setOverviewDocTab("estimate");
     window.setTimeout(() => {
       estimateEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -23707,6 +23866,60 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     estimateForm?.source_sales_order_id,
     estimateForm?.sourceSalesOrderNo,
     estimateForm?.source_sales_order_no,
+    shouldResumeEstimate,
+    shouldResumeInvoice,
+  ]);
+
+  useEffect(() => {
+    if (shouldResumeEstimate || shouldResumeInvoice) {
+      return;
+    }
+    if (activeTab !== "invoices" || editingInvoiceId) {
+      return;
+    }
+    const hasInvoiceData = Boolean(
+      String(invoiceForm?.customerName || "").trim()
+      || String(invoiceForm?.sourceSalesOrderId || invoiceForm?.source_sales_order_id || "").trim()
+      || String(invoiceForm?.sourceSalesOrderNo || invoiceForm?.source_sales_order_no || "").trim()
+    );
+    if (hasInvoiceData) {
+      return;
+    }
+    const pendingDraft = readPendingAccountsInvoiceDraft();
+    if (!hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
+      return;
+    }
+    clearPendingAccountsInvoiceDraft(pendingDraft.orgId);
+    const preferredInvoiceId = String(pendingDraft.documentId || "").trim();
+    const convertedInvoice = buildAccountsBillingDocumentFromSalesOrder(
+      pendingDraft.sourceSalesOrder,
+      "invoice",
+      preferredInvoiceId
+    );
+    if (preferredInvoiceId) {
+      setModuleData((prev) => {
+        const rows = Array.isArray(prev?.invoices) ? prev.invoices : [];
+        const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedInvoice.id || "").trim());
+        return exists ? prev : { ...prev, invoices: [convertedInvoice, ...rows] };
+      });
+      setInvoiceForm(convertedInvoice);
+      setEditingInvoiceId(String(convertedInvoice.id || "").trim());
+    } else {
+      setInvoiceForm({ ...convertedInvoice, id: "" });
+      setEditingInvoiceId("");
+    }
+    setOverviewDocTab("invoice");
+    window.setTimeout(() => {
+      invoiceEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }, [
+    activeTab,
+    editingInvoiceId,
+    invoiceForm?.customerName,
+    invoiceForm?.sourceSalesOrderId,
+    invoiceForm?.source_sales_order_id,
+    invoiceForm?.sourceSalesOrderNo,
+    invoiceForm?.source_sales_order_no,
     shouldResumeEstimate,
     shouldResumeInvoice,
   ]);
@@ -23725,20 +23938,26 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }, 0);
       } else {
         const pendingDraft = readPendingAccountsEstimateDraft();
-        if (pendingDraft?.sourceSalesOrder?.id) {
+        if (hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
           clearPendingAccountsEstimateDraft(pendingDraft.orgId);
+          const preferredEstimateId = String(pendingDraft.documentId || accountsQueryEditEstimateId || "").trim();
           const convertedEstimate = buildAccountsBillingDocumentFromSalesOrder(
             pendingDraft.sourceSalesOrder,
             "estimate",
-            pendingDraft.documentId || accountsQueryEditEstimateId
+            preferredEstimateId
           );
-          setModuleData((prev) => {
-            const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
-            const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
-            return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
-          });
-          setEstimateForm(convertedEstimate);
-          setEditingEstimateId(String(convertedEstimate.id || "").trim());
+          if (preferredEstimateId) {
+            setModuleData((prev) => {
+              const rows = Array.isArray(prev?.estimates) ? prev.estimates : [];
+              const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedEstimate.id || "").trim());
+              return exists ? prev : { ...prev, estimates: [convertedEstimate, ...rows] };
+            });
+            setEstimateForm(convertedEstimate);
+            setEditingEstimateId(String(convertedEstimate.id || "").trim());
+          } else {
+            setEstimateForm({ ...convertedEstimate, id: "" });
+            setEditingEstimateId("");
+          }
           setActiveTab("estimates");
           setOverviewDocTab("estimate");
           window.setTimeout(() => {
@@ -23759,20 +23978,26 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }, 0);
       } else {
         const pendingDraft = readPendingAccountsInvoiceDraft();
-        if (pendingDraft?.sourceSalesOrder?.id) {
+        if (hasSalesOrderIdentity(pendingDraft?.sourceSalesOrder || {})) {
           clearPendingAccountsInvoiceDraft(pendingDraft.orgId);
+          const preferredInvoiceId = String(pendingDraft.documentId || accountsQueryEditInvoiceId || "").trim();
           const convertedInvoice = buildAccountsBillingDocumentFromSalesOrder(
             pendingDraft.sourceSalesOrder,
             "invoice",
-            pendingDraft.documentId || accountsQueryEditInvoiceId
+            preferredInvoiceId
           );
-          setModuleData((prev) => {
-            const rows = Array.isArray(prev?.invoices) ? prev.invoices : [];
-            const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedInvoice.id || "").trim());
-            return exists ? prev : { ...prev, invoices: [convertedInvoice, ...rows] };
-          });
-          setInvoiceForm(convertedInvoice);
-          setEditingInvoiceId(String(convertedInvoice.id || "").trim());
+          if (preferredInvoiceId) {
+            setModuleData((prev) => {
+              const rows = Array.isArray(prev?.invoices) ? prev.invoices : [];
+              const exists = rows.some((row) => String(row?.id || "").trim() === String(convertedInvoice.id || "").trim());
+              return exists ? prev : { ...prev, invoices: [convertedInvoice, ...rows] };
+            });
+            setInvoiceForm(convertedInvoice);
+            setEditingInvoiceId(String(convertedInvoice.id || "").trim());
+          } else {
+            setInvoiceForm({ ...convertedInvoice, id: "" });
+            setEditingInvoiceId("");
+          }
           setActiveTab("invoices");
           setOverviewDocTab("invoice");
           window.setTimeout(() => {
@@ -23896,7 +24121,34 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         ).trim();
         const hasSourceIdChanged = nextSourceOrderId !== String(row?.sourceSalesOrderId || row?.source_sales_order_id || "").trim();
         const hasSourceNoChanged = nextSourceOrderNo !== String(row?.sourceSalesOrderNo || row?.source_sales_order_no || "").trim();
-        if (!hasCustomerChanged && !hasLeadChanged && !hasClientChanged && !hasReferenceChanged && !hasSourceIdChanged && !hasSourceNoChanged) {
+        const nextConvertedFlag = Boolean(
+          row?.convertedFromSalesOrder
+          || row?.converted_from_sales_order
+          || isPipelineRow
+        );
+        const existingConvertedFlag = Boolean(row?.convertedFromSalesOrder || row?.converted_from_sales_order);
+        const nextConversionMode = String(
+          row?.sourceSalesOrderConversionMode
+          || row?.source_sales_order_conversion_mode
+          || (isPipelineRow ? "manual" : "")
+        ).trim();
+        const existingConversionMode = String(
+          row?.sourceSalesOrderConversionMode
+          || row?.source_sales_order_conversion_mode
+          || ""
+        ).trim();
+        const hasConvertedFlagChanged = nextConvertedFlag !== existingConvertedFlag;
+        const hasConversionModeChanged = nextConversionMode !== existingConversionMode;
+        if (
+          !hasCustomerChanged
+          && !hasLeadChanged
+          && !hasClientChanged
+          && !hasReferenceChanged
+          && !hasSourceIdChanged
+          && !hasSourceNoChanged
+          && !hasConvertedFlagChanged
+          && !hasConversionModeChanged
+        ) {
           return row;
         }
         changed = true;
@@ -23908,6 +24160,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           sourceSalesOrderLeadName: nextLeadName,
           sourceSalesOrderClientName: nextClientName,
           crmReferenceId: nextReferenceId,
+          convertedFromSalesOrder: nextConvertedFlag,
+          converted_from_sales_order: nextConvertedFlag,
+          sourceSalesOrderConversionMode: nextConversionMode,
+          source_sales_order_conversion_mode: nextConversionMode,
         };
       });
       return { changed, nextRows };
@@ -26116,6 +26372,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }
         return Boolean(sourceReferenceId && salesOrderRef && sourceReferenceId === salesOrderRef);
       }) || null;
+    const hasSalesOrderSourceLink = Boolean(
+      sourceOrderId
+      || sourceOrderNo
+      || linkedSourceOrder
+      || String(row?.sourceSalesOrderLeadName || row?.source_sales_order_lead_name || "").trim()
+      || String(row?.sourceSalesOrderClientName || row?.source_sales_order_client_name || "").trim()
+    );
     const resolvedSourceClientName = String(
       row?.sourceSalesOrderClientName
       || row?.source_sales_order_client_name
@@ -26171,17 +26434,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         || ""
       ).trim(),
       sourceSalesOrderClientName: resolvedSourceClientName,
-      convertedFromSalesOrder: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order),
-      converted_from_sales_order: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order),
+      convertedFromSalesOrder: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order || hasSalesOrderSourceLink),
+      converted_from_sales_order: Boolean(row.convertedFromSalesOrder || row.converted_from_sales_order || hasSalesOrderSourceLink),
       sourceSalesOrderConversionMode: String(
         row.sourceSalesOrderConversionMode
         || row.source_sales_order_conversion_mode
-        || (row.convertedFromSalesOrder || row.converted_from_sales_order ? "manual" : "")
+        || (row.convertedFromSalesOrder || row.converted_from_sales_order || hasSalesOrderSourceLink ? "manual" : "")
       ).trim(),
       source_sales_order_conversion_mode: String(
         row.source_sales_order_conversion_mode
         || row.sourceSalesOrderConversionMode
-        || (row.convertedFromSalesOrder || row.converted_from_sales_order ? "manual" : "")
+        || (row.convertedFromSalesOrder || row.converted_from_sales_order || hasSalesOrderSourceLink ? "manual" : "")
       ).trim(),
       items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
         ...splitDocumentLineDescription(item.description, item.customText),
