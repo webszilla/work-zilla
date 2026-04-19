@@ -3495,16 +3495,25 @@ def accounts_workspace(request):
     billing_profile = BillingProfile.objects.filter(organization=org).only("country").first()
 
     resolved_method = request.method
+    payload = None
     if request.method == "POST":
-        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method == "PUT":
-            resolved_method = "PUT"
-
-    if resolved_method == "PUT":
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("__crm_action") or payload.get("action") or "").strip().upper()
+        if body_action in {"PUT", "PATCH", "UPDATE"}:
+            resolved_method = "PUT"
+        elif override_method == "PUT":
+            resolved_method = "PUT"
+
+    if resolved_method == "PUT":
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         data = _merge_accounts_workspace(workspace.data, payload.get("data"))
         data = _seed_accounts_workspace_defaults_for_org(data, org)
         workspace.data = data

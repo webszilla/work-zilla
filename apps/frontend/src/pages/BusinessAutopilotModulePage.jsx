@@ -5768,8 +5768,8 @@ async function persistSharedAccountsCustomers(nextCustomers) {
   window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
   try {
     await apiFetch("/api/business-autopilot/accounts/workspace", {
-      method: "PUT",
-      body: JSON.stringify({ data: nextData }),
+      method: "POST",
+      body: JSON.stringify({ __crm_action: "put", data: nextData }),
     });
   } catch (_error) {
     // Keep local cache updated even if server sync fails.
@@ -7193,17 +7193,6 @@ function BillingDocumentEditor({
                   placeholder={kind === "estimate" ? "EST-DD-MM-YYYY-001" : kind === "salesOrder" ? "SO-DDMMYYYY-001" : "INV-DD-MM-YYYY-001"}
                 />
               </div>
-              {kind === "salesOrder" && Boolean(String(form.sourceDealId || form.source_deal_id || "").trim()) ? (
-                <div className="col-12 col-xl-2">
-                  <label className="form-label small text-secondary mb-1">CRM Reference ID</label>
-                  <input
-                    className="form-control"
-                    value={form.crmReferenceId || ""}
-                    readOnly
-                    placeholder="Auto from lead/deal"
-                  />
-                </div>
-              ) : null}
               <div className="col-12 col-xl-2">
                 <label className="form-label small text-secondary mb-1">Sales Person</label>
                 <div className="crm-inline-suggestions-wrap">
@@ -8770,8 +8759,8 @@ function CrmOnePageModule() {
     const accountsStorageKey = buildScopedAccountsStorageKey(getActiveBusinessAutopilotOrgId());
     window.localStorage.setItem(accountsStorageKey, JSON.stringify(normalizedWorkspace));
     await apiFetch("/api/business-autopilot/accounts/workspace", {
-      method: "PUT",
-      body: JSON.stringify({ data: normalizedWorkspace }),
+      method: "POST",
+      body: JSON.stringify({ __crm_action: "put", data: normalizedWorkspace }),
     });
   }
 
@@ -24134,8 +24123,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     syncTimerRef.current = window.setTimeout(async () => {
       try {
         await apiFetch("/api/business-autopilot/accounts/workspace", {
-          method: "PUT",
-          body: JSON.stringify({ data: moduleData })
+          method: "POST",
+          body: JSON.stringify({ __crm_action: "put", data: moduleData })
         });
         setAccountsSyncError("");
         setAccountsSyncStatus("Saved to server");
