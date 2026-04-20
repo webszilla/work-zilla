@@ -4143,6 +4143,15 @@ function normalizePlaceholderText(value = "") {
   return normalizedValue === "-" ? "" : normalizedValue;
 }
 
+function toPopupTitleCase(value = "") {
+  return String(value || "").replace(/\b([A-Za-z][A-Za-z']*)\b/g, (word) => {
+    if (word.length > 1 && word === word.toUpperCase()) {
+      return word;
+    }
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  });
+}
+
 function pickFirstMeaningfulValue(...values) {
   for (const value of values) {
     const normalizedValue = normalizePlaceholderText(String(value ?? "").trim());
@@ -16396,7 +16405,7 @@ function CrmOnePageModule() {
         >
           <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
-              <h5 className="mb-0">{crmActionPopup.title || "Success"}</h5>
+              <h5 className="mb-0">{toPopupTitleCase(crmActionPopup.title || "Success")}</h5>
               <button
                 type="button"
                 className="btn btn-sm wz-crm-popup-close"
@@ -16405,7 +16414,7 @@ function CrmOnePageModule() {
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
-            <div className="text-secondary mb-3">{crmActionPopup.message || "Operation completed successfully."}</div>
+            <div className="text-secondary mb-3">{toPopupTitleCase(crmActionPopup.message || "Operation completed successfully.")}</div>
             <div className="d-flex justify-content-end gap-2">
               {typeof crmActionPopup.onConfirm === "function" ? (
                 <button
@@ -22657,8 +22666,8 @@ function CategoryCrudModule({
           <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
               <div>
-                <h5 className="mb-1">{moduleActionPopup.title}</h5>
-                <p className="mb-0 small text-secondary">{moduleActionPopup.message}</p>
+                <h5 className="mb-1">{toPopupTitleCase(moduleActionPopup.title || "Success")}</h5>
+                <p className="mb-0 small text-secondary">{toPopupTitleCase(moduleActionPopup.message || "Operation completed successfully.")}</p>
               </div>
               <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={() => setModuleActionPopup((prev) => ({ ...prev, open: false }))}>
                 Close
@@ -27783,7 +27792,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         >
           <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
-              <h5 className="mb-0">{accountsActionPopup.title || "Success"}</h5>
+              <h5 className="mb-0">{toPopupTitleCase(accountsActionPopup.title || "Success")}</h5>
               <button
                 type="button"
                 className="btn btn-sm wz-crm-popup-close"
@@ -27792,7 +27801,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
-            <div className="text-secondary mb-3">{accountsActionPopup.message || "Operation completed successfully."}</div>
+            <div className="text-secondary mb-3">{toPopupTitleCase(accountsActionPopup.message || "Operation completed successfully.")}</div>
             <div className="d-flex justify-content-end">
               <button
                 type="button"
