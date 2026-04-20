@@ -1180,6 +1180,36 @@
       return "";
     }
 
+    function resolveTrialErrorMessage(data, fallbackMessage) {
+      const detail = String((data && data.detail) || "").trim().toLowerCase();
+      const serverMessage = String((data && data.message) || "").trim();
+      if (serverMessage) return serverMessage;
+      if (detail === "email_verification_required") {
+        return "Please verify your email before starting the free trial.";
+      }
+      if (detail === "checkout_in_progress") {
+        return "Checkout already started for this product. Continue from My Account.";
+      }
+      if (detail === "trial_already_used") {
+        return "Free trial already used for this product.";
+      }
+      if (detail === "subscription_exists") {
+        return "A plan is already active for this product.";
+      }
+      if (detail === "trial_history_exists") {
+        return "Free trial is not available after previous billing activity.";
+      }
+      return fallbackMessage || "Unable to start free trial now.";
+    }
+
+    function buildTrialError(data, fallbackMessage) {
+      const error = new Error(resolveTrialErrorMessage(data, fallbackMessage));
+      if (data && data.redirect) {
+        error.redirect = data.redirect;
+      }
+      return error;
+    }
+
     function startTrial(planId, productSlug, options = {}) {
       const fallbackToCheckout = options.fallbackToCheckout === true;
       fetch("/api/subscription/start", {
@@ -1195,26 +1225,25 @@
         })
       })
         .then(async (response) => {
+          const data = await response.json().catch(() => ({}));
           if (response.status === 403) {
-            const data = await response.json().catch(() => ({}));
-            if (data && data.detail === "email_verification_required") {
-              window.location.href = data.redirect || "/my-account/";
-              return null;
-            }
-            throw new Error("Please login to continue.");
+            throw buildTrialError(
+              data,
+              "Please verify your email before starting the free trial.",
+            );
           }
           if (response.status === 409) {
             if (fallbackToCheckout) {
               submitCheckout(planId, productSlug);
             } else {
-              throw new Error("Trial not available for this product.");
+              throw buildTrialError(data, "Free trial is not available for this product.");
             }
             return null;
           }
           if (!response.ok) {
-            throw new Error("Trial failed.");
+            throw buildTrialError(data, "Unable to start free trial now.");
           }
-          return response.json();
+          return data;
         })
         .then((data) => {
           if (data && data.redirect) {
@@ -1228,6 +1257,9 @@
           }
           const message = (error && error.message) ? error.message : "Unable to start trial now.";
           window.alert(message);
+          if (error && error.redirect) {
+            window.location.href = error.redirect;
+          }
         });
     }
 

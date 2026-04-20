@@ -10,7 +10,7 @@ from apps.backend.products.models import Product
 from saas_admin.models import Product as SaaSAdminProduct
 from core.subscription_utils import FREE_TRIAL_DAYS, is_free_plan
 from dashboard.views import get_active_org
-from core.models import Subscription, SubscriptionHistory
+from core.models import Subscription, SubscriptionHistory, PendingTransfer
 from apps.backend.storage.models import Product as StorageProduct, Plan as StoragePlan, AddOn as StorageAddOn, OrgSubscription as StorageOrgSubscription
 from apps.backend.enquiries.views import build_enquiry_context
 
@@ -287,6 +287,64 @@ def public_plans(request):
     free_eligible = True
     if org:
         free_eligible = not _org_used_free_trial(org, normalized_slug)
+        if free_eligible:
+            if normalized_slug == "storage":
+                storage_product_filter = models.Q(plan__product__slug="storage")
+                has_pending_checkout = (
+                    PendingTransfer.objects
+                    .filter(
+                        organization=org,
+                        status__in=["draft", "pending"],
+                        request_type__in=["new", "renew"],
+                    )
+                    .filter(storage_product_filter)
+                    .exists()
+                )
+                has_subscription = (
+                    Subscription.objects
+                    .filter(organization=org)
+                    .filter(storage_product_filter)
+                    .exists()
+                )
+                has_history = (
+                    SubscriptionHistory.objects
+                    .filter(organization=org)
+                    .filter(storage_product_filter)
+                    .exists()
+                )
+                has_storage_subscription = StorageOrgSubscription.objects.filter(organization=org).exists()
+                if has_pending_checkout or has_subscription or has_history or has_storage_subscription:
+                    free_eligible = False
+            else:
+                product_filter = models.Q(plan__product__slug=normalized_slug)
+                if normalized_slug == "monitor":
+                    product_filter |= models.Q(plan__product__isnull=True)
+                elif _is_business_autopilot_alias(normalized_slug):
+                    product_filter = models.Q(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
+                has_pending_checkout = (
+                    PendingTransfer.objects
+                    .filter(
+                        organization=org,
+                        status__in=["draft", "pending"],
+                        request_type__in=["new", "renew"],
+                    )
+                    .filter(product_filter)
+                    .exists()
+                )
+                has_subscription = (
+                    Subscription.objects
+                    .filter(organization=org)
+                    .filter(product_filter)
+                    .exists()
+                )
+                has_history = (
+                    SubscriptionHistory.objects
+                    .filter(organization=org)
+                    .filter(product_filter)
+                    .exists()
+                )
+                if has_pending_checkout or has_subscription or has_history:
+                    free_eligible = False
 
     response_plans = []
     response_addons = []

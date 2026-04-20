@@ -1496,6 +1496,25 @@ def _clear_renew_session(request):
 
 @require_http_methods(["POST"])
 def subscription_start(request):
+    trial_error_messages = {
+        "email_verification_required": "Please verify your email before starting the free trial.",
+        "checkout_in_progress": "Checkout already started for this product. Continue from My Account.",
+        "trial_already_used": "Free trial already used for this product.",
+        "subscription_exists": "A plan is already active for this product.",
+        "trial_history_exists": "Free trial is not available after previous billing activity.",
+        "trial_disabled": "Free trial is currently unavailable.",
+        "trial_not_available": "Free trial is not available for this product.",
+    }
+
+    def _trial_block_response(detail, *, status=409, redirect_url=""):
+        payload = {
+            "detail": detail,
+            "message": trial_error_messages.get(detail, trial_error_messages["trial_not_available"]),
+        }
+        if redirect_url:
+            payload["redirect"] = redirect_url
+        return JsonResponse(payload, status=status)
+
     if not request.user.is_authenticated:
         return JsonResponse({"detail": "authentication_required"}, status=401)
     if request.user.email and not request.user.email_verified:
@@ -1507,9 +1526,10 @@ def subscription_start(request):
             )
         else:
             messages.info(request, "Please verify your email to continue checkout.")
-        return JsonResponse(
-            {"detail": "email_verification_required", "redirect": "/my-account/"},
+        return _trial_block_response(
+            "email_verification_required",
             status=403,
+            redirect_url="/my-account/",
         )
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -1545,17 +1565,33 @@ def subscription_start(request):
     if not org:
         return JsonResponse({"detail": "organization_required"}, status=403)
 
+    pending_checkout = False
+    has_history = False
+    has_subscription = False
+    has_storage_sub = False
+    has_live_subscription = False
+
     if product_slug in ("storage", "online-storage"):
+        has_storage_sub = StorageOrgSubscription.objects.filter(organization=org).exists()
+        storage_subscriptions = Subscription.objects.filter(
+            organization=org,
+            plan__product__slug="storage",
+        )
+        has_subscription = storage_subscriptions.exists()
+        has_live_subscription = storage_subscriptions.exclude(status="expired").exists()
+        has_pending_subscription = storage_subscriptions.filter(status="pending").exists()
+        pending_checkout = PendingTransfer.objects.filter(
+            organization=org,
+            status__in=["draft", "pending"],
+            request_type__in=["new", "renew"],
+            plan__product__slug="storage",
+        ).exists() or has_pending_subscription
+
         storage_slug = "storage"
         has_history = SubscriptionHistory.objects.filter(
             organization=org,
             plan__product__slug=storage_slug
         ).exists()
-        has_subscription = Subscription.objects.filter(
-            organization=org,
-            plan__product__slug=storage_slug
-        ).exists()
-        has_storage_sub = StorageOrgSubscription.objects.filter(organization=org).exists()
     else:
         product_filter = Q(plan__product__slug=product_slug)
         if product_slug == "monitor":
@@ -1563,19 +1599,40 @@ def subscription_start(request):
         has_history = SubscriptionHistory.objects.filter(
             organization=org
         ).filter(product_filter).exists()
-        has_subscription = Subscription.objects.filter(
+        product_subscriptions = Subscription.objects.filter(
             organization=org
-        ).filter(product_filter).exists()
-        has_storage_sub = False
+        ).filter(product_filter)
+        has_subscription = product_subscriptions.exists()
+        has_live_subscription = product_subscriptions.exclude(status="expired").exists()
+        has_pending_subscription = product_subscriptions.filter(status="pending").exists()
+        pending_checkout = PendingTransfer.objects.filter(
+            organization=org,
+            status__in=["draft", "pending"],
+            request_type__in=["new", "renew"],
+        ).filter(product_filter).exists() or has_pending_subscription
 
     trial_days = FREE_TRIAL_DAYS
+    used_free_trial = _org_has_used_free_trial(org, product_slug)
     trial_available = (
         trial_days > 0
         and not has_history
         and not has_subscription
         and not has_storage_sub
-        and not _org_has_used_free_trial(org, product_slug)
+        and not used_free_trial
     )
+    if not trial_available:
+        if trial_days <= 0:
+            return _trial_block_response("trial_disabled")
+        if pending_checkout:
+            return _trial_block_response("checkout_in_progress", redirect_url="/my-account/billing/")
+        if used_free_trial:
+            return _trial_block_response("trial_already_used")
+        if has_live_subscription or has_storage_sub:
+            return _trial_block_response("subscription_exists")
+        if has_history or has_subscription:
+            return _trial_block_response("trial_history_exists")
+        return _trial_block_response("trial_not_available")
+
     if trial_available:
         now = timezone.now()
         trial_end = now + timedelta(days=trial_days)
@@ -1622,7 +1679,7 @@ def subscription_start(request):
                 "subscription_id": subscription.id,
             })
 
-    return JsonResponse({"detail": "trial_not_available"}, status=409)
+    return _trial_block_response("trial_not_available")
 
 
 @require_POST
