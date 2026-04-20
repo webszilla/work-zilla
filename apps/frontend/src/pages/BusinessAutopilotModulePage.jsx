@@ -386,7 +386,7 @@ const CRM_SECTION_CONFIG = {
       { key: "contactPerson", label: "Contact Person", placeholder: "Client / Contact person", required: false },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Mobile number" },
-      { key: "leadAmount", label: "Lead Amount", placeholder: "Lead amount", required: false },
+      { key: "leadAmount", label: "Lead Amount", placeholder: "Lead amount" },
       { key: "leadSource", label: "Lead Source", type: "select", options: CRM_LEAD_SOURCE_OPTIONS, defaultValue: "" },
       { key: "assignType", label: "Assign To", type: "select", options: ["Users", "Team"], defaultValue: "Users" },
       { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
@@ -1396,8 +1396,98 @@ function formatInr(amount) {
   return formatCurrencyAmount(amount, getOrgCurrency());
 }
 
+function resolveGstTemplateTaxMode(gstTemplate = {}) {
+  const scopeText = normalizeGstTemplateText(gstTemplate?.taxScope || gstTemplate?.scope || "");
+  const nameText = normalizeGstTemplateText(gstTemplate?.name || "");
+  const cgst = parseNumber(gstTemplate?.cgst);
+  const sgst = parseNumber(gstTemplate?.sgst);
+  const igst = parseNumber(gstTemplate?.igst);
+  const splitTotal = cgst + sgst;
+  const hasInterStateHint = scopeText.includes("inter") || nameText.includes("igst");
+  const hasIntraStateHint = scopeText.includes("intra") || nameText.includes("cgst") || nameText.includes("sgst");
+
+  if (hasInterStateHint && !hasIntraStateHint) {
+    return "igst";
+  }
+  if (hasIntraStateHint && !hasInterStateHint) {
+    return "split";
+  }
+  if (splitTotal > 0 && igst <= 0) {
+    return "split";
+  }
+  if (igst > 0 && splitTotal <= 0) {
+    return "igst";
+  }
+  if (splitTotal > 0 && igst > 0) {
+    return splitTotal >= igst ? "split" : "igst";
+  }
+  return "igst";
+}
+
+function getGstTemplateTaxComponents(gstTemplate = {}) {
+  const rawComponents = {
+    cgst: parseNumber(gstTemplate?.cgst),
+    sgst: parseNumber(gstTemplate?.sgst),
+    igst: parseNumber(gstTemplate?.igst),
+    cess: parseNumber(gstTemplate?.cess),
+  };
+  const mode = resolveGstTemplateTaxMode(gstTemplate);
+  if (mode === "split") {
+    return {
+      mode,
+      components: {
+        cgst: rawComponents.cgst,
+        sgst: rawComponents.sgst,
+        igst: 0,
+        cess: rawComponents.cess,
+      },
+    };
+  }
+  return {
+    mode,
+    components: {
+      cgst: 0,
+      sgst: 0,
+      igst: rawComponents.igst,
+      cess: rawComponents.cess,
+    },
+  };
+}
+
+function sumTaxComponents(components = {}) {
+  return parseNumber(components.cgst) + parseNumber(components.sgst) + parseNumber(components.igst) + parseNumber(components.cess);
+}
+
+function distributeTaxPercentByComponents(taxPercent, templateComponents = {}, templateMode = "igst") {
+  const normalizedTaxPercent = Math.max(0, parseNumber(taxPercent));
+  const baseTotal = sumTaxComponents(templateComponents);
+  if (baseTotal > 0) {
+    return {
+      cgst: (normalizedTaxPercent * parseNumber(templateComponents.cgst)) / baseTotal,
+      sgst: (normalizedTaxPercent * parseNumber(templateComponents.sgst)) / baseTotal,
+      igst: (normalizedTaxPercent * parseNumber(templateComponents.igst)) / baseTotal,
+      cess: (normalizedTaxPercent * parseNumber(templateComponents.cess)) / baseTotal,
+    };
+  }
+  if (templateMode === "split") {
+    return {
+      cgst: normalizedTaxPercent / 2,
+      sgst: normalizedTaxPercent / 2,
+      igst: 0,
+      cess: 0,
+    };
+  }
+  return {
+    cgst: 0,
+    sgst: 0,
+    igst: normalizedTaxPercent,
+    cess: 0,
+  };
+}
+
 function gstTemplateTotalPercent(row) {
-  return parseNumber(row?.cgst) + parseNumber(row?.sgst) + parseNumber(row?.igst) + parseNumber(row?.cess);
+  const { components } = getGstTemplateTaxComponents(row);
+  return sumTaxComponents(components);
 }
 
 function splitDocumentLineDescription(rawDescription = "", rawCustomText = "") {
@@ -2011,13 +2101,8 @@ function createEmptySubscriptionDraftForm({ currency = "INR" } = {}) {
 
 function computeDocumentTotals(doc, gstTemplates) {
   const gstTemplate = (gstTemplates || []).find((row) => row.id === doc.gstTemplateId);
-  const templateComponents = {
-    cgst: parseNumber(gstTemplate?.cgst),
-    sgst: parseNumber(gstTemplate?.sgst),
-    igst: parseNumber(gstTemplate?.igst),
-    cess: parseNumber(gstTemplate?.cess),
-  };
-  const defaultTax = Object.values(templateComponents).reduce((sum, value) => sum + value, 0);
+  const { mode: templateTaxMode, components: templateComponents } = getGstTemplateTaxComponents(gstTemplate);
+  const defaultTax = sumTaxComponents(templateComponents);
   const rows = Array.isArray(doc?.items) ? doc.items : [];
   let subtotal = 0;
   let taxTotal = 0;
@@ -2033,22 +2118,12 @@ function computeDocumentTotals(doc, gstTemplates) {
     const lineAmount = qty * rate;
     const hasRowTaxOverride = String(item?.taxPercent ?? "").trim() !== "";
     const taxPct = hasRowTaxOverride ? parseNumber(item.taxPercent) : defaultTax;
-    const componentTotal = Object.values(templateComponents).reduce((sum, value) => sum + value, 0);
-    const effectiveComponents = componentTotal > 0
-      ? {
-          cgst: (taxPct * templateComponents.cgst) / componentTotal,
-          sgst: (taxPct * templateComponents.sgst) / componentTotal,
-          igst: (taxPct * templateComponents.igst) / componentTotal,
-          cess: (taxPct * templateComponents.cess) / componentTotal,
-        }
-      : {
-          cgst: 0,
-          sgst: 0,
-          igst: taxPct,
-          cess: 0,
-        };
+    const effectiveComponents = hasRowTaxOverride
+      ? distributeTaxPercentByComponents(taxPct, templateComponents, templateTaxMode)
+      : templateComponents;
+    const effectiveTaxPercent = sumTaxComponents(effectiveComponents);
     subtotal += lineAmount;
-    taxTotal += lineAmount * (taxPct / 100);
+    taxTotal += lineAmount * (effectiveTaxPercent / 100);
     taxBreakdown.cgst += lineAmount * (effectiveComponents.cgst / 100);
     taxBreakdown.sgst += lineAmount * (effectiveComponents.sgst / 100);
     taxBreakdown.igst += lineAmount * (effectiveComponents.igst / 100);
@@ -6851,6 +6926,7 @@ function BillingDocumentEditor({
     updateDocLine,
     removeDocLine,
     canEditPaymentDetails = false,
+    hsnFieldErrors = {},
   }) {
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
@@ -7379,7 +7455,7 @@ function BillingDocumentEditor({
                         <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control mb-2 wz-item-custom-input"
-                            required={kind === "invoice"}
+                            required
                             value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
                             onChange={(e) => {
                               updateLineTextDraft(line.id, "customText", e.target.value);
@@ -7436,7 +7512,15 @@ function BillingDocumentEditor({
                                   <option value="SAC">SAC</option>
                                 </select>
                                 <input
-                                  className="form-control"
+                                  className={`form-control ${hsnFieldErrors?.[line.id] ? "is-invalid" : ""}`}
+                                  required
+                                  style={hsnFieldErrors?.[line.id]
+                                    ? {
+                                        borderColor: "#dc3545",
+                                        outline: "2px solid rgba(220,53,69,0.35)",
+                                        outlineOffset: "0px",
+                                      }
+                                    : undefined}
                                   value={line.hsnSacCode || ""}
                                   onChange={(e) => updateDocLine(kind, line.id, "hsnSacCode", e.target.value)}
                                   placeholder={normalizeHsnSacType(line.hsnSacType || "HSN") === "SAC" ? "SAC Code" : "HSN Code"}
@@ -7919,6 +8003,7 @@ function CrmOnePageModule() {
   const [editingCrmSalesOrderId, setEditingCrmSalesOrderId] = useState("");
   const [crmSalesOrderEditorOpen, setCrmSalesOrderEditorOpen] = useState(false);
   const [crmSalesOrderNotice, setCrmSalesOrderNotice] = useState("");
+  const [crmSalesOrderHsnErrors, setCrmSalesOrderHsnErrors] = useState({});
   const [crmSalesOrderConvertPopup, setCrmSalesOrderConvertPopup] = useState({ open: false, row: null });
   const [crmSalesOrderConvertBusy, setCrmSalesOrderConvertBusy] = useState(false);
   const [crmGstForm, setCrmGstForm] = useState({
@@ -7978,7 +8063,9 @@ function CrmOnePageModule() {
     () => resolveCrmRoleAccessRecord(crmRoleAccessMap, currentUserRole, currentUserEmployeeRole),
     [crmRoleAccessMap, currentUserRole, currentUserEmployeeRole]
   );
-  const crmSectionAccessLevel = normalizeCrmAccessLevel(crmRoleAccessRecord?.sections?.crm || "No Access");
+  const crmSectionAccessLevel = normalizeCrmAccessLevel(
+    crmRoleAccessRecord?.sections?.crm || (normalizedCurrentUserRole === "org_user" ? "View" : "No Access")
+  );
   const hasCrmFullAccess = isCrmAdmin || crmSectionAccessLevel === "Full Access";
   const hasCrmEditAccess = isCrmAdmin || hasCrmFullAccess || crmSectionAccessLevel === "View and Edit" || crmSectionAccessLevel === "Create, View and Edit";
   const canCreateCrmRows = isCrmAdmin || hasCrmFullAccess || crmSectionAccessLevel === "Create, View and Edit";
@@ -10199,6 +10286,12 @@ function CrmOnePageModule() {
   function onConvertContactToClient(contactRow) {
     const normalizedContact = normalizeCrmContactRecord(contactRow);
     const sourceContactId = String(normalizedContact.id || "").trim();
+    const sourceCrmReferenceId = String(
+      normalizedContact.crmReferenceId
+      || normalizedContact.crm_reference_id
+      || resolveCrmReferenceIdByText(normalizedContact.company || normalizedContact.name || "")
+      || ""
+    ).trim();
     const hasContactData = [
       normalizedContact.company,
       normalizedContact.name,
@@ -10216,7 +10309,7 @@ function CrmOnePageModule() {
     const payload = {
       sourceContactId,
       id: sourceContactId || normalizedContact.id,
-      crmReferenceId: String(normalizedContact.crmReferenceId || normalizedContact.crm_reference_id || "").trim(),
+      crmReferenceId: sourceCrmReferenceId,
       name: normalizedContact.name,
       company: normalizedContact.company,
       email: normalizedContact.email,
@@ -10226,6 +10319,11 @@ function CrmOnePageModule() {
       createdAt: new Date().toISOString(),
     };
     try {
+      Object.keys(window.localStorage || {}).forEach((key) => {
+        if (String(key || "").startsWith(CRM_CONTACT_TO_CLIENT_DRAFT_KEY_PREFIX)) {
+          window.localStorage.removeItem(key);
+        }
+      });
       window.localStorage.setItem(scopedDraftKey, JSON.stringify(payload));
       window.localStorage.setItem(CRM_CONTACT_TO_CLIENT_DRAFT_GLOBAL_KEY, JSON.stringify(payload));
     } catch {
@@ -10449,6 +10547,7 @@ function CrmOnePageModule() {
   }
 
   function addCrmSalesOrderLine() {
+    setCrmSalesOrderHsnErrors({});
     setCrmSalesOrderForm((prev) => ({ ...prev, items: [...(prev.items || []), createEmptyDocLine()] }));
   }
 
@@ -10465,6 +10564,12 @@ function CrmOnePageModule() {
       ...prev,
       items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row)),
     }));
+    setCrmSalesOrderHsnErrors((prev) => {
+      if (!prev?.[lineId]) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
   }
 
   function updateCrmSalesOrderLineDescription(lineId, value) {
@@ -10485,6 +10590,12 @@ function CrmOnePageModule() {
   }
 
   function removeCrmSalesOrderLine(lineId) {
+    setCrmSalesOrderHsnErrors((prev) => {
+      if (!prev?.[lineId]) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
     setCrmSalesOrderForm((prev) => {
       const rows = (prev.items || []).filter((row) => row.id !== lineId);
       return { ...prev, items: rows.length ? rows : [createEmptyDocLine()] };
@@ -10568,11 +10679,13 @@ function CrmOnePageModule() {
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(false);
     setCrmSalesOrderNotice("");
+    setCrmSalesOrderHsnErrors({});
     setCrmSalesOrderForm(createEmptyCrmSalesOrder(moduleData.salesOrders || []));
   }
 
   function openCrmSalesOrderCreate(prefill = null) {
     setCrmSalesOrderNotice("");
+    setCrmSalesOrderHsnErrors({});
     setEditingCrmSalesOrderId("");
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
@@ -10887,6 +11000,7 @@ function CrmOnePageModule() {
 
   function editCrmSalesOrder(row) {
     setCrmSalesOrderNotice("");
+    setCrmSalesOrderHsnErrors({});
     setEditingCrmSalesOrderId(String(row?.id || "").trim());
     setCrmSalesOrderEditorOpen(true);
     setCrmSalesOrderTab("list");
@@ -10937,24 +11051,36 @@ function CrmOnePageModule() {
       setCrmSalesOrderNotice("GST template is required.");
       return;
     }
-    const lineValidationError = (form.items || []).reduce((message, row, index) => {
-      if (message) return message;
+    const missingHsnFieldMap = {};
+    let lineValidationError = "";
+    (form.items || []).some((row, index) => {
       const lineNumber = index + 1;
       if (!String(row.customText || "").trim()) {
-        return `Bill line 1 custom text is required in row ${lineNumber}.`;
+        lineValidationError = `Bill line 1 custom text is required in row ${lineNumber}.`;
+        return true;
       }
-      if (!String(row.qty || "").trim()) return `Qty is required in row ${lineNumber}.`;
-      if (!String(row.rate || "").trim()) return `Rate is required in row ${lineNumber}.`;
+      if (!String(row.qty || "").trim()) {
+        lineValidationError = `Qty is required in row ${lineNumber}.`;
+        return true;
+      }
+      if (!String(row.rate || "").trim()) {
+        lineValidationError = `Rate is required in row ${lineNumber}.`;
+        return true;
+      }
       if (!String(row.hsnSacCode || "").trim()) {
+        missingHsnFieldMap[String(row.id || "")] = true;
         const codeLabel = normalizeHsnSacType(row.hsnSacType || "HSN") === "SAC" ? "SAC code" : "HSN code";
-        return `${codeLabel} is required in row ${lineNumber}.`;
+        lineValidationError = `${codeLabel} is required in row ${lineNumber}.`;
+        return true;
       }
-      return "";
-    }, "");
+      return false;
+    });
     if (lineValidationError) {
+      setCrmSalesOrderHsnErrors(missingHsnFieldMap);
       setCrmSalesOrderNotice(lineValidationError);
       return;
     }
+    setCrmSalesOrderHsnErrors({});
     if (selectedPaymentStatus !== "Pending" && parseNumber(form.paidAmount) <= 0) {
       setCrmSalesOrderNotice("Paid Amount is required when Payment Status is Partial or Paid.");
       return;
@@ -13710,6 +13836,7 @@ function CrmOnePageModule() {
                       updateDocLine={(_kind, lineId, key, value) => updateCrmSalesOrderLine(lineId, key, value)}
                       removeDocLine={(_kind, lineId) => removeCrmSalesOrderLine(lineId)}
                       canEditPaymentDetails={true}
+                      hsnFieldErrors={crmSalesOrderHsnErrors}
                     />
                   </div>
                 ) : (
@@ -14354,7 +14481,7 @@ function CrmOnePageModule() {
                           >
                             <label className={`form-label small mb-1 ${sectionFieldErrors[sectionKey]?.[field.key] ? "text-danger" : "text-secondary"}`}>
                               {sectionKey === "leads" && field.key === "leadAmount"
-                                ? `Lead Amount (${crmCurrencyCode} ${crmCurrencySymbol})`
+                                ? `Lead Amount (${crmCurrencyCode})`
                                 : field.label}
                               {isCrmFieldRequired(sectionKey, field, formValues) ? " *" : ""}
                             </label>
@@ -15913,6 +16040,16 @@ function CrmOnePageModule() {
                         <i className="bi bi-journal-text" aria-hidden="true" />
                       </button>
                     ) : null}
+                    {sectionKey === "contacts" && canEditCrmRow(sectionKey, row) ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-success"
+                        onClick={() => onConvertContactToClient(row)}
+                        title="Create client from contact"
+                      >
+                        Convert to Client
+                      </button>
+                    ) : null}
                     {canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
@@ -15924,16 +16061,6 @@ function CrmOnePageModule() {
                         )}
                       >
                         Edit
-                      </button>
-                    ) : null}
-                    {sectionKey === "contacts" && canEditCrmRow(sectionKey, row) ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-success"
-                        onClick={() => onConvertContactToClient(row)}
-                        title="Create client from contact"
-                      >
-                        Convert to Client
                       </button>
                     ) : null}
                     {canDeleteCrmRow(sectionKey, row) ? (
@@ -23458,6 +23585,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [editingTemplateId, setEditingTemplateId] = useState("");
   const [estimateForm, setEstimateForm] = useState(createEmptyBillingDocument("estimate", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || [], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
   const [invoiceForm, setInvoiceForm] = useState(createEmptyBillingDocument("invoice", [], DEFAULT_ACCOUNTS_DATA.gstTemplates || [], DEFAULT_ACCOUNTS_DATA.billingTemplates || []));
+  const [documentHsnErrors, setDocumentHsnErrors] = useState({ estimate: {}, invoice: {} });
   const [editingEstimateId, setEditingEstimateId] = useState("");
   const [editingInvoiceId, setEditingInvoiceId] = useState("");
   const [customerForm, setCustomerForm] = useState({
@@ -26161,6 +26289,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }
 
   function addDocLine(kind) {
+    setDocumentHsnErrors((prev) => ({ ...prev, [kind]: {} }));
     if (kind === "estimate") {
       setEstimateForm((prev) => ({ ...prev, items: [...(prev.items || []), createEmptyDocLine()] }));
       return;
@@ -26182,6 +26311,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ...prev,
       items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row))
     }));
+    setDocumentHsnErrors((prev) => {
+      if (!prev?.[kind]?.[lineId]) return prev;
+      const nextKind = { ...prev[kind] };
+      delete nextKind[lineId];
+      return { ...prev, [kind]: nextKind };
+    });
   }
 
   function updateDocLineDescription(kind, lineId, value) {
@@ -26206,6 +26341,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }
 
   function removeDocLine(kind, lineId) {
+    setDocumentHsnErrors((prev) => {
+      if (!prev?.[kind]?.[lineId]) return prev;
+      const nextKind = { ...prev[kind] };
+      delete nextKind[lineId];
+      return { ...prev, [kind]: nextKind };
+    });
     const setter = kind === "estimate" ? setEstimateForm : setInvoiceForm;
     setter((prev) => {
       const rows = (prev.items || []).filter((row) => row.id !== lineId);
@@ -26237,28 +26378,36 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setAccountsFormNotice("Issue date is required.");
       return;
     }
-    const lineValidationError = (form.items || []).reduce((message, row, index) => {
-      if (message) return message;
+    const missingHsnFieldMap = {};
+    let lineValidationError = "";
+    (form.items || []).some((row, index) => {
       const lineNumber = index + 1;
       if (!String(row.customText || "").trim()) {
-        return `Bill line 1 custom text is required in row ${lineNumber}.`;
+        lineValidationError = `Bill line 1 custom text is required in row ${lineNumber}.`;
+        return true;
       }
-      if (kind === "invoice" && !String(row.hsnSacCode || "").trim()) {
+      if (!String(row.hsnSacCode || "").trim()) {
+        missingHsnFieldMap[String(row.id || "")] = true;
         const codeLabel = normalizeHsnSacType(row.hsnSacType || "HSN") === "SAC" ? "SAC code" : "HSN code";
-        return `${codeLabel} is required in row ${lineNumber}.`;
+        lineValidationError = `${codeLabel} is required in row ${lineNumber}.`;
+        return true;
       }
       if (!String(row.qty || "").trim()) {
-        return `Qty is required in row ${lineNumber}.`;
+        lineValidationError = `Qty is required in row ${lineNumber}.`;
+        return true;
       }
       if (!String(row.rate || "").trim()) {
-        return `Rate is required in row ${lineNumber}.`;
+        lineValidationError = `Rate is required in row ${lineNumber}.`;
+        return true;
       }
-      return "";
-    }, "");
+      return false;
+    });
     if (lineValidationError) {
+      setDocumentHsnErrors((prev) => ({ ...prev, [kind]: missingHsnFieldMap }));
       setAccountsFormNotice(lineValidationError);
       return;
     }
+    setDocumentHsnErrors((prev) => ({ ...prev, [kind]: {} }));
     if (selectedPaymentStatus !== "Pending" && parseNumber(form.paidAmount) <= 0) {
       setAccountsFormNotice("Paid Amount is required when Payment Status is Partial or Paid.");
       return;
@@ -26408,6 +26557,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       })),
     };
     setEditingInvoiceId("");
+    setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
     setInvoiceForm(normalized);
     setAccountsFormNotice("");
     setActiveTab("invoices");
@@ -26532,11 +26682,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     };
     if (kind === "estimate") {
       setEditingEstimateId(row.id);
+      setDocumentHsnErrors((prev) => ({ ...prev, estimate: {} }));
       setEstimateForm(normalized);
       setActiveTab("estimates");
       return;
     }
     setEditingInvoiceId(row.id);
+    setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
     setInvoiceForm(normalized);
     setActiveTab("invoices");
   }
@@ -26559,10 +26711,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     });
     if (kind === "estimate" && editingEstimateId === id) {
       setEditingEstimateId("");
+      setDocumentHsnErrors((prev) => ({ ...prev, estimate: {} }));
       setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
     }
     if (kind === "invoice" && editingInvoiceId === id) {
       setEditingInvoiceId("");
+      setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
       setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
     }
   }
@@ -26649,6 +26803,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     updateDocLine,
     removeDocLine,
     canEditPaymentDetails = false,
+    hsnFieldErrors = {},
   }) {
     const kindLabel = kind === "estimate" ? "Estimate" : kind === "salesOrder" ? "Sales Order" : "Invoice";
     const requireCustomer = kind !== "estimate";
@@ -27180,7 +27335,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <td className="wz-item-details-cell" style={{ backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
                           <input
                             className="form-control mb-2 wz-item-custom-input"
-                            required={kind === "invoice"}
+                            required
                             value={lineTextDrafts[line.id]?.customText ?? line.customText ?? ""}
                             onChange={(e) => {
                               updateLineTextDraft(line.id, "customText", e.target.value);
@@ -27237,7 +27392,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                   <option value="SAC">SAC</option>
                                 </select>
                                 <input
-                                  className="form-control"
+                                  className={`form-control ${hsnFieldErrors?.[line.id] ? "is-invalid" : ""}`}
+                                  required
+                                  style={hsnFieldErrors?.[line.id]
+                                    ? {
+                                        borderColor: "#dc3545",
+                                        outline: "2px solid rgba(220,53,69,0.35)",
+                                        outlineOffset: "0px",
+                                      }
+                                    : undefined}
                                   value={line.hsnSacCode || ""}
                                   onChange={(e) => updateDocLine(kind, line.id, "hsnSacCode", e.target.value)}
                                   placeholder={normalizeHsnSacType(line.hsnSacType || "HSN") === "SAC" ? "SAC Code" : "HSN Code"}
@@ -28610,6 +28773,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               onSave={(event) => saveDocument("estimate", event)}
               onCancelEdit={() => {
                 setEditingEstimateId("");
+                setDocumentHsnErrors((prev) => ({ ...prev, estimate: {} }));
                 setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
               }}
               editingId={editingEstimateId}
@@ -28630,6 +28794,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               updateDocLine={updateDocLine}
               removeDocLine={removeDocLine}
               canEditPaymentDetails={true}
+              hsnFieldErrors={documentHsnErrors.estimate}
             />
           </div>
         </>
@@ -28646,6 +28811,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               onSave={(event) => saveDocument("invoice", event)}
               onCancelEdit={() => {
                 setEditingInvoiceId("");
+                setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
                 setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
               }}
               editingId={editingInvoiceId}
@@ -28666,6 +28832,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               updateDocLine={updateDocLine}
               removeDocLine={removeDocLine}
               canEditPaymentDetails={true}
+              hsnFieldErrors={documentHsnErrors.invoice}
             />
           </div>
         </>

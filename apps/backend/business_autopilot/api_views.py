@@ -325,8 +325,6 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
 
 
 def _resolve_org(user: User):
-    if getattr(user, "organization", None):
-        return user.organization
     profile = UserProfile.objects.filter(user=user).select_related("organization").first()
     if profile and profile.organization:
         return profile.organization

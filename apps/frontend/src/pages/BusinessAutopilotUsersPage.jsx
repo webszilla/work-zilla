@@ -793,6 +793,7 @@ function normalizeCrmContactConversionDraft(value = {}) {
   return {
     sourceContactId,
     orgId: String(value?.orgId || "").trim(),
+    createdAt: String(value?.createdAt || value?.created_at || "").trim(),
     crmReferenceId: String(value?.crmReferenceId || value?.crm_reference_id || normalizedContact.crmReferenceId || "").trim(),
     id: sourceContactId || normalizedContact.id,
     name: normalizedContact.name,
@@ -2505,6 +2506,7 @@ export default function BusinessAutopilotUsersPage() {
 
   const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
   const normalizedCurrentProfileRole = normalizeRoleToken(currentProfileRole);
+  const isOrgUserProfile = normalizedCurrentProfileRole === "org_user";
   const normalizedCurrentMembershipRole = normalizeRoleToken(currentUserMembershipRole);
   const hasResolvedMembershipRole = Boolean(normalizedCurrentMembershipRole);
   const isOrgAdminUser = canManageUsers
@@ -2516,7 +2518,7 @@ export default function BusinessAutopilotUsersPage() {
   );
   const usersSectionAccessLevel = isOrgAdminUser
     ? "Full Access"
-    : normalizeRoleAccessLevel(usersRoleAccessRecord?.sections?.users || "No Access");
+    : normalizeRoleAccessLevel(usersRoleAccessRecord?.sections?.users || (isOrgUserProfile ? "View" : "No Access"));
   const usersSubSections = normalizeUserSubSections(
     usersRoleAccessRecord?.user_sub_sections,
     usersSectionAccessLevel
@@ -2533,7 +2535,7 @@ export default function BusinessAutopilotUsersPage() {
     : normalizeRoleAccessLevel(
       usersSubSections.clients?.enabled
         ? usersSubSections.clients?.access_level
-        : usersSectionAccessLevel
+        : (isOrgUserProfile ? "View" : usersSectionAccessLevel)
     );
   const vendorsAccessLevel = isOrgAdminUser
     ? "Full Access"
@@ -2551,7 +2553,7 @@ export default function BusinessAutopilotUsersPage() {
   const canManageRoleAccessTab = isOrgAdminUser;
   const canViewEmployeeTab = isOrgAdminUser || employeeAccessLevel !== "No Access";
   const canManageEmployeeTab = isOrgAdminUser || employeeAccessLevel === "View and Edit" || employeeAccessLevel === "Create, View and Edit" || employeeAccessLevel === "Full Access";
-  const canViewClientsTab = isOrgAdminUser || clientsAccessLevel !== "No Access";
+  const canViewClientsTab = isOrgAdminUser || isOrgUserProfile || clientsAccessLevel !== "No Access";
   const canEditClientsTab = isOrgAdminUser || clientsAccessLevel === "View and Edit" || clientsAccessLevel === "Create, View and Edit" || clientsAccessLevel === "Full Access";
   const canCreateClientsTab = isOrgAdminUser || clientsAccessLevel === "Create, View and Edit" || clientsAccessLevel === "Full Access";
   const canDeleteClientsTab = isOrgAdminUser || clientsAccessLevel === "Full Access";
@@ -2642,62 +2644,30 @@ export default function BusinessAutopilotUsersPage() {
       || normalizedContact.crmReferenceId
       || ""
     ).trim().toLowerCase();
-    const sourceEmail = String(normalizedContact.email || "").trim().toLowerCase();
-    const sourcePhoneCode = String(normalizedContact.phoneCountryCode || "+91").trim() || "+91";
-    const sourcePhone = String(normalizedContact.phone || "").trim();
-    const sourceCompany = String(normalizedContact.company || "").trim().toLowerCase();
-    const sourceName = String(normalizedContact.name || "").trim().toLowerCase();
-    const existingCustomer = (Array.isArray(sharedCustomers) ? sharedCustomers : [])
-      .map((row) => normalizeSharedCustomerRecord(row))
-      .find((customer) => {
-        const customerSourceContactId = String(
-          customer.crmSourceContactId
-          || customer.crm_source_contact_id
-          || ""
-        ).trim();
-        if (sourceContactId && customerSourceContactId && customerSourceContactId === sourceContactId) {
-          return true;
-        }
-        const customerCrmReferenceId = String(
-          customer.crmReferenceId
-          || customer.crm_reference_id
-          || ""
-        ).trim().toLowerCase();
-        if (sourceCrmReferenceId && customerCrmReferenceId && customerCrmReferenceId === sourceCrmReferenceId) {
-          return true;
-        }
-        const customerEmailPool = new Set([
-          String(customer.email || "").trim().toLowerCase(),
-          ...(Array.isArray(customer.emailList) ? customer.emailList : []).map((value) => String(value || "").trim().toLowerCase()),
-          ...(Array.isArray(customer.additionalEmails) ? customer.additionalEmails : []).map((value) => String(value || "").trim().toLowerCase()),
-        ].filter(Boolean));
-        if (sourceEmail && customerEmailPool.has(sourceEmail)) {
-          return true;
-        }
-        const customerPhonePool = [
-          ...(String(customer.phone || "").trim()
-            ? [{
-                countryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
-                number: String(customer.phone || "").trim(),
-              }]
-            : []),
-          ...(Array.isArray(customer.phoneList) ? customer.phoneList : []),
-          ...(Array.isArray(customer.additionalPhones) ? customer.additionalPhones : []),
-        ].map((entry) => ({
-          countryCode: String(entry?.countryCode || "+91").trim() || "+91",
-          number: String(entry?.number || "").trim(),
-        }));
-        if (sourcePhone && customerPhonePool.some((entry) => entry.number === sourcePhone && entry.countryCode === sourcePhoneCode)) {
-          return true;
-        }
-        const customerCompany = String(customer.companyName || customer.name || "").trim().toLowerCase();
-        const customerClientName = String(customer.clientName || "").trim().toLowerCase();
-        return Boolean(
-          sourceCompany
-          && sourceName
-          && (customerCompany === sourceCompany || customerClientName === sourceName || customerCompany === sourceName)
-        );
-      }) || null;
+    const hasStrongSourceIdentity = Boolean(sourceContactId || sourceCrmReferenceId);
+    const existingCustomer = hasStrongSourceIdentity
+      ? (Array.isArray(sharedCustomers) ? sharedCustomers : [])
+        .map((row) => normalizeSharedCustomerRecord(row))
+        .find((customer) => {
+          const customerSourceContactId = String(
+            customer.crmSourceContactId
+            || customer.crm_source_contact_id
+            || ""
+          ).trim();
+          if (sourceContactId && customerSourceContactId && customerSourceContactId === sourceContactId) {
+            return true;
+          }
+          const customerCrmReferenceId = String(
+            customer.crmReferenceId
+            || customer.crm_reference_id
+            || ""
+          ).trim().toLowerCase();
+          if (sourceCrmReferenceId && customerCrmReferenceId && customerCrmReferenceId === sourceCrmReferenceId) {
+            return true;
+          }
+          return false;
+        }) || null
+      : null;
     if (existingCustomer) {
       clearCrmContactToClientDraft(crmContactToClientDraft.orgId);
       setCrmContactToClientDraft(null);
@@ -3087,12 +3057,12 @@ export default function BusinessAutopilotUsersPage() {
       : [payload, ...sharedCustomers];
     setSharedCustomers(nextCustomers);
     await persistSharedAccountsCustomers(nextCustomers);
-    let successMessage = editingClientId ? "Client updated successfully." : "Client created successfully.";
+    let successMessage = editingClientId ? "Client updated successfully." : "Client Created Successfully";
     if (conversionDraftForThisSave) {
       const conversionResult = await removeConvertedCrmContact(conversionDraftForThisSave);
       clearActiveCrmContactToClientDraft();
       if (conversionResult.localRemoved || conversionResult.serverRemoved) {
-        successMessage = "Client created successfully and contact converted from CRM.";
+        successMessage = "Client Created Successfully";
       }
     }
     const pendingSalesOrderDraft = conversionDraftForThisSave

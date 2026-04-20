@@ -1,6 +1,10 @@
 const LISTENER_KEY = "__wzRequiredFieldValidation";
 const FORM_ALERT_SELECTOR = "[data-wz-form-required-alert]";
 const FORM_ALERT_TEXT = "Please fill mandatory fields.";
+const FORCED_INVALID_DATA_KEY = "wzForcedInvalidStyle";
+const INVALID_BORDER_COLOR = "#ef4444";
+const INVALID_BOX_SHADOW = "0 0 0 0.12rem rgba(239, 68, 68, 0.14)";
+const FORM_SUBMIT_ATTEMPTED_ATTR = "data-wz-submit-attempted";
 
 function normalizeIsoDate(value) {
   const raw = String(value || "").trim();
@@ -130,6 +134,41 @@ function getAssociatedLabels(control) {
 function setValidationState(control, invalid) {
   control.classList.toggle("is-invalid", Boolean(invalid));
   control.setAttribute("aria-invalid", invalid ? "true" : "false");
+  if (invalid) {
+    if (!control.dataset[FORCED_INVALID_DATA_KEY]) {
+      control.dataset[FORCED_INVALID_DATA_KEY] = JSON.stringify({
+        borderValue: control.style.getPropertyValue("border-color") || "",
+        borderPriority: control.style.getPropertyPriority("border-color") || "",
+        shadowValue: control.style.getPropertyValue("box-shadow") || "",
+        shadowPriority: control.style.getPropertyPriority("box-shadow") || "",
+      });
+    }
+    control.style.setProperty("border-color", INVALID_BORDER_COLOR, "important");
+    control.style.setProperty("box-shadow", INVALID_BOX_SHADOW, "important");
+  } else if (control.dataset[FORCED_INVALID_DATA_KEY]) {
+    let saved = null;
+    try {
+      saved = JSON.parse(control.dataset[FORCED_INVALID_DATA_KEY] || "{}");
+    } catch {
+      saved = null;
+    }
+    if (saved && typeof saved === "object") {
+      if (saved.borderValue) {
+        control.style.setProperty("border-color", saved.borderValue, saved.borderPriority || "");
+      } else {
+        control.style.removeProperty("border-color");
+      }
+      if (saved.shadowValue) {
+        control.style.setProperty("box-shadow", saved.shadowValue, saved.shadowPriority || "");
+      } else {
+        control.style.removeProperty("box-shadow");
+      }
+    } else {
+      control.style.removeProperty("border-color");
+      control.style.removeProperty("box-shadow");
+    }
+    delete control.dataset[FORCED_INVALID_DATA_KEY];
+  }
   getAssociatedLabels(control).forEach((label) => {
     label.classList.toggle("wz-required-invalid", Boolean(invalid));
   });
@@ -283,6 +322,11 @@ export function bindGlobalRequiredFieldValidation() {
   const onBlur = (event) => {
     const control = event.target;
     if (!isSupportedControl(control)) return;
+    const form = control.form;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (String(form.getAttribute(FORM_SUBMIT_ATTEMPTED_ATTR) || "").trim().toLowerCase() !== "true") {
+      return;
+    }
     validateRequiredControl(control, { force: true });
   };
 
@@ -292,9 +336,12 @@ export function bindGlobalRequiredFieldValidation() {
     ensureNoValidate(form);
     const result = validateFormRequiredControls(form, { focusFirstInvalid: true });
     if (!result.valid) {
+      form.setAttribute(FORM_SUBMIT_ATTEMPTED_ATTR, "true");
       event.preventDefault();
       event.stopPropagation();
+      return;
     }
+    form.removeAttribute(FORM_SUBMIT_ATTEMPTED_ATTR);
   };
 
   document.addEventListener("input", onInput, true);
