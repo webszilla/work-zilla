@@ -99,6 +99,9 @@ export default function SaasAdminOrganizationsPage() {
   const [inactiveDealerSearchTerm, setInactiveDealerSearchTerm] = useState("");
   const [inactiveDealerQuery, setInactiveDealerQuery] = useState("");
   const [inactiveDealerPage, setInactiveDealerPage] = useState(1);
+  const [newSearchTerm, setNewSearchTerm] = useState("");
+  const [newQuery, setNewQuery] = useState("");
+  const [newPage, setNewPage] = useState(1);
   const [deletedTab, setDeletedTab] = useState("org");
   const [deletedSearchTerm, setDeletedSearchTerm] = useState("");
   const [deletedQuery, setDeletedQuery] = useState("");
@@ -196,6 +199,14 @@ export default function SaasAdminOrganizationsPage() {
     }, 300);
     return () => clearTimeout(handle);
   }, [inactiveDealerSearchTerm]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setNewQuery(newSearchTerm.trim());
+      setNewPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [newSearchTerm]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -380,6 +391,47 @@ export default function SaasAdminOrganizationsPage() {
   const inactiveDealerEndEntry = inactiveDealerTotalItems
     ? Math.min(inactiveDealerPage * PAGE_SIZE, inactiveDealerTotalItems)
     : 0;
+
+  const newAccountsOrgs = useMemo(() => {
+    return organizations.filter((org) => {
+      const hasSubscriptionId = Boolean(org.subscription?.id);
+      const hasSubscriptionPlan = Boolean(String(org.subscription?.plan_name || "").trim());
+      const hasProductPlan = (org.product_statuses || []).some(
+        (item) => String(item?.plan_name || "").trim() && String(item?.plan_name || "").trim() !== "-"
+      );
+      return !hasSubscriptionId && !hasSubscriptionPlan && !hasProductPlan;
+    });
+  }, [organizations]);
+
+  const newFilteredOrgs = useMemo(() => {
+    const base = newAccountsOrgs.filter((org) => {
+      if (productFilter === "all") {
+        return true;
+      }
+      return (org.products || []).includes(productFilter);
+    });
+    if (!newQuery) {
+      return base;
+    }
+    const term = newQuery.toLowerCase();
+    return base.filter((org) =>
+      [
+        org.name,
+        org.company_key,
+        org.owner_name,
+        org.owner_email,
+        org.created_at,
+      ].some((value) => String(value || "").toLowerCase().includes(term))
+    );
+  }, [newAccountsOrgs, newQuery, productFilter]);
+  const newTotalPages = Math.max(Math.ceil(newFilteredOrgs.length / PAGE_SIZE), 1);
+  const newPagedOrgs = useMemo(
+    () => newFilteredOrgs.slice((newPage - 1) * PAGE_SIZE, newPage * PAGE_SIZE),
+    [newFilteredOrgs, newPage]
+  );
+  const newTotalItems = newFilteredOrgs.length;
+  const newStartEntry = newTotalItems ? (newPage - 1) * PAGE_SIZE + 1 : 0;
+  const newEndEntry = newTotalItems ? Math.min(newPage * PAGE_SIZE, newTotalItems) : 0;
 
   const deletedFilteredOrgs = useMemo(() => {
     if (!deletedQuery) {
@@ -612,6 +664,13 @@ export default function SaasAdminOrganizationsPage() {
     const permanentId = org?.id;
     const legacyId = org?.legacy_deleted_account_id;
     if (!permanentId && !legacyId) {
+      return;
+    }
+    if (!org?.can_permanent_delete) {
+      setState((prev) => ({
+        ...prev,
+        error: getPermanentDeleteActionTitle(org)
+      }));
       return;
     }
     const confirmed = await confirm({
@@ -1039,6 +1098,13 @@ export default function SaasAdminOrganizationsPage() {
           >
             Dealer Accounts
           </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${inactiveTab === "new" ? "btn-primary" : "btn-outline-light"}`}
+            onClick={() => setInactiveTab("new")}
+          >
+            New Accounts
+          </button>
         </div>
 
         {inactiveTab === "org" ? (
@@ -1158,6 +1224,111 @@ export default function SaasAdminOrganizationsPage() {
                 page={inactivePage}
                 totalPages={inactiveTotalPages}
                 onPageChange={setInactivePage}
+                showPageLinks
+                showPageLabel={false}
+                maxPageLinks={7}
+              />
+            </div>
+          </>
+        ) : inactiveTab === "new" ? (
+          <>
+            <div className="table-controls">
+              <div className="table-length">Show {PAGE_SIZE} entries</div>
+              <div className="d-flex align-items-center gap-2 flex-wrap saas-org-table__controls-right">
+                <label className="table-search" htmlFor="saas-new-search">
+                  <span>Search:</span>
+                  <input
+                    id="saas-new-search"
+                    type="text"
+                    value={newSearchTerm}
+                    onChange={(event) => setNewSearchTerm(event.target.value)}
+                    placeholder="Search new accounts"
+                  />
+                </label>
+                <label className="table-search" htmlFor="saas-new-product">
+                  <span>Product:</span>
+                  <select
+                    id="saas-new-product"
+                    value={productFilter}
+                    onChange={(event) => {
+                      setProductFilter(event.target.value);
+                      setNewPage(1);
+                    }}
+                  >
+                    <option value="all">All</option>
+                    {products.map((product) => (
+                      <option key={product.slug} value={product.slug}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-dark table-striped table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Organization</th>
+                    <th>Admin User Name</th>
+                    <th>Email ID</th>
+                    <th>Created At</th>
+                    <th className="table-actions">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {newPagedOrgs.length ? (
+                    newPagedOrgs.map((org) => (
+                      <tr key={`new-account-${org.id}`}>
+                        <td>{org.name}</td>
+                        <td>{formatValue(org.owner_name)}</td>
+                        <td>{formatValue(org.owner_email)}</td>
+                        <td>{formatValue(org.created_at)}</td>
+                        <td className="table-actions">
+                          <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-light btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}`)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => navigate(`/saas-admin/organizations/${org.id}#edit`)}
+                            >
+                              Edit
+                            </button>
+                            {org.can_delete !== false ? (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDelete(org)}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="5">No new accounts found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-footer">
+              <div className="table-info">
+                Showing {newStartEntry} to {newEndEntry} of {newTotalItems} entries
+              </div>
+              <TablePagination
+                page={newPage}
+                totalPages={newTotalPages}
+                onPageChange={setNewPage}
                 showPageLinks
                 showPageLabel={false}
                 maxPageLinks={7}
@@ -1342,13 +1513,8 @@ export default function SaasAdminOrganizationsPage() {
                             </button>
                             <button
                               type="button"
-                              className={`${org.can_permanent_delete ? "btn btn-danger" : "btn btn-outline-danger disabled"} btn-sm saas-org-icon-btn`}
-                              onClick={() => {
-                                if (!org.can_permanent_delete) {
-                                  return;
-                                }
-                                handleDeletedOrgPermanentDelete(org);
-                              }}
+                              className={`${org.can_permanent_delete ? "btn btn-danger" : "btn btn-outline-danger"} btn-sm saas-org-icon-btn`}
+                              onClick={() => handleDeletedOrgPermanentDelete(org)}
                               title={getPermanentDeleteActionTitle(org)}
                               aria-label="Permanent Delete"
                               aria-disabled={!org.can_permanent_delete}

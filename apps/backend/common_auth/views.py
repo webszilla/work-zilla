@@ -1,5 +1,6 @@
 import random
 import hashlib
+import re
 from datetime import datetime, timedelta
 
 from django.contrib.auth import authenticate, login, logout
@@ -23,7 +24,7 @@ from django.utils import timezone
 
 from .forms import SignupForm
 from .models import Organization, User
-from core.models import UserProfile
+from core.models import UserProfile, Organization as CoreOrganization
 from core.access_control import get_user_organization
 from core.email_utils import send_templated_email
 from core.notification_emails import send_email_verification, is_verification_token_valid, mark_email_verified
@@ -47,6 +48,20 @@ def _safe_next_url(request, value, default="/my-account/"):
     ):
         return target
     return default
+
+
+def _build_core_company_key(username, user_id):
+    raw = str(username or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    if not normalized:
+        normalized = "organization"
+    normalized = normalized[:70]
+    candidate = f"{normalized}-{user_id}"
+    suffix = 1
+    while CoreOrganization.objects.filter(company_key=candidate).exists():
+        candidate = f"{normalized}-{user_id}-{suffix}"
+        suffix += 1
+    return candidate
 
 
 @require_GET
@@ -386,9 +401,15 @@ def signup_view(request):
         user.first_name = first_name
         user.last_name = last_name
         user.save(update_fields=["first_name", "last_name"])
+        core_org = CoreOrganization.objects.create(
+            name=company_name,
+            company_key=_build_core_company_key(username, user.id),
+            owner=user,
+        )
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.phone_number = phone_number
-        profile.save(update_fields=["phone_number"])
+        profile.organization = core_org
+        profile.save(update_fields=["phone_number", "organization"])
     send_templated_email(
         user.email,
         "Welcome to Work Zilla",
