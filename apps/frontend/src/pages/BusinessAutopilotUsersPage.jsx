@@ -687,6 +687,7 @@ function readSharedHrEmployees() {
 function normalizeCrmContactRecord(row = {}) {
   return {
     id: String(row?.id || "").trim(),
+    crmReferenceId: String(row?.crmReferenceId || row?.crm_reference_id || "").trim(),
     name: String(row?.name || row?.clientName || "").trim(),
     company: String(row?.company || row?.companyName || row?.name || "").trim(),
     email: String(row?.email || "").trim(),
@@ -760,6 +761,7 @@ function normalizeCrmContactConversionDraft(value = {}) {
   const normalizedContact = normalizeCrmContactRecord(value);
   const sourceContactId = String(value?.sourceContactId || normalizedContact.id || "").trim();
   const hasContactData = sourceContactId
+    || normalizedContact.crmReferenceId
     || normalizedContact.name
     || normalizedContact.company
     || normalizedContact.email
@@ -770,6 +772,7 @@ function normalizeCrmContactConversionDraft(value = {}) {
   return {
     sourceContactId,
     orgId: String(value?.orgId || "").trim(),
+    crmReferenceId: String(value?.crmReferenceId || value?.crm_reference_id || normalizedContact.crmReferenceId || "").trim(),
     id: sourceContactId || normalizedContact.id,
     name: normalizedContact.name,
     company: normalizedContact.company,
@@ -2554,6 +2557,83 @@ export default function BusinessAutopilotUsersPage() {
       crmContactToClientDraftAppliedRef.current = false;
       return;
     }
+    const sourceContactId = String(
+      crmContactToClientDraft.sourceContactId
+      || normalizedContact.id
+      || ""
+    ).trim();
+    const sourceCrmReferenceId = String(
+      crmContactToClientDraft.crmReferenceId
+      || crmContactToClientDraft.crm_reference_id
+      || normalizedContact.crmReferenceId
+      || ""
+    ).trim().toLowerCase();
+    const sourceEmail = String(normalizedContact.email || "").trim().toLowerCase();
+    const sourcePhoneCode = String(normalizedContact.phoneCountryCode || "+91").trim() || "+91";
+    const sourcePhone = String(normalizedContact.phone || "").trim();
+    const sourceCompany = String(normalizedContact.company || "").trim().toLowerCase();
+    const sourceName = String(normalizedContact.name || "").trim().toLowerCase();
+    const existingCustomer = (Array.isArray(sharedCustomers) ? sharedCustomers : [])
+      .map((row) => normalizeSharedCustomerRecord(row))
+      .find((customer) => {
+        const customerSourceContactId = String(
+          customer.crmSourceContactId
+          || customer.crm_source_contact_id
+          || ""
+        ).trim();
+        if (sourceContactId && customerSourceContactId && customerSourceContactId === sourceContactId) {
+          return true;
+        }
+        const customerCrmReferenceId = String(
+          customer.crmReferenceId
+          || customer.crm_reference_id
+          || ""
+        ).trim().toLowerCase();
+        if (sourceCrmReferenceId && customerCrmReferenceId && customerCrmReferenceId === sourceCrmReferenceId) {
+          return true;
+        }
+        const customerEmailPool = new Set([
+          String(customer.email || "").trim().toLowerCase(),
+          ...(Array.isArray(customer.emailList) ? customer.emailList : []).map((value) => String(value || "").trim().toLowerCase()),
+          ...(Array.isArray(customer.additionalEmails) ? customer.additionalEmails : []).map((value) => String(value || "").trim().toLowerCase()),
+        ].filter(Boolean));
+        if (sourceEmail && customerEmailPool.has(sourceEmail)) {
+          return true;
+        }
+        const customerPhonePool = [
+          ...(String(customer.phone || "").trim()
+            ? [{
+                countryCode: String(customer.phoneCountryCode || "+91").trim() || "+91",
+                number: String(customer.phone || "").trim(),
+              }]
+            : []),
+          ...(Array.isArray(customer.phoneList) ? customer.phoneList : []),
+          ...(Array.isArray(customer.additionalPhones) ? customer.additionalPhones : []),
+        ].map((entry) => ({
+          countryCode: String(entry?.countryCode || "+91").trim() || "+91",
+          number: String(entry?.number || "").trim(),
+        }));
+        if (sourcePhone && customerPhonePool.some((entry) => entry.number === sourcePhone && entry.countryCode === sourcePhoneCode)) {
+          return true;
+        }
+        const customerCompany = String(customer.companyName || customer.name || "").trim().toLowerCase();
+        const customerClientName = String(customer.clientName || "").trim().toLowerCase();
+        return Boolean(
+          sourceCompany
+          && sourceName
+          && (customerCompany === sourceCompany || customerClientName === sourceName || customerCompany === sourceName)
+        );
+      }) || null;
+    if (existingCustomer) {
+      clearCrmContactToClientDraft(crmContactToClientDraft.orgId);
+      setCrmContactToClientDraft(null);
+      crmContactToClientDraftAppliedRef.current = false;
+      activateTopTab("clients", { preserveSource: true });
+      setNotice(
+        `CRM contact is already converted to client: ${String(existingCustomer.companyName || existingCustomer.clientName || existingCustomer.name || "Existing Client").trim()}.`
+      );
+      return;
+    }
     crmContactToClientDraftAppliedRef.current = true;
     const companyName = normalizedContact.company || normalizedContact.name || "";
     activateTopTab("clients", { preserveSource: true });
@@ -2569,7 +2649,7 @@ export default function BusinessAutopilotUsersPage() {
     });
     setClientCompanySearchOpen(false);
     setNotice("CRM contact loaded in client form. Complete remaining fields and create client.");
-  }, [canViewClientsTab, crmContactToClientDraft]);
+  }, [canViewClientsTab, crmContactToClientDraft, sharedCustomers]);
 
   useEffect(() => {
     setNotice("");
@@ -2899,6 +2979,10 @@ export default function BusinessAutopilotUsersPage() {
       companyName,
       clientName,
       name: companyName,
+      crmSourceContactId: String(conversionDraftForThisSave?.sourceContactId || "").trim(),
+      crm_source_contact_id: String(conversionDraftForThisSave?.sourceContactId || "").trim(),
+      crmReferenceId: String(conversionDraftForThisSave?.crmReferenceId || conversionDraftForThisSave?.crm_reference_id || "").trim(),
+      crm_reference_id: String(conversionDraftForThisSave?.crmReferenceId || conversionDraftForThisSave?.crm_reference_id || "").trim(),
       gstin: String(clientForm.gstin || "").trim(),
       phoneCountryCode: String(clientForm.phoneCountryCode || "+91").trim() || "+91",
       phone: primaryPhone,

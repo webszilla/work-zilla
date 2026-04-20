@@ -4063,11 +4063,24 @@ function findBestCustomerMatch(customers = [], {
   companyName = "",
   leadName = "",
   customerName = "",
+  contactId = "",
+  phoneNumber = "",
+  email = "",
 } = {}) {
   const normalizedCustomers = (Array.isArray(customers) ? customers : [])
     .map((row) => normalizeSharedCustomerRecord(row));
   if (!normalizedCustomers.length) {
     return null;
+  }
+  const sourceContactId = String(contactId || "").trim();
+  if (sourceContactId) {
+    const bySourceContact = normalizedCustomers.find((row) => {
+      const rowSourceContactId = String(row.crmSourceContactId || row.crm_source_contact_id || "").trim();
+      return Boolean(rowSourceContactId && rowSourceContactId === sourceContactId);
+    }) || null;
+    if (bySourceContact) {
+      return bySourceContact;
+    }
   }
   const sourceReference = normalizePlaceholderText(String(crmReferenceId || "").trim());
   if (sourceReference) {
@@ -4076,6 +4089,35 @@ function findBestCustomerMatch(customers = [], {
     )) || null;
     if (byReference) {
       return byReference;
+    }
+  }
+  const sourceEmail = String(email || "").trim().toLowerCase();
+  if (sourceEmail) {
+    const byEmail = normalizedCustomers.find((row) => {
+      const customerEmails = new Set([
+        String(row.email || "").trim().toLowerCase(),
+        ...(Array.isArray(row.emailList) ? row.emailList : []).map((value) => String(value || "").trim().toLowerCase()),
+        ...(Array.isArray(row.additionalEmails) ? row.additionalEmails : []).map((value) => String(value || "").trim().toLowerCase()),
+      ].filter(Boolean));
+      return customerEmails.has(sourceEmail);
+    }) || null;
+    if (byEmail) {
+      return byEmail;
+    }
+  }
+  const normalizePhoneMatchValue = (value = "") => String(value || "").replace(/[^\d+]/g, "");
+  const sourcePhone = normalizePhoneMatchValue(phoneNumber);
+  if (sourcePhone) {
+    const byPhone = normalizedCustomers.find((row) => {
+      const customerPhones = [
+        normalizePhoneMatchValue(row.phone),
+        ...(Array.isArray(row.phoneList) ? row.phoneList : []).map((item) => normalizePhoneMatchValue(item?.number)),
+        ...(Array.isArray(row.additionalPhones) ? row.additionalPhones : []).map((item) => normalizePhoneMatchValue(item?.number)),
+      ].filter(Boolean);
+      return customerPhones.includes(sourcePhone);
+    }) || null;
+    if (byPhone) {
+      return byPhone;
     }
   }
   const targetNames = new Set([
@@ -9052,6 +9094,7 @@ function CrmOnePageModule() {
         companyName: sourceClientName,
         leadName: sourceLeadName,
         customerName: String(normalizedSalesOrder.customerName || "").trim(),
+        phoneNumber: String(normalizedSalesOrder.phone || "").trim(),
       }
     );
     const targetRow = existingRows.find((row) => String(row?.id || "").trim() === documentId) || null;
@@ -9244,6 +9287,7 @@ function CrmOnePageModule() {
       ),
       leadName: pickFirstMeaningfulValue(normalizedRow.leadName, normalizedRow.customerName),
       customerName: pickFirstMeaningfulValue(normalizedRow.customerName, normalizedRow.leadName),
+      phoneNumber: String(normalizedRow.phone || "").trim(),
       })
       || {}
     );
@@ -10163,6 +10207,7 @@ function CrmOnePageModule() {
     const payload = {
       sourceContactId,
       id: sourceContactId || normalizedContact.id,
+      crmReferenceId: String(normalizedContact.crmReferenceId || normalizedContact.crm_reference_id || "").trim(),
       name: normalizedContact.name,
       company: normalizedContact.company,
       email: normalizedContact.email,
@@ -10607,28 +10652,26 @@ function CrmOnePageModule() {
   }
 
   function findExistingSalesOrderCustomerForDeal(dealRow = {}) {
-    const companyName = String(dealRow?.company || "").trim().toLowerCase();
-    const dealName = String(dealRow?.dealName || dealRow?.name || "").trim().toLowerCase();
+    const normalizedDeal = normalizeCrmDealRecord(dealRow || {});
+    const matchedContact = findConvertibleCrmContactForDeal(normalizedDeal);
     const customerPool = [
       ...readSharedAccountsCustomers(),
       ...crmSalesOrderCustomerOptions,
       ...sharedCustomerOptions,
     ];
-    return customerPool.find((row) => {
-      const normalizedCustomer = normalizeSharedCustomerRecord(row);
-      if (!hasSalesOrderReadyCustomerDetails(normalizedCustomer)) {
-        return false;
-      }
-      const customerCompany = String(normalizedCustomer.companyName || "").trim().toLowerCase();
-      const customerClient = String(normalizedCustomer.clientName || "").trim().toLowerCase();
-      const customerName = String(normalizedCustomer.name || "").trim().toLowerCase();
-      if (companyName) {
-        return customerCompany === companyName || customerClient === companyName || customerName === companyName;
-      }
-      return Boolean(
-        dealName && (customerClient === dealName || customerName === dealName || customerCompany === dealName)
-      );
-    }) || null;
+    const matchedCustomer = findBestCustomerMatch(customerPool, {
+      crmReferenceId: normalizePlaceholderText(String(normalizedDeal.crmReferenceId || normalizedDeal.crm_reference_id || "").trim()),
+      companyName: normalizePlaceholderText(String(normalizedDeal.company || "").trim()),
+      leadName: normalizePlaceholderText(String(normalizedDeal.dealName || normalizedDeal.name || "").trim()),
+      customerName: normalizePlaceholderText(String(normalizedDeal.dealName || normalizedDeal.name || "").trim()),
+      contactId: String(matchedContact?.id || "").trim(),
+      phoneNumber: String(normalizedDeal.phone || "").trim(),
+      email: String(matchedContact?.email || "").trim(),
+    });
+    if (!matchedCustomer) {
+      return null;
+    }
+    return hasSalesOrderReadyCustomerDetails(matchedCustomer) ? matchedCustomer : matchedCustomer;
   }
 
   function findConvertibleCrmContactForDeal(dealRow = {}) {
@@ -10696,6 +10739,7 @@ function CrmOnePageModule() {
 
   function findExistingSalesOrderCustomerForSalesOrder(salesOrderRow = {}) {
     const normalizedRow = normalizeCrmSalesOrderRecord(salesOrderRow);
+    const matchedContact = findConvertibleCrmContactForSalesOrder(normalizedRow);
     const customerPool = [
       ...(moduleData?.customers || []),
       ...readSharedAccountsCustomers(),
@@ -10707,6 +10751,9 @@ function CrmOnePageModule() {
       companyName: normalizePlaceholderText(String(normalizedRow.company || normalizedRow.clients || "").trim()),
       leadName: normalizePlaceholderText(String(normalizedRow.leadName || "").trim()),
       customerName: normalizePlaceholderText(String(normalizedRow.customerName || "").trim()),
+      contactId: String(matchedContact?.id || "").trim(),
+      phoneNumber: String(normalizedRow.phone || "").trim(),
+      email: String(matchedContact?.email || "").trim(),
     });
     if (!matchedCustomer) {
       return null;
