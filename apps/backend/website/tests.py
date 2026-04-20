@@ -1,3 +1,4 @@
+import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from unittest.mock import patch
@@ -175,3 +176,50 @@ class AccountAccessScopeTests(TestCase):
         self.assertEqual(mock_send_email_verification.call_count, 1)
         _, call_kwargs = mock_send_email_verification.call_args
         self.assertEqual(call_kwargs.get("force"), True)
+
+
+class SubscriptionStartAliasTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="trial-alias@workzilla.test",
+            email="trial-alias@workzilla.test",
+            password="pw123456",
+        )
+        self.user.email_verified = True
+        self.user.save(update_fields=["email_verified"])
+        self.org = Organization.objects.create(
+            name="Trial Alias Org",
+            company_key="TRIALALIAS",
+            owner=self.user,
+        )
+        UserProfile.objects.create(user=self.user, organization=self.org, role="org_admin")
+        self.product = Product.objects.create(
+            slug="business-autopilot-erp",
+            name="Business Autopilot",
+        )
+        self.plan = Plan.objects.create(
+            name="Starter ERP",
+            product=self.product,
+            monthly_price=0,
+            yearly_price=0,
+        )
+
+    def test_business_autopilot_public_slug_accepts_erp_plan(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/subscription/start",
+            data=json.dumps(
+                {
+                    "product": "business-autopilot",
+                    "plan_id": self.plan.id,
+                    "interval": "monthly",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload.get("status"), "trialing")
+        self.assertIn("/app/business-autopilot/", payload.get("redirect", ""))

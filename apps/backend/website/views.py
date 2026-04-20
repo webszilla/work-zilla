@@ -706,6 +706,11 @@ def _normalize_product_slug(value, default="monitor"):
     return slug or default
 
 
+def _is_business_autopilot_alias(slug):
+    normalized = (slug or "").strip().lower()
+    return normalized in {"business-autopilot", "business-autopilot-erp"}
+
+
 def _normalize_saas_slug_to_public(value):
     slug = str(value or "").strip().lower()
     if slug in {"work-suite", "worksuite"}:
@@ -1558,7 +1563,11 @@ def subscription_start(request):
         if not plan:
             return JsonResponse({"detail": "plan_not_found"}, status=404)
         plan_product_slug = _normalize_product_slug(plan.product.slug if plan.product else "monitor")
-        if plan_product_slug != product_slug:
+        same_product = plan_product_slug == product_slug or (
+            _is_business_autopilot_alias(plan_product_slug)
+            and _is_business_autopilot_alias(product_slug)
+        )
+        if not same_product:
             return JsonResponse({"detail": "product_mismatch"}, status=400)
 
     org = _resolve_org_for_user(request.user)
