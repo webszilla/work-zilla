@@ -325,18 +325,38 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
 
 
 def _resolve_org(user: User):
-    membership = (
+    if getattr(user, "organization", None):
+        return user.organization
+    profile = UserProfile.objects.filter(user=user).select_related("organization").first()
+    if profile and profile.organization:
+        return profile.organization
+    active_membership = (
         OrganizationUser.objects
         .filter(user=user, is_active=True, is_deleted=False)
         .select_related("organization")
         .order_by("-updated_at", "-id")
         .first()
     )
-    if membership and membership.organization:
-        return membership.organization
-    profile = UserProfile.objects.filter(user=user).select_related("organization").first()
-    if profile and profile.organization:
-        return profile.organization
+    if active_membership and active_membership.organization:
+        return active_membership.organization
+    any_membership = (
+        OrganizationUser.objects
+        .filter(user=user, is_deleted=False)
+        .select_related("organization")
+        .order_by("-is_active", "-updated_at", "-id")
+        .first()
+    )
+    if any_membership and any_membership.organization:
+        return any_membership.organization
+    legacy_membership = (
+        OrganizationUser.objects
+        .filter(user=user)
+        .select_related("organization")
+        .order_by("-is_active", "is_deleted", "-updated_at", "-id")
+        .first()
+    )
+    if legacy_membership and legacy_membership.organization:
+        return legacy_membership.organization
     return Organization.objects.filter(owner=user).first()
 
 
