@@ -1195,6 +1195,14 @@
         })
       })
         .then(async (response) => {
+          if (response.status === 403) {
+            const data = await response.json().catch(() => ({}));
+            if (data && data.detail === "email_verification_required") {
+              window.location.href = data.redirect || "/my-account/";
+              return null;
+            }
+            throw new Error("Please login to continue.");
+          }
           if (response.status === 409) {
             if (fallbackToCheckout) {
               submitCheckout(planId, productSlug);

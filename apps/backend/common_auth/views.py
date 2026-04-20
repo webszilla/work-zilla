@@ -398,7 +398,12 @@ def signup_view(request):
             "login_url": request.build_absolute_uri("/auth/login/"),
         },
     )
-    verification_sent = send_email_verification(user, request=request, force=True)
+    verification_sent = send_email_verification(
+        user,
+        request=request,
+        force=True,
+        next_path=next_url,
+    )
     transaction.on_commit(
         lambda: user_registration_success.send(
             sender=signup_view,
@@ -411,9 +416,10 @@ def signup_view(request):
     request.session.pop("signup_captcha_answer", None)
     request.session.pop("signup_captcha_question", None)
     if verification_sent:
+        target_label = "checkout" if str(next_url or "").startswith("/checkout/") else "My Account"
         messages.info(
             request,
-            f"Verification email sent to {user.email}. Please verify your email to continue to My Account.",
+            f"Verification email sent to {user.email}. Please verify your email to continue to {target_label}.",
         )
     else:
         messages.warning(
@@ -537,4 +543,9 @@ def verify_email_view(request, user_id, token):
     # so the user sees only the final verification result after opening the link.
     list(messages.get_messages(request))
     messages.success(request, f"Email verified successfully: {user.email}")
-    return redirect("/my-account/")
+    redirect_target = _safe_next_url(
+        request,
+        request.GET.get("next") or request.session.pop("post_verify_next", None),
+        default="/my-account/",
+    )
+    return redirect(redirect_target)

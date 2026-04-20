@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.utils import timezone
@@ -50,7 +51,7 @@ def _store_email_inbox(user, title, message, product_slug="", event_type="system
     )
 
 
-def send_email_verification(user, request=None, force=False):
+def send_email_verification(user, request=None, force=False, next_path=None):
     if not user or not user.email:
         return False
     if user.email_verified and not force:
@@ -81,7 +82,11 @@ def send_email_verification(user, request=None, force=False):
     else:
         user.save(update_fields=["email_verification_token", "email_verification_sent_at"])
 
-    verify_url = _absolute_url(f"/auth/verify-email/{user.id}/{token}/", request=request)
+    verify_path = f"/auth/verify-email/{user.id}/{token}/"
+    normalized_next_path = str(next_path or "").strip()
+    if normalized_next_path.startswith("/"):
+        verify_path = f"{verify_path}?{urlencode({'next': normalized_next_path})}"
+    verify_url = _absolute_url(verify_path, request=request)
     _store_email_inbox(
         user,
         "Email Verification",

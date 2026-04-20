@@ -141,6 +141,27 @@ def _parse_checkout_paid_on(value):
             continue
     return None
 
+
+def _remember_post_verify_next(request, next_path="/checkout/"):
+    target = str(next_path or "").strip()
+    if not target.startswith("/"):
+        return ""
+    request.session["post_verify_next"] = target
+    request.session.modified = True
+    return target
+
+
+def _send_checkout_verification_email(request, next_path="/checkout/"):
+    safe_next_path = _remember_post_verify_next(request, next_path=next_path)
+    if request.user.email:
+        send_email_verification(
+            request.user,
+            request=request,
+            force=False,
+            next_path=safe_next_path or None,
+        )
+    return safe_next_path
+
 def _prefer_arm64_mac(request):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").lower()
     if any(token in user_agent for token in ("intel", "x86_64", "x64")):
@@ -1186,6 +1207,17 @@ def checkout_select(request):
 
 @login_required(login_url="/auth/login/")
 def checkout_view(request):
+    if request.user.email and not request.user.email_verified:
+        _send_checkout_verification_email(request, next_path="/checkout/")
+        if request.user.email:
+            messages.info(
+                request,
+                f"Please verify your email ({request.user.email}) to continue checkout.",
+            )
+        else:
+            messages.info(request, "Please verify your email to continue checkout.")
+        return redirect("/my-account/")
+
     context = _base_context(request)
     plan_id = request.session.get("selected_plan_id")
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
@@ -1466,6 +1498,19 @@ def _clear_renew_session(request):
 def subscription_start(request):
     if not request.user.is_authenticated:
         return JsonResponse({"detail": "authentication_required"}, status=401)
+    if request.user.email and not request.user.email_verified:
+        _send_checkout_verification_email(request, next_path="/checkout/")
+        if request.user.email:
+            messages.info(
+                request,
+                f"Please verify your email ({request.user.email}) to continue checkout.",
+            )
+        else:
+            messages.info(request, "Please verify your email to continue checkout.")
+        return JsonResponse(
+            {"detail": "email_verification_required", "redirect": "/my-account/"},
+            status=403,
+        )
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
@@ -1583,6 +1628,17 @@ def subscription_start(request):
 @require_POST
 @login_required(login_url="/auth/login/")
 def checkout_confirm(request):
+    if request.user.email and not request.user.email_verified:
+        _send_checkout_verification_email(request, next_path="/checkout/")
+        if request.user.email:
+            messages.info(
+                request,
+                f"Please verify your email ({request.user.email}) to continue checkout.",
+            )
+        else:
+            messages.info(request, "Please verify your email to continue checkout.")
+        return redirect("/my-account/")
+
     plan_id = request.session.get("selected_plan_id")
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
@@ -2472,7 +2528,15 @@ def account_resend_verification(request):
         request.session["email_verification_banner_level"] = "success"
         request.session["email_verification_banner_text"] = "Email already verified."
         return redirect("/my-account/")
-    sent = send_email_verification(request.user, request=request, force=True)
+    post_verify_next = str(request.session.get("post_verify_next") or "").strip()
+    if not post_verify_next.startswith("/"):
+        post_verify_next = None
+    sent = send_email_verification(
+        request.user,
+        request=request,
+        force=True,
+        next_path=post_verify_next,
+    )
     if sent:
         request.session["email_verification_banner_level"] = "success"
         request.session["email_verification_banner_text"] = (
@@ -2505,7 +2569,15 @@ def account_update_verification_email(request):
     request.user.email_verified = False
     request.user.email_verified_at = None
     request.user.save(update_fields=["email", "email_verified", "email_verified_at"])
-    sent = send_email_verification(request.user, request=request, force=True)
+    post_verify_next = str(request.session.get("post_verify_next") or "").strip()
+    if not post_verify_next.startswith("/"):
+        post_verify_next = None
+    sent = send_email_verification(
+        request.user,
+        request=request,
+        force=True,
+        next_path=post_verify_next,
+    )
     if sent:
         request.session["email_verification_banner_level"] = "success"
         request.session["email_verification_banner_text"] = (
