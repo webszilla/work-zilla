@@ -3048,6 +3048,7 @@ export default function BusinessAutopilotUsersPage() {
       await openAlertDialog(message, { title: "Required Fields Missing" });
       return;
     }
+    const conversionDraftForThisSave = editingClientId ? null : crmContactToClientDraft;
     const payload = normalizeSharedCustomerRecord({
       id: editingClientId || `cust_${Date.now()}`,
       companyName,
@@ -3084,7 +3085,6 @@ export default function BusinessAutopilotUsersPage() {
     const nextCustomers = editingClientId
       ? sharedCustomers.map((row) => (row.id === editingClientId ? { ...row, ...payload } : row))
       : [payload, ...sharedCustomers];
-    const conversionDraftForThisSave = editingClientId ? null : crmContactToClientDraft;
     setSharedCustomers(nextCustomers);
     await persistSharedAccountsCustomers(nextCustomers);
     let successMessage = editingClientId ? "Client updated successfully." : "Client created successfully.";
