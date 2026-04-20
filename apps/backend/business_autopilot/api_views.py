@@ -102,7 +102,7 @@ ROLE_ACCESS_LEVELS = {"No Access", "View", "View and Edit", "Create, View and Ed
 ROLE_ACCESS_LEVEL_ALIASES = {
     "No Access": "No Access",
     "View": "View",
-    "Create/Edit": "View and Edit",
+    "Create/Edit": "Create, View and Edit",
     "View and Edit": "View and Edit",
     "Create, View and Edit": "Create, View and Edit",
     "Full Access": "Full Access",
@@ -328,6 +328,15 @@ def _resolve_org(user: User):
     profile = UserProfile.objects.filter(user=user).select_related("organization").first()
     if profile and profile.organization:
         return profile.organization
+    membership = (
+        OrganizationUser.objects
+        .filter(user=user, is_active=True, is_deleted=False)
+        .select_related("organization")
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+    if membership and membership.organization:
+        return membership.organization
     return Organization.objects.filter(owner=user).first()
 
 

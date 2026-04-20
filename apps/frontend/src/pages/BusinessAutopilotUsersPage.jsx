@@ -183,7 +183,7 @@ function limitedTextarea(fieldKey, value) {
 function normalizeRoleAccessLevel(level) {
   const value = String(level || "").trim();
   if (value === "Create/Edit") {
-    return "View and Edit";
+    return "Create, View and Edit";
   }
   return ACCESS_LEVEL_OPTIONS.includes(value) ? value : "No Access";
 }
@@ -738,6 +738,27 @@ function readSharedCrmContacts() {
   }
 }
 
+function writeSharedCrmContacts(contacts = [], preferredOrgId = "") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const normalizedRows = (Array.isArray(contacts) ? contacts : [])
+    .map((row) => normalizeCrmContactRecord(row))
+    .filter((row) => row.name || row.company || row.email || row.phone);
+  const orgId = String(preferredOrgId || getActiveBusinessAutopilotOrgId() || getActiveCrmScopeOrgId() || "").trim();
+  const safeOrgId = orgId ? sanitizeScopedStorageKeyPart(orgId) : "";
+  const scopedKey = safeOrgId ? `${CRM_SHARED_CONTACTS_KEY_PREFIX}__${safeOrgId}` : "";
+  try {
+    if (scopedKey) {
+      window.localStorage.setItem(scopedKey, JSON.stringify(normalizedRows));
+      window.localStorage.setItem(CRM_STORAGE_KEY_ACTIVE, `${CRM_STORAGE_KEY_PREFIX}__${safeOrgId}`);
+    }
+    window.localStorage.setItem(CRM_SHARED_CONTACTS_GLOBAL_KEY, JSON.stringify(normalizedRows));
+  } catch {
+    // Ignore storage sync failures.
+  }
+}
+
 function sanitizeScopedStorageKeyPart(value = "") {
   return String(value || "").replace(/[^a-z0-9_.-]/gi, "_");
 }
@@ -1217,6 +1238,55 @@ export default function BusinessAutopilotUsersPage() {
       setSharedCustomers(readSharedAccountsCustomers(buildScopedAccountsStorageKey(activeOrgId)));
       setSharedVendors(readSharedAccountsVendors(buildScopedAccountsStorageKey(activeOrgId)));
     }
+    return activeOrgId;
+  }
+
+  async function loadSharedAccountsWorkspace(preferredOrgId = "") {
+    try {
+      const response = await apiFetch("/api/business-autopilot/accounts/workspace");
+      const orgId = String(
+        preferredOrgId
+        || response?.organization?.id
+        || response?.organization_id
+        || ""
+      ).trim();
+      if (orgId) {
+        setActiveBusinessAutopilotOrgId(orgId);
+      }
+      const storageKey = buildScopedAccountsStorageKey(orgId);
+      const payload = sanitizeAccountsWorkspaceData(response?.data || {});
+      const customers = (Array.isArray(payload.customers) ? payload.customers : [])
+        .map((row) => normalizeSharedCustomerRecord(row));
+      const vendors = (Array.isArray(payload.vendors) ? payload.vendors : [])
+        .map((row) => normalizeSharedCustomerRecord(row));
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          ...payload,
+          customers,
+          vendors,
+        })
+      );
+      setSharedCustomers(customers);
+      setSharedVendors(vendors);
+    } catch {
+      // Keep local cache data if server sync fails.
+    }
+  }
+
+  async function loadCrmContactsFromServer(preferredOrgId = "") {
+    try {
+      const response = await apiFetch("/api/business-autopilot/contacts");
+      const rows = Array.isArray(response?.contacts) ? response.contacts : [];
+      const normalizedRows = rows
+        .map((row) => normalizeCrmContactRecord(row))
+        .filter((row) => row.name || row.company || row.email || row.phone);
+      writeSharedCrmContacts(normalizedRows, preferredOrgId);
+      setCrmContacts(normalizedRows);
+    } catch {
+      // Keep locally cached contacts if server fetch fails.
+      setCrmContacts(readSharedCrmContacts());
+    }
   }
 
   async function loadUsers() {
@@ -1224,7 +1294,11 @@ export default function BusinessAutopilotUsersPage() {
     setNotice("");
     try {
       const data = await apiFetch("/api/business-autopilot/users");
-      applyUsersResponse(data);
+      const activeOrgId = applyUsersResponse(data);
+      await Promise.all([
+        loadSharedAccountsWorkspace(activeOrgId),
+        loadCrmContactsFromServer(activeOrgId),
+      ]);
     } catch (error) {
       setNotice(error?.message || "Unable to load users.");
       setUsers([]);
@@ -2376,7 +2450,7 @@ export default function BusinessAutopilotUsersPage() {
 
   useEffect(() => {
     if (activeTopTab === "clients") {
-      setCrmContacts(readSharedCrmContacts());
+      void loadCrmContactsFromServer();
     }
   }, [activeTopTab]);
 

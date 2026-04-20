@@ -3255,7 +3255,7 @@ function normalizeCrmRoleToken(value) {
 function normalizeCrmAccessLevel(value) {
   const level = String(value || "").trim();
   if (level === "Create/Edit") {
-    return "View and Edit";
+    return "Create, View and Edit";
   }
   if (["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"].includes(level)) {
     return level;
