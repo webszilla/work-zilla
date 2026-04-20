@@ -13116,10 +13116,11 @@ function CrmOnePageModule() {
         <div className="d-flex flex-wrap gap-2">
           {sectionOrder.map((sectionKey) => {
             const config = CRM_SECTION_CONFIG[sectionKey];
-            const count = (Array.isArray(moduleData[sectionKey]) ? moduleData[sectionKey] : [])
-              .filter((row) => isRowAssignedToCurrentUser(sectionKey, row))
-              .filter((row) => !isSoftDeletedCrmRow(row))
-              .length;
+            const tabRows = (Array.isArray(moduleData[sectionKey]) ? moduleData[sectionKey] : []);
+            const tabAccessibleRows = sectionKey === "contacts"
+              ? tabRows
+              : tabRows.filter((row) => isRowAssignedToCurrentUser(sectionKey, row));
+            const count = tabAccessibleRows.filter((row) => !isSoftDeletedCrmRow(row)).length;
             return (
               <button
                 key={`crm-tab-${sectionKey}`}
@@ -13153,7 +13154,9 @@ function CrmOnePageModule() {
       {sectionOrder.filter((sectionKey) => sectionKey === activeSection).map((sectionKey) => {
         const config = CRM_SECTION_CONFIG[sectionKey];
         const rows = moduleData[sectionKey] || [];
-        const accessibleRows = rows.filter((row) => isRowAssignedToCurrentUser(sectionKey, row));
+        const accessibleRows = sectionKey === "contacts"
+          ? rows
+          : rows.filter((row) => isRowAssignedToCurrentUser(sectionKey, row));
         const activeRows = accessibleRows.filter((row) => !isSoftDeletedCrmRow(row));
         const deletedRows = accessibleRows.filter((row) => isSoftDeletedCrmRow(row));
         const isDeletedSectionView = isCrmAdmin && deletedViewSection === sectionKey;
