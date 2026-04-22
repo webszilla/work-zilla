@@ -142,6 +142,65 @@ def _ba_pdf_image_from_data_url(data_url):
         return None
 
 
+def _ba_pdf_image_from_file(file_field):
+    if not file_field:
+        return None
+    try:
+        if getattr(file_field, "path", ""):
+            return ImageReader(file_field.path)
+    except Exception:
+        pass
+    try:
+        file_field.open("rb")
+        try:
+            return ImageReader(BytesIO(file_field.read()))
+        finally:
+            file_field.close()
+    except Exception:
+        return None
+
+
+def _ba_resolve_org_logo_image(org, current_user=None):
+    if not org:
+        return None
+    seen_profile_ids = set()
+    profile_candidates = []
+
+    if current_user and getattr(current_user, "is_authenticated", False):
+        current_profile = (
+            UserProfile.objects
+            .filter(user=current_user, organization=org)
+            .only("id", "profile_photo")
+            .first()
+        )
+        if current_profile and current_profile.pk:
+            profile_candidates.append(current_profile)
+            seen_profile_ids.add(int(current_profile.pk))
+
+    admin_profiles = (
+        UserProfile.objects
+        .filter(organization=org, profile_photo__isnull=False)
+        .exclude(profile_photo="")
+        .only("id", "profile_photo")
+        .order_by("id")[:10]
+    )
+    for profile in admin_profiles:
+        if not profile or not profile.pk:
+            continue
+        profile_id = int(profile.pk)
+        if profile_id in seen_profile_ids:
+            continue
+        profile_candidates.append(profile)
+        seen_profile_ids.add(profile_id)
+
+    for profile in profile_candidates:
+        logo_image = _ba_pdf_image_from_file(getattr(profile, "profile_photo", None))
+        if logo_image:
+            return logo_image
+
+    return None
+
+
 def _ba_draw_pdf_logo(pdf, image, x, top_y, max_width, max_height):
     if not image:
         return 0
@@ -1953,18 +2012,126 @@ def _merge_subscription_alert_recipients(primary, org):
     return merged
 
 
+_LEGACY_AUTO_TAX_VALUES = {"0", "0.0", "0.00", "0.000"}
+_GST_TEMPLATE_ID_ALIASES = {
+    "gst_default_india_igst": "gst_default_india_igst",
+    "gst_default_india_cgst_sgst": "gst_default_india_cgst_sgst",
+    "gst_india_igst": "gst_default_india_igst",
+    "gst_india_cgst_sgst": "gst_default_india_cgst_sgst",
+}
+
+
+def _document_template_components(gst_template):
+    if not isinstance(gst_template, dict):
+        return {
+            "cgst": Decimal("0"),
+            "sgst": Decimal("0"),
+            "igst": Decimal("0"),
+            "cess": Decimal("0"),
+        }
+    return {
+        "cgst": _to_decimal(gst_template.get("cgst")),
+        "sgst": _to_decimal(gst_template.get("sgst")),
+        "igst": _to_decimal(gst_template.get("igst")),
+        "cess": _to_decimal(gst_template.get("cess")),
+    }
+
+
+def _document_template_total_percent(gst_template):
+    return sum(_document_template_components(gst_template).values(), Decimal("0"))
+
+
+def _resolve_gst_template_by_id(gst_templates_by_id, template_id):
+    raw_template_id = str(template_id or "").strip()
+    if not raw_template_id:
+        return None
+    normalized_template_id = raw_template_id.lower().replace("-", "_").replace(" ", "_")
+    canonical_template_id = _GST_TEMPLATE_ID_ALIASES.get(normalized_template_id, normalized_template_id)
+    candidate_ids = []
+    for value in (raw_template_id, normalized_template_id, canonical_template_id):
+        if value and value not in candidate_ids:
+            candidate_ids.append(value)
+    if "cgst" in normalized_template_id and "sgst" in normalized_template_id:
+        inferred = "gst_default_india_cgst_sgst"
+        if inferred not in candidate_ids:
+            candidate_ids.append(inferred)
+    elif "igst" in normalized_template_id:
+        inferred = "gst_default_india_igst"
+        if inferred not in candidate_ids:
+            candidate_ids.append(inferred)
+
+    if isinstance(gst_templates_by_id, dict):
+        for candidate_id in candidate_ids:
+            direct = gst_templates_by_id.get(candidate_id)
+            if isinstance(direct, dict):
+                return direct
+
+    for default_template in _default_india_gst_templates():
+        default_template_id = str(default_template.get("id") or "").strip()
+        if default_template_id in candidate_ids:
+            return default_template
+
+    return None
+
+
+def _resolve_document_line_tax_override(row):
+    if not isinstance(row, dict):
+        return {
+            "has_override": False,
+            "tax_percent": Decimal("0"),
+            "tax_percent_source": "auto",
+        }
+
+    raw_tax_value = row.get("taxPercent")
+    if raw_tax_value is None:
+        raw_tax_value = row.get("tax_percent")
+    raw_tax_percent = str(raw_tax_value if raw_tax_value is not None else "").strip()
+    raw_tax_source = row.get("taxPercentSource")
+    if raw_tax_source is None:
+        raw_tax_source = row.get("tax_percent_source")
+    tax_source = str(raw_tax_source or "").strip().lower()
+
+    if tax_source == "manual":
+        has_override = bool(raw_tax_percent)
+        return {
+            "has_override": has_override,
+            "tax_percent": _to_decimal(raw_tax_percent),
+            "tax_percent_source": "manual" if has_override else "auto",
+        }
+
+    if tax_source in {"auto", "template"}:
+        return {
+            "has_override": False,
+            "tax_percent": Decimal("0"),
+            "tax_percent_source": "auto",
+        }
+
+    if (not raw_tax_percent) or (raw_tax_percent in _LEGACY_AUTO_TAX_VALUES):
+        return {
+            "has_override": False,
+            "tax_percent": Decimal("0"),
+            "tax_percent_source": "auto",
+        }
+
+    return {
+        "has_override": True,
+        "tax_percent": _to_decimal(raw_tax_percent),
+        "tax_percent_source": "manual",
+    }
+
+
 def _document_totals(document, gst_templates_by_id):
     items = document.get("items") if isinstance(document, dict) else []
     if not isinstance(items, list):
         items = []
-    gst_template = gst_templates_by_id.get((document or {}).get("gstTemplateId")) if isinstance(document, dict) else None
-    template_components = {
-        "cgst": _to_decimal(gst_template.get("cgst")) if isinstance(gst_template, dict) else Decimal("0"),
-        "sgst": _to_decimal(gst_template.get("sgst")) if isinstance(gst_template, dict) else Decimal("0"),
-        "igst": _to_decimal(gst_template.get("igst")) if isinstance(gst_template, dict) else Decimal("0"),
-        "cess": _to_decimal(gst_template.get("cess")) if isinstance(gst_template, dict) else Decimal("0"),
-    }
-    default_tax = sum(template_components.values(), Decimal("0"))
+    gst_template_id = (
+        str((document or {}).get("gstTemplateId") or (document or {}).get("gst_template_id") or "").strip()
+        if isinstance(document, dict)
+        else ""
+    )
+    gst_template = _resolve_gst_template_by_id(gst_templates_by_id, gst_template_id)
+    template_components = _document_template_components(gst_template)
+    default_tax = _document_template_total_percent(gst_template)
     subtotal = Decimal("0")
     tax_total = Decimal("0")
     tax_breakdown = {
@@ -1979,7 +2146,8 @@ def _document_totals(document, gst_templates_by_id):
         qty = _to_decimal(row.get("qty"))
         rate = _to_decimal(row.get("rate"))
         line_total = qty * rate
-        tax_pct = _to_decimal(row.get("taxPercent")) if str(row.get("taxPercent") or "").strip() else default_tax
+        tax_override = _resolve_document_line_tax_override(row)
+        tax_pct = tax_override["tax_percent"] if tax_override["has_override"] else default_tax
         component_total = sum(template_components.values(), Decimal("0"))
         if component_total > 0:
             effective_components = {
@@ -4372,9 +4540,16 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
     gst_templates = {str(row.get("id")): row for row in data.get("gstTemplates", []) if isinstance(row, dict)}
     billing_templates = {str(row.get("id")): row for row in data.get("billingTemplates", []) if isinstance(row, dict)}
     totals = _document_totals(document, gst_templates)
-    gst_template = gst_templates.get(str(document.get("gstTemplateId") or ""))
+    gst_template = _resolve_gst_template_by_id(gst_templates, str(document.get("gstTemplateId") or ""))
     billing_template = billing_templates.get(str(document.get("billingTemplateId") or ""))
+    org_billing_profile = (
+        BillingProfile.objects
+        .filter(organization=org)
+        .only("company_name", "address_line1", "address_line2", "city", "state", "country", "gstin")
+        .first()
+    )
     items = document.get("items") if isinstance(document.get("items"), list) else []
+    gst_template_default_tax = _document_template_total_percent(gst_template)
 
     line_rows = []
     for row in items:
@@ -4392,6 +4567,8 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
             first_line, _, remaining = raw_description.partition("\n")
             description_main = first_line.strip()
             description_custom = remaining.strip()
+        line_tax_override = _resolve_document_line_tax_override(row)
+        line_tax_percent = line_tax_override["tax_percent"] if line_tax_override["has_override"] else gst_template_default_tax
         line_rows.append(
             {
                 "description": description_main,
@@ -4400,10 +4577,13 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
                 "hsn_sac_code": str(row.get("hsnSacCode") or row.get("hsnCode") or row.get("sacCode") or "").strip(),
                 "qty": str(row.get("qty") or ""),
                 "rate": float(rate),
-                "tax_percent": float(_to_decimal(row.get("taxPercent"))),
+                "tax_percent": float(line_tax_percent),
                 "amount": float(amount),
             }
         )
+
+    paid_amount_value = _to_decimal(document.get("paidAmount"))
+    balance_amount_value = max(Decimal("0"), _to_decimal(totals.get("grand_total")) - paid_amount_value)
 
     context = {
         "org": org,
@@ -4422,12 +4602,12 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         "theme_color": (billing_template or {}).get("themeColor") or "#22c55e",
         "company_logo_data_url": (billing_template or {}).get("companyLogoDataUrl") or "",
         "payment_status": str(document.get("paymentStatus") or "Pending").strip().title() or "Pending",
-        "paid_amount": float(_to_decimal(document.get("paidAmount"))),
-        "balance_amount": float(_to_decimal(document.get("balanceAmount"))),
+        "paid_amount": float(paid_amount_value),
+        "balance_amount": float(balance_amount_value),
         "payment_mode": str(document.get("paymentMode") or "").strip(),
         "payment_date": str(document.get("paymentDate") or "").strip(),
         "transaction_id": str(document.get("transactionId") or "").strip(),
-        "has_payment": _to_decimal(document.get("paidAmount")) > 0,
+        "has_payment": paid_amount_value > 0,
     }
     if str(request.GET.get("format") or "").strip().lower() == "pdf":
         buffer = BytesIO()
@@ -4437,6 +4617,8 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         right = width - 18 * mm
         top = height - 20 * mm
         logo_image = _ba_pdf_image_from_data_url(context["company_logo_data_url"])
+        if not logo_image:
+            logo_image = _ba_resolve_org_logo_image(org, request.user)
         money_font = _ba_get_unicode_pdf_font() or "Helvetica"
         tax_breakdown = totals.get("tax_breakdown") or {}
         breakdown_percent = totals.get("breakdown_percent") or {}
@@ -4449,35 +4631,49 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         pdf.setTitle(f"{context['doc_type_label']} {document.get('docNo') or doc_id}")
         pdf.setFillColorRGB(0, 0, 0)
         logo_height = _ba_draw_pdf_logo(pdf, logo_image, left, top + 1 * mm, 24 * mm, 14 * mm)
-        seller_x = left + (30 * mm if logo_height else 0)
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(seller_x, top, str(org.name or "Organization"))
+        right_section_x = right
+        seller_x = left
+        seller_header_y = top - (logo_height + 3 * mm if logo_height else 0)
+        org_company_name = str(getattr(org_billing_profile, "company_name", "") or "").strip()
+        seller_heading = org_company_name or str(org.name or "Organization")
+        pdf.setFont("Helvetica-Bold", 18)
+        pdf.drawString(seller_x, seller_header_y, seller_heading)
         pdf.setFont("Helvetica", 9)
         seller_lines = []
-        billing_address_lines = [line for line in str(document.get("billingAddress") or "").splitlines() if str(line).strip()]
-        if billing_address_lines:
-            seller_lines.append(billing_address_lines[0])
-        if document.get("customerGstin"):
-            seller_lines.append(f"GSTIN: {document.get('customerGstin')}")
-        if isinstance(gst_template, dict) and str(gst_template.get("name") or "").strip():
-            seller_lines.append(f"GST Template: {gst_template.get('name')}")
-        seller_y = top - 8 * mm
+        org_address_line1 = str(getattr(org_billing_profile, "address_line1", "") or "").strip()
+        org_address_line2 = str(getattr(org_billing_profile, "address_line2", "") or "").strip()
+        org_city = str(getattr(org_billing_profile, "city", "") or "").strip()
+        org_state = str(getattr(org_billing_profile, "state", "") or "").strip()
+        org_country = str(getattr(org_billing_profile, "country", "") or "").strip()
+        org_city_line = ", ".join([value for value in [org_city, org_state] if value])
+        if org_address_line1:
+            seller_lines.append(org_address_line1)
+        if org_address_line2:
+            seller_lines.append(org_address_line2)
+        if org_city_line:
+            seller_lines.append(org_city_line)
+        elif org_country:
+            seller_lines.append(org_country)
+        seller_y = seller_header_y - 8 * mm
         for line in seller_lines[:3]:
             pdf.drawString(seller_x, seller_y, str(line))
             seller_y -= 4 * mm
 
         invoice_meta_y = top - 2 * mm
         pdf.setFont("Helvetica-Bold", 16)
-        pdf.drawString(width - 86 * mm, invoice_meta_y, context["doc_type_label"].upper())
+        pdf.drawRightString(right_section_x, invoice_meta_y, context["doc_type_label"].upper())
         pdf.setFont("Helvetica", 9)
-        pdf.drawString(width - 86 * mm, invoice_meta_y - 6 * mm, f"{context['doc_type_label']} # {document.get('docNo') or '-'}")
-        pdf.drawString(width - 86 * mm, invoice_meta_y - 10 * mm, f"{context['doc_type_label']} Date {document.get('issueDate') or '-'}")
+        pdf.drawRightString(right_section_x, invoice_meta_y - 6 * mm, f"# {document.get('docNo') or '-'}")
+        pdf.drawRightString(right_section_x, invoice_meta_y - 10 * mm, f"Date {document.get('issueDate') or '-'}")
         pdf.setFont(money_font, 9)
-        pdf.drawString(width - 86 * mm, invoice_meta_y - 14 * mm, f"{context['doc_type_label']} Amount {_format_pdf_inr(totals.get('grand_total') or '0')}")
+        pdf.drawRightString(right_section_x, invoice_meta_y - 14 * mm, f"Amount {_format_pdf_inr(totals.get('grand_total') or '0')}")
         pdf.setFont("Helvetica", 9)
-        pdf.drawString(width - 86 * mm, invoice_meta_y - 18 * mm, f"Customer {document.get('customerName') or '-'}")
+        pdf.drawRightString(right_section_x, invoice_meta_y - 18 * mm, f"Customer : {document.get('customerName') or '-'}")
 
-        billed_y = top - 34 * mm
+        billing_address_lines = [line for line in str(document.get("billingAddress") or "").splitlines() if str(line).strip()]
+        right_section_bottom = invoice_meta_y - 18 * mm
+        left_section_bottom = seller_y if seller_lines else seller_header_y
+        billed_y = min(left_section_bottom, right_section_bottom) - 8 * mm
         pdf.setFont("Helvetica-Bold", 9)
         pdf.drawString(left, billed_y, "BILLED TO")
         pdf.setFont("Helvetica", 9)
@@ -4496,9 +4692,9 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
             pdf.drawString(left, billed_line_y, str(line))
             billed_line_y -= 4 * mm
 
-        details_y = top - 34 * mm
+        details_y = billed_y
         pdf.setFont("Helvetica-Bold", 9)
-        pdf.drawString(width - 86 * mm, details_y, "DOCUMENT DETAILS")
+        pdf.drawRightString(right_section_x, details_y, "DOCUMENT DETAILS")
         pdf.setFont("Helvetica", 9)
         details_rows = [
             f"Due Date {document.get('dueDate') or '-'}",
@@ -4507,11 +4703,12 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         if isinstance(gst_template, dict) and str(gst_template.get("name") or "").strip():
             details_rows.append(f"GST Template {gst_template.get('name')}")
         for index, line in enumerate(details_rows, start=1):
-            pdf.drawString(width - 86 * mm, details_y - (index * 4 * mm), line)
+            pdf.drawRightString(right_section_x, details_y - (index * 4 * mm), line)
 
         table_top = min(billed_line_y, details_y - (len(details_rows) + 1) * 4 * mm) - 8 * mm
         pdf.setFont("Helvetica-Bold", 9)
         pdf.drawString(left, table_top, "DESCRIPTION")
+        pdf.drawString(left + 56 * mm, table_top, "GST")
         pdf.drawString(left + 90 * mm, table_top, "HSN / SAC")
         pdf.drawString(left + 112 * mm, table_top, "UNITS")
         pdf.drawString(left + 131 * mm, table_top, "UNIT PRICE")
@@ -4538,7 +4735,7 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
             pdf.setFont("Helvetica", 9)
             if line_tax > 0:
                 pdf.setFont("Helvetica", 8)
-                pdf.drawString(left + 56 * mm, text_bottom_y, f"Tax {float(line_tax)}%")
+                pdf.drawString(left + 56 * mm, text_bottom_y, f"GST {float(line_tax)}%")
                 pdf.setFont("Helvetica", 9)
             pdf.line(left, text_bottom_y - 4 * mm, right, text_bottom_y - 4 * mm)
             row_y = text_bottom_y - 8 * mm
@@ -4582,8 +4779,12 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
         pdf.save()
         buffer.seek(0)
         response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
-        filename = f"{normalized_doc_type}_{document.get('docNo') or doc_id}.pdf".replace(" ", "_")
+        generated_at = timezone.localtime().strftime("%Y%m%d%H%M%S")
+        filename = f"{normalized_doc_type}_{document.get('docNo') or doc_id}_{generated_at}.pdf".replace(" ", "_")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response["Pragma"] = "no-cache"
+        response["Expires"] = "0"
         return response
     return render(request, "business_autopilot/accounts/document_print.html", context)
 
@@ -4759,7 +4960,7 @@ def _crm_normalize_sales_order_items(items):
         qty_value = _crm_to_decimal(item.get("qty"))
         qty = qty_value if qty_value > 0 else Decimal("1")
         rate = _crm_to_decimal(item.get("rate"))
-        tax_percent = _crm_to_decimal(item.get("taxPercent") if item.get("taxPercent") is not None else item.get("tax_percent"))
+        tax_override = _resolve_document_line_tax_override(item)
         qty_text = format(qty.quantize(Decimal("1")), "f") if qty == qty.to_integral() else format(qty.normalize(), "f")
         normalized_items.append({
             "id": str(item.get("id") or f"crm_so_line_{index + 1}").strip(),
@@ -4771,12 +4972,13 @@ def _crm_normalize_sales_order_items(items):
             "hsnSacCode": hsn_sac_code,
             "qty": qty_text,
             "rate": str(rate),
-            "taxPercent": str(tax_percent),
+            "taxPercent": str(tax_override["tax_percent"]) if tax_override["has_override"] else "",
+            "taxPercentSource": tax_override["tax_percent_source"],
         })
     return normalized_items
 
 
-def _crm_sales_order_totals(items):
+def _crm_sales_order_totals(items, default_tax_percent=Decimal("0")):
     subtotal = Decimal("0")
     tax_total = Decimal("0")
     total_qty = Decimal("0")
@@ -4785,7 +4987,8 @@ def _crm_sales_order_totals(items):
     for index, item in enumerate(items):
         qty = _crm_to_decimal(item.get("qty"))
         rate = _crm_to_decimal(item.get("rate"))
-        tax_percent = _crm_to_decimal(item.get("taxPercent"))
+        tax_override = _resolve_document_line_tax_override(item)
+        tax_percent = tax_override["tax_percent"] if tax_override["has_override"] else _to_decimal(default_tax_percent)
         line_subtotal = qty * rate
         subtotal += line_subtotal
         tax_total += line_subtotal * (tax_percent / Decimal("100"))
@@ -5877,8 +6080,19 @@ def crm_sales_orders(request, order_id: int = None):
         source_deal = CrmDeal.objects.filter(organization=org, id=source_deal_id).select_related("lead").first()
     if source_deal and not crm_reference_id:
         crm_reference_id = str(source_deal.crm_reference_id or getattr(source_deal.lead, "crm_reference_id", "") or "").strip()[:32]
+    gst_template_id = str(payload.get("gst_template_id") or payload.get("gstTemplateId") or "").strip()
+    accounts_workspace = _get_accounts_workspace(org)
+    accounts_data = _normalize_accounts_workspace(accounts_workspace.data)
+    gst_templates_by_id = {
+        str(item.get("id")): item
+        for item in accounts_data.get("gstTemplates", [])
+        if isinstance(item, dict)
+    }
+    default_tax_percent = _document_template_total_percent(
+        _resolve_gst_template_by_id(gst_templates_by_id, gst_template_id)
+    )
     normalized_items = _crm_normalize_sales_order_items(payload.get("items"))
-    totals = _crm_sales_order_totals(normalized_items)
+    totals = _crm_sales_order_totals(normalized_items, default_tax_percent=default_tax_percent)
     subtotal_amount = _crm_to_decimal(payload.get("amount")) if not normalized_items else totals["subtotal"]
     total_amount = _crm_to_decimal(payload.get("total_amount")) if not normalized_items else totals["grand_total"]
     quantity = _coerce_positive_int(payload.get("quantity")) or int(totals["total_qty"] or Decimal("1")) or 1
@@ -5902,7 +6116,7 @@ def crm_sales_orders(request, order_id: int = None):
         "items": normalized_items,
         "issueDate": str(payload.get("issue_date") or payload.get("issueDate") or "").strip(),
         "dueDate": str(payload.get("due_date") or payload.get("dueDate") or "").strip(),
-        "gstTemplateId": str(payload.get("gst_template_id") or payload.get("gstTemplateId") or "").strip(),
+        "gstTemplateId": gst_template_id,
         "billingTemplateId": str(payload.get("billing_template_id") or payload.get("billingTemplateId") or "").strip(),
         "salesperson": str(payload.get("salesperson") or "").strip(),
         "customerGstin": str(payload.get("customer_gstin") or payload.get("customerGstin") or "").strip(),

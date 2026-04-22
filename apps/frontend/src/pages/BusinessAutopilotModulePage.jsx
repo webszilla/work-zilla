@@ -62,45 +62,107 @@ function getNodePlainText(node) {
   return "";
 }
 
+function hasBootstrapIconChild(node) {
+  if (!isValidElement(node)) {
+    if (Array.isArray(node)) {
+      return node.some((item) => hasBootstrapIconChild(item));
+    }
+    return false;
+  }
+  if (String(node.type || "").toLowerCase() === "i") {
+    const className = String(node.props?.className || "");
+    if (/\bbi\b/.test(className)) {
+      return true;
+    }
+  }
+  return hasBootstrapIconChild(node.props?.children);
+}
+
+const ACTION_ICON_RULES = [
+  { test: /^(edit|update)\b/i, icon: "bi bi-pencil-square", label: "Edit" },
+  { test: /^(delete|remove)\b/i, icon: "bi bi-trash3", label: "Delete" },
+  { test: /^(view|preview|open)\b/i, icon: "bi bi-eye", label: "View" },
+  { test: /^(history|log|timeline)\b/i, icon: "bi bi-clock-history", label: "History" },
+  { test: /^(details?)\b/i, icon: "bi bi-info-circle", label: "Details" },
+  { test: /^(convert(ed)?|migrate)\b/i, icon: "bi bi-arrow-left-right", label: "Convert" },
+  { test: /^(restore)\b/i, icon: "bi bi-arrow-counterclockwise", label: "Restore" },
+  { test: /^(verify|approve)\b/i, icon: "bi bi-patch-check", label: "Verify" },
+  { test: /^(reject)\b/i, icon: "bi bi-x-lg", label: "Reject" },
+  { test: /^(pdf|download)\b/i, icon: "bi bi-file-earmark-pdf", label: "Download PDF" },
+  { test: /^(email|mail|send)\b/i, icon: "bi bi-envelope-paper", label: "Send Email" },
+];
+
+function resolveActionIconMeta(actionText, explicitLabel) {
+  const candidate = String(explicitLabel || actionText || "").trim();
+  if (!candidate) {
+    return null;
+  }
+  const normalized = candidate.toLowerCase();
+  for (const rule of ACTION_ICON_RULES) {
+    if (rule.test.test(normalized)) {
+      return {
+        icon: rule.icon,
+        label: rule.label,
+      };
+    }
+  }
+  return null;
+}
+
 function normalizeTableActionNode(node) {
   if (!isValidElement(node)) {
     if (Array.isArray(node)) {
-      return node.map((item, index) => normalizeTableActionNode(item, index));
+      return node.map((item) => normalizeTableActionNode(item));
     }
     return node;
   }
 
   const normalizedChildren = Children.map(node.props?.children, (child) => normalizeTableActionNode(child));
-  if (node.type !== "button") {
+  const nodeType = String(node.type || "").toLowerCase();
+  if (nodeType !== "button" && nodeType !== "a") {
     return cloneElement(node, undefined, normalizedChildren);
   }
 
-  const actionText = getNodePlainText(node.props?.children).trim().toLowerCase();
-  if (actionText !== "edit" && actionText !== "delete") {
+  const actionText = getNodePlainText(node.props?.children).trim();
+  const existingTitle = String(node.props?.title || node.props?.["data-tooltip"] || node.props?.["data-wz-tooltip"] || "").trim();
+  const existingAria = String(node.props?.["aria-label"] || "").trim();
+  const explicitLabel = existingAria || existingTitle;
+  const iconMeta = resolveActionIconMeta(actionText, explicitLabel);
+  const hasIcon = hasBootstrapIconChild(node.props?.children);
+  const shouldConvertToIcon = Boolean(iconMeta && !hasIcon);
+  const label = explicitLabel || iconMeta?.label || actionText;
+  const isIconOnly = Boolean(shouldConvertToIcon || (hasIcon && !actionText));
+
+  if (!isIconOnly && !label) {
     return cloneElement(node, undefined, normalizedChildren);
   }
 
-  const isDelete = actionText === "delete";
-  const iconClassName = isDelete ? "bi bi-trash3" : "bi bi-pencil-square";
-  const actionLabel = node.props?.["aria-label"] || node.props?.title || (isDelete ? "Delete" : "Edit");
-  const mergedClassName = [node.props?.className || "", "d-inline-flex", "align-items-center", "justify-content-center"].filter(Boolean).join(" ");
+  const mergedClassName = [
+    node.props?.className || "",
+    "d-inline-flex",
+    "align-items-center",
+    "justify-content-center",
+    isIconOnly ? "saas-org-icon-btn wz-table-action-btn" : "",
+  ].filter(Boolean).join(" ");
 
   return cloneElement(
     node,
     {
       ...node.props,
       className: mergedClassName,
-      title: node.props?.title || actionLabel,
-      "aria-label": node.props?.["aria-label"] || actionLabel,
-      style: {
-        minWidth: 38,
-        width: 38,
-        height: 38,
-        padding: 0,
-        ...(node.props?.style || {}),
-      },
+      title: node.props?.title || label || undefined,
+      "aria-label": node.props?.["aria-label"] || label || undefined,
+      style: isIconOnly
+        ? {
+          minWidth: 34,
+          width: 34,
+          height: 30,
+          padding: 0,
+          ...(node.props?.style || {}),
+        }
+        : (node.props?.style || undefined),
     },
-    <i className={iconClassName} aria-hidden="true" />
+    shouldConvertToIcon ? <i className={iconMeta.icon} aria-hidden="true" /> : normalizedChildren
   );
 }
 
@@ -329,11 +391,13 @@ const CRM_DEAL_STATUS_OPTIONS = ["Open", "Won", "Lost"];
 const CRM_SOFT_DELETE_RETENTION_DAYS = 180;
 
 async function downloadDocumentPdf(kind, id) {
-  const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print?format=pdf`;
+  const cacheBust = Date.now();
+  const url = `/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(id)}/print?format=pdf&_ts=${cacheBust}`;
   try {
     const response = await fetch(url, {
       method: "GET",
       credentials: "include",
+      cache: "no-store",
     });
     if (!response.ok) {
       let errorMessage = `Unable to download PDF (${response.status}).`;
@@ -1485,6 +1549,39 @@ function distributeTaxPercentByComponents(taxPercent, templateComponents = {}, t
   };
 }
 
+const LEGACY_AUTO_TAX_VALUES = new Set(["0", "0.0", "0.00", "0.000"]);
+
+function resolveDocumentLineTaxOverride(item = {}) {
+  const rawTaxPercent = String(item?.taxPercent ?? item?.tax_percent ?? "").trim();
+  const rawSource = String(item?.taxPercentSource ?? item?.tax_percent_source ?? "").trim().toLowerCase();
+  if (rawSource === "manual") {
+    return {
+      taxPercent: rawTaxPercent,
+      taxPercentSource: rawTaxPercent ? "manual" : "auto",
+      hasOverride: Boolean(rawTaxPercent),
+    };
+  }
+  if (rawSource === "auto" || rawSource === "template") {
+    return {
+      taxPercent: "",
+      taxPercentSource: "auto",
+      hasOverride: false,
+    };
+  }
+  if (!rawTaxPercent || LEGACY_AUTO_TAX_VALUES.has(rawTaxPercent)) {
+    return {
+      taxPercent: "",
+      taxPercentSource: "auto",
+      hasOverride: false,
+    };
+  }
+  return {
+    taxPercent: rawTaxPercent,
+    taxPercentSource: "manual",
+    hasOverride: true,
+  };
+}
+
 function gstTemplateTotalPercent(row) {
   const { components } = getGstTemplateTaxComponents(row);
   return sumTaxComponents(components);
@@ -1557,7 +1654,8 @@ function createEmptyDocLine() {
     hsnSacCode: "",
     qty: "1",
     rate: "",
-    taxPercent: ""
+    taxPercent: "",
+    taxPercentSource: "auto"
   };
 }
 
@@ -2116,9 +2214,9 @@ function computeDocumentTotals(doc, gstTemplates) {
     const qty = parseNumber(item.qty);
     const rate = parseNumber(item.rate);
     const lineAmount = qty * rate;
-    const hasRowTaxOverride = String(item?.taxPercent ?? "").trim() !== "";
-    const taxPct = hasRowTaxOverride ? parseNumber(item.taxPercent) : defaultTax;
-    const effectiveComponents = hasRowTaxOverride
+    const taxOverride = resolveDocumentLineTaxOverride(item);
+    const taxPct = taxOverride.hasOverride ? parseNumber(taxOverride.taxPercent) : defaultTax;
+    const effectiveComponents = taxOverride.hasOverride
       ? distributeTaxPercentByComponents(taxPct, templateComponents, templateTaxMode)
       : templateComponents;
     const effectiveTaxPercent = sumTaxComponents(effectiveComponents);
@@ -3642,20 +3740,24 @@ function normalizeCrmSalesOrderRecord(row = {}) {
         ? row.products
         : [];
   const normalizedItems = rawItems.length
-    ? rawItems.map((item) => ({
-      ...splitDocumentLineDescription(item?.description, item?.customText),
-      id: String(item?.id || createEmptyDocLine().id).trim(),
-      itemMasterId: String(item?.itemMasterId || "").trim(),
-      inventoryItemId: String(item?.inventoryItemId || "").trim(),
-      hsnSacType: normalizeHsnSacType(
-        item?.hsnSacType || item?.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
-        "HSN"
-      ),
-      hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
-      qty: sanitizeDigitsOnlyInput(String(item?.qty ?? "").trim(), 8),
-      rate: String(item?.rate ?? "").trim(),
-      taxPercent: String(item?.taxPercent ?? item?.tax_percent ?? "").trim(),
-    }))
+    ? rawItems.map((item) => {
+      const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+      return {
+        ...splitDocumentLineDescription(item?.description, item?.customText),
+        id: String(item?.id || createEmptyDocLine().id).trim(),
+        itemMasterId: String(item?.itemMasterId || "").trim(),
+        inventoryItemId: String(item?.inventoryItemId || "").trim(),
+        hsnSacType: normalizeHsnSacType(
+          item?.hsnSacType || item?.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+          "HSN"
+        ),
+        hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
+        qty: sanitizeDigitsOnlyInput(String(item?.qty ?? "").trim(), 8),
+        rate: String(item?.rate ?? "").trim(),
+        taxPercent: normalizedTaxOverride.taxPercent,
+        taxPercentSource: normalizedTaxOverride.taxPercentSource,
+      };
+    })
     : [createEmptyDocLine()];
   const assignType = "Users";
   const paymentDetails = normalizePaymentDetails({
@@ -6777,7 +6879,7 @@ function SearchablePaginatedTableCard({
                   );
                 })()
               ))}
-              {renderActions ? <th className="text-end" style={actionHeaderStyle || undefined}>Action</th> : null}
+              {renderActions ? <th className="text-end table-actions" style={actionHeaderStyle || undefined}>Action</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -6809,7 +6911,7 @@ function SearchablePaginatedTableCard({
                   ))}
                   {renderActions ? (
                     <td
-                      className="text-end"
+                      className="text-end table-actions"
                       style={{
                         backgroundColor: rowIndex % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
                         ...(actionCellStyle || {}),
@@ -7259,7 +7361,7 @@ function BillingDocumentEditor({
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <h6 className="mb-0">{editingId ? `Edit ${kindLabel}` : `Create ${kindLabel}`}</h6>
         </div>
-        <form className="d-flex flex-column gap-3" onSubmit={onSave}>
+        <form className="d-flex flex-column gap-3" data-skip-ba-character-limit-scope="true" onSubmit={onSave}>
           <div className="p-0">
             <div className="row g-3">
               <div className="col-12 col-xl-2">
@@ -7512,6 +7614,8 @@ function BillingDocumentEditor({
                                   required
                                   data-field-key="hsnSacCode"
                                   data-skip-ba-character-limit="true"
+                                  maxLength={24}
+                                  autoComplete="off"
                                   style={hsnFieldErrors?.[line.id]
                                     ? {
                                         borderColor: "#dc3545",
@@ -8010,6 +8114,7 @@ function CrmOnePageModule() {
   const [crmSalesOrderHsnErrors, setCrmSalesOrderHsnErrors] = useState({});
   const [crmSalesOrderConvertPopup, setCrmSalesOrderConvertPopup] = useState({ open: false, row: null });
   const [crmSalesOrderConvertBusy, setCrmSalesOrderConvertBusy] = useState(false);
+  const [convertingLeadIds, setConvertingLeadIds] = useState(() => new Set());
   const [crmGstForm, setCrmGstForm] = useState({
     id: "",
     name: "",
@@ -9435,18 +9540,22 @@ function CrmOnePageModule() {
       paymentStatus: String(normalizedRow.paymentStatus || "Pending").trim() || "Pending",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
-      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => ({
-        ...createEmptyDocLine(),
-        ...item,
-        id: String(item?.id || createEmptyDocLine().id).trim(),
-        description: String(item?.description || "").trim(),
-        customText: String(item?.customText || "").trim(),
-        hsnSacType: normalizeHsnSacType(item?.hsnSacType || "HSN"),
-        hsnSacCode: String(item?.hsnSacCode || "").trim(),
-        qty: String(item?.qty ?? "1").trim(),
-        rate: String(item?.rate ?? "").trim(),
-        taxPercent: String(item?.taxPercent ?? "").trim(),
-      })),
+      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+        return {
+          ...createEmptyDocLine(),
+          ...item,
+          id: String(item?.id || createEmptyDocLine().id).trim(),
+          description: String(item?.description || "").trim(),
+          customText: String(item?.customText || "").trim(),
+          hsnSacType: normalizeHsnSacType(item?.hsnSacType || "HSN"),
+          hsnSacCode: String(item?.hsnSacCode || "").trim(),
+          qty: String(item?.qty ?? "1").trim(),
+          rate: String(item?.rate ?? "").trim(),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
       crmReferenceId: String(normalizedRow.crmReferenceId || "").trim(),
       sourceSalesOrderId: String(normalizedRow.id || "").trim(),
       sourceSalesOrderNo: sourceOrderNo,
@@ -10370,6 +10479,9 @@ function CrmOnePageModule() {
     if (!leadId) {
       return;
     }
+    if (convertingLeadIds.has(leadId)) {
+      return;
+    }
     const leadAmountValue = parseNumber(leadRow?.leadAmount ?? leadRow?.lead_amount ?? "");
     if (leadAmountValue <= 0) {
       setCrmActionPopup({
@@ -10380,6 +10492,11 @@ function CrmOnePageModule() {
       });
       return;
     }
+    setConvertingLeadIds((prev) => {
+      const next = new Set(prev);
+      next.add(leadId);
+      return next;
+    });
     try {
       const response = await apiFetch(`/api/business-autopilot/convert-to-deal/${encodeURIComponent(leadId)}`, {
         method: "POST",
@@ -10396,6 +10513,7 @@ function CrmOnePageModule() {
         ...prev,
         deals: crmReferenceId,
       }));
+      setActiveSection("deals");
     } catch (error) {
       const detail = String(error?.data?.detail || error?.message || "").trim();
       const message = detail === "lead_amount_required_for_conversion"
@@ -10408,8 +10526,16 @@ function CrmOnePageModule() {
         isError: true,
       });
       return;
+    } finally {
+      setConvertingLeadIds((prev) => {
+        if (!prev.has(leadId)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.delete(leadId);
+        return next;
+      });
     }
-    setActiveSection("deals");
   }
 
   function findLinkedDealForLead(leadRow) {
@@ -10566,7 +10692,18 @@ function CrmOnePageModule() {
     }
     setCrmSalesOrderForm((prev) => ({
       ...prev,
-      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row)),
+      items: (prev.items || []).map((row) => {
+        if (row.id !== lineId) return row;
+        if (key === "taxPercent") {
+          const nextTaxPercent = String(normalizedValue || "").trim();
+          return {
+            ...row,
+            taxPercent: nextTaxPercent,
+            taxPercentSource: nextTaxPercent ? "manual" : "auto",
+          };
+        }
+        return { ...row, [key]: normalizedValue };
+      }),
     }));
     setCrmSalesOrderHsnErrors((prev) => {
       if (!prev?.[lineId]) return prev;
@@ -10615,19 +10752,23 @@ function CrmOnePageModule() {
       ...prev,
       items: (prev.items || []).map((row) => (
         row.id === lineId
-          ? {
-              ...row,
-              itemMasterId: selected.id,
-              inventoryItemId: "",
-              description: selected.name || row.description,
-              hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
-              hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
-              rate: formatCurrencyNumberInput(
-                sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
-                crmCurrencyCode
-              ),
-              taxPercent: String(selected.taxPercent || row.taxPercent || ""),
-            }
+          ? (() => {
+              const normalizedTaxOverride = resolveDocumentLineTaxOverride(row);
+              return {
+                ...row,
+                itemMasterId: selected.id,
+                inventoryItemId: "",
+                description: selected.name || row.description,
+                hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
+                hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
+                rate: formatCurrencyNumberInput(
+                  sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
+                  crmCurrencyCode
+                ),
+                taxPercent: normalizedTaxOverride.taxPercent,
+                taxPercentSource: normalizedTaxOverride.taxPercentSource,
+              };
+            })()
           : row
       )),
     }));
@@ -11020,19 +11161,23 @@ function CrmOnePageModule() {
             .split(",")
             .map((entry) => entry.trim())
             .filter(Boolean),
-      items: (row?.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
-        ...createEmptyDocLine(),
-        ...item,
-        ...splitDocumentLineDescription(item.description, item.customText),
-        id: item.id || createEmptyDocLine().id,
-        itemMasterId: item.itemMasterId || "",
-        inventoryItemId: item.inventoryItemId || "",
-        hsnSacType: normalizeHsnSacType(item.hsnSacType || inferHsnSacTypeFromItem(item, "HSN"), "HSN"),
-        hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: sanitizeDigitsOnlyInput(String(item.qty ?? "1"), 8) || "1",
-        rate: formatCurrencyNumberInput(sanitizeCurrencyInput(String(item.rate ?? "")), crmCurrencyCode),
-        taxPercent: String(item.taxPercent ?? ""),
-      })),
+      items: (row?.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+        return {
+          ...createEmptyDocLine(),
+          ...item,
+          ...splitDocumentLineDescription(item.description, item.customText),
+          id: item.id || createEmptyDocLine().id,
+          itemMasterId: item.itemMasterId || "",
+          inventoryItemId: item.inventoryItemId || "",
+          hsnSacType: normalizeHsnSacType(item.hsnSacType || inferHsnSacTypeFromItem(item, "HSN"), "HSN"),
+          hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
+          qty: sanitizeDigitsOnlyInput(String(item.qty ?? "1"), 8) || "1",
+          rate: formatCurrencyNumberInput(sanitizeCurrencyInput(String(item.rate ?? "")), crmCurrencyCode),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
     });
   }
 
@@ -11119,16 +11264,20 @@ function CrmOnePageModule() {
       crm_reference_id: String(form.crmReferenceId || "").trim(),
       order_id: String(form.orderId || form.docNo || "").trim(),
       status: String(form.status || "Pending").trim(),
-      items: (form.items || []).map((row) => ({
-        ...row,
-        description: composeDocumentLineDescription(row.description, row.customText),
-        customText: String(row.customText || "").trim(),
-        hsnSacType: normalizeHsnSacType(row.hsnSacType || "HSN"),
-        hsnSacCode: String(row.hsnSacCode || "").trim(),
-        qty: String(row.qty || "").trim(),
-        rate: String(row.rate || "").trim(),
-        taxPercent: String(row.taxPercent || "").trim(),
-      })),
+      items: (form.items || []).map((row) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(row);
+        return {
+          ...row,
+          description: composeDocumentLineDescription(row.description, row.customText),
+          customText: String(row.customText || "").trim(),
+          hsnSacType: normalizeHsnSacType(row.hsnSacType || "HSN"),
+          hsnSacCode: String(row.hsnSacCode || "").trim(),
+          qty: String(row.qty || "").trim(),
+          rate: String(row.rate || "").trim(),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
     };
     try {
       if (editingCrmSalesOrderId) {
@@ -11250,11 +11399,106 @@ function CrmOnePageModule() {
     return byTextMatch ? normalizeCrmLeadRecord(byTextMatch) : null;
   }
 
-  async function cancelDealAndReopenLead(dealRow = {}) {
+  function findLinkedSalesOrdersForDealCancellation(dealRow = {}) {
+    const normalizedDeal = normalizeCrmDealRecord(dealRow || {});
+    const dealId = String(normalizedDeal?.id || "").trim();
+    const dealReferenceId = String(normalizedDeal?.crmReferenceId || normalizedDeal?.crm_reference_id || "").trim();
+    const dealName = String(normalizedDeal?.dealName || normalizedDeal?.deal_name || "").trim().toLowerCase();
+    const dealCompany = String(normalizedDeal?.company || "").trim().toLowerCase();
+    const seenKeys = new Set();
+    return (moduleData.salesOrders || [])
+      .map((row) => normalizeCrmSalesOrderRecord(row))
+      .filter((row) => {
+        const sourceDealId = String(row?.sourceDealId || row?.source_deal_id || "").trim();
+        const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+        const rowLeadName = String(row?.leadName || row?.customerName || "").trim().toLowerCase();
+        const rowCompany = String(row?.company || row?.clients || row?.sourceSalesOrderClientName || "").trim().toLowerCase();
+        if (dealId && sourceDealId && sourceDealId === dealId) {
+          return true;
+        }
+        if (dealReferenceId && rowReferenceId && rowReferenceId === dealReferenceId) {
+          return true;
+        }
+        if (dealName && dealCompany && rowLeadName === dealName && rowCompany === dealCompany) {
+          return true;
+        }
+        return false;
+      })
+      .filter((row) => {
+        const dedupeKey = String(row?.id || row?.orderId || row?.docNo || "").trim();
+        if (!dedupeKey) {
+          return true;
+        }
+        if (seenKeys.has(dedupeKey)) {
+          return false;
+        }
+        seenKeys.add(dedupeKey);
+        return true;
+      });
+  }
+
+  function resolveDealCancellationDependencies(dealRow = {}) {
+    const linkedSalesOrders = findLinkedSalesOrdersForDealCancellation(dealRow);
+    const estimateRows = Array.isArray(crmAccountsWorkspace?.estimates) ? crmAccountsWorkspace.estimates : [];
+    const invoiceRows = Array.isArray(crmAccountsWorkspace?.invoices) ? crmAccountsWorkspace.invoices : [];
+    let linkedEstimate = null;
+    let linkedInvoice = null;
+    linkedSalesOrders.forEach((salesOrderRow) => {
+      if (!linkedEstimate) {
+        linkedEstimate = findAccountsDocumentForSalesOrder(estimateRows, salesOrderRow, {
+          requireManualMarker: false,
+          allowBlankCustomer: true,
+        });
+      }
+      if (!linkedInvoice) {
+        linkedInvoice = findAccountsDocumentForSalesOrder(invoiceRows, salesOrderRow, {
+          requireManualMarker: false,
+          allowBlankCustomer: true,
+        });
+      }
+    });
+    return {
+      linkedSalesOrders,
+      linkedEstimate,
+      linkedInvoice,
+    };
+  }
+
+  async function deleteLinkedEstimateForDealCancellation(estimateRow = {}) {
+    const estimateId = String(estimateRow?.id || "").trim();
+    if (!estimateId) {
+      return;
+    }
+    const currentWorkspace = _normalizeAccountsWorkspacePayload(crmAccountsWorkspace);
+    const currentEstimateRows = Array.isArray(currentWorkspace.estimates) ? currentWorkspace.estimates : [];
+    if (!currentEstimateRows.some((row) => String(row?.id || "").trim() === estimateId)) {
+      return;
+    }
+    const nextWorkspace = {
+      ...currentWorkspace,
+      estimates: currentEstimateRows.filter((row) => String(row?.id || "").trim() !== estimateId),
+      invoices: (currentWorkspace.invoices || []).map((row) => {
+        if (String(row?.sourceEstimateId || row?.source_estimate_id || "").trim() !== estimateId) {
+          return row;
+        }
+        return {
+          ...row,
+          sourceEstimateId: "",
+          source_estimate_id: "",
+        };
+      }),
+    };
+    await persistCrmAccountsWorkspace(nextWorkspace);
+  }
+
+  async function cancelDealAndReopenLead(dealRow = {}, options = {}) {
     const dealId = String(dealRow?.id || "").trim();
     if (!dealId) {
       return;
     }
+    const estimateToDelete = options?.estimateToDelete && typeof options.estimateToDelete === "object"
+      ? options.estimateToDelete
+      : null;
     const linkedLead = resolveLeadForDealCancellation(dealRow);
     const linkedLeadId = String(linkedLead?.id || "").trim();
     const leadPatchPayload = {};
@@ -11269,6 +11513,9 @@ function CrmOnePageModule() {
       }
     }
     try {
+      if (estimateToDelete) {
+        await deleteLinkedEstimateForDealCancellation(estimateToDelete);
+      }
       try {
         await saveCrmCollectionRecord("deals", "DELETE", dealId);
       } catch (deleteError) {
@@ -11305,12 +11552,39 @@ function CrmOnePageModule() {
   }
 
   function onCancelDeal(row) {
+    const dependencySummary = resolveDealCancellationDependencies(row);
+    const linkedInvoice = dependencySummary.linkedInvoice;
+    const linkedEstimate = dependencySummary.linkedEstimate;
+    if (linkedInvoice) {
+      const invoiceNo = String(linkedInvoice?.docNo || "").trim() || "this invoice";
+      setCrmActionPopup({
+        open: true,
+        title: "Invoice Linked",
+        message: `This deal is linked to ${invoiceNo}. Please delete that invoice manually first, then cancel this deal again.`,
+        confirmText: "OK",
+      });
+      return;
+    }
+    if (linkedEstimate) {
+      const estimateNo = String(linkedEstimate?.docNo || "").trim() || "this estimate";
+      setCrmActionPopup({
+        open: true,
+        title: "Estimate Linked",
+        message: `This deal is linked to ${estimateNo}. Do you want to cancel that estimate and continue deal cancellation?`,
+        confirmText: "Yes",
+        cancelText: "No",
+        primaryFirst: true,
+        onConfirm: () => cancelDealAndReopenLead(row, { estimateToDelete: linkedEstimate }),
+      });
+      return;
+    }
     setCrmActionPopup({
       open: true,
       title: "Cancel Deal Conversion",
       message: "Do you want to cancel this deal and reopen the linked lead?",
-      confirmText: "Cancel Deal",
-      cancelText: "Keep Deal",
+      confirmText: "Yes",
+      cancelText: "No",
+      primaryFirst: true,
       onConfirm: () => cancelDealAndReopenLead(row),
     });
   }
@@ -15975,28 +16249,36 @@ function CrmOnePageModule() {
                     ) : null}
                     {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (() => {
                       const linkedDeal = findLinkedDealForLead(row);
+                      const leadRowId = String(row?.id || "").trim();
+                      const isConverting = Boolean(leadRowId) && convertingLeadIds.has(leadRowId);
                       const isStatusBlocked = ["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase());
                       if (linkedDeal) {
                         return (
                           <button
                             type="button"
-                            className="btn btn-sm btn-outline-secondary"
+                            className="btn btn-sm btn-outline-success saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                             onClick={() => openLinkedDealFromLead(row)}
-                            title="Open converted deal"
+                            title="Open Converted Deal"
+                            aria-label="Open Converted Deal"
                           >
-                            Converted to Deal
+                            <i className="bi bi-hand-thumbs-up" aria-hidden="true" />
                           </button>
                         );
                       }
                       return (
                         <button
                           type="button"
-                          className="btn btn-sm btn-outline-success"
+                          className="btn btn-sm btn-outline-info saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                           onClick={() => onConvertLeadToDeal(row)}
-                          disabled={isStatusBlocked}
-                          title="Create deal from lead"
+                          disabled={isStatusBlocked || isConverting}
+                          title={isConverting ? "Converting..." : "Click to Convert"}
+                          aria-label={isConverting ? "Converting..." : "Click to Convert"}
                         >
-                          Convert to Deal
+                          <i
+                            className="bi bi-arrow-repeat"
+                            aria-hidden="true"
+                            style={isConverting ? { animation: "spin 0.9s linear infinite" } : undefined}
+                          />
                         </button>
                       );
                     })() : null}
@@ -16023,11 +16305,10 @@ function CrmOnePageModule() {
                     {sectionKey === "leads" ? (
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-light d-inline-flex align-items-center justify-content-center"
+                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                         title="View Lead"
                         aria-label="View Lead"
                         onClick={() => openLeadViewPopup(row)}
-                        style={{ minWidth: 38, width: 38, height: 38, padding: 0 }}
                       >
                         <i className="bi bi-eye" aria-hidden="true" />
                       </button>
@@ -16035,11 +16316,10 @@ function CrmOnePageModule() {
                     {sectionKey === "leads" ? (
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-light d-inline-flex align-items-center justify-content-center"
+                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                         title="Lead Notes"
                         aria-label="Lead Notes"
                         onClick={() => openLeadNotesPopup(row)}
-                        style={{ minWidth: 38, width: 38, height: 38, padding: 0 }}
                       >
                         <i className="bi bi-journal-text" aria-hidden="true" />
                       </button>
@@ -16550,28 +16830,48 @@ function CrmOnePageModule() {
             </div>
             <div className="text-secondary mb-3">{toPopupTitleCase(crmActionPopup.message || "Operation completed successfully.")}</div>
             <div className="d-flex justify-content-end gap-2">
-              {typeof crmActionPopup.onConfirm === "function" ? (
-                <button
-                  type="button"
-                  className="btn btn-outline-light btn-sm"
-                  onClick={clearCrmActionPopup}
-                >
-                  {crmActionPopup.cancelText || "Cancel"}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-success btn-sm"
-                onClick={() => {
-                  const confirmAction = crmActionPopup.onConfirm;
-                  clearCrmActionPopup();
-                  if (typeof confirmAction === "function") {
-                    confirmAction();
-                  }
-                }}
-              >
-                {crmActionPopup.confirmText || "OK"}
-              </button>
+              {(() => {
+                const hasConfirmAction = typeof crmActionPopup.onConfirm === "function";
+                const primaryFirst = Boolean(crmActionPopup.primaryFirst);
+                const confirmButton = (
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm"
+                    onClick={() => {
+                      const confirmAction = crmActionPopup.onConfirm;
+                      clearCrmActionPopup();
+                      if (typeof confirmAction === "function") {
+                        confirmAction();
+                      }
+                    }}
+                  >
+                    {crmActionPopup.confirmText || "OK"}
+                  </button>
+                );
+                const cancelButton = hasConfirmAction ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={clearCrmActionPopup}
+                  >
+                    {crmActionPopup.cancelText || "Cancel"}
+                  </button>
+                ) : null;
+                if (!hasConfirmAction) {
+                  return confirmButton;
+                }
+                return primaryFirst ? (
+                  <>
+                    {confirmButton}
+                    {cancelButton}
+                  </>
+                ) : (
+                  <>
+                    {cancelButton}
+                    {confirmButton}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -23811,18 +24111,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentStatus: String(normalizedRow.paymentStatus || "Pending").trim() || "Pending",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
-      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => ({
-        ...createEmptyDocLine(),
-        ...item,
-        id: String(item?.id || createEmptyDocLine().id).trim(),
-        description: String(item?.description || "").trim(),
-        customText: String(item?.customText || "").trim(),
-        hsnSacType: normalizeHsnSacType(item?.hsnSacType || "HSN"),
-        hsnSacCode: String(item?.hsnSacCode || "").trim(),
-        qty: String(item?.qty ?? "1").trim(),
-        rate: String(item?.rate ?? "").trim(),
-        taxPercent: String(item?.taxPercent ?? "").trim(),
-      })),
+      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+        return {
+          ...createEmptyDocLine(),
+          ...item,
+          id: String(item?.id || createEmptyDocLine().id).trim(),
+          description: String(item?.description || "").trim(),
+          customText: String(item?.customText || "").trim(),
+          hsnSacType: normalizeHsnSacType(item?.hsnSacType || "HSN"),
+          hsnSacCode: String(item?.hsnSacCode || "").trim(),
+          qty: String(item?.qty ?? "1").trim(),
+          rate: String(item?.rate ?? "").trim(),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
       crmReferenceId: String(normalizedRow.crmReferenceId || "").trim(),
       sourceSalesOrderId: String(normalizedRow.id || "").trim(),
       sourceSalesOrderNo: sourceOrderNo,
@@ -26127,19 +26431,23 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       ...prev,
       items: (prev.items || []).map((row) => (
         row.id === lineId
-          ? {
-              ...row,
-              itemMasterId: selected.id,
-              inventoryItemId: "",
-              description: selected.name || row.description,
-              hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
-              hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
-              rate: formatCurrencyNumberInput(
-                sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
-                currencyCode
-              ),
-              taxPercent: String(selected.taxPercent || row.taxPercent || "")
-            }
+          ? (() => {
+              const normalizedTaxOverride = resolveDocumentLineTaxOverride(row);
+              return {
+                ...row,
+                itemMasterId: selected.id,
+                inventoryItemId: "",
+                description: selected.name || row.description,
+                hsnSacType: inferHsnSacTypeFromItem(selected, row.hsnSacType || "HSN"),
+                hsnSacCode: String(selected.hsnSacCode || row.hsnSacCode || ""),
+                rate: formatCurrencyNumberInput(
+                  sanitizeCurrencyInput(String(selected.defaultRate || row.rate || "")),
+                  currencyCode
+                ),
+                taxPercent: normalizedTaxOverride.taxPercent,
+                taxPercentSource: normalizedTaxOverride.taxPercentSource,
+              };
+            })()
           : row
       ))
     }));
@@ -26313,7 +26621,18 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }
     setter((prev) => ({
       ...prev,
-      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, [key]: normalizedValue } : row))
+      items: (prev.items || []).map((row) => {
+        if (row.id !== lineId) return row;
+        if (key === "taxPercent") {
+          const nextTaxPercent = String(normalizedValue || "").trim();
+          return {
+            ...row,
+            taxPercent: nextTaxPercent,
+            taxPercentSource: nextTaxPercent ? "manual" : "auto",
+          };
+        }
+        return { ...row, [key]: normalizedValue };
+      })
     }));
     setDocumentHsnErrors((prev) => {
       if (!prev?.[kind]?.[lineId]) return prev;
@@ -26443,6 +26762,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       inventoryCommitted: kind === "invoice" ? Boolean(form.inventoryCommitted) : false,
       items: (form.items || [])
         .map((row) => {
+          const normalizedTaxOverride = resolveDocumentLineTaxOverride(row);
           const description = composeDocumentLineDescription(row.description, row.customText);
           return {
             ...row,
@@ -26454,7 +26774,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             hsnSacCode: String(row.hsnSacCode || "").trim(),
             qty: String(row.qty || "").trim(),
             rate: String(row.rate || "").trim(),
-            taxPercent: String(row.taxPercent || "").trim()
+            taxPercent: normalizedTaxOverride.taxPercent,
+            taxPercentSource: normalizedTaxOverride.taxPercentSource,
           };
         })
         .filter((row) => row.description || row.customText || row.hsnSacCode || row.qty || row.rate)
@@ -26545,20 +26866,24 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentDate: String(row.paymentDate || row.payment_date || "").trim(),
       transactionId: String(row.transactionId || row.transaction_id || "").trim(),
       paymentEntries: normalizePaymentEntries(row.paymentEntries || row.payment_entries),
-      items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
-        ...splitDocumentLineDescription(item.description, item.customText),
-        id: item.id || createEmptyDocLine().id,
-        itemMasterId: item.itemMasterId || "",
-        inventoryItemId: item.inventoryItemId || "",
-        hsnSacType: normalizeHsnSacType(
-          item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
-          "HSN"
-        ),
-        hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
-        rate: String(item.rate ?? ""),
-        taxPercent: String(item.taxPercent ?? "")
-      })),
+      items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+        return {
+          ...splitDocumentLineDescription(item.description, item.customText),
+          id: item.id || createEmptyDocLine().id,
+          itemMasterId: item.itemMasterId || "",
+          inventoryItemId: item.inventoryItemId || "",
+          hsnSacType: normalizeHsnSacType(
+            item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+            "HSN"
+          ),
+          hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
+          qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
+          rate: String(item.rate ?? ""),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
     };
     setEditingInvoiceId("");
     setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
@@ -26659,20 +26984,24 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         || row.sourceSalesOrderConversionMode
         || (row.convertedFromSalesOrder || row.converted_from_sales_order || hasSalesOrderSourceLink ? "manual" : "")
       ).trim(),
-      items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => ({
-        ...splitDocumentLineDescription(item.description, item.customText),
-        id: item.id || createEmptyDocLine().id,
-        itemMasterId: item.itemMasterId || "",
-        inventoryItemId: item.inventoryItemId || "",
-        hsnSacType: normalizeHsnSacType(
-          item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
-          "HSN"
-        ),
-        hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
-        qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
-        rate: String(item.rate ?? ""),
-        taxPercent: String(item.taxPercent ?? "")
-      })),
+      items: (row.items && row.items.length ? row.items : [createEmptyDocLine()]).map((item) => {
+        const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+        return {
+          ...splitDocumentLineDescription(item.description, item.customText),
+          id: item.id || createEmptyDocLine().id,
+          itemMasterId: item.itemMasterId || "",
+          inventoryItemId: item.inventoryItemId || "",
+          hsnSacType: normalizeHsnSacType(
+            item.hsnSacType || item.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+            "HSN"
+          ),
+          hsnSacCode: String(item.hsnSacCode || item.hsnCode || item.sacCode || ""),
+          qty: sanitizeDigitsOnlyInput(String(item.qty ?? ""), 8),
+          rate: String(item.rate ?? ""),
+          taxPercent: normalizedTaxOverride.taxPercent,
+          taxPercentSource: normalizedTaxOverride.taxPercentSource,
+        };
+      }),
       paymentStatus: normalizePaymentStatus(row.paymentStatus),
       paidAmount: normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).paidAmount,
       balanceAmount: String(normalizePaymentDetails(row, row.grandTotal ?? row.total_amount).balanceAmount || "").trim(),
@@ -26781,7 +27110,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     () => computeDocumentTotals(invoiceForm, moduleData.gstTemplates || []),
     [invoiceForm, moduleData.gstTemplates]
   );
-  function BillingDocumentEditor({
+  function BillingDocumentEditorLegacyUnused({
     kind,
     form,
     setField,
@@ -27147,7 +27476,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <h6 className="mb-0">{editingId ? `Edit ${kindLabel}` : `Create ${kindLabel}`}</h6>
         </div>
-        <form className="d-flex flex-column gap-3" onSubmit={onSave}>
+        <form className="d-flex flex-column gap-3" data-skip-ba-character-limit-scope="true" onSubmit={onSave}>
           <div className="p-0">
             <div className="row g-3">
               <div className="col-12 col-xl-2">
@@ -27400,6 +27729,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                   required
                                   data-field-key="hsnSacCode"
                                   data-skip-ba-character-limit="true"
+                                  maxLength={24}
+                                  autoComplete="off"
                                   style={hsnFieldErrors?.[line.id]
                                     ? {
                                         borderColor: "#dc3545",
@@ -29904,10 +30235,13 @@ function applyBusinessAutopilotCharacterLimit(target) {
   if (!isTextArea && !isInput) {
     return;
   }
+  if (target.closest?.("[data-skip-ba-character-limit-scope='true']")) {
+    return;
+  }
+  if (target.hasAttribute?.("data-skip-ba-character-limit")) {
+    return;
+  }
   if (isInput) {
-    if (target.hasAttribute("data-skip-ba-character-limit")) {
-      return;
-    }
     const inputMode = String(target.inputMode || "").trim().toLowerCase();
     if (inputMode === "numeric" || inputMode === "decimal") {
       return;
