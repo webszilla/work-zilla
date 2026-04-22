@@ -990,6 +990,89 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   text-overflow: clip;
   min-width: 240px;
 }
+.table td.table-actions :is(button, a, [role="button"])[title],
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip],
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]{
+  position: relative;
+}
+.table td.table-actions :is(button, a, [role="button"])[title]::after,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]::after,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::after{
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(4px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: max-content;
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(17, 24, 39, 0.72);
+  background: rgba(31, 41, 55, 0.96);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+  z-index: 3200;
+}
+.table td.table-actions :is(button, a, [role="button"])[title]::after{
+  content: attr(title);
+}
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]::after{
+  content: attr(data-tooltip);
+}
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::after{
+  content: attr(data-wz-tooltip);
+}
+.table td.table-actions :is(button, a, [role="button"])[title]::before,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]::before,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::before{
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  width: 8px;
+  height: 8px;
+  background: rgba(31, 41, 55, 0.96);
+  border-right: 1px solid rgba(17, 24, 39, 0.72);
+  border-bottom: 1px solid rgba(17, 24, 39, 0.72);
+  transform: translateX(-50%) rotate(45deg) translateY(4px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+  z-index: 3200;
+}
+.table td.table-actions :is(button, a, [role="button"])[title]:hover::after,
+.table td.table-actions :is(button, a, [role="button"])[title]:focus-visible::after,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]:hover::after,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]:focus-visible::after,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:hover::after,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::after{
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+.table td.table-actions :is(button, a, [role="button"])[title]:hover::before,
+.table td.table-actions :is(button, a, [role="button"])[title]:focus-visible::before,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]:hover::before,
+.table td.table-actions :is(button, a, [role="button"])[data-tooltip]:focus-visible::before,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:hover::before,
+.table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::before{
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) rotate(45deg) translateY(0);
+}
 .wz-data-table-wrap{
   border:1px solid rgba(148,163,184,0.18);
   border-radius:12px;

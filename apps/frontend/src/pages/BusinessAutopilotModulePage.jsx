@@ -1,12 +1,12 @@
 import { Children, Fragment, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { showUploadAlert } from "../lib/uploadAlert.js";
 import { getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
+import { readSpreadsheetRows } from "../lib/spreadsheetImport.js";
 import {
   clampBusinessAutopilotText,
   getBusinessAutopilotMaxLength,
@@ -6622,11 +6622,7 @@ function SearchablePaginatedTableCard({
       let parsedRows = [];
       const fileName = String(file.name || "").toLowerCase();
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-        parsedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+        parsedRows = normalizeSpreadsheetRows(await readSpreadsheetRows(file));
       } else {
         const content = await file.text();
         parsedRows = parseCsvRows(content);
@@ -6687,7 +6683,7 @@ function SearchablePaginatedTableCard({
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 className="d-none"
                 onChange={onImportFileChange}
               />
@@ -7514,6 +7510,8 @@ function BillingDocumentEditor({
                                 <input
                                   className={`form-control ${hsnFieldErrors?.[line.id] ? "is-invalid" : ""}`}
                                   required
+                                  data-field-key="hsnSacCode"
+                                  data-skip-ba-character-limit="true"
                                   style={hsnFieldErrors?.[line.id]
                                     ? {
                                         borderColor: "#dc3545",
@@ -7539,6 +7537,8 @@ function BillingDocumentEditor({
                             className="form-control"
                             required
                             inputMode="numeric"
+                            data-field-key="qty"
+                            data-skip-ba-character-limit="true"
                             maxLength={8}
                             value={line.qty || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
@@ -7550,6 +7550,8 @@ function BillingDocumentEditor({
                             className="form-control"
                             required
                             inputMode="decimal"
+                            data-field-key="rate"
+                            data-skip-ba-character-limit="true"
                             maxLength={13}
                             value={line.rate || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
@@ -7560,6 +7562,8 @@ function BillingDocumentEditor({
                           <input
                             className="form-control"
                             inputMode="decimal"
+                            data-field-key="taxPercent"
+                            data-skip-ba-character-limit="true"
                             maxLength={6}
                             value={line.taxPercent || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
@@ -7616,7 +7620,7 @@ function BillingDocumentEditor({
                     {itemPickerInventoryMatches.length ? (
                       <div className="col-12 col-lg-5">
                         <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Inventory Items</div>
+                          <div className="crm-inline-suggestions__title crm-inline-suggestions__title--primary-bar">Inventory Items</div>
                           {itemPickerInventoryMatches.map((item) => (
                             <button
                               key={`${kind}-picker-inv-${item.id || item.name}`}
@@ -7645,10 +7649,10 @@ function BillingDocumentEditor({
                     {itemPickerMasterMatches.length ? (
                       <div className="col-12 col-lg-7">
                         <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Item Masters</div>
+                          <div className="crm-inline-suggestions__title crm-inline-suggestions__title--primary-bar">Item Masters</div>
                           <div className="row g-3">
                           <div className="col-12 col-md-6">
-                            <div className="crm-inline-suggestions__title mb-2">Products</div>
+                            <div className="crm-inline-suggestions__title crm-inline-suggestions__title--subheading-line mb-2">Products</div>
                             {itemPickerMasterMatches
                               .filter((item) => String(item.itemType || "Product").trim().toLowerCase() !== "service")
                               .map((item) => (
@@ -7669,7 +7673,7 @@ function BillingDocumentEditor({
                               ))}
                           </div>
                           <div className="col-12 col-md-6">
-                            <div className="crm-inline-suggestions__title mb-2">Services</div>
+                            <div className="crm-inline-suggestions__title crm-inline-suggestions__title--subheading-line mb-2">Services</div>
                             {itemPickerMasterMatches
                               .filter((item) => String(item.itemType || "").trim().toLowerCase() === "service")
                               .map((item) => (
@@ -27394,6 +27398,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                                 <input
                                   className={`form-control ${hsnFieldErrors?.[line.id] ? "is-invalid" : ""}`}
                                   required
+                                  data-field-key="hsnSacCode"
+                                  data-skip-ba-character-limit="true"
                                   style={hsnFieldErrors?.[line.id]
                                     ? {
                                         borderColor: "#dc3545",
@@ -27419,6 +27425,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                             className="form-control"
                             required
                             inputMode="numeric"
+                            data-field-key="qty"
+                            data-skip-ba-character-limit="true"
                             maxLength={8}
                             value={line.qty || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "qty", e.target.value)}
@@ -27430,6 +27438,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                             className="form-control"
                             required
                             inputMode="decimal"
+                            data-field-key="rate"
+                            data-skip-ba-character-limit="true"
                             maxLength={13}
                             value={line.rate || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "rate", e.target.value)}
@@ -27441,6 +27451,8 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                             className="form-control"
                             required
                             inputMode="decimal"
+                            data-field-key="taxPercent"
+                            data-skip-ba-character-limit="true"
                             maxLength={6}
                             value={line.taxPercent || ""}
                             onChange={(e) => updateDocLine(kind, line.id, "taxPercent", e.target.value)}
@@ -27497,7 +27509,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     {itemPickerInventoryMatches.length ? (
                       <div className="col-12 col-lg-5">
                         <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Inventory Items</div>
+                          <div className="crm-inline-suggestions__title crm-inline-suggestions__title--primary-bar">Inventory Items</div>
                           {itemPickerInventoryMatches.map((item) => (
                             <button
                               key={`${kind}-picker-inv-${item.id || item.name}`}
@@ -27526,10 +27538,10 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     {itemPickerMasterMatches.length ? (
                       <div className="col-12 col-lg-7">
                         <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Item Masters</div>
+                          <div className="crm-inline-suggestions__title crm-inline-suggestions__title--primary-bar">Item Masters</div>
                           <div className="row g-3">
                           <div className="col-12 col-md-6">
-                            <div className="crm-inline-suggestions__title mb-2">Products</div>
+                            <div className="crm-inline-suggestions__title crm-inline-suggestions__title--subheading-line mb-2">Products</div>
                             {itemPickerMasterMatches
                               .filter((item) => String(item.itemType || "Product").trim().toLowerCase() !== "service")
                               .map((item) => (
@@ -27550,7 +27562,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                               ))}
                           </div>
                           <div className="col-12 col-md-6">
-                            <div className="crm-inline-suggestions__title mb-2">Services</div>
+                            <div className="crm-inline-suggestions__title crm-inline-suggestions__title--subheading-line mb-2">Services</div>
                             {itemPickerMasterMatches
                               .filter((item) => String(item.itemType || "").trim().toLowerCase() === "service")
                               .map((item) => (
@@ -29893,6 +29905,13 @@ function applyBusinessAutopilotCharacterLimit(target) {
     return;
   }
   if (isInput) {
+    if (target.hasAttribute("data-skip-ba-character-limit")) {
+      return;
+    }
+    const inputMode = String(target.inputMode || "").trim().toLowerCase();
+    if (inputMode === "numeric" || inputMode === "decimal") {
+      return;
+    }
     const inputType = String(target.type || "text").trim().toLowerCase();
     if (INPUT_TYPES_WITHOUT_CHAR_LIMIT.has(inputType)) {
       return;

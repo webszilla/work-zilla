@@ -200,9 +200,60 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertTrue(
             UserProductAccess.objects.filter(user=product_user, product=self.wa_product).exists()
         )
-        self.assertFalse(
-            OrganizationUser.objects.filter(id=membership.id).exists()
+        membership.refresh_from_db()
+        self.assertTrue(membership.is_deleted)
+        self.assertFalse(membership.is_active)
+
+    def test_org_admin_account_cannot_be_deleted_from_users(self):
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=self.admin,
+            role="company_admin",
+            is_active=True,
         )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/business-autopilot/users")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        admin_row = next(
+            (row for row in payload.get("users", []) if str(row.get("email", "")).lower() == self.admin.email.lower()),
+            None,
+        )
+        self.assertIsNotNone(admin_row)
+        self.assertTrue(admin_row.get("is_org_admin_account"))
+        self.assertFalse(admin_row.get("can_delete"))
+
+        delete_response = self.client.delete(f"/api/business-autopilot/users/{admin_row['membership_id']}")
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(delete_response.json().get("detail"), "org_admin_delete_forbidden")
+        self.assertTrue(
+            OrganizationUser.objects.filter(
+                organization=self.org,
+                user=self.admin,
+                is_deleted=False,
+            ).exists()
+        )
+
+    def test_org_admin_account_cannot_be_deactivated_from_users(self):
+        membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=self.admin,
+            role="company_admin",
+            is_active=True,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            f"/api/business-autopilot/users/{membership.id}/toggle-status",
+            data={"enabled": False},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("detail"), "org_admin_deactivate_forbidden")
+        membership.refresh_from_db()
+        self.assertTrue(membership.is_active)
 
     def test_crm_deal_patch_allows_company_admin_role_alias(self):
         self.admin.userprofile.role = "Company Admin"

@@ -1,26 +1,103 @@
 {% extends "public/base.html" %}
-{% block meta_title %}Work Zilla | Terms of Service{% endblock %}
-{% block meta_description %}Review Work Zilla terms of service and usage policies.{% endblock %}
+{% block meta_title %}Terms & Conditions | Work Zilla{% endblock %}
+{% block meta_description %}Read Work Zilla Terms & Conditions for subscription usage, billing, and service obligations.{% endblock %}
 
 {% block content %}
-<section class="hero">
+<section class="hero legal-hero">
   <div class="site-container hero-grid">
     <div>
-      <span class="eyebrow">Legal</span>
-      <h1>Terms of Service</h1>
-      <p>These terms govern the use of Work Zilla products and services.</p>
+      <h1>Terms &amp; Conditions</h1>
+      <p>
+        These Terms &amp; Conditions govern your access to and use of Work Zilla websites,
+        SaaS applications, and related services.
+      </p>
     </div>
   </div>
 </section>
 
 <section class="section">
-  <div class="site-container">
-    <div class="card">
-      <h3>Overview</h3>
-      <p class="text-secondary">
-        This is a placeholder terms page. Replace with your legal terms before launch.
+  <div class="site-container legal-layout">
+    <article class="legal-content">
+
+      <h2>1. Acceptance of Terms</h2>
+      <p>
+        By accessing or using Work Zilla services, you agree to these Terms and to our related policies.
+        If you do not agree, do not use the service.
       </p>
-    </div>
+
+      <h2>2. Account and Access</h2>
+      <ul>
+        <li>You are responsible for maintaining account confidentiality and authorized usage.</li>
+        <li>You must provide accurate account and billing information.</li>
+        <li>You are responsible for activities performed under your organization account.</li>
+      </ul>
+
+      <h2>3. Acceptable Use</h2>
+      <p>You agree not to misuse the platform, including attempts to:</p>
+      <ul>
+        <li>Bypass security controls or interfere with service integrity.</li>
+        <li>Upload malicious content or perform unauthorized access attempts.</li>
+        <li>Use the service for unlawful, abusive, or fraudulent purposes.</li>
+      </ul>
+
+      <h2>4. Subscriptions, Billing, and Renewals</h2>
+      <ul>
+        <li>Plans may be offered on monthly, yearly, or customized billing cycles.</li>
+        <li>Paid access depends on successful payment processing and account standing.</li>
+        <li>Add-ons, upgrades, and renewals may change billing amounts as per active pricing.</li>
+      </ul>
+
+      <h2>5. Trials and Plan Changes</h2>
+      <p>
+        Trial access, when offered, is time-limited and may have feature or usage restrictions.
+        Plan upgrades/downgrades can affect available limits and modules.
+      </p>
+
+      <h2>6. Service Availability</h2>
+      <p>
+        We aim for stable service operations but do not guarantee uninterrupted or error-free availability at all times.
+        Maintenance windows, third-party dependencies, and force majeure events may affect service continuity.
+      </p>
+
+      <h2>7. Customer Responsibilities</h2>
+      <ul>
+        <li>Use the platform in compliance with employment, privacy, and data laws applicable to your region.</li>
+        <li>Maintain internal policies and user permissions in your organization.</li>
+        <li>Review audit and activity data responsibly and lawfully.</li>
+      </ul>
+
+      <h2>8. Intellectual Property</h2>
+      <p>
+        Work Zilla software, branding, designs, and related materials are protected by intellectual property laws.
+        You receive a limited, non-transferable right to use the service under your active subscription.
+      </p>
+
+      <h2>9. Limitation of Liability</h2>
+      <p>
+        To the maximum extent permitted by law, Work Zilla is not liable for indirect, incidental, special, or consequential damages
+        arising from service use, downtime, data loss, or third-party failures.
+      </p>
+
+      <h2>10. Termination or Suspension</h2>
+      <p>
+        We may suspend or terminate access for policy violations, abuse, security risks, or unpaid dues.
+        You may stop using the service at any time, subject to billing cycle and refund policy terms.
+      </p>
+
+      <h2>11. Governing Terms</h2>
+      <p>
+        These terms are interpreted under applicable laws and commercial standards relevant to the service provider's jurisdiction,
+        unless otherwise required by mandatory law.
+      </p>
+
+      <h2>12. Contact Information</h2>
+      <p>
+        For legal clarifications, visit our
+        <a href="/contact/">Contact Information page</a>.
+      </p>
+    </article>
+
+    {% include "public/partials/legal_sidebar.html" %}
   </div>
 </section>
 {% endblock %}

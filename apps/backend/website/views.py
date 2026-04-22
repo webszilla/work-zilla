@@ -1187,6 +1187,14 @@ def terms_view(request):
     return render(request, "public/terms.html", _base_context(request))
 
 
+def refund_policy_view(request):
+    return render(request, "public/refund_policy.html", _base_context(request))
+
+
+def disclaimer_view(request):
+    return render(request, "public/disclaimer.html", _base_context(request))
+
+
 @require_POST
 def checkout_select(request):
     plan_id = request.POST.get("plan_id")

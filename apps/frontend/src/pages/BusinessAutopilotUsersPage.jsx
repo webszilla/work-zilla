@@ -1,11 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import { clampBusinessAutopilotText, getBusinessAutopilotMaxLength } from "../lib/businessAutopilotFormRules.js";
+import { readSpreadsheetRows } from "../lib/spreadsheetImport.js";
 
 const HrManagementModule = lazy(() =>
   import("./BusinessAutopilotModulePage.jsx").then((module) => ({ default: module.HrManagementModule }))
@@ -299,6 +299,14 @@ function normalizeRoleToken(value) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+function isOrgAdminAccountUser(row = {}) {
+  const normalizedMembershipRole = normalizeRoleToken(row?.role);
+  const normalizedProfileRole = normalizeRoleToken(row?.profile_role);
+  return Boolean(row?.is_org_admin_account)
+    || normalizedMembershipRole === "company_admin"
+    || ["org_admin", "owner", "superadmin", "super_admin"].includes(normalizedProfileRole);
 }
 
 function resolveRoleAccessRecord(roleAccessMap, profileRole, employeeRole) {
@@ -1558,6 +1566,12 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     const targetUser = users.find((user) => String(user?.membership_id || "") === String(membershipId));
+    if (isOrgAdminAccountUser(targetUser)) {
+      const message = "ORG admin account cannot be deleted.";
+      setNotice(message);
+      await openAlertDialog(message, { title: "Delete Not Allowed" });
+      return;
+    }
     const confirmed = await openConfirmDialog(
       `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access. Any CRM leads or deals assigned to this user will be shown again after deletion so you can reassign them. Do you want to continue?`,
       {
@@ -1622,6 +1636,12 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     const targetUser = deletedUsers.find((user) => String(user?.membership_id || "") === String(membershipId));
+    if (isOrgAdminAccountUser(targetUser)) {
+      const message = "ORG admin account cannot be permanently deleted.";
+      setNotice(message);
+      await openAlertDialog(message, { title: "Delete Not Allowed" });
+      return;
+    }
     const confirmed = await openConfirmDialog(
       `Permanently deleting ${String(targetUser?.name || targetUser?.email || "this user")} cannot be undone and may cause permanent user data loss. Do you want to continue?`,
       {
@@ -1657,6 +1677,12 @@ export default function BusinessAutopilotUsersPage() {
 
   async function handleToggleUserStatus(user, nextEnabled) {
     if (!canManageUsersTab) {
+      return;
+    }
+    if (isOrgAdminAccountUser(user) && !nextEnabled) {
+      const message = "ORG admin account cannot be deactivated.";
+      setNotice(message);
+      await openAlertDialog(message, { title: "Action Not Allowed" });
       return;
     }
     const membershipId = String(user?.membership_id || "").trim();
@@ -3237,11 +3263,7 @@ export default function BusinessAutopilotUsersPage() {
       let importedRows = [];
       const fileName = String(file.name || "").toLowerCase();
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-        importedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+        importedRows = normalizeSpreadsheetRows(await readSpreadsheetRows(file));
       } else {
         importedRows = parseCsvRows(await file.text());
       }
@@ -3568,11 +3590,7 @@ export default function BusinessAutopilotUsersPage() {
       let importedRows = [];
       const fileName = String(file.name || "").toLowerCase();
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-        importedRows = sheet ? normalizeSpreadsheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })) : [];
+        importedRows = normalizeSpreadsheetRows(await readSpreadsheetRows(file));
       } else {
         importedRows = parseCsvRows(await file.text());
       }
@@ -4252,7 +4270,7 @@ export default function BusinessAutopilotUsersPage() {
                       <th>Department</th>
                       <th>Employee Role</th>
                       <th>Status</th>
-                      <th>Action</th>
+                      <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4267,35 +4285,100 @@ export default function BusinessAutopilotUsersPage() {
                           <td>{user.department || "-"}</td>
                           <td>{user.employee_role || "-"}</td>
                           <td>{user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive")}</td>
-                          <td>
-                            <div className="d-inline-flex gap-2">
-                              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openViewUser(user)}>View</button>
+                          <td className="table-actions">
+                            <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
                               <button
                                 type="button"
-                                className="btn btn-sm btn-outline-success"
-                                onClick={() => handleResendCredentials(user)}
-                                disabled={!user.membership_id || sendingCredentialMembershipId === String(user.membership_id)}
-                              >
-                                {sendingCredentialMembershipId === String(user.membership_id) ? "Emailing..." : "Email"}
-                              </button>
-                              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openEdit(user)}>Edit</button>
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${
+                                className={`btn btn-sm saas-org-icon-btn wz-user-toggle-btn ${
                                   user.is_locked
-                                    ? "btn-outline-secondary"
-                                    : (user.is_active ? "btn-outline-success" : "btn-outline-primary")
+                                    ? "is-locked"
+                                    : (user.is_active ? "is-active" : "is-inactive")
                                 }`}
                                 onClick={() => handleToggleUserStatus(user, !user.is_active)}
-                                disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
+                                disabled={
+                                  !user.membership_id
+                                  || togglingMembershipId === String(user.membership_id)
+                                  || (isOrgAdminAccountUser(user) && user.is_active)
+                                }
+                                title={
+                                  isOrgAdminAccountUser(user) && user.is_active
+                                    ? "ORG admin account is always active"
+                                    : user.is_locked
+                                    ? "Locked by user limit"
+                                    : (user.is_active ? "Deactivate User" : "Activate User")
+                                }
+                                aria-label={
+                                  isOrgAdminAccountUser(user) && user.is_active
+                                    ? "ORG admin account is always active"
+                                    : user.is_locked
+                                    ? "Locked by user limit"
+                                    : (user.is_active ? "Deactivate User" : "Activate User")
+                                }
                               >
-                                {togglingMembershipId === String(user.membership_id)
-                                  ? "Updating..."
-                                  : (user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive"))}
+                                {togglingMembershipId === String(user.membership_id) ? (
+                                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                ) : (
+                                  <i
+                                    className={`bi ${
+                                      isOrgAdminAccountUser(user) && user.is_active
+                                        ? "bi-shield-check"
+                                        : user.is_locked
+                                        ? "bi-lock-fill"
+                                        : (user.is_active ? "bi-toggle-on" : "bi-toggle-off")
+                                    }`}
+                                    aria-hidden="true"
+                                  />
+                                )}
                               </button>
-                              <button type="button" className="btn btn-sm btn-outline-danger" data-no-delete-confirm="true" onClick={() => handleDeleteUser(user.membership_id)} disabled={deletingMembershipId === String(user.membership_id)}>
-                                {deletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-success saas-org-icon-btn"
+                                onClick={() => handleResendCredentials(user)}
+                                disabled={!user.membership_id || sendingCredentialMembershipId === String(user.membership_id)}
+                                title="Email Login Credentials"
+                                aria-label="Email Login Credentials"
+                              >
+                                {sendingCredentialMembershipId === String(user.membership_id) ? (
+                                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                ) : (
+                                  <i className="bi bi-envelope-paper" aria-hidden="true" />
+                                )}
                               </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary saas-org-icon-btn"
+                                onClick={() => openViewUser(user)}
+                                title="View User"
+                                aria-label="View User"
+                              >
+                                <i className="bi bi-eye" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-info saas-org-icon-btn"
+                                onClick={() => openEdit(user)}
+                                title="Edit User"
+                                aria-label="Edit User"
+                              >
+                                <i className="bi bi-pencil-square" aria-hidden="true" />
+                              </button>
+                              {!isOrgAdminAccountUser(user) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger saas-org-icon-btn"
+                                  data-no-delete-confirm="true"
+                                  onClick={() => handleDeleteUser(user.membership_id)}
+                                  disabled={deletingMembershipId === String(user.membership_id)}
+                                  title="Delete User"
+                                  aria-label="Delete User"
+                                >
+                                  {deletingMembershipId === String(user.membership_id) ? (
+                                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                  ) : (
+                                    <i className="bi bi-trash3" aria-hidden="true" />
+                                  )}
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
@@ -4340,15 +4423,17 @@ export default function BusinessAutopilotUsersPage() {
                               >
                                 {restoringMembershipId === String(user.membership_id) ? "Restoring..." : "Restore"}
                               </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline-danger"
-                                data-no-delete-confirm="true"
-                                onClick={() => handlePermanentDeleteUser(user.membership_id)}
-                                disabled={permanentlyDeletingMembershipId === String(user.membership_id)}
-                              >
-                                {permanentlyDeletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
-                              </button>
+                              {!isOrgAdminAccountUser(user) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  data-no-delete-confirm="true"
+                                  onClick={() => handlePermanentDeleteUser(user.membership_id)}
+                                  disabled={permanentlyDeletingMembershipId === String(user.membership_id)}
+                                >
+                                  {permanentlyDeletingMembershipId === String(user.membership_id) ? "Deleting..." : "Delete"}
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
@@ -4951,7 +5036,7 @@ export default function BusinessAutopilotUsersPage() {
                 <input
                   ref={clientImportInputRef}
                   type="file"
-                  accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                  accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   className="d-none"
                   onChange={onClientImportFileChange}
                 />
@@ -5215,7 +5300,7 @@ export default function BusinessAutopilotUsersPage() {
               <input
                 ref={vendorImportInputRef}
                 type="file"
-                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
+                accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 className="d-none"
                 onChange={onVendorImportFileChange}
               />

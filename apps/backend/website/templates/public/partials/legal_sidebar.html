@@ -1,0 +1,33 @@
+<aside class="legal-sidebar">
+  <div class="sidebar-card">
+    <h4>Products</h4>
+    <ul class="sidebar-links">
+      {% if site_nav.product_links %}
+        {% for item in site_nav.product_links %}
+          <li>
+            <a href="{{ item.href }}">
+              {% if item.slug == "monitor" or item.slug == "worksuite" or item.slug == "work-suite" %}
+                Work Suite
+              {% else %}
+                {{ item.name }}
+              {% endif %}
+            </a>
+          </li>
+        {% endfor %}
+      {% else %}
+        <li><a href="/products/worksuite/">Work Suite</a></li>
+        <li><a href="/products/business-autopilot-erp/">Business Autopilot</a></li>
+        <li><a href="/products/whatsapp-automation/">Whatsapp Automation</a></li>
+      {% endif %}
+      <li><a href="/pricing/">Plans</a></li>
+    </ul>
+  </div>
+
+  <div class="sidebar-card accent">
+    <h4>Contact Information</h4>
+    <p>If you have legal, billing, or policy questions, our team will help you quickly.</p>
+    <a class="btn btn-outline w-100" href="/contact/">Open Contact Page</a>
+  </div>
+
+  {% include "public/partials/enquiry_form.html" %}
+</aside>

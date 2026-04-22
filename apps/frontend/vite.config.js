@@ -7,6 +7,7 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: "dist",
     assetsDir: "assets",
-    emptyOutDir: true
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 1500
   }
 }));

@@ -1,0 +1,86 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Refund Policy | Work Zilla{% endblock %}
+{% block meta_description %}Read Work Zilla refund policy for subscriptions, renewals, cancellations, and payment handling terms.{% endblock %}
+
+{% block content %}
+<section class="hero legal-hero">
+  <div class="site-container hero-grid">
+    <div>
+      <h1>Refund Policy</h1>
+      <p>
+        This Refund Policy explains how billing reversals, cancellations, and refund requests are handled for Work Zilla services.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container legal-layout">
+    <article class="legal-content">
+
+      <h2>1. Policy Scope</h2>
+      <p>
+        This policy applies to paid Work Zilla SaaS subscriptions, plan renewals, and add-on purchases
+        completed through approved payment channels.
+      </p>
+
+      <h2>2. Trial and Evaluation</h2>
+      <p>
+        Where trial access is available, customers should evaluate the platform during the trial period before purchasing.
+        Trial periods are intended to reduce refund disputes by enabling informed purchase decisions.
+      </p>
+
+      <h2>3. Monthly Subscription Charges</h2>
+      <p>
+        Monthly plan fees are generally non-refundable after billing is successfully processed and service access is granted.
+        Cancellation stops future cycles and does not automatically reverse the current paid cycle.
+      </p>
+
+      <h2>4. Yearly Subscription Charges</h2>
+      <p>
+        Annual plans are generally non-refundable once activated, except where refund is required by applicable law
+        or approved by Work Zilla under exceptional circumstances.
+      </p>
+
+      <h2>5. Add-ons and One-Time Charges</h2>
+      <p>
+        Add-on user packs, setup charges, and one-time commercial items are non-refundable after successful activation,
+        unless charged in error.
+      </p>
+
+      <h2>6. Duplicate or Incorrect Charges</h2>
+      <p>
+        If duplicate billing or an incorrect charge occurs due to technical or processing error,
+        customers should report it promptly. Verified billing errors are eligible for correction or refund.
+      </p>
+
+      <h2>7. Chargebacks and Payment Disputes</h2>
+      <p>
+        Please contact Work Zilla support before initiating a chargeback.
+        Unauthorized or abusive disputes may result in temporary service restrictions while the case is reviewed.
+      </p>
+
+      <h2>8. Cancellation and Future Billing</h2>
+      <p>
+        You may request cancellation to prevent future renewal charges.
+        Cancellation timing and entitlement follow your active plan cycle and contract terms.
+      </p>
+
+      <h2>9. Refund Request Process</h2>
+      <ul>
+        <li>Submit request through our <a href="/contact/">Contact Information page</a>.</li>
+        <li>Include billing email, transaction details, and reason for request.</li>
+        <li>Our team reviews requests and shares decision and next steps.</li>
+      </ul>
+
+      <h2>10. Processing Timeline</h2>
+      <p>
+        Approved refunds are initiated promptly. Final credit timeline depends on payment gateway, card issuer,
+        bank policies, and settlement systems.
+      </p>
+    </article>
+
+    {% include "public/partials/legal_sidebar.html" %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "public/base.html" %}
+{% block meta_title %}Disclaimer | Work Zilla{% endblock %}
+{% block meta_description %}Read Work Zilla disclaimer for platform usage responsibilities, third-party dependencies, and service limitations.{% endblock %}
+
+{% block content %}
+<section class="hero legal-hero">
+  <div class="site-container hero-grid">
+    <div>
+      <h1>Disclaimer</h1>
+      <p>
+        This Disclaimer defines important limitations and responsibilities related to the use of Work Zilla websites,
+        SaaS products, and related communication channels.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="site-container legal-layout">
+    <article class="legal-content">
+
+      <h2>1. General Information Only</h2>
+      <p>
+        Content published on this website, including product pages, policy pages, help content, and support guidance,
+        is provided for general information. It does not constitute legal, tax, accounting, employment, or regulatory advice.
+      </p>
+
+      <h2>2. Customer Compliance Responsibility</h2>
+      <p>
+        Customers are responsible for ensuring their usage of Work Zilla is compliant with applicable laws,
+        including employment, privacy, monitoring, and data protection requirements in their jurisdiction.
+      </p>
+
+      <h2>3. No Warranty of Uninterrupted Service</h2>
+      <p>
+        Work Zilla aims for reliable and secure operations, but we do not guarantee uninterrupted, error-free,
+        or always-available service. Downtime may occur due to maintenance, infrastructure events, or third-party dependencies.
+      </p>
+
+      <h2>4. Third-Party Integrations and Gateways</h2>
+      <p>
+        Our platform may rely on external providers, such as payment gateways, cloud services, messaging APIs,
+        or identity services. Work Zilla is not responsible for independent outages, policy decisions, or delays by those providers.
+      </p>
+
+      <h2>5. Accuracy and Timeliness</h2>
+      <p>
+        We make reasonable efforts to keep website and product information accurate and current.
+        However, product features, pricing, policies, or availability may change without prior notice.
+      </p>
+
+      <h2>6. Limitation of Liability</h2>
+      <p>
+        To the maximum extent permitted by law, Work Zilla is not liable for indirect, incidental, special,
+        or consequential losses related to service usage, including business interruption, loss of profits, or data impact.
+      </p>
+
+      <h2>7. Policy Hierarchy</h2>
+      <p>
+        This Disclaimer should be read together with our Privacy Policy, Terms &amp; Conditions, and Refund Policy.
+        In case of conflict, the most specific policy for the situation applies.
+      </p>
+
+      <h2>8. Contact Information</h2>
+      <p>
+        For legal, compliance, or billing clarifications, please use our
+        <a href="/contact/">Contact Information page</a>.
+      </p>
+    </article>
+
+    {% include "public/partials/legal_sidebar.html" %}
+  </div>
+</section>
+{% endblock %}

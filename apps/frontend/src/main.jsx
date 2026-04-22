@@ -11,12 +11,14 @@ import { bindGlobalEmailRealtimeValidation } from "./lib/emailRealtimeValidation
 import { bindGlobalRequiredFieldValidation } from "./lib/requiredFieldValidation.js";
 import { bindGlobalDatePickerEnhancer } from "./lib/datePickerEnhancer.js";
 import { bindGlobalSelectPlaceholderShortener } from "./lib/selectPlaceholderShortener.js";
+import { bindGlobalTableActionTooltipEnhancer } from "./lib/tableActionTooltipEnhancer.js";
 
 loadRemoteSharedUiCss();
 bindGlobalEmailRealtimeValidation();
 bindGlobalRequiredFieldValidation();
 bindGlobalDatePickerEnhancer();
 bindGlobalSelectPlaceholderShortener();
+bindGlobalTableActionTooltipEnhancer();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

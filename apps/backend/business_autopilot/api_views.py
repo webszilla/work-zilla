@@ -75,6 +75,7 @@ DEFAULT_ERP_MODULES = [
 ]
 
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
+DELETE_PROTECTED_PROFILE_ROLES = {"org_admin", "owner", "superadmin", "super_admin"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
@@ -899,29 +900,49 @@ def _serialize_org_users(org, *, include_deleted=False):
         .order_by("-id")
     )
     memberships = queryset.filter(is_deleted=bool(include_deleted))
-    return [
-        {
-            "id": member.user_id,
-            "membership_id": member.id,
-            "name": _get_org_user_display_name(member.user),
-            "first_name": str(getattr(member.user, "first_name", "") or "").strip(),
-            "last_name": str(getattr(member.user, "last_name", "") or "").strip(),
-            "employeeId": _format_employee_code(member.user_id),
-            "email": member.user.email or "",
-            "email_verified": bool(getattr(member.user, "email_verified", False)),
-            "phone_number": str(
-                getattr(getattr(member.user, "userprofile", None), "phone_number", "") or ""
-            ).strip(),
-            "role": member.role or "org_user",
-            "department": member.department or "",
-            "employee_role": member.employee_role or "",
-            "is_active": bool(member.is_active and member.user.is_active),
-            "is_deleted": bool(member.is_deleted),
-            "created_at": member.created_at.isoformat() if member.created_at else "",
-            "deleted_at": member.deleted_at.isoformat() if member.deleted_at else "",
-        }
-        for member in memberships
-    ]
+    return [_serialize_org_user_member(org, member) for member in memberships]
+
+
+def _is_org_admin_account_member(org: Organization, member: OrganizationUser) -> bool:
+    if not member:
+        return False
+    profile_role = _normalize_admin_role(getattr(getattr(member.user, "userprofile", None), "role", ""))
+    membership_role = _normalize_admin_role(getattr(member, "role", ""))
+    is_owner = bool(getattr(org, "owner_id", None) and member.user_id == org.owner_id)
+    return (
+        is_owner
+        or membership_role == "company_admin"
+        or profile_role in DELETE_PROTECTED_PROFILE_ROLES
+    )
+
+
+def _serialize_org_user_member(org: Organization, member: OrganizationUser):
+    profile_role = _normalize_admin_role(getattr(getattr(member.user, "userprofile", None), "role", ""))
+    is_org_admin_account = _is_org_admin_account_member(org, member)
+    return {
+        "id": member.user_id,
+        "membership_id": member.id,
+        "name": _get_org_user_display_name(member.user),
+        "first_name": str(getattr(member.user, "first_name", "") or "").strip(),
+        "last_name": str(getattr(member.user, "last_name", "") or "").strip(),
+        "employeeId": _format_employee_code(member.user_id),
+        "email": member.user.email or "",
+        "email_verified": bool(getattr(member.user, "email_verified", False)),
+        "phone_number": str(
+            getattr(getattr(member.user, "userprofile", None), "phone_number", "") or ""
+        ).strip(),
+        "role": member.role or "org_user",
+        "profile_role": profile_role,
+        "is_org_admin_account": is_org_admin_account,
+        "can_delete": not is_org_admin_account,
+        "can_toggle_status": not is_org_admin_account,
+        "department": member.department or "",
+        "employee_role": member.employee_role or "",
+        "is_active": bool(member.is_active and member.user.is_active),
+        "is_deleted": bool(member.is_deleted),
+        "created_at": member.created_at.isoformat() if member.created_at else "",
+        "deleted_at": member.deleted_at.isoformat() if member.deleted_at else "",
+    }
 
 
 def _safe_serialize_org_users(org, *, include_deleted=False):
@@ -975,11 +996,21 @@ def _list_org_user_memberships(org):
     )
 
 
-def _compute_org_user_lock_ids(employee_limit, memberships=None):
+def _compute_org_user_lock_ids(employee_limit, memberships=None, org: Organization = None):
     rows = memberships if isinstance(memberships, list) else []
     safe_limit = max(0, int(employee_limit or 0))
-    unlocked_ids = [row.id for row in rows[:safe_limit]]
-    locked_ids = [row.id for row in rows[safe_limit:]]
+    resolved_org = org if org else None
+    protected_ids = []
+    regular_rows = []
+    for row in rows:
+        current_org = resolved_org if resolved_org else getattr(row, "organization", None)
+        if current_org and _is_org_admin_account_member(current_org, row):
+            protected_ids.append(row.id)
+        else:
+            regular_rows.append(row)
+    remaining_capacity = max(0, safe_limit - len(protected_ids))
+    unlocked_ids = [*protected_ids, *[row.id for row in regular_rows[:remaining_capacity]]]
+    locked_ids = [row.id for row in regular_rows[remaining_capacity:]]
     return {
         "unlocked_ids": set(unlocked_ids),
         "locked_ids": set(locked_ids),
@@ -1024,7 +1055,7 @@ def _build_org_user_meta(org, users=None):
 
     employee_limit = max(0, base_limit + max(0, addon_count))
     memberships = _list_org_user_memberships(org)
-    lock_state = _compute_org_user_lock_ids(employee_limit, memberships=memberships)
+    lock_state = _compute_org_user_lock_ids(employee_limit, memberships=memberships, org=org)
     total_users = lock_state["total_users"]
     used_users = min(total_users, employee_limit)
     remaining_users = max(0, employee_limit - lock_state["total_users"])
@@ -1061,7 +1092,11 @@ def _build_org_users_response_payload(org, can_manage_users, *, created_user_cre
     users = _safe_serialize_org_users(org)
     deleted_users = _safe_serialize_org_users(org, include_deleted=True)
     meta = _build_org_user_meta(org, users=users)
-    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    lock_state = _compute_org_user_lock_ids(
+        meta.get("employee_limit"),
+        memberships=_list_org_user_memberships(org),
+        org=org,
+    )
     users = _attach_locked_state(users, lock_state["locked_ids"])
     return {
         "authenticated": True,
@@ -1084,10 +1119,18 @@ def _sync_org_users_to_plan_limit(org, requested_by=None):
         return {"auto_disabled_ids": [], "auto_enabled_ids": []}
 
     meta = _build_org_user_meta(org, users=None)
-    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=memberships)
+    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=memberships, org=org)
     locked_ids = lock_state["locked_ids"]
     auto_disabled = []
     auto_enabled = []
+
+    # ORG admin account must always remain active.
+    for row in memberships:
+        if _is_org_admin_account_member(org, row) and not row.is_active:
+            row.is_active = True
+            row.save(update_fields=["is_active", "updated_at"])
+            _grant_business_autopilot_access(row.user, requested_by or row.user, row.role or "company_admin")
+            auto_enabled.append(row.id)
 
     # Extra users are lock-managed by plan limit and must stay inactive.
     for row in memberships:
@@ -2361,6 +2404,14 @@ def org_user_detail(request, membership_id: int):
             return JsonResponse({"detail": "invalid_action"}, status=400)
 
     if resolved_method == "DELETE":
+        if _is_org_admin_account_member(org, membership):
+            return JsonResponse(
+                {
+                    "detail": "org_admin_delete_forbidden",
+                    "message": "ORG admin account cannot be deleted from Users.",
+                },
+                status=403,
+            )
         permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
         if request.method == "POST":
             permanent_raw = str(payload.get("permanent") or "").strip().lower()
@@ -2509,6 +2560,7 @@ def org_user_detail(request, membership_id: int):
             preview_lock_state = _compute_org_user_lock_ids(
                 preview_meta.get("employee_limit"),
                 memberships=_list_org_user_memberships(org),
+                org=org,
             )
             if membership.id in preview_lock_state["locked_ids"]:
                 return JsonResponse(
@@ -2521,7 +2573,17 @@ def org_user_detail(request, membership_id: int):
                 )
 
         if isinstance(is_active, bool):
+            if not is_active and _is_org_admin_account_member(org, membership):
+                return JsonResponse(
+                    {
+                        "detail": "org_admin_deactivate_forbidden",
+                        "message": "ORG admin account cannot be deactivated.",
+                    },
+                    status=403,
+                )
             membership.is_active = is_active
+        elif _is_org_admin_account_member(org, membership):
+            membership.is_active = True
         membership.save(update_fields=["role", "department", "employee_role", "is_active", "updated_at"])
         if membership.is_active:
             _grant_business_autopilot_access(membership.user, request.user, role)
@@ -2557,6 +2619,14 @@ def org_user_toggle_status(request, membership_id: int):
     enabled = payload.get("enabled")
     if not isinstance(enabled, bool):
         return JsonResponse({"detail": "enabled_required"}, status=400)
+    if not enabled and _is_org_admin_account_member(org, membership):
+        return JsonResponse(
+            {
+                "detail": "org_admin_deactivate_forbidden",
+                "message": "ORG admin account cannot be deactivated.",
+            },
+            status=403,
+        )
 
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
     if enabled and not membership.is_active:
@@ -2564,6 +2634,7 @@ def org_user_toggle_status(request, membership_id: int):
         preview_lock_state = _compute_org_user_lock_ids(
             preview_meta.get("employee_limit"),
             memberships=_list_org_user_memberships(org),
+            org=org,
         )
         if membership.id in preview_lock_state["locked_ids"]:
             return JsonResponse(
@@ -2585,7 +2656,11 @@ def org_user_toggle_status(request, membership_id: int):
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
     users = _safe_serialize_org_users(org)
     meta = _build_org_user_meta(org, users=users)
-    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    lock_state = _compute_org_user_lock_ids(
+        meta.get("employee_limit"),
+        memberships=_list_org_user_memberships(org),
+        org=org,
+    )
     users = _attach_locked_state(users, lock_state["locked_ids"])
     message = "User activated." if enabled else "User deactivated."
 
@@ -2689,7 +2764,11 @@ def org_user_verify_email(request, membership_id: int):
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
     users = _safe_serialize_org_users(org)
     meta = _build_org_user_meta(org, users=users)
-    lock_state = _compute_org_user_lock_ids(meta.get("employee_limit"), memberships=_list_org_user_memberships(org))
+    lock_state = _compute_org_user_lock_ids(
+        meta.get("employee_limit"),
+        memberships=_list_org_user_memberships(org),
+        org=org,
+    )
     users = _attach_locked_state(users, lock_state["locked_ids"])
 
     if membership.is_active and not (membership.id in lock_state["locked_ids"]):

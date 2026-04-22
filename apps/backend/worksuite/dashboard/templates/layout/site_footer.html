@@ -17,34 +17,40 @@
     </div>
 
     <div class="footer-col">
-      <h5>Product</h5>
-      <a href="/#features">Features</a>
-      <a href="/#privacy">Privacy controls</a>
-      <a href="/#insights">Insights</a>
-      <a href="/products/ai-chatbot/">AI Chatbot</a>
-      <a href="/pricing">Plans</a>
-    </div>
-
-    <div class="footer-col">
-      <h5>Solutions</h5>
-      <a href="/#how-it-works">Remote teams</a>
-      <a href="/#how-it-works">Office teams</a>
-      <a href="/#how-it-works">Agencies</a>
-      <a href="/#how-it-works">IT operations</a>
-      <a href="#" data-download-modal-trigger>Download</a>
-    </div>
-
-    <div class="footer-col">
       <h5>Company</h5>
-      <a href="/about">About</a>
-      <a href="/contact">Contact</a>
-      {% if site_nav.is_authenticated %}
-        <a href="{{ site_nav.dashboard_url }}">{{ site_nav.dashboard_label }}</a>
+      <a href="/about/">About Us</a>
+      <a href="/privacy/">Privacy Policy</a>
+      <a href="/terms/">Terms &amp; Conditions</a>
+      <a href="/refund-policy/">Refund Policy</a>
+      <a href="/disclaimer/">Disclaimer</a>
+      <a href="/contact/">Contact Us</a>
+    </div>
+
+    <div class="footer-col">
+      <h5>Product</h5>
+      {% if site_nav.product_links %}
+        {% for item in site_nav.product_links %}
+          <a href="{{ item.href }}">
+            {% if item.slug == "monitor" or item.slug == "worksuite" or item.slug == "work-suite" %}
+              Work Suite
+            {% else %}
+              {{ item.name }}
+            {% endif %}
+          </a>
+        {% endfor %}
       {% else %}
-        <a href="/auth/login/?next=/app/">Login</a>
+        <a href="/products/worksuite/">Work Suite</a>
       {% endif %}
-      <a href="/signup">Create account</a>
+      <a href="/pricing/">Plans</a>
+    </div>
+
+    <div class="footer-col">
+      <h5>Others</h5>
+      <a href="/auth/signup/">Signup</a>
       <a href="/agent-signup">Agent Signup</a>
+      <a href="/my-account/">My Account</a>
+      <a href="/my-account/">My Products</a>
+      <a href="/downloads/application-files/">Downloads</a>
     </div>
   </div>
 
