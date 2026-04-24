@@ -2,6 +2,7 @@ import json
 import re
 from datetime import timedelta
 
+from django.conf import settings
 from django.http import HttpResponsePermanentRedirect
 from django.shortcuts import redirect
 from django.core.cache import cache
@@ -125,6 +126,17 @@ class RequestSecurityShieldMiddleware:
             return self.get_response(request)
 
         ip = self._get_ip(request)
+
+        # Do not rate-limit local development traffic.
+        # This shield is meant to protect public endpoints from scans/attacks and
+        # can be triggered during dev when UI makes repeated 404/invalid calls.
+        host = str(getattr(request, "get_host", lambda: "")() or "")
+        if getattr(settings, "DEBUG", False) or ip in {"127.0.0.1", "::1"} or host.startswith(("127.0.0.1", "localhost")):
+            return self.get_response(request)
+        if getattr(request, "user", None) and getattr(request.user, "is_authenticated", False):
+            if getattr(request.user, "is_superuser", False) or getattr(request.user, "is_staff", False):
+                return self.get_response(request)
+
         block_state = cache.get(self._block_key(ip)) or {}
         until = block_state.get("until")
         if until and until > timezone.now():

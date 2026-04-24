@@ -15,6 +15,7 @@ import requests
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
+from django.db.models import Q
 from django.shortcuts import render
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
@@ -99,13 +100,22 @@ ROLE_ACCESS_SECTION_KEYS = {
     "plans",
     "profile",
 }
-ROLE_ACCESS_LEVELS = {"No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"}
+ROLE_ACCESS_LEVELS = {
+    "No Access",
+    "View",
+    "View and Edit",
+    "Create, View and Edit Own",
+    "Create, View and Edit All",
+    "Full Access",
+}
 ROLE_ACCESS_LEVEL_ALIASES = {
     "No Access": "No Access",
     "View": "View",
-    "Create/Edit": "Create, View and Edit",
+    "Create/Edit": "Create, View and Edit Own",
     "View and Edit": "View and Edit",
-    "Create, View and Edit": "Create, View and Edit",
+    "Create, View and Edit": "Create, View and Edit Own",
+    "Create, View and Edit Own": "Create, View and Edit Own",
+    "Create, View and Edit All": "Create, View and Edit All",
     "Full Access": "Full Access",
 }
 logger = logging.getLogger(__name__)
@@ -598,21 +608,25 @@ def _crm_section_access_level(user: User, org: Organization, section_key: str = 
 
 def _crm_has_view_access(user: User, org: Organization):
     access_level = _crm_section_access_level(user, org, "crm")
-    return access_level in {"View", "View and Edit", "Create, View and Edit", "Full Access"}
+    return access_level in {"View", "View and Edit", "Create, View and Edit Own", "Create, View and Edit All", "Full Access"}
 
 
 def _crm_has_edit_access(user: User, org: Organization):
     access_level = _crm_section_access_level(user, org, "crm")
-    return access_level in {"View and Edit", "Create, View and Edit", "Full Access"}
+    return access_level in {"View and Edit", "Create, View and Edit Own", "Create, View and Edit All", "Full Access"}
 
 
 def _crm_has_create_access(user: User, org: Organization):
     access_level = _crm_section_access_level(user, org, "crm")
-    return access_level in {"Create, View and Edit", "Full Access"}
+    return access_level in {"Create, View and Edit Own", "Create, View and Edit All", "Full Access"}
 
 
 def _crm_has_unrestricted_row_access(user: User, org: Organization):
-    return _crm_section_access_level(user, org, "crm") in {"View and Edit", "Create, View and Edit", "Full Access"}
+    # "All" scope must be explicit. Default to own-only access for "View and Edit"
+    # and "Create, View and Edit Own". Only these grant full org-wide visibility:
+    # - Create, View and Edit All
+    # - Full Access
+    return _crm_section_access_level(user, org, "crm") in {"Create, View and Edit All", "Full Access"}
 
 
 def _crm_business_autopilot_permission(user: User):
@@ -660,21 +674,27 @@ def _crm_row_matches_user(user: User, row):
 def _crm_can_view_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
         return True
-    if _crm_has_product_view_access(user):
+    if _crm_has_unrestricted_row_access(user, org):
         return True
     if _crm_has_view_access(user, org):
-        return True
-    return _crm_row_matches_user(user, row)
+        return _crm_row_matches_user(user, row)
+    # Legacy fallback: allow users with product access to view only rows they own/are assigned to.
+    if _crm_has_product_view_access(user):
+        return _crm_row_matches_user(user, row)
+    return False
 
 
 def _crm_can_edit_row(user: User, org: Organization, row):
     if _crm_is_admin(user, org):
         return True
-    if _crm_has_product_edit_access(user):
+    if _crm_has_unrestricted_row_access(user, org):
         return True
     if _crm_has_edit_access(user, org):
-        return True
-    return _crm_row_matches_user(user, row)
+        return _crm_row_matches_user(user, row)
+    # Legacy fallback: users with product edit access can edit only rows they own/are assigned to.
+    if _crm_has_product_edit_access(user):
+        return _crm_row_matches_user(user, row)
+    return False
 
 
 def _serialize_openai_settings(settings_obj: OrganizationSettings):
@@ -4867,6 +4887,31 @@ def _crm_order_id(org: Organization):
     return f"{prefix}{last_seq + 1:03d}"
 
 
+def _crm_issue_date_from_order_id(order_id: str):
+    raw_order_id = str(order_id or "").strip()
+    if not raw_order_id:
+        return ""
+    compact_match = re.match(r"^SO-(\d{2})(\d{2})(\d{4})-\d{3}$", raw_order_id, re.IGNORECASE)
+    if compact_match:
+        day = int(compact_match.group(1))
+        month = int(compact_match.group(2))
+        year = int(compact_match.group(3))
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError:
+            return ""
+    dashed_match = re.match(r"^SO-(\d{2})-(\d{2})-(\d{4})-\d{3}$", raw_order_id, re.IGNORECASE)
+    if dashed_match:
+        day = int(dashed_match.group(1))
+        month = int(dashed_match.group(2))
+        year = int(dashed_match.group(3))
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError:
+            return ""
+    return ""
+
+
 def _crm_resolve_unique_order_id(org: Organization, requested_order_id: str = ""):
     requested = str(requested_order_id or "").strip()[:30]
     if requested:
@@ -5053,6 +5098,8 @@ def _serialize_crm_lead(row: CrmLead):
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
+        "updated_by_id": row.updated_by_id,
+        "updated_by_name": _get_org_user_display_name(row.updated_by) if row.updated_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -5071,9 +5118,74 @@ def _serialize_crm_contact(row: CrmContact):
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
+        "updated_by_id": row.updated_by_id,
+        "updated_by_name": _get_org_user_display_name(row.updated_by) if row.updated_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
+
+
+def _crm_normalize_phone_digits(value: str) -> str:
+    return re.sub(r"\D+", "", str(value or ""))
+
+
+def _crm_find_duplicate_contact(
+    org: Organization,
+    *,
+    company: str = "",
+    email: str = "",
+    phone_country_code: str = "+91",
+    phone: str = "",
+    exclude_contact_id: Optional[int] = None,
+):
+    normalized_company = str(company or "").strip()
+    normalized_company_lower = normalized_company.lower()
+    normalized_email = str(email or "").strip()
+    normalized_email_lower = normalized_email.lower()
+    normalized_phone_country_code = str(phone_country_code or "+91").strip() or "+91"
+    normalized_phone_country_code_lower = normalized_phone_country_code.lower()
+    normalized_phone_digits = _crm_normalize_phone_digits(phone)
+
+    duplicate_q = Q()
+    has_filters = False
+    if normalized_company_lower:
+        duplicate_q |= Q(company__iexact=normalized_company)
+        has_filters = True
+    if normalized_email_lower:
+        duplicate_q |= Q(email__iexact=normalized_email)
+        has_filters = True
+    if normalized_phone_digits:
+        duplicate_q |= Q(phone_country_code__iexact=normalized_phone_country_code)
+        has_filters = True
+    if not has_filters:
+        return None, []
+
+    queryset = CrmContact.objects.filter(organization=org, is_deleted=False)
+    if exclude_contact_id:
+        queryset = queryset.exclude(id=exclude_contact_id)
+    candidates = queryset.filter(duplicate_q).select_related("created_by").order_by("-created_at", "-id")
+
+    for candidate in candidates:
+        matched_fields = []
+        candidate_company = str(getattr(candidate, "company", "") or "").strip().lower()
+        candidate_email = str(getattr(candidate, "email", "") or "").strip().lower()
+        candidate_phone_country_code = str(getattr(candidate, "phone_country_code", "") or "+91").strip().lower()
+        candidate_phone_digits = _crm_normalize_phone_digits(getattr(candidate, "phone", ""))
+        if normalized_company_lower and candidate_company and candidate_company == normalized_company_lower:
+            matched_fields.append("company")
+        if normalized_email_lower and candidate_email and candidate_email == normalized_email_lower:
+            matched_fields.append("email")
+        if (
+            normalized_phone_digits
+            and candidate_phone_digits
+            and candidate_phone_country_code == normalized_phone_country_code_lower
+            and candidate_phone_digits == normalized_phone_digits
+        ):
+            matched_fields.append("phone")
+        if matched_fields:
+            return candidate, matched_fields
+
+    return None, []
 
 
 def _crm_collect_leads_linked_to_user(org: Organization, user_id: int):
@@ -5166,6 +5278,8 @@ def _serialize_crm_deal(row: CrmDeal):
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
+        "updated_by_id": row.updated_by_id,
+        "updated_by_name": _get_org_user_display_name(row.updated_by) if row.updated_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -5180,6 +5294,11 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
     payload = _crm_sales_order_payload_dict(row)
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     totals = _crm_sales_order_totals(items)
+    issue_date = str(payload.get("issueDate") or payload.get("issue_date") or "").strip()
+    if not issue_date:
+        issue_date = _crm_issue_date_from_order_id(row.order_id)
+    if not issue_date and row.created_at:
+        issue_date = row.created_at.date().isoformat()
     return {
         "id": row.id,
         "crm_reference_id": crm_reference_id,
@@ -5202,7 +5321,7 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         "payment_date": row.payment_date.isoformat() if row.payment_date else "",
         "transaction_id": row.transaction_id or "",
         "balance_amount": float(max(Decimal("0"), (row.total_amount or Decimal("0")) - Decimal(str(row.paid_amount or 0)))),
-        "issue_date": str(payload.get("issueDate") or payload.get("issue_date") or ""),
+        "issue_date": issue_date,
         "due_date": str(payload.get("dueDate") or payload.get("due_date") or ""),
         "gst_template_id": str(payload.get("gstTemplateId") or payload.get("gst_template_id") or ""),
         "billing_template_id": str(payload.get("billingTemplateId") or payload.get("billing_template_id") or ""),
@@ -5224,6 +5343,8 @@ def _serialize_crm_sales_order(row: CrmSalesOrder):
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
+        "updated_by_id": row.updated_by_id,
+        "updated_by_name": _get_org_user_display_name(row.updated_by) if row.updated_by_id else "",
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
@@ -5333,6 +5454,818 @@ def _dispatch_due_crm_meeting_reminders(org: Organization = None, now=None, limi
             row.reminder_email_sent_map = updated_map
             row.save(update_fields=["reminder_email_sent_map", "updated_at"])
     return {"checked": len(rows), "sent": sent}
+
+
+def _crm_report_parse_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    parsed = _parse_iso_date(raw)
+    if parsed:
+        return parsed
+    iso_candidate = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(iso_candidate).date()
+    except ValueError:
+        pass
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _crm_report_issue_date_from_doc_no(doc_no):
+    raw_doc_no = str(doc_no or "").strip()
+    if not raw_doc_no:
+        return None
+    dashed_match = re.match(r"^(?:SO|EST|INV)-(\d{2})-(\d{2})-(\d{4})-\d+$", raw_doc_no, re.IGNORECASE)
+    if dashed_match:
+        try:
+            return date(int(dashed_match.group(3)), int(dashed_match.group(2)), int(dashed_match.group(1)))
+        except ValueError:
+            return None
+    compact_match = re.match(r"^(?:SO|EST|INV)-(\d{2})(\d{2})(\d{4})-\d+$", raw_doc_no, re.IGNORECASE)
+    if compact_match:
+        try:
+            return date(int(compact_match.group(3)), int(compact_match.group(2)), int(compact_match.group(1)))
+        except ValueError:
+            return None
+    return None
+
+
+def _crm_report_extract_doc_issue_date(row):
+    if not isinstance(row, dict):
+        return None
+    for key in ("issueDate", "issue_date", "createdDate", "created_date", "invoiceDate", "invoice_date", "date"):
+        parsed = _crm_report_parse_date(row.get(key))
+        if parsed:
+            return parsed
+    return _crm_report_issue_date_from_doc_no(
+        row.get("docNo")
+        or row.get("doc_no")
+        or row.get("invoiceNo")
+        or row.get("invoice_no")
+        or row.get("estimateNo")
+        or row.get("estimate_no")
+    )
+
+
+def _crm_report_extract_source_sales_order_refs(row):
+    if not isinstance(row, dict):
+        return "", ""
+    source_id = str(
+        row.get("sourceSalesOrderId")
+        or row.get("source_sales_order_id")
+        or ""
+    ).strip()
+    source_no = str(
+        row.get("sourceSalesOrderNo")
+        or row.get("source_sales_order_no")
+        or ""
+    ).strip()
+    return source_id, source_no.lower()
+
+
+def _crm_report_default_group_label(group_by):
+    return "Unassigned User" if group_by == "user" else "Direct / Users"
+
+
+def _crm_report_group_label_for_lead(row: CrmLead, group_by: str):
+    if group_by == "team":
+        assigned_team = str(getattr(row, "assigned_team", "") or "").strip()
+        if assigned_team:
+            return assigned_team
+        return _crm_report_default_group_label(group_by)
+    assigned_name = _get_org_user_display_name(getattr(row, "assigned_user", None))
+    if assigned_name:
+        return assigned_name
+    created_name = _get_org_user_display_name(getattr(row, "created_by", None))
+    if created_name:
+        return created_name
+    return _crm_report_default_group_label(group_by)
+
+
+def _crm_report_group_label_for_sales_order(row: CrmSalesOrder, group_by: str):
+    if group_by == "team":
+        assigned_team = str(getattr(getattr(row, "deal", None), "assigned_team", "") or "").strip()
+        if assigned_team:
+            return assigned_team
+        return _crm_report_default_group_label(group_by)
+    assigned_name = _get_org_user_display_name(getattr(row, "assigned_user", None))
+    if assigned_name:
+        return assigned_name
+    created_name = _get_org_user_display_name(getattr(row, "created_by", None))
+    if created_name:
+        return created_name
+    return _crm_report_default_group_label(group_by)
+
+
+def _crm_report_group_label_for_deal(row: CrmDeal, group_by: str):
+    if group_by == "team":
+        assigned_team = str(getattr(row, "assigned_team", "") or "").strip()
+        if assigned_team:
+            return assigned_team
+        return _crm_report_default_group_label(group_by)
+    assigned_name = _get_org_user_display_name(getattr(row, "assigned_user", None))
+    if assigned_name:
+        return assigned_name
+    created_name = _get_org_user_display_name(getattr(row, "created_by", None))
+    if created_name:
+        return created_name
+    return _crm_report_default_group_label(group_by)
+
+
+def _crm_report_sales_order_issue_date(row: CrmSalesOrder):
+    payload = _crm_sales_order_payload_dict(row)
+    issue_date = _crm_report_parse_date(payload.get("issueDate") or payload.get("issue_date"))
+    if issue_date:
+        return issue_date
+    issue_from_order_id = _crm_report_parse_date(_crm_issue_date_from_order_id(row.order_id))
+    if issue_from_order_id:
+        return issue_from_order_id
+    if row.created_at:
+        return row.created_at.date()
+    return None
+
+
+def _crm_report_in_range(value, start_date, end_date):
+    if not value:
+        return False
+    return start_date <= value <= end_date
+
+
+def _crm_report_build_payload(request_user: User, org: Organization, start_date: date, end_date: date, group_by: str):
+    visible_leads = [
+        row
+        for row in (
+            CrmLead.objects
+            # Extra safety: exclude inconsistent soft-deleted rows.
+            .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+            .select_related("assigned_user", "created_by")
+            .order_by("-created_at", "-id")
+        )
+        if _crm_can_view_row(request_user, org, row)
+    ]
+    visible_deals = [
+        row
+        for row in (
+            CrmDeal.objects
+            .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+            .select_related("assigned_user", "created_by")
+            .order_by("-created_at", "-id")
+        )
+        if _crm_can_view_row(request_user, org, row)
+    ]
+    visible_sales_orders = [
+        row
+        for row in (
+            CrmSalesOrder.objects
+            .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+            .select_related("assigned_user", "created_by", "deal")
+            .order_by("-created_at", "-id")
+        )
+        if _crm_can_view_row(request_user, org, row)
+    ]
+
+    sales_order_by_id = {}
+    sales_order_by_no = {}
+    for row in visible_sales_orders:
+        row_id = str(row.id or "").strip()
+        row_no = str(row.order_id or "").strip().lower()
+        if row_id:
+            sales_order_by_id[row_id] = row
+        if row_no:
+            sales_order_by_no[row_no] = row
+
+    has_unrestricted_doc_access = bool(
+        _crm_is_admin(request_user, org)
+        or _crm_has_product_view_access(request_user)
+        or _crm_has_unrestricted_row_access(request_user, org)
+    )
+
+    workspace = _get_accounts_workspace(org)
+    workspace_data = _normalize_accounts_workspace(workspace.data)
+    estimate_rows = workspace_data.get("estimates") if isinstance(workspace_data.get("estimates"), list) else []
+    invoice_rows = workspace_data.get("invoices") if isinstance(workspace_data.get("invoices"), list) else []
+
+    def _empty_group_row(label):
+        return {
+            "group_name": label,
+            "total_leads": 0,
+            "new_leads": 0,
+            "pending_leads": 0,
+            "completed_leads": 0,
+            "onhold_leads": 0,
+            "sales_orders": 0,
+            "estimate_converted": 0,
+            "invoice_converted": 0,
+            "pipeline_value": Decimal("0"),
+            "won_amount": Decimal("0"),
+            "sales_order_value": Decimal("0"),
+        }
+
+    group_rows_map = {}
+
+    def _group_bucket(label):
+        normalized_label = str(label or "").strip() or _crm_report_default_group_label(group_by)
+        if normalized_label not in group_rows_map:
+            group_rows_map[normalized_label] = _empty_group_row(normalized_label)
+        return group_rows_map[normalized_label]
+
+    lead_details = []
+    range_leads = []
+    pipeline_leads = []
+    for row in visible_leads:
+        created_date = row.created_at.date() if row.created_at else None
+        if not _crm_report_in_range(created_date, start_date, end_date):
+            continue
+        range_leads.append(row)
+        normalized_status = str(row.status or "").strip().lower()
+        normalized_stage = str(row.stage or "").strip().lower()
+        is_new = normalized_stage == "new" or normalized_status == "open"
+        is_pending = normalized_status in {"open", "onhold", "pending"}
+        is_completed = normalized_status in {"closed", "completed", "won", "converted"}
+        is_onhold = normalized_status == "onhold"
+        group_name = _crm_report_group_label_for_lead(row, group_by)
+        bucket = _group_bucket(group_name)
+        bucket["total_leads"] += 1
+        if is_new:
+            bucket["new_leads"] += 1
+        if is_pending:
+            bucket["pending_leads"] += 1
+        if is_completed:
+            bucket["completed_leads"] += 1
+        if is_onhold:
+            bucket["onhold_leads"] += 1
+        # Pipeline value should reflect only active opportunities (open/pending/onhold),
+        # not already closed/completed leads.
+        if is_pending and not is_completed:
+            bucket["pipeline_value"] += _crm_to_decimal(row.lead_amount)
+            pipeline_leads.append(row)
+        lead_details.append(
+            {
+                "date": created_date.isoformat() if created_date else "",
+                "crm_reference_id": str(row.crm_reference_id or "").strip(),
+                "lead_name": str(row.lead_name or "").strip(),
+                "company": str(row.company or "").strip(),
+                "phone": str(row.phone or "").strip(),
+                "lead_amount": float(_crm_to_decimal(row.lead_amount)),
+                "status": str(row.status or "").strip().title() or "-",
+                "priority": str(row.priority or "").strip().title() or "-",
+                "lead_source": str(row.lead_source or "").strip(),
+                "assigned_to": _get_org_user_display_name(row.assigned_user) if row.assigned_user_id else "",
+                "assigned_team": str(row.assigned_team or "").strip(),
+                "created_by": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
+                "group_name": group_name,
+            }
+        )
+
+    range_sales_orders = []
+    for row in visible_sales_orders:
+        issue_date = _crm_report_sales_order_issue_date(row)
+        if not _crm_report_in_range(issue_date, start_date, end_date):
+            continue
+        range_sales_orders.append(row)
+        group_name = _crm_report_group_label_for_sales_order(row, group_by)
+        bucket = _group_bucket(group_name)
+        bucket["sales_orders"] += 1
+        bucket["sales_order_value"] += _crm_to_decimal(row.total_amount)
+
+    range_won_deals = []
+    for row in visible_deals:
+        created_date = row.created_at.date() if row.created_at else None
+        if not _crm_report_in_range(created_date, start_date, end_date):
+            continue
+        if str(row.status or "").strip().lower() != "won":
+            continue
+        range_won_deals.append(row)
+        group_name = _crm_report_group_label_for_deal(row, group_by)
+        bucket = _group_bucket(group_name)
+        bucket["won_amount"] += _crm_to_decimal(row.won_amount_final or row.deal_value)
+
+    converted_estimate_count = 0
+    converted_invoice_count = 0
+
+    def _process_conversion_docs(rows, target_key):
+        nonlocal converted_estimate_count, converted_invoice_count
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            issue_date = _crm_report_extract_doc_issue_date(row)
+            if not _crm_report_in_range(issue_date, start_date, end_date):
+                continue
+            source_id, source_no = _crm_report_extract_source_sales_order_refs(row)
+            converted_flag = _to_bool(row.get("convertedFromSalesOrder") or row.get("converted_from_sales_order"))
+            has_conversion_ref = bool(source_id or source_no)
+            if not converted_flag and not has_conversion_ref:
+                continue
+            source_sales_order = sales_order_by_id.get(source_id) if source_id else None
+            if not source_sales_order and source_no:
+                source_sales_order = sales_order_by_no.get(source_no)
+            if not has_unrestricted_doc_access and not source_sales_order:
+                continue
+            group_name = (
+                _crm_report_group_label_for_sales_order(source_sales_order, group_by)
+                if source_sales_order
+                else _crm_report_default_group_label(group_by)
+            )
+            bucket = _group_bucket(group_name)
+            bucket[target_key] += 1
+            if target_key == "estimate_converted":
+                converted_estimate_count += 1
+            elif target_key == "invoice_converted":
+                converted_invoice_count += 1
+
+    _process_conversion_docs(estimate_rows, "estimate_converted")
+    _process_conversion_docs(invoice_rows, "invoice_converted")
+
+    summary_new_leads = sum(
+        1
+        for row in range_leads
+        if str(row.stage or "").strip().lower() == "new" or str(row.status or "").strip().lower() == "open"
+    )
+    summary_pending_leads = sum(
+        1
+        for row in range_leads
+        if str(row.status or "").strip().lower() in {"open", "onhold", "pending"}
+    )
+    summary_completed_leads = sum(
+        1
+        for row in range_leads
+        if str(row.status or "").strip().lower() in {"closed", "completed", "won", "converted"}
+    )
+    summary_onhold_leads = sum(
+        1
+        for row in range_leads
+        if str(row.status or "").strip().lower() == "onhold"
+    )
+    pipeline_value = sum((_crm_to_decimal(row.lead_amount) for row in pipeline_leads), Decimal("0"))
+    won_amount_total = sum((_crm_to_decimal(row.won_amount_final or row.deal_value) for row in range_won_deals), Decimal("0"))
+    sales_order_total = sum((_crm_to_decimal(row.total_amount) for row in range_sales_orders), Decimal("0"))
+
+    group_rows = []
+    for label, row in group_rows_map.items():
+        group_rows.append(
+            {
+                "group_name": label,
+                "total_leads": int(row["total_leads"]),
+                "new_leads": int(row["new_leads"]),
+                "pending_leads": int(row["pending_leads"]),
+                "completed_leads": int(row["completed_leads"]),
+                "onhold_leads": int(row["onhold_leads"]),
+                "sales_orders": int(row["sales_orders"]),
+                "estimate_converted": int(row["estimate_converted"]),
+                "invoice_converted": int(row["invoice_converted"]),
+                "pipeline_value": float(row["pipeline_value"]),
+                "won_amount": float(row["won_amount"]),
+                "sales_order_value": float(row["sales_order_value"]),
+            }
+        )
+    group_rows.sort(key=lambda item: (item["total_leads"], item["sales_orders"], item["pipeline_value"]), reverse=True)
+    lead_details.sort(key=lambda item: (item.get("date") or "", item.get("lead_name") or ""), reverse=True)
+
+    summary = {
+        "total_leads": len(range_leads),
+        "new_leads": summary_new_leads,
+        "pending_leads": summary_pending_leads,
+        "completed_leads": summary_completed_leads,
+        "onhold_leads": summary_onhold_leads,
+        "sales_orders": len(range_sales_orders),
+        "converted_estimates": converted_estimate_count,
+        "converted_invoices": converted_invoice_count,
+        "won_deals": len(range_won_deals),
+        "pipeline_value": float(pipeline_value),
+        "sales_order_value": float(sales_order_total),
+        "won_amount": float(won_amount_total),
+    }
+
+    chart_items = [
+        {"key": "new_leads", "label": "New Leads", "value": int(summary["new_leads"])},
+        {"key": "pending_leads", "label": "Pending Leads", "value": int(summary["pending_leads"])},
+        {"key": "completed_leads", "label": "Completed Leads", "value": int(summary["completed_leads"])},
+        {"key": "sales_orders", "label": "Sales Orders", "value": int(summary["sales_orders"])},
+        {"key": "converted_estimates", "label": "Estimate Converted", "value": int(summary["converted_estimates"])},
+        {"key": "converted_invoices", "label": "Invoice Converted", "value": int(summary["converted_invoices"])},
+    ]
+
+    return {
+        "group_by": group_by,
+        "period": {
+            "from_date": start_date.isoformat(),
+            "to_date": end_date.isoformat(),
+            "days": (end_date - start_date).days + 1,
+            "generated_at": timezone.now().isoformat(),
+        },
+        "summary": summary,
+        "chart_items": chart_items,
+        "group_rows": group_rows,
+        "lead_details": lead_details,
+    }
+
+
+def _crm_report_xlsx_response(org: Organization, request_user: User, payload):
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+    except ImportError:
+        return JsonResponse({"detail": "excel_dependency_missing", "package": "openpyxl"}, status=500)
+
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    period = payload.get("period") if isinstance(payload.get("period"), dict) else {}
+    group_rows = payload.get("group_rows") if isinstance(payload.get("group_rows"), list) else []
+    lead_rows = payload.get("lead_details") if isinstance(payload.get("lead_details"), list) else []
+    group_by = str(payload.get("group_by") or "user").strip().lower()
+
+    wb = Workbook()
+    ws_summary = wb.active
+    ws_summary.title = "Summary"
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    label_font = Font(bold=True, color="1F2937")
+
+    def write_kv_sheet(ws, title, rows):
+        ws.append([title])
+        ws["A1"].font = Font(bold=True, size=14, color="111827")
+        ws.append([])
+        ws.append(["Field", "Value"])
+        for cell in ws[3]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        for label, value in rows:
+            ws.append([label, value])
+            ws.cell(row=ws.max_row, column=1).font = label_font
+        ws.column_dimensions["A"].width = 28
+        ws.column_dimensions["B"].width = 42
+
+    write_kv_sheet(
+        ws_summary,
+        f"CRM Report ({'User' if group_by == 'user' else 'Team'})",
+        [
+            ("Organization", str(getattr(org, "name", "") or "Organization").strip()),
+            ("From Date", str(period.get("from_date") or "")),
+            ("To Date", str(period.get("to_date") or "")),
+            ("Days", int(period.get("days") or 0)),
+            ("Generated At", str(period.get("generated_at") or "")),
+            ("Total Leads", int(summary.get("total_leads") or 0)),
+            ("New Leads", int(summary.get("new_leads") or 0)),
+            ("Pending Leads", int(summary.get("pending_leads") or 0)),
+            ("Completed Leads", int(summary.get("completed_leads") or 0)),
+            ("Onhold Leads", int(summary.get("onhold_leads") or 0)),
+            ("Sales Orders", int(summary.get("sales_orders") or 0)),
+            ("Estimate Converted", int(summary.get("converted_estimates") or 0)),
+            ("Invoice Converted", int(summary.get("converted_invoices") or 0)),
+            ("Pipeline Value", float(summary.get("pipeline_value") or 0)),
+            ("Won Amount", float(summary.get("won_amount") or 0)),
+            ("Sales Order Value", float(summary.get("sales_order_value") or 0)),
+        ],
+    )
+
+    ws_perf = wb.create_sheet("Performance")
+    perf_headers = ["User / Team", "Total", "New", "Pending", "Completed", "Onhold", "SO", "Estimate", "Invoice", "Pipeline", "Won", "SO Value"]
+    ws_perf.append(perf_headers)
+    for cell in ws_perf[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    for row in group_rows:
+        ws_perf.append(
+            [
+                str(row.get("group_name") or ""),
+                int(row.get("total_leads") or 0),
+                int(row.get("new_leads") or 0),
+                int(row.get("pending_leads") or 0),
+                int(row.get("completed_leads") or 0),
+                int(row.get("onhold_leads") or 0),
+                int(row.get("sales_orders") or 0),
+                int(row.get("estimate_converted") or 0),
+                int(row.get("invoice_converted") or 0),
+                float(row.get("pipeline_value") or 0),
+                float(row.get("won_amount") or 0),
+                float(row.get("sales_order_value") or 0),
+            ]
+        )
+    for col in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]:
+        ws_perf.column_dimensions[col].width = 16 if col != "A" else 34
+
+    ws_leads = wb.create_sheet("Lead Details")
+    lead_headers = ["Date", "CRM ID", "Lead Name", "Company", "Phone", "Amount", "Status", "Priority", "Lead Source", "Assigned To", "Assigned Team", "Created By", "Group"]
+    ws_leads.append(lead_headers)
+    for cell in ws_leads[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    for row in lead_rows:
+        ws_leads.append(
+            [
+                str(row.get("date") or ""),
+                str(row.get("crm_reference_id") or ""),
+                str(row.get("lead_name") or ""),
+                str(row.get("company") or ""),
+                str(row.get("phone") or ""),
+                float(row.get("lead_amount") or 0),
+                str(row.get("status") or ""),
+                str(row.get("priority") or ""),
+                str(row.get("lead_source") or ""),
+                str(row.get("assigned_to") or ""),
+                str(row.get("assigned_team") or ""),
+                str(row.get("created_by") or ""),
+                str(row.get("group_name") or ""),
+            ]
+        )
+    ws_leads.freeze_panes = "A2"
+    ws_leads.column_dimensions["A"].width = 12
+    ws_leads.column_dimensions["B"].width = 18
+    ws_leads.column_dimensions["C"].width = 22
+    ws_leads.column_dimensions["D"].width = 22
+    ws_leads.column_dimensions["E"].width = 14
+    ws_leads.column_dimensions["F"].width = 12
+    ws_leads.column_dimensions["G"].width = 12
+    ws_leads.column_dimensions["H"].width = 12
+    ws_leads.column_dimensions["I"].width = 18
+    ws_leads.column_dimensions["J"].width = 18
+    ws_leads.column_dimensions["K"].width = 16
+    ws_leads.column_dimensions["L"].width = 16
+    ws_leads.column_dimensions["M"].width = 24
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    filename = f"crm_report_{period.get('from_date')}_to_{period.get('to_date')}.xlsx".replace(":", "-")
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _crm_report_pdf_response(org: Organization, request_user: User, payload):
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    period = payload.get("period") if isinstance(payload.get("period"), dict) else {}
+    group_rows = payload.get("group_rows") if isinstance(payload.get("group_rows"), list) else []
+    lead_rows = payload.get("lead_details") if isinstance(payload.get("lead_details"), list) else []
+    chart_items = payload.get("chart_items") if isinstance(payload.get("chart_items"), list) else []
+    group_by = str(payload.get("group_by") or "user").strip().lower()
+
+    company_name = str(org.name or "Organization").strip() or "Organization"
+    generated_at = timezone.localtime(timezone.now())
+    from_date = str(period.get("from_date") or "").strip() or "-"
+    to_date = str(period.get("to_date") or "").strip() or "-"
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    left = 16 * mm
+    right = width - 16 * mm
+    page_bottom = 14 * mm
+    row_gap = 4 * mm
+    money_font = _ba_get_unicode_pdf_font() or "Helvetica"
+    logo_image = _ba_resolve_org_logo_image(org, request_user)
+    metric_cards = [
+        ("Total Leads", str(summary.get("total_leads", 0))),
+        ("New Leads", str(summary.get("new_leads", 0))),
+        ("Pending Leads", str(summary.get("pending_leads", 0))),
+        ("Sales Orders", str(summary.get("sales_orders", 0))),
+        ("Estimate Conv.", str(summary.get("converted_estimates", 0))),
+        ("Invoice Conv.", str(summary.get("converted_invoices", 0))),
+        ("Pipeline Value", _format_pdf_inr(summary.get("pipeline_value", 0))),
+        ("Won Amount", _format_pdf_inr(summary.get("won_amount", 0))),
+    ]
+
+    y = height - 18 * mm
+
+    def draw_page_header(include_title=True):
+        nonlocal y
+        y = height - 18 * mm
+        logo_height = _ba_draw_pdf_logo(pdf, logo_image, left, y + 1 * mm, 22 * mm, 12 * mm)
+        title_x = left + (24 * mm if logo_height else 0)
+        if include_title:
+            pdf.setFont("Helvetica-Bold", 16)
+            pdf.drawString(title_x, y, "CRM Performance Report")
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(title_x, y - 5 * mm, company_name)
+            pdf.drawString(title_x, y - 9 * mm, f"Period: {from_date} to {to_date}")
+            pdf.drawString(title_x, y - 13 * mm, f"Generated: {generated_at.strftime('%d-%m-%Y %I:%M %p')}")
+            pdf.drawRightString(right, y, f"Group By: {'User' if group_by == 'user' else 'Team'}")
+            y = y - (max(logo_height, 14 * mm) + 8 * mm)
+        else:
+            y = y - (max(logo_height, 6 * mm) + 4 * mm)
+
+    def ensure_space(required_height):
+        nonlocal y
+        if y - required_height < page_bottom:
+            pdf.showPage()
+            draw_page_header(include_title=False)
+
+    draw_page_header(include_title=True)
+
+    card_columns = 4
+    card_gap = 3 * mm
+    card_width = (right - left - (card_gap * (card_columns - 1))) / card_columns
+    card_height = 16 * mm
+    for index, (label, value) in enumerate(metric_cards):
+        row_index = index // card_columns
+        col_index = index % card_columns
+        card_x = left + col_index * (card_width + card_gap)
+        card_y = y - row_index * (card_height + card_gap)
+        ensure_space(card_height + 2 * mm)
+        pdf.setFillColorRGB(0.94, 0.97, 1)
+        pdf.roundRect(card_x, card_y - card_height, card_width, card_height, 2 * mm, stroke=0, fill=1)
+        pdf.setFillColorRGB(0.18, 0.27, 0.41)
+        pdf.setFont("Helvetica", 8)
+        pdf.drawString(card_x + 2 * mm, card_y - 5 * mm, label)
+        if label in {"Pipeline Value", "Won Amount"}:
+            pdf.setFont(money_font, 10)
+        else:
+            pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(card_x + 2 * mm, card_y - 11 * mm, str(value or "-"))
+    y = y - (2 * (card_height + card_gap) + 3 * mm)
+
+    ensure_space(38 * mm)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.setFillColorRGB(0.07, 0.12, 0.2)
+    pdf.drawString(left, y, "Performance Snapshot")
+    y -= 5 * mm
+    max_chart_value = max([int(item.get("value") or 0) for item in chart_items] + [1])
+    for item in chart_items[:6]:
+        ensure_space(7 * mm)
+        label = str(item.get("label") or "-")
+        value = int(item.get("value") or 0)
+        bar_x = left + 45 * mm
+        bar_width = 84 * mm
+        bar_height = 4 * mm
+        fill_width = bar_width * (value / max_chart_value if max_chart_value else 0)
+        pdf.setFont("Helvetica", 9)
+        pdf.setFillColorRGB(0.12, 0.16, 0.25)
+        pdf.drawString(left, y, label)
+        pdf.setFillColorRGB(0.90, 0.92, 0.97)
+        pdf.roundRect(bar_x, y - 3 * mm, bar_width, bar_height, 1 * mm, stroke=0, fill=1)
+        pdf.setFillColorRGB(0.24, 0.56, 0.96)
+        if fill_width > 0:
+            pdf.roundRect(bar_x, y - 3 * mm, fill_width, bar_height, 1 * mm, stroke=0, fill=1)
+        pdf.setFillColorRGB(0.07, 0.12, 0.2)
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawRightString(right, y, str(value))
+        y -= 6 * mm
+
+    y -= 2 * mm
+    table_title = "User Performance Table" if group_by == "user" else "Team Performance Table"
+    ensure_space(16 * mm)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(left, y, table_title)
+    y -= 5 * mm
+    headers = ["User / Team", "Total", "Pending", "Completed", "SO", "Estimate", "Invoice"]
+    col_widths = [56 * mm, 14 * mm, 18 * mm, 18 * mm, 12 * mm, 18 * mm, 18 * mm]
+
+    def draw_table_header():
+        nonlocal y
+        pdf.setFillColorRGB(0.88, 0.91, 0.96)
+        x = left
+        for header, col_width in zip(headers, col_widths):
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
+            pdf.setFillColorRGB(0.07, 0.12, 0.2)
+            pdf.setFont("Helvetica-Bold", 8)
+            pdf.drawString(x + 1.2 * mm, y - 3.6 * mm, header)
+            x += col_width
+        y -= 5.4 * mm
+
+    draw_table_header()
+    for row in group_rows[:24]:
+        ensure_space(5.5 * mm)
+        if y - 5.5 * mm < page_bottom:
+            pdf.showPage()
+            draw_page_header(include_title=False)
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(left, y, table_title)
+            y -= 5 * mm
+            draw_table_header()
+        values = [
+            str(row.get("group_name") or "-"),
+            str(row.get("total_leads", 0)),
+            str(row.get("pending_leads", 0)),
+            str(row.get("completed_leads", 0)),
+            str(row.get("sales_orders", 0)),
+            str(row.get("estimate_converted", 0)),
+            str(row.get("invoice_converted", 0)),
+        ]
+        x = left
+        for value, col_width in zip(values, col_widths):
+            pdf.setStrokeColorRGB(0.87, 0.89, 0.93)
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=1, fill=0)
+            pdf.setFillColorRGB(0.09, 0.14, 0.22)
+            pdf.setFont("Helvetica", 8)
+            pdf.drawString(x + 1.2 * mm, y - 3.6 * mm, str(value)[:48])
+            x += col_width
+        y -= 5 * mm
+
+    y -= 3 * mm
+    ensure_space(15 * mm)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.setFillColorRGB(0.07, 0.12, 0.2)
+    pdf.drawString(left, y, "Lead Details")
+    y -= 5 * mm
+    lead_headers = ["Date", "CRM ID", "Lead Name", "Company", "Status", "Assigned"]
+    lead_col_widths = [20 * mm, 26 * mm, 44 * mm, 40 * mm, 18 * mm, 34 * mm]
+
+    def draw_lead_header():
+        nonlocal y
+        x = left
+        pdf.setFillColorRGB(0.88, 0.91, 0.96)
+        for header, col_width in zip(lead_headers, lead_col_widths):
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
+            pdf.setFillColorRGB(0.07, 0.12, 0.2)
+            pdf.setFont("Helvetica-Bold", 8)
+            pdf.drawString(x + 1.0 * mm, y - 3.6 * mm, header)
+            x += col_width
+        y -= 5.4 * mm
+
+    draw_lead_header()
+    for row in lead_rows[:50]:
+        ensure_space(5.5 * mm)
+        if y - 5.5 * mm < page_bottom:
+            pdf.showPage()
+            draw_page_header(include_title=False)
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(left, y, "Lead Details")
+            y -= 5 * mm
+            draw_lead_header()
+        values = [
+            str(row.get("date") or "-"),
+            str(row.get("crm_reference_id") or "-"),
+            str(row.get("lead_name") or "-"),
+            str(row.get("company") or "-"),
+            str(row.get("status") or "-"),
+            str(row.get("assigned_to") or row.get("group_name") or "-"),
+        ]
+        x = left
+        for value, col_width in zip(values, lead_col_widths):
+            pdf.setStrokeColorRGB(0.87, 0.89, 0.93)
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=1, fill=0)
+            pdf.setFillColorRGB(0.09, 0.14, 0.22)
+            pdf.setFont("Helvetica", 7.5)
+            pdf.drawString(x + 1.0 * mm, y - 3.5 * mm, str(value)[:42])
+            x += col_width
+        y -= 5 * mm
+
+    pdf.setFont("Helvetica", 7)
+    pdf.setFillColorRGB(0.35, 0.4, 0.48)
+    pdf.drawRightString(right, 8 * mm, f"Generated by Work Zilla CRM on {generated_at.strftime('%d-%m-%Y %I:%M %p')}")
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    filename = f"crm_report_{from_date}_to_{to_date}.pdf".replace(":", "-")
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@require_http_methods(["GET"])
+def crm_reports(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not (_crm_is_admin(request.user, org) or _crm_has_product_view_access(request.user) or _crm_has_view_access(request.user, org)):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    today = timezone.localdate()
+    preset = str(request.GET.get("preset") or "last_30_days").strip().lower()
+    from_raw = str(request.GET.get("from_date") or request.GET.get("from") or "").strip()
+    to_raw = str(request.GET.get("to_date") or request.GET.get("to") or "").strip()
+    group_by = str(request.GET.get("group_by") or "user").strip().lower()
+    if group_by not in {"user", "team"}:
+        group_by = "user"
+
+    preset_days_map = {
+        "last_7_days": 7,
+        "last_15_days": 15,
+        "last_30_days": 30,
+        "last_60_days": 60,
+        "last_90_days": 90,
+    }
+    default_span = preset_days_map.get(preset, 30)
+    default_start = today - timedelta(days=max(default_span - 1, 0))
+    start_date = _crm_report_parse_date(from_raw) or default_start
+    end_date = _crm_report_parse_date(to_raw) or today
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    max_span_days = 365
+    if (end_date - start_date).days > max_span_days:
+        start_date = end_date - timedelta(days=max_span_days)
+
+    report_payload = _crm_report_build_payload(request.user, org, start_date, end_date, group_by)
+    requested_format = str(request.GET.get("format") or "json").strip().lower()
+    if requested_format == "pdf":
+        return _crm_report_pdf_response(org, request.user, report_payload)
+    if requested_format in {"xlsx", "excel"}:
+        return _crm_report_xlsx_response(org, request.user, report_payload)
+
+    return JsonResponse({"report": report_payload})
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
@@ -5585,16 +6518,36 @@ def crm_contacts(request, contact_id: int = None):
         name = str(payload.get("name") or "").strip()
         if not name:
             return JsonResponse({"detail": "name_required"}, status=400)
+        company = str(payload.get("company") or "").strip()[:180]
+        email = str(payload.get("email") or "").strip()[:180]
+        phone_country_code = str(payload.get("phone_country_code") or payload.get("phoneCountryCode") or "+91").strip()[:10] or "+91"
+        phone = str(payload.get("phone") or "").strip()[:40]
+        duplicate_row, duplicate_fields = _crm_find_duplicate_contact(
+            org,
+            company=company,
+            email=email,
+            phone_country_code=phone_country_code,
+            phone=phone,
+        )
+        if duplicate_row:
+            return JsonResponse(
+                {
+                    "detail": "duplicate_contact",
+                    "duplicate_fields": duplicate_fields,
+                    "existing_contact": _serialize_crm_contact(duplicate_row),
+                },
+                status=409,
+            )
         tag = str(payload.get("tag") or "Client").strip().title()
         if tag not in {"Client", "Prospect", "Vendor"}:
             tag = "Client"
         row = CrmContact.objects.create(
             organization=org,
             name=name[:180],
-            company=str(payload.get("company") or "").strip()[:180],
-            email=str(payload.get("email") or "").strip()[:180],
-            phone_country_code=str(payload.get("phone_country_code") or payload.get("phoneCountryCode") or "+91").strip()[:10] or "+91",
-            phone=str(payload.get("phone") or "").strip()[:40],
+            company=company,
+            email=email,
+            phone_country_code=phone_country_code,
+            phone=phone,
             tag=tag,
             created_by=request.user,
             updated_by=request.user,
@@ -5611,25 +6564,52 @@ def crm_contacts(request, contact_id: int = None):
                 payload = json.loads(request.body.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
+        next_name = str(row.name or "").strip()
+        next_company = str(row.company or "").strip()
+        next_email = str(row.email or "").strip()
+        next_phone_country_code = str(row.phone_country_code or "+91").strip() or "+91"
+        next_phone = str(row.phone or "").strip()
         update_fields = ["updated_by", "updated_at"]
         if "name" in payload:
             name = str(payload.get("name") or "").strip()
             if not name:
                 return JsonResponse({"detail": "name_required"}, status=400)
-            row.name = name[:180]
+            next_name = name[:180]
             update_fields.append("name")
         if "company" in payload:
-            row.company = str(payload.get("company") or "").strip()[:180]
+            next_company = str(payload.get("company") or "").strip()[:180]
             update_fields.append("company")
         if "email" in payload:
-            row.email = str(payload.get("email") or "").strip()[:180]
+            next_email = str(payload.get("email") or "").strip()[:180]
             update_fields.append("email")
         if "phone_country_code" in payload or "phoneCountryCode" in payload:
-            row.phone_country_code = str(payload.get("phone_country_code") or payload.get("phoneCountryCode") or "+91").strip()[:10] or "+91"
+            next_phone_country_code = str(payload.get("phone_country_code") or payload.get("phoneCountryCode") or "+91").strip()[:10] or "+91"
             update_fields.append("phone_country_code")
         if "phone" in payload:
-            row.phone = str(payload.get("phone") or "").strip()[:40]
+            next_phone = str(payload.get("phone") or "").strip()[:40]
             update_fields.append("phone")
+        duplicate_row, duplicate_fields = _crm_find_duplicate_contact(
+            org,
+            company=next_company,
+            email=next_email,
+            phone_country_code=next_phone_country_code,
+            phone=next_phone,
+            exclude_contact_id=row.id,
+        )
+        if duplicate_row:
+            return JsonResponse(
+                {
+                    "detail": "duplicate_contact",
+                    "duplicate_fields": duplicate_fields,
+                    "existing_contact": _serialize_crm_contact(duplicate_row),
+                },
+                status=409,
+            )
+        row.name = next_name[:180]
+        row.company = next_company[:180]
+        row.email = next_email[:180]
+        row.phone_country_code = next_phone_country_code[:10] or "+91"
+        row.phone = next_phone[:40]
         if "tag" in payload:
             tag = str(payload.get("tag") or "Client").strip().title()
             row.tag = tag if tag in {"Client", "Prospect", "Vendor"} else "Client"
@@ -5774,7 +6754,7 @@ def crm_deals(request, deal_id: int = None):
     if resolved_method == "GET" and not deal_id:
         rows = [
         row
-        for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead", "created_by").order_by("-created_at")
+        for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead", "created_by", "updated_by").order_by("-created_at")
         if _crm_can_view_row(request.user, org, row)
     ]
         pipeline_value = sum((_crm_to_decimal(row.deal_value) for row in rows if not row.is_deleted), Decimal("0"))
@@ -5817,7 +6797,7 @@ def crm_deals(request, deal_id: int = None):
         )
         return JsonResponse({"deal": _serialize_crm_deal(row)}, status=201)
 
-    row = CrmDeal.objects.filter(organization=org, id=deal_id).first() if deal_id else None
+    row = CrmDeal.objects.filter(organization=org, id=deal_id).select_related("assigned_user", "lead", "created_by", "updated_by").first() if deal_id else None
     if not row:
         return JsonResponse({"detail": "deal_not_found"}, status=404)
     if not _crm_can_access_row(request.user, org, row):
@@ -6134,10 +7114,24 @@ def crm_sales_orders(request, order_id: int = None):
         payment_status = "partial"
     else:
         payment_status = "pending"
+    existing_products_payload = _crm_sales_order_payload_dict(row) if row else {}
+    requested_order_id = str(payload.get("order_id") or payload.get("orderId") or (row.order_id if row else "") or "").strip()
+    resolved_issue_date = str(payload.get("issue_date") or payload.get("issueDate") or "").strip()
+    if not resolved_issue_date:
+        resolved_issue_date = str(existing_products_payload.get("issueDate") or existing_products_payload.get("issue_date") or "").strip()
+    if not resolved_issue_date:
+        resolved_issue_date = _crm_issue_date_from_order_id(requested_order_id)
+    if not resolved_issue_date:
+        resolved_issue_date = timezone.localdate().isoformat()
+    resolved_due_date = str(payload.get("due_date") or payload.get("dueDate") or "").strip()
+    if not resolved_due_date:
+        resolved_due_date = str(existing_products_payload.get("dueDate") or existing_products_payload.get("due_date") or "").strip()
+    if not resolved_due_date:
+        resolved_due_date = resolved_issue_date
     products_payload = {
         "items": normalized_items,
-        "issueDate": str(payload.get("issue_date") or payload.get("issueDate") or "").strip(),
-        "dueDate": str(payload.get("due_date") or payload.get("dueDate") or "").strip(),
+        "issueDate": resolved_issue_date,
+        "dueDate": resolved_due_date,
         "gstTemplateId": gst_template_id,
         "billingTemplateId": str(payload.get("billing_template_id") or payload.get("billingTemplateId") or "").strip(),
         "salesperson": str(payload.get("salesperson") or "").strip(),
@@ -6269,15 +7263,23 @@ def crm_convert_to_sales_order(request, deal_id: int):
     with transaction.atomic():
         amount = _crm_to_decimal(deal.deal_value)
         customer_name = str(deal.lead.lead_name if deal.lead_id else deal.deal_name).strip()[:180]
+        conversion_date = timezone.localdate().isoformat()
+        next_order_id = _crm_order_id(org)
         row = CrmSalesOrder.objects.create(
             organization=org,
             deal=deal,
             crm_reference_id=str(deal.crm_reference_id or getattr(deal.lead, "crm_reference_id", "") or "").strip()[:32],
-            order_id=_crm_order_id(org),
+            order_id=next_order_id,
             customer_name=customer_name or "Customer",
             company=str(deal.company or "").strip()[:180],
             phone=str(deal.phone or "").strip()[:40],
             amount=amount,
+            products={
+                "items": [],
+                "issueDate": conversion_date,
+                "dueDate": conversion_date,
+                "sourceDealId": str(deal.id),
+            },
             quantity=1,
             price=amount,
             tax=Decimal("0"),

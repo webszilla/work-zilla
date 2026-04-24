@@ -5,6 +5,11 @@ from . import api_views
 
 urlpatterns = [
     path("crm/activity-log", api_views.crm_activity_log, name="business_autopilot_crm_activity_log"),
+    # Accept both slash and non-slash variants to avoid 404s when clients append a trailing slash.
+    path("crm/activity-log/", api_views.crm_activity_log, name="business_autopilot_crm_activity_log_slash"),
+    path("crm/reports", api_views.crm_reports, name="business_autopilot_crm_reports"),
+    # Accept both slash and non-slash variants to avoid 404s when clients append a trailing slash.
+    path("crm/reports/", api_views.crm_reports, name="business_autopilot_crm_reports_slash"),
     path("contacts", api_views.crm_contacts, name="business_autopilot_crm_contacts"),
     path("contacts/<int:contact_id>", api_views.crm_contacts, name="business_autopilot_crm_contact_detail"),
     path("leads", api_views.crm_leads, name="business_autopilot_crm_leads"),

@@ -55,6 +55,7 @@ setuptools>=69.0.0
 
 # PDF / Reports
 reportlab==4.4.7
+openpyxl==3.1.5
 
 # Payments
 razorpay==2.0.0

@@ -8,7 +8,15 @@ Billing cycle: {{ billing_cycle }}
 Expiry date: {{ end_date }}
 Days left: {{ days_left }}
 
+{% if items %}
+Subscriptions summary:
+{% for item in items %}
+- {{ item.product }} | {{ item.plan_name }} | {{ item.billing_cycle }} | {{ item.status }} | Expiry: {{ item.end_date }}{% if item.kind == "expiring" %} | Days left: {{ item.days }}{% endif %}{% if item.kind == "expired" and item.days %} | Days since: {{ item.days }}{% endif %}
+{% endfor %}
+{% endif %}
+
 Please renew to avoid interruption.
+Renew here: {{ renew_url }}
 
 
 Thanks,

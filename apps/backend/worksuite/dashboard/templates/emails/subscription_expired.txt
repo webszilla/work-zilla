@@ -6,7 +6,15 @@ Your subscription has expired.
 Plan: {{ plan_name }}
 End Date: {{ end_date }}
 
+{% if items %}
+Subscriptions summary:
+{% for item in items %}
+- {{ item.product }} | {{ item.plan_name }} | {{ item.billing_cycle }} | {{ item.status }} | Expiry: {{ item.end_date }}{% if item.kind == "expiring" %} | Days left: {{ item.days }}{% endif %}{% if item.kind == "expired" and item.days %} | Days since: {{ item.days }}{% endif %}
+{% endfor %}
+{% endif %}
+
 Please renew to continue access.
+Renew here: {{ renew_url }}
 
 
 Thanks,

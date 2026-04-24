@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html
 from django.db import models
 from django.contrib.admin import SimpleListFilter
-from .models import Organization, Employee, Activity, Screenshot, Plan, Device, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, Subscription, SubscriptionHistory, DeletedAccount, AdminNotification, PendingTransfer, UserProfile, BillingProfile, InvoiceSellerProfile, ThemeSettings, ReferralSettings, ReferralEarning, DealerAccount, DealerReferralEarning, EventMetric, AlertRule, ChatWidget, ChatConversation, ChatMessage, ChatLead, ChatEnquiryLead, AiUsageCounter, AiUsageMonthly, OrganizationProduct, UserProductAccess
+from .models import Organization, Employee, Activity, Screenshot, Plan, Device, OrganizationSettings, CompanyPrivacySettings, SupportAccessAuditLog, Subscription, SubscriptionHistory, EmailNotificationLog, DeletedAccount, AdminNotification, PendingTransfer, UserProfile, BillingProfile, InvoiceSellerProfile, ThemeSettings, ReferralSettings, ReferralEarning, DealerAccount, DealerReferralEarning, EventMetric, AlertRule, ChatWidget, ChatConversation, ChatMessage, ChatLead, ChatEnquiryLead, AiUsageCounter, AiUsageMonthly, OrganizationProduct, UserProductAccess
 from django.utils import timezone
 from django.db.models import Q
 from decimal import Decimal
@@ -152,6 +152,14 @@ class OrganizationAdmin(admin.ModelAdmin):
 class SubscriptionAdmin(admin.ModelAdmin):
     list_display = ("organization", "plan", "status", "billing_cycle", "retention_days", "start_date", "end_date")
     list_filter = ("status", "billing_cycle")
+
+
+@admin.register(EmailNotificationLog)
+class EmailNotificationLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "organization", "category", "event_key", "scheduled_for", "status", "to_email", "subject")
+    list_filter = ("category", "status", "scheduled_for")
+    search_fields = ("organization__name", "to_email", "subject", "event_key", "category")
+    readonly_fields = ("created_at", "sent_at")
 
 
 @admin.register(EventMetric)

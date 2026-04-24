@@ -114,6 +114,7 @@ const ROLE_ACCESS_SECTION_MODULE_SLUG = {
   stocks: "stocks",
 };
 const ACCESS_LEVEL_OPTIONS = ["No Access", "View", "View and Edit", "Create, View and Edit", "Full Access"];
+const CRM_ACCESS_LEVEL_OPTIONS = ["No Access", "View", "View and Edit", "Create, View and Edit Own", "Create, View and Edit All", "Full Access"];
 const USER_SUB_ACCESS_OPTIONS = [
   { key: "employee", label: "Employee" },
   { key: "clients", label: "Clients" },
@@ -185,7 +186,18 @@ function normalizeRoleAccessLevel(level) {
   if (value === "Create/Edit") {
     return "Create, View and Edit";
   }
+  if (value === "Create, View and Edit Own" || value === "Create, View and Edit All") {
+    return value;
+  }
   return ACCESS_LEVEL_OPTIONS.includes(value) ? value : "No Access";
+}
+
+function normalizeCrmRoleAccessLevel(level) {
+  const normalized = normalizeRoleAccessLevel(level);
+  if (normalized === "Create, View and Edit") {
+    return "Create, View and Edit Own";
+  }
+  return CRM_ACCESS_LEVEL_OPTIONS.includes(normalized) ? normalized : "No Access";
 }
 
 function createDefaultUserSubSections() {
@@ -594,6 +606,124 @@ function formatSharedCustomerEmails(row = {}) {
     });
   }
   return list.filter(Boolean);
+}
+
+function normalizeSharedPartyMatchToken(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildSharedPartyPhoneMatchKey(countryCode = "+91", phone = "") {
+  const normalizedCountryCode = String(countryCode || "+91").trim() || "+91";
+  const normalizedPhoneDigits = String(phone || "").replace(/\D+/g, "");
+  if (!normalizedPhoneDigits) {
+    return "";
+  }
+  return `${normalizedCountryCode}|${normalizedPhoneDigits}`;
+}
+
+function collectSharedPartyPhoneMatchKeys(row = {}) {
+  const normalized = normalizeSharedCustomerRecord(row);
+  const keys = new Set();
+  const pushPhone = (countryCode, number) => {
+    const key = buildSharedPartyPhoneMatchKey(countryCode, number);
+    if (key) {
+      keys.add(key);
+    }
+  };
+  pushPhone(normalized.phoneCountryCode, normalized.phone);
+  (Array.isArray(normalized.phoneList) ? normalized.phoneList : []).forEach((item) => {
+    pushPhone(item?.countryCode, item?.number);
+  });
+  (Array.isArray(normalized.additionalPhones) ? normalized.additionalPhones : []).forEach((item) => {
+    pushPhone(item?.countryCode, item?.number);
+  });
+  return keys;
+}
+
+function collectSharedPartyEmailMatchKeys(row = {}) {
+  const normalized = normalizeSharedCustomerRecord(row);
+  const keys = new Set();
+  const pushEmail = (value) => {
+    const token = normalizeSharedPartyMatchToken(value);
+    if (token) {
+      keys.add(token);
+    }
+  };
+  pushEmail(normalized.email);
+  (Array.isArray(normalized.emailList) ? normalized.emailList : []).forEach((item) => pushEmail(item));
+  (Array.isArray(normalized.additionalEmails) ? normalized.additionalEmails : []).forEach((item) => pushEmail(item));
+  return keys;
+}
+
+function hasSharedMatchValue(leftSet = new Set(), rightSet = new Set()) {
+  for (const value of leftSet) {
+    if (rightSet.has(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findDuplicateSharedCustomerRow(rows = [], candidate = {}, options = {}) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const excludeId = String(options.excludeId || "").trim();
+  const normalizedCandidate = normalizeSharedCustomerRecord(candidate);
+  const candidateCompany = normalizeSharedPartyMatchToken(normalizedCandidate.companyName || normalizedCandidate.name);
+  const candidatePhoneKeys = collectSharedPartyPhoneMatchKeys(normalizedCandidate);
+  const candidateEmailKeys = collectSharedPartyEmailMatchKeys(normalizedCandidate);
+
+  for (const row of normalizedRows) {
+    const normalizedRow = normalizeSharedCustomerRecord(row);
+    if (excludeId && String(normalizedRow.id || "").trim() === excludeId) {
+      continue;
+    }
+    const matchedFields = [];
+    const rowCompany = normalizeSharedPartyMatchToken(normalizedRow.companyName || normalizedRow.name);
+    if (candidateCompany && rowCompany && candidateCompany === rowCompany) {
+      matchedFields.push("company");
+    }
+    if (candidateEmailKeys.size && hasSharedMatchValue(candidateEmailKeys, collectSharedPartyEmailMatchKeys(normalizedRow))) {
+      matchedFields.push("email");
+    }
+    if (candidatePhoneKeys.size && hasSharedMatchValue(candidatePhoneKeys, collectSharedPartyPhoneMatchKeys(normalizedRow))) {
+      matchedFields.push("phone");
+    }
+    if (matchedFields.length) {
+      return { row: normalizedRow, matchedFields };
+    }
+  }
+
+  return null;
+}
+
+function formatSharedPartyDuplicateFieldLabelList(fields = []) {
+  const labels = [];
+  if (fields.includes("company")) {
+    labels.push("Company Name");
+  }
+  if (fields.includes("email")) {
+    labels.push("Email ID");
+  }
+  if (fields.includes("phone")) {
+    labels.push("Mobile Number");
+  }
+  return labels;
+}
+
+function buildClientDuplicateSummaryText(row = {}) {
+  const normalizedRow = normalizeSharedCustomerRecord(row);
+  const locationText = [
+    normalizedRow.billingState || normalizedRow.state,
+    normalizedRow.billingCountry || normalizedRow.country,
+    normalizedRow.billingPincode || normalizedRow.pincode,
+  ].filter(Boolean).join(", ");
+  return [
+    `Company Name: ${normalizedRow.companyName || normalizedRow.name || "-"}`,
+    `Client Name: ${normalizedRow.clientName || "-"}`,
+    `Mobile Number: ${formatSharedCustomerPhones(normalizedRow).join(", ") || "-"}`,
+    `Email ID: ${formatSharedCustomerEmails(normalizedRow).join(", ") || "-"}`,
+    `Location: ${locationText || "-"}`,
+  ].join("\n");
 }
 
 function normalizeImportHeader(value) {
@@ -1177,6 +1307,7 @@ export default function BusinessAutopilotUsersPage() {
   const emailCheckRequestRef = useRef(0);
   const clientImportInputRef = useRef(null);
   const vendorImportInputRef = useRef(null);
+  const clientFormCardRef = useRef(null);
   const userFormRef = useRef(null);
   const createPasswordInputRef = useRef(null);
   const crmContactToClientDraftAppliedRef = useRef(false);
@@ -2856,6 +2987,12 @@ export default function BusinessAutopilotUsersPage() {
     setVendorForm(createEmptySharedPartyForm());
   }
 
+  function scrollClientFormIntoView() {
+    window.requestAnimationFrame(() => {
+      clientFormCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   function clearActiveCrmContactToClientDraft() {
     if (!crmContactToClientDraft) {
       return;
@@ -3044,6 +3181,41 @@ export default function BusinessAutopilotUsersPage() {
       await openAlertDialog(message, { title: "Required Fields Missing" });
       return;
     }
+    const primaryPhoneCountryCode = String(clientForm.phoneCountryCode || "+91").trim() || "+91";
+    const duplicateClientMatch = findDuplicateSharedCustomerRow(
+      sharedCustomers,
+      {
+        companyName,
+        name: companyName,
+        clientName,
+        phoneCountryCode: primaryPhoneCountryCode,
+        phone: primaryPhone,
+        additionalPhones,
+        email: primaryEmail,
+        additionalEmails,
+      },
+      { excludeId: editingClientId },
+    );
+    if (duplicateClientMatch) {
+      const matchedFieldLabels = formatSharedPartyDuplicateFieldLabelList(duplicateClientMatch.matchedFields);
+      const duplicateMessage = [
+        `A client with same ${matchedFieldLabels.join(", ")} already exists.`,
+        "",
+        buildClientDuplicateSummaryText(duplicateClientMatch.row),
+        "",
+        "Do you want to edit this existing client?",
+      ].join("\n");
+      const shouldOpenEdit = await openConfirmDialog(duplicateMessage, {
+        title: "Duplicate Client Found",
+        confirmText: "Edit Client",
+        cancelText: "Close",
+      });
+      if (shouldOpenEdit) {
+        editClient(duplicateClientMatch.row);
+        setNotice("Existing client opened for editing.");
+      }
+      return;
+    }
     const conversionDraftForThisSave = editingClientId ? null : crmContactToClientDraft;
     const payload = normalizeSharedCustomerRecord({
       id: editingClientId || `cust_${Date.now()}`,
@@ -3055,11 +3227,11 @@ export default function BusinessAutopilotUsersPage() {
       crmReferenceId: String(conversionDraftForThisSave?.crmReferenceId || conversionDraftForThisSave?.crm_reference_id || "").trim(),
       crm_reference_id: String(conversionDraftForThisSave?.crmReferenceId || conversionDraftForThisSave?.crm_reference_id || "").trim(),
       gstin: String(clientForm.gstin || "").trim(),
-      phoneCountryCode: String(clientForm.phoneCountryCode || "+91").trim() || "+91",
+      phoneCountryCode: primaryPhoneCountryCode,
       phone: primaryPhone,
       additionalPhones,
       phoneList: [
-        ...(primaryPhone ? [{ countryCode: String(clientForm.phoneCountryCode || "+91").trim() || "+91", number: primaryPhone }] : []),
+        ...(primaryPhone ? [{ countryCode: primaryPhoneCountryCode, number: primaryPhone }] : []),
         ...additionalPhones,
       ],
       email: primaryEmail,
@@ -3116,6 +3288,7 @@ export default function BusinessAutopilotUsersPage() {
     });
     setClientCompanySearchOpen(false);
     activateTopTab("clients");
+    scrollClientFormIntoView();
   }
 
   function selectCrmContactForClient(row) {
@@ -4655,19 +4828,28 @@ export default function BusinessAutopilotUsersPage() {
                   <tr key={section.key}>
                     <td>{section.label}</td>
                     <td>
+                      {(() => {
+                        const isCrmSection = section.key === "crm";
+                        const sectionOptions = isCrmSection ? CRM_ACCESS_LEVEL_OPTIONS : ACCESS_LEVEL_OPTIONS;
+                        const selectedLevel = isCrmSection
+                          ? normalizeCrmRoleAccessLevel(selectedRoleAccess.sections?.[section.key] || "No Access")
+                          : normalizeRoleAccessLevel(selectedRoleAccess.sections?.[section.key] || "No Access");
+                        return (
                       <select
                         className="form-select form-select-sm"
-                        value={selectedRoleAccess.sections?.[section.key] || "No Access"}
+                        value={selectedLevel}
                         disabled={!canManageRoleAccessTab}
                         onChange={(event) => updateRoleAccess((prev) => ({
                           ...prev,
                           sections: { ...(prev.sections || {}), [section.key]: event.target.value }
                         }))}
                       >
-                        {ACCESS_LEVEL_OPTIONS.map((level) => (
+                        {sectionOptions.map((level) => (
                           <option key={`${section.key}-${level}`} value={level}>{level}</option>
                         ))}
                       </select>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -4801,7 +4983,7 @@ export default function BusinessAutopilotUsersPage() {
       ) : activeTopTab === "clients" ? (
         <>
           {canCreateClientsTab || editingClientId ? (
-            <div className="card p-3">
+            <div className="card p-3" ref={clientFormCardRef}>
               <h6 className="mb-3">{editingClientId ? "Edit Client" : "Create Client"}</h6>
               <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
               <div className="row g-3">

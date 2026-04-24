@@ -1112,6 +1112,61 @@ class SubscriptionHistory(models.Model):
         return f"{org_name} - {plan_name}"
 
 
+class EmailNotificationLog(models.Model):
+    STATUS_CHOICES = (
+        ("queued", "Queued"),
+        ("sent", "Sent"),
+        ("skipped", "Skipped"),
+        ("failed", "Failed"),
+    )
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="email_notification_logs",
+    )
+    subscription = models.ForeignKey(
+        "Subscription",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="email_notification_logs",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="email_notification_logs",
+    )
+    to_email = models.EmailField(blank=True, default="")
+    category = models.CharField(max_length=64, db_index=True, default="")
+    event_key = models.CharField(max_length=64, db_index=True, default="")
+    scheduled_for = models.DateField(db_index=True, null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="queued", db_index=True)
+    subject = models.CharField(max_length=200, blank=True, default="")
+    template_name = models.CharField(max_length=180, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "category", "event_key", "scheduled_for"],
+                name="core_email_notification_dedupe_key",
+            ),
+        ]
+
+    def __str__(self):
+        org_name = self.organization.name if self.organization else "-"
+        return f"EmailNotificationLog({org_name} {self.category}:{self.event_key} {self.scheduled_for or '-'})"
+
+
 def _receipt_upload_to(instance, filename):
     org_id = None
     if instance.organization_id:

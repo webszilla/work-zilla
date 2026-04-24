@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 import json
 
-from apps.backend.business_autopilot.models import AccountsWorkspace, CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
+from apps.backend.business_autopilot.models import AccountsWorkspace, CrmContact, CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, OrganizationSettings, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -365,6 +365,88 @@ class BusinessAutopilotUserAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["lead"]["priority"], "High")
 
+    def test_crm_contacts_post_blocks_duplicate_company_email_and_phone(self):
+        existing_contact = CrmContact.objects.create(
+            organization=self.org,
+            name="Krishnan",
+            company="Krish Infotech",
+            email="krish@gmail.com",
+            phone_country_code="+91",
+            phone="9092833701",
+            tag="Client",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            "/api/business-autopilot/contacts",
+            data=json.dumps(
+                {
+                    "name": "Krishnan New",
+                    "company": "Krish Infotech",
+                    "email": "krish@gmail.com",
+                    "phone_country_code": "+91",
+                    "phone": "9092833701",
+                    "tag": "Client",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertEqual(payload["detail"], "duplicate_contact")
+        self.assertEqual(payload["existing_contact"]["id"], existing_contact.id)
+        duplicate_fields = set(payload.get("duplicate_fields") or [])
+        self.assertTrue({"company", "email", "phone"}.issubset(duplicate_fields))
+
+    def test_crm_contacts_patch_blocks_duplicate_company_email_and_phone(self):
+        first_contact = CrmContact.objects.create(
+            organization=self.org,
+            name="First Contact",
+            company="Com Com",
+            email="vishwa@gmail.com",
+            phone_country_code="+91",
+            phone="9092833701",
+            tag="Client",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+        second_contact = CrmContact.objects.create(
+            organization=self.org,
+            name="Second Contact",
+            company="Apple Inc",
+            email="apple@gmail.com",
+            phone_country_code="+91",
+            phone="1234567891",
+            tag="Client",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.patch(
+            f"/api/business-autopilot/contacts/{second_contact.id}",
+            data=json.dumps(
+                {
+                    "name": "Second Contact Updated",
+                    "company": "Com Com",
+                    "email": "vishwa@gmail.com",
+                    "phone_country_code": "+91",
+                    "phone": "9092833701",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertEqual(payload["detail"], "duplicate_contact")
+        self.assertEqual(payload["existing_contact"]["id"], first_contact.id)
+        duplicate_fields = set(payload.get("duplicate_fields") or [])
+        self.assertTrue({"company", "email", "phone"}.issubset(duplicate_fields))
+
     def test_crm_deal_get_detail_allows_business_autopilot_product_edit_permission(self):
         crm_user = User.objects.create_user(
             username="product-edit-detail@workzilla.test",
@@ -423,6 +505,8 @@ class BusinessAutopilotUserAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["deal"]["id"], deal.id)
         self.assertEqual(payload["deal"]["deal_name"], "Detail Deal")
+        self.assertEqual(payload["deal"]["created_by_name"], deal_owner.username)
+        self.assertEqual(payload["deal"]["updated_by_name"], deal_owner.username)
 
     def test_crm_lead_patch_allows_role_access_map_full_access(self):
         crm_user = User.objects.create_user(
@@ -499,6 +583,281 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(payload["lead"]["lead_amount"], 7500.0)
         lead.refresh_from_db()
         self.assertEqual(float(lead.lead_amount), 7500.0)
+
+    def test_crm_lead_list_with_role_access_map_create_view_edit_own_is_row_scoped(self):
+        crm_user = User.objects.create_user(
+            username="crm-own-list@workzilla.test",
+            email="crm-own-list@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Executive",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Executive": {
+                "sections": {"crm": "Create, View and Edit Own"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        other_user = User.objects.create_user(
+            username="crm-own-list-owner@workzilla.test",
+            email="crm-own-list-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=other_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=other_user,
+            role="org_user",
+            is_active=True,
+        )
+        own_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Own Lead",
+            company="Own Corp",
+            phone="9000000001",
+            lead_amount="1000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=crm_user,
+            assigned_user_ids=[crm_user.id],
+            stage="New",
+            status="Open",
+            created_by=crm_user,
+            updated_by=crm_user,
+        )
+        assigned_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Assigned Lead",
+            company="Assigned Corp",
+            phone="9000000002",
+            lead_amount="2000",
+            lead_source="Referral",
+            assign_type="Users",
+            assigned_user=crm_user,
+            assigned_user_ids=[crm_user.id],
+            stage="New",
+            status="Open",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+        restricted_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Restricted Lead",
+            company="Other Corp",
+            phone="9000000003",
+            lead_amount="3000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=other_user,
+            assigned_user_ids=[other_user.id],
+            stage="New",
+            status="Open",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.get("/api/business-autopilot/leads")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        returned_ids = {row["id"] for row in payload.get("leads", [])}
+        self.assertIn(own_lead.id, returned_ids)
+        self.assertIn(assigned_lead.id, returned_ids)
+        self.assertNotIn(restricted_lead.id, returned_ids)
+
+    def test_crm_lead_patch_with_role_access_map_create_view_edit_own_blocks_unassigned_lead(self):
+        crm_user = User.objects.create_user(
+            username="crm-own-edit@workzilla.test",
+            email="crm-own-edit@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Executive",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Executive": {
+                "sections": {"crm": "Create, View and Edit Own"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        other_user = User.objects.create_user(
+            username="crm-own-edit-owner@workzilla.test",
+            email="crm-own-edit-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=other_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=other_user,
+            role="org_user",
+            is_active=True,
+        )
+        blocked_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Blocked Lead",
+            company="Blocked Corp",
+            phone="9111111111",
+            lead_amount="4000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=other_user,
+            assigned_user_ids=[other_user.id],
+            stage="New",
+            status="Open",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+        allowed_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Allowed Lead",
+            company="Allowed Corp",
+            phone="9222222222",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=crm_user,
+            assigned_user_ids=[crm_user.id],
+            stage="New",
+            status="Open",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+
+        self.client.force_login(crm_user)
+        blocked_response = self.client.patch(
+            f"/api/business-autopilot/leads/{blocked_lead.id}",
+            data=json.dumps({"lead_amount": "4500"}),
+            content_type="application/json",
+        )
+        self.assertEqual(blocked_response.status_code, 403)
+        self.assertEqual(blocked_response.json().get("detail"), "forbidden")
+
+        allowed_response = self.client.patch(
+            f"/api/business-autopilot/leads/{allowed_lead.id}",
+            data=json.dumps({"lead_amount": "5500"}),
+            content_type="application/json",
+        )
+        self.assertEqual(allowed_response.status_code, 200)
+        allowed_lead.refresh_from_db()
+        self.assertEqual(float(allowed_lead.lead_amount), 5500.0)
+
+    def test_crm_lead_patch_with_role_access_map_create_view_edit_all_allows_other_member_lead(self):
+        crm_user = User.objects.create_user(
+            username="crm-all-edit@workzilla.test",
+            email="crm-all-edit@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Head",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Head": {
+                "sections": {"crm": "Create, View and Edit All"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        other_user = User.objects.create_user(
+            username="crm-all-edit-owner@workzilla.test",
+            email="crm-all-edit-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=other_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=other_user,
+            role="org_user",
+            is_active=True,
+        )
+        other_member_lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Other Member Lead",
+            company="Other Member Corp",
+            phone="9333333333",
+            lead_amount="7000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=other_user,
+            assigned_user_ids=[other_user.id],
+            stage="New",
+            status="Open",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{other_member_lead.id}",
+            data=json.dumps({"lead_amount": "7700"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["lead_amount"], 7700.0)
+        other_member_lead.refresh_from_db()
+        self.assertEqual(float(other_member_lead.lead_amount), 7700.0)
 
     def test_crm_deal_patch_allows_role_access_map_full_access(self):
         crm_user = User.objects.create_user(

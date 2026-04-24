@@ -7,7 +7,6 @@ from django.db.models import Q
 from django.http import JsonResponse
 
 from .models import PendingTransfer, Subscription, SubscriptionHistory, Organization, UserProfile
-from .email_utils import send_templated_email
 
 FREE_TRIAL_DAYS = 15
 
@@ -93,18 +92,6 @@ def maybe_expire_subscription(subscription, now=None):
         status_changed = True
     if update_fields:
         subscription.save(update_fields=update_fields)
-        org = subscription.organization
-        owner = org.owner if org else None
-        send_templated_email(
-            owner.email if owner else "",
-            "Subscription Expired",
-            "emails/subscription_expired.txt",
-            {
-                "name": owner.first_name if owner and owner.first_name else (owner.username if owner else "User"),
-                "plan_name": subscription.plan.name if subscription.plan else "-",
-                "end_date": subscription.end_date.strftime("%Y-%m-%d") if subscription.end_date else "-"
-            }
-        )
         if status_changed and is_free_plan(subscription.plan):
             try:
                 from .notifications import notify_free_plan_expired
