@@ -163,6 +163,18 @@ A) Backend run (mac/local)
 - cd apps/backend
 - python3 manage.py runserver
 
+B) Local Single-URL Run (Recommended, 2026-04-23)
+- Goal: Django + React (built) same URL `http://127.0.0.1:8000`
+- Steps:
+  1) `cd ~/Desktop/webszilla/saas/work-zilla`
+  2) `./build_and_copy_frontend.sh`
+  3) `source env/bin/activate`
+  4) `cd apps/backend`
+  5) `python3 manage.py runserver 127.0.0.1:8000 --noreload`
+- Note:
+  - Use full URL with protocol: `http://127.0.0.1:8000/...`
+  - Do NOT open `/accounts?...` directly (Django will 404). SPA base path is under `/app/...`.
+
 B) Django migrations
 - cd apps/backend
 - python3 manage.py makemigrations
@@ -191,6 +203,12 @@ C) Frontend build helpers
   - Start Django backend
   - Open http://127.0.0.1:8000 (frontend + backend on same URL; frontend served from `apps/backend/frontend_dist`)
 - Use Vite `5173` only when explicitly needed for frontend-only development/debugging.
+
+BUSINESS AUTOPILOT ACCOUNTS EDIT NOTE (2026-04-23)
+- Symptom: Invoice/Estimate Edit click goes to wrong URL (ex: `/accounts?...`) causing 404 or falls back to Overview (no edit load).
+- Fix direction:
+  - Keep SPA routing under `/app/business-autopilot/accounts`.
+  - Edit click should set query `tab=invoices|estimates` + `edit-invoice|edit-estimate=<id>` and then hydrate/open document.
 
 D) Desktop app build (mac)
 - cd apps/desktop_app

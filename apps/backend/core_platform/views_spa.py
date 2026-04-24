@@ -16,6 +16,8 @@ def _disable_cache_headers(response):
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    response["CDN-Cache-Control"] = "no-store"
+    response["Surrogate-Control"] = "no-store"
     return response
 
 

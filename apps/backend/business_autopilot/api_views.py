@@ -279,7 +279,7 @@ def _get_business_autopilot_product():
 def crm_activity_log(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     try:
@@ -384,10 +384,30 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
         ).delete()
 
 
-def _resolve_org(user: User):
+def _resolve_org(user: User, request=None):
+    if not user or not getattr(user, "is_authenticated", False):
+        return None
+
     profile = UserProfile.objects.filter(user=user).select_related("organization").first()
-    if profile and profile.organization:
-        return profile.organization
+    if request is not None:
+        session_org_id = str(request.session.get("active_org_id") or "").strip()
+        if session_org_id.isdigit():
+            session_org_int = int(session_org_id)
+            session_org = Organization.objects.filter(id=session_org_int).first()
+            if session_org:
+                if user.is_superuser or user.is_staff:
+                    return session_org
+                if profile and profile.organization_id == session_org_int:
+                    return profile.organization or session_org
+                if Organization.objects.filter(id=session_org_int, owner=user).exists():
+                    return session_org
+                if OrganizationUser.objects.filter(
+                    organization_id=session_org_int,
+                    user=user,
+                    is_deleted=False,
+                ).exists():
+                    return session_org
+
     active_membership = (
         OrganizationUser.objects
         .filter(user=user, is_active=True, is_deleted=False)
@@ -397,6 +417,8 @@ def _resolve_org(user: User):
     )
     if active_membership and active_membership.organization:
         return active_membership.organization
+    if profile and profile.organization:
+        return profile.organization
     any_membership = (
         OrganizationUser.objects
         .filter(user=user, is_deleted=False)
@@ -2183,7 +2205,7 @@ def org_enabled_modules(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False, "modules": []}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "modules": []})
 
@@ -2243,7 +2265,7 @@ def org_users(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False, "users": [], "meta": {}}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
@@ -2447,7 +2469,7 @@ def org_user_email_check(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "available": False}, status=404)
 
@@ -2526,7 +2548,7 @@ def org_user_detail(request, membership_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
@@ -2767,7 +2789,7 @@ def org_user_toggle_status(request, membership_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
@@ -2851,7 +2873,7 @@ def org_user_resend_credentials(request, membership_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": []})
 
@@ -2907,7 +2929,7 @@ def org_user_verify_email(request, membership_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
 
@@ -2960,7 +2982,7 @@ def org_role_access(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False, "role_access_map": {}}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "role_access_map": {}})
 
@@ -3010,7 +3032,7 @@ def org_employee_roles(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False, "employee_roles": []}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "employee_roles": []})
 
@@ -3081,7 +3103,7 @@ def org_employee_roles(request):
 def org_employee_role_detail(request, role_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if not _can_manage_users(request.user, org):
@@ -3174,7 +3196,7 @@ def org_departments(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False, "departments": []}, status=401)
 
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "departments": []})
 
@@ -3244,7 +3266,7 @@ def org_departments(request):
 def org_department_detail(request, department_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if not _can_manage_users(request.user, org):
@@ -3343,7 +3365,7 @@ def org_department_detail(request, department_id: int):
 def payroll_workspace(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse(
             {
@@ -3587,7 +3609,7 @@ def payroll_workspace(request):
 def employees_search(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     if not _can_view_salary_history(request.user, org):
@@ -3632,7 +3654,7 @@ def employees_search(request):
 def employee_salary_history(request, employee_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     if not _can_view_salary_history(request.user, org):
@@ -3673,7 +3695,7 @@ def employee_salary_history(request, employee_id: int):
 def payroll_payslip_pdf(request, payslip_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -3761,7 +3783,7 @@ def payroll_payslip_pdf(request, payslip_id: int):
 def accounts_workspace(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None, "data": _default_accounts_workspace()})
 
@@ -3886,7 +3908,7 @@ def _serialize_accounts_customer_options(org):
 def accounts_subscription_categories(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method == "POST" and not _can_manage_modules(request.user):
@@ -3931,7 +3953,7 @@ def accounts_subscription_categories(request):
 def accounts_subscription_category_detail(request, category_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
@@ -3971,7 +3993,7 @@ def accounts_subscription_category_detail(request, category_id: int):
 def accounts_subscription_sub_categories(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method == "POST" and not _can_manage_modules(request.user):
@@ -4025,7 +4047,7 @@ def accounts_subscription_sub_categories(request):
 def accounts_subscription_sub_category_detail(request, sub_category_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
@@ -4070,7 +4092,7 @@ def accounts_subscription_sub_category_detail(request, sub_category_id: int):
 def accounts_subscriptions(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method == "POST" and not _can_manage_modules(request.user):
@@ -4183,7 +4205,7 @@ def accounts_subscriptions(request):
 def accounts_subscription_detail(request, subscription_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"authenticated": True, "organization": None}, status=404)
     if request.method in {"PUT", "DELETE"} and not _can_manage_modules(request.user):
@@ -4305,7 +4327,7 @@ def accounts_subscription_detail(request, subscription_id: int):
 def org_openai_settings(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     if not _can_manage_openai(request.user, org):
@@ -4348,7 +4370,7 @@ def org_openai_settings(request):
 def org_openai_test(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     if not _can_manage_openai(request.user, org):
@@ -4395,7 +4417,7 @@ def org_openai_test(request):
 def org_openai_chat(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     if not _can_manage_openai(request.user, org):
@@ -4475,7 +4497,7 @@ def org_openai_chat(request):
 def accounts_document_print(request, doc_type: str, doc_id: str):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -5317,7 +5339,7 @@ def _dispatch_due_crm_meeting_reminders(org: Organization = None, now=None, limi
 def crm_leads(request, lead_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -5524,7 +5546,7 @@ def crm_leads(request, lead_id: int = None):
 def crm_contacts(request, contact_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -5646,7 +5668,7 @@ def crm_contacts(request, contact_id: int = None):
 def crm_convert_to_deal(request, lead_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     lead = CrmLead.objects.filter(organization=org, id=lead_id, is_deleted=False).first()
@@ -5723,7 +5745,7 @@ def crm_convert_to_deal(request, lead_id: int):
 def crm_deals(request, deal_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -5850,7 +5872,7 @@ def crm_deals(request, deal_id: int = None):
 def crm_meetings(request, meeting_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -6011,7 +6033,7 @@ def crm_meetings(request, meeting_id: int = None):
 def crm_sales_orders(request, order_id: int = None):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
@@ -6228,7 +6250,7 @@ def crm_sales_orders(request, order_id: int = None):
 def crm_convert_to_sales_order(request, deal_id: int):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
-    org = _resolve_org(request.user)
+    org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
     deal = CrmDeal.objects.filter(organization=org, id=deal_id, is_deleted=False).select_related("lead").first()

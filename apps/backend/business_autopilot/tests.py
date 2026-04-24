@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 import json
 
-from apps.backend.business_autopilot.models import CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
+from apps.backend.business_autopilot.models import AccountsWorkspace, CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, OrganizationSettings, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -827,7 +827,6 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(payload["organization"]["id"], self.org.id)
 
     def test_accounts_workspace_get_repairs_legacy_india_gst_template(self):
-        from apps.backend.business_autopilot.models import AccountsWorkspace
         from core.models import BillingProfile
 
         BillingProfile.objects.create(
@@ -877,6 +876,95 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(len(gst_templates), 2)
         self.assertEqual(gst_templates[0]["id"], "gst_default_india_igst")
         self.assertEqual(gst_templates[1]["id"], "gst_default_india_cgst_sgst")
+
+    def test_accounts_workspace_prefers_session_active_org_when_user_has_access(self):
+        secondary_org = Organization.objects.create(
+            name="Beta Corp",
+            company_key="BETAKEY",
+        )
+        OrganizationUser.objects.create(
+            organization=secondary_org,
+            user=self.admin,
+            role="company_admin",
+            is_active=True,
+            is_deleted=False,
+        )
+        AccountsWorkspace.objects.create(
+            organization=self.org,
+            data={
+                "customers": [],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [{"id": "inv_acme_1", "docNo": "INV-ACME-001"}],
+            },
+        )
+        AccountsWorkspace.objects.create(
+            organization=secondary_org,
+            data={
+                "customers": [],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [{"id": "inv_beta_1", "docNo": "INV-BETA-001"}],
+            },
+        )
+
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["active_org_id"] = secondary_org.id
+        session.save()
+
+        response = self.client.get("/api/business-autopilot/accounts/workspace")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["organization"]["id"], secondary_org.id)
+        self.assertEqual(payload["data"]["invoices"][0]["docNo"], "INV-BETA-001")
+
+    def test_accounts_workspace_ignores_session_active_org_without_access(self):
+        inaccessible_org = Organization.objects.create(
+            name="Gamma Corp",
+            company_key="GAMMAKEY",
+        )
+        AccountsWorkspace.objects.create(
+            organization=self.org,
+            data={
+                "customers": [],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [{"id": "inv_acme_2", "docNo": "INV-ACME-002"}],
+            },
+        )
+        AccountsWorkspace.objects.create(
+            organization=inaccessible_org,
+            data={
+                "customers": [],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [{"id": "inv_gamma_1", "docNo": "INV-GAMMA-001"}],
+            },
+        )
+
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["active_org_id"] = inaccessible_org.id
+        session.save()
+
+        response = self.client.get("/api/business-autopilot/accounts/workspace")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["organization"]["id"], self.org.id)
+        self.assertEqual(payload["data"]["invoices"][0]["docNo"], "INV-ACME-002")
 
     def test_user_update_supports_post_action_update(self):
         product_user = User.objects.create_user(

@@ -8,7 +8,7 @@ def guard(view):
     return require_active_monitor_subscription(view)
 
 urlpatterns = [
-    path("summary", guard(api_views.dashboard_summary), name="api_dashboard_summary"),
+    path("summary", api_views.dashboard_summary, name="api_dashboard_summary"),
     path("employees", guard(api_views.employees_list), name="api_employees_list"),
     path("employees/create", guard(api_views.employees_create), name="api_employees_create"),
     path("employees/<int:emp_id>", guard(api_views.employees_detail), name="api_employees_detail"),
