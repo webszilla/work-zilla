@@ -6598,23 +6598,15 @@ def crm_leads(request, lead_id: int = None):
             str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
             or bool((payload or {}).get("__crm_permanent"))
         )
-        linked_leads = _crm_collect_contacts_linked_to_contact(row)
         if permanent:
             row.delete()
-            return JsonResponse({
-                "deleted": True,
-                "permanent": True,
-                "affected_leads": [_serialize_crm_lead(item) for item in linked_leads],
-            })
+            return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True
         row.deleted_at = timezone.now()
         row.deleted_by = request.user
         row.updated_by = request.user
         row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
-        return JsonResponse({
-            "deleted": True,
-            "affected_leads": [_serialize_crm_lead(item) for item in linked_leads],
-        })
+        return JsonResponse({"deleted": True})
 
     return JsonResponse({"detail": "invalid_method"}, status=405)
 

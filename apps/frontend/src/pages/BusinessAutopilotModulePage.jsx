@@ -8486,6 +8486,7 @@ function CrmOnePageModule() {
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [contactTagTab, setContactTagTab] = useState("all");
   const [dealStatusTab, setDealStatusTab] = useState("all");
+  const [salesOrderStatusTab, setSalesOrderStatusTab] = useState("all");
   const [meetingStatusTab, setMeetingStatusTab] = useState("all");
   const [followUpStatusTab, setFollowUpStatusTab] = useState("all");
   const [forms, setForms] = useState(() =>
@@ -10957,6 +10958,8 @@ function CrmOnePageModule() {
       setContactTagTab("all");
     } else if (normalizedSection === "deals") {
       setDealStatusTab("all");
+    } else if (normalizedSection === "salesOrders") {
+      setSalesOrderStatusTab("all");
     } else if (normalizedSection === "meetings") {
       setMeetingStatusTab("all");
     } else if (normalizedSection === "followUps") {
@@ -14697,7 +14700,9 @@ function CrmOnePageModule() {
         const accessibleRows = getAccessibleCrmRows(sectionKey, rows);
         const activeRows = accessibleRows.filter((row) => !isSoftDeletedCrmRow(row));
         const deletedRows = accessibleRows.filter((row) => isSoftDeletedCrmRow(row));
-        const isDeletedSectionView = isCrmAdmin && deletedViewSection === sectionKey;
+        const isDeletedSectionView = sectionKey === "salesOrders"
+          ? (isCrmAdmin && salesOrderStatusTab === "deleted")
+          : (isCrmAdmin && deletedViewSection === sectionKey);
         const tableRows = isDeletedSectionView ? deletedRows : activeRows;
         const deletedItemsNotice = isDeletedSectionView
           ? `Deleted ${config.label.toLowerCase()} items older than ${CRM_SOFT_DELETE_RETENTION_DAYS} days will be automatically deleted.`
@@ -14720,6 +14725,23 @@ function CrmOnePageModule() {
           { key: "won", label: "Won" },
           { key: "lost", label: "Lost" },
         ];
+        const salesOrderStatusTabs = [
+          { key: "all", label: "All" },
+          { key: "pending", label: "Pending" },
+          { key: "estimated", label: "Estimated" },
+          { key: "invoiced", label: "Invoiced" },
+          { key: "deleted", label: "Deleted" },
+        ];
+        const getSalesOrderStatusKey = (row) => {
+          const summary = getAccountsConversionSummaryForSalesOrder(row);
+          if (summary.hasInvoice) {
+            return "invoiced";
+          }
+          if (summary.hasEstimate) {
+            return "estimated";
+          }
+          return "pending";
+        };
         const meetingStatusTabs = [
           { key: "all", label: "All" },
           { key: "scheduled", label: "Scheduled" },
@@ -14753,6 +14775,17 @@ function CrmOnePageModule() {
               }
               return String(row.status || "").trim().toLowerCase() === dealStatusTab;
             })
+          : sectionKey === "salesOrders"
+          ? (
+              salesOrderStatusTab === "deleted"
+                ? (isCrmAdmin ? deletedRows : activeRows)
+                : activeRows
+            ).filter((row) => {
+              if (salesOrderStatusTab === "all" || salesOrderStatusTab === "deleted") {
+                return true;
+              }
+              return getSalesOrderStatusKey(row) === salesOrderStatusTab;
+            })
           : sectionKey === "meetings"
           ? tableRows.filter((row) => {
               if (meetingStatusTab === "all") {
@@ -14780,6 +14813,7 @@ function CrmOnePageModule() {
         const leadTabRowsForCount = sectionKey === "leads" ? activeRows : [];
         const contactTabRowsForCount = sectionKey === "contacts" ? activeRows : [];
         const dealTabRowsForCount = sectionKey === "deals" ? activeRows : [];
+        const salesOrderTabRowsForCount = sectionKey === "salesOrders" ? activeRows : [];
         const meetingTabRowsForCount = sectionKey === "meetings" ? activeRows : [];
         const followUpTabRowsForCount = sectionKey === "followUps" ? activeRows : [];
         const leadTabCounts = sectionKey === "leads"
@@ -14811,6 +14845,18 @@ function CrmOnePageModule() {
               acc[tab.key] = tab.key === "all"
                 ? dealTabRowsForCount.length
                 : dealTabRowsForCount.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+              return acc;
+            }, {})
+          : {};
+        const salesOrderTabCounts = sectionKey === "salesOrders"
+          ? salesOrderStatusTabs.reduce((acc, tab) => {
+              if (tab.key === "deleted") {
+                acc[tab.key] = deletedRows.length;
+                return acc;
+              }
+              acc[tab.key] = tab.key === "all"
+                ? salesOrderTabRowsForCount.length
+                : salesOrderTabRowsForCount.filter((row) => getSalesOrderStatusKey(row) === tab.key).length;
               return acc;
             }, {})
           : {};
@@ -15288,7 +15334,6 @@ function CrmOnePageModule() {
                       columns={[
                         { key: "crmReferenceId", label: "CRM ID" },
                         { key: "orderId", label: "Order ID" },
-                        { key: "leadName", label: "Lead Name" },
                         { key: "clients", label: "Clients" },
                         { key: "issueDate", label: "Issue Date" },
                         { key: "amountDisplay", label: `Amount (${crmCurrencyCode})` },
@@ -15298,6 +15343,41 @@ function CrmOnePageModule() {
                       searchPlaceholder="Search Sales Orders"
                       pageSize={DEFAULT_TABLE_PAGE_SIZE}
                       withoutOuterCard
+                      headerBottom={(
+                        <div className="d-flex flex-column gap-2">
+                          <div className="d-flex flex-wrap gap-2">
+                            {salesOrderStatusTabs.map((tab) => {
+                              const isDeletedTab = tab.key === "deleted";
+                              const isDisabled = isDeletedTab && !isCrmAdmin;
+                              return (
+                                <button
+                                  key={`sales-order-status-tab-${tab.key}`}
+                                  type="button"
+                                  className={`btn btn-sm ${salesOrderStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                                  disabled={isDisabled}
+                                  onClick={() => {
+                                    if (isDisabled) {
+                                      return;
+                                    }
+                                    setSalesOrderStatusTab(tab.key);
+                                    if (tab.key === "deleted") {
+                                      setDeletedViewSection(sectionKey);
+                                      return;
+                                    }
+                                    setDeletedViewSection("");
+                                  }}
+                                >
+                                  {tab.label} ({salesOrderTabCounts[tab.key] || 0})
+                                </button>
+                              );
+                            })}
+                            {bulkActions}
+                          </div>
+                          {isDeletedSectionView ? (
+                            <div className="small text-secondary">{deletedItemsNotice}</div>
+                          ) : null}
+                        </div>
+                      )}
                       searchBy={(row) => [
                         row.crmReferenceId,
                         row.orderId,
@@ -15312,7 +15392,6 @@ function CrmOnePageModule() {
                       renderCells={(row) => [
                         row.crmReferenceId || "-",
                         row.orderId || "-",
-                        row.leadName || "-",
                         row.clients || "-",
                         formatDateLikeCellValue("issueDate", row.issueDate, "-"),
                         row.amountDisplay || "-",

@@ -460,6 +460,10 @@ function normalizeSharedCustomerRecord(row = {}) {
   };
 }
 
+function isSharedPartyDeleted(row = {}) {
+  return Boolean(row.isDeleted || row.is_deleted || row.deletedAt || row.deleted_at);
+}
+
 function isLegacyDemoAccountCustomer(row = {}) {
   const company = String(row.companyName || row.name || "").trim().toLowerCase();
   const email = String(row.email || "").trim().toLowerCase();
@@ -1272,6 +1276,8 @@ export default function BusinessAutopilotUsersPage() {
   const [roleAccessSaving, setRoleAccessSaving] = useState(false);
   const [roleAccessDirty, setRoleAccessDirty] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
+  const [clientListTab, setClientListTab] = useState("all");
+  const [selectedClientIds, setSelectedClientIds] = useState([]);
   const [clientPage, setClientPage] = useState(1);
   const [vendorSearch, setVendorSearch] = useState("");
   const [vendorPage, setVendorPage] = useState(1);
@@ -1282,6 +1288,7 @@ export default function BusinessAutopilotUsersPage() {
   const [sharedCustomers, setSharedCustomers] = useState(() => readSharedAccountsCustomers());
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
+  const [viewClientModal, setViewClientModal] = useState({ open: false, client: null });
   const [credentialModal, setCredentialModal] = useState({
     open: false,
     credentials: null,
@@ -1997,7 +2004,11 @@ export default function BusinessAutopilotUsersPage() {
 
   useEffect(() => {
     setClientPage(1);
-  }, [clientSearch, sharedCustomers.length]);
+  }, [clientSearch, clientListTab, sharedCustomers.length]);
+
+  useEffect(() => {
+    setSelectedClientIds((prev) => prev.filter((id) => sharedCustomers.some((row) => String(row.id) === String(id))));
+  }, [sharedCustomers]);
 
   useEffect(() => {
     setVendorPage(1);
@@ -2859,12 +2870,24 @@ export default function BusinessAutopilotUsersPage() {
   const shippingStateOptions = getStateOptionsForCountry(String(clientForm.shippingCountry || "India"));
   const vendorBillingStateOptions = getStateOptionsForCountry(String(vendorForm.billingCountry || "India"));
   const vendorShippingStateOptions = getStateOptionsForCountry(String(vendorForm.shippingCountry || "India"));
+  const activeClients = useMemo(
+    () => sharedCustomers.filter((row) => !isSharedPartyDeleted(row)),
+    [sharedCustomers]
+  );
+  const deletedClients = useMemo(
+    () => sharedCustomers.filter((row) => isSharedPartyDeleted(row)),
+    [sharedCustomers]
+  );
+  const clientTabRows = useMemo(
+    () => (clientListTab === "deleted" ? deletedClients : activeClients),
+    [activeClients, clientListTab, deletedClients]
+  );
   const filteredClients = useMemo(() => {
     const q = clientSearch.trim().toLowerCase();
     if (!q) {
-      return sharedCustomers;
+      return clientTabRows;
     }
-    return sharedCustomers.filter((row) =>
+    return clientTabRows.filter((row) =>
       [
         row.companyName,
         row.clientName,
@@ -2881,7 +2904,7 @@ export default function BusinessAutopilotUsersPage() {
         row.shippingPincode,
       ].filter(Boolean).join(" ").toLowerCase().includes(q)
     );
-  }, [clientSearch, sharedCustomers]);
+  }, [clientSearch, clientTabRows]);
   const crmClientMatches = useMemo(() => {
     const q = String(clientForm.companyName || "").trim().toLowerCase();
     return crmContacts
@@ -2904,6 +2927,19 @@ export default function BusinessAutopilotUsersPage() {
   const paginatedClients = filteredClients.slice((normalizedClientPage - 1) * pageSize, normalizedClientPage * pageSize);
   const clientStartIndex = filteredClients.length ? (normalizedClientPage - 1) * pageSize + 1 : 0;
   const clientEndIndex = Math.min(normalizedClientPage * pageSize, filteredClients.length);
+  const visibleClientIds = filteredClients
+    .map((row) => String(row.id || "").trim())
+    .filter(Boolean);
+  const selectedClientIdSet = new Set(
+    selectedClientIds
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  const selectedVisibleClientCount = visibleClientIds.reduce(
+    (count, id) => (selectedClientIdSet.has(id) ? count + 1 : count),
+    0
+  );
+  const allVisibleClientsSelected = Boolean(visibleClientIds.length) && selectedVisibleClientCount === visibleClientIds.length;
   const filteredVendors = useMemo(() => {
     const q = vendorSearch.trim().toLowerCase();
     if (!q) {
@@ -3183,7 +3219,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const primaryPhoneCountryCode = String(clientForm.phoneCountryCode || "+91").trim() || "+91";
     const duplicateClientMatch = findDuplicateSharedCustomerRow(
-      sharedCustomers,
+      activeClients,
       {
         companyName,
         name: companyName,
@@ -3312,13 +3348,95 @@ export default function BusinessAutopilotUsersPage() {
     if (!canDeleteClientsTab) {
       return;
     }
-    const nextCustomers = sharedCustomers.filter((row) => String(row.id) !== String(clientId));
+    const normalizedClientId = String(clientId || "").trim();
+    const shouldPermanentlyDelete = clientListTab === "deleted";
+    const nextCustomers = shouldPermanentlyDelete
+      ? sharedCustomers.filter((row) => String(row.id) !== normalizedClientId)
+      : sharedCustomers.map((row) => (
+        String(row.id) === normalizedClientId
+          ? {
+              ...row,
+              is_deleted: true,
+              deleted_at: new Date().toISOString(),
+            }
+          : row
+      ));
     setSharedCustomers(nextCustomers);
     await persistSharedAccountsCustomers(nextCustomers);
-    if (editingClientId === String(clientId)) {
+    if (editingClientId === normalizedClientId) {
       resetClientForm();
     }
-    setNotice("Client deleted successfully.");
+    if (String(viewClientModal.client?.id || "").trim() === normalizedClientId) {
+      setViewClientModal({ open: false, client: null });
+    }
+    setSelectedClientIds((prev) => prev.filter((id) => String(id) !== normalizedClientId));
+    setNotice(shouldPermanentlyDelete ? "Client permanently deleted." : "Client moved to deleted list.");
+  }
+
+  function openClientDetails(row) {
+    const normalized = normalizeSharedCustomerRecord(row || {});
+    setViewClientModal({ open: true, client: normalized });
+  }
+
+  function toggleClientRowSelection(clientId, checked) {
+    const normalizedClientId = String(clientId || "").trim();
+    if (!normalizedClientId) {
+      return;
+    }
+    setSelectedClientIds((prev) => {
+      const nextSet = new Set(prev.map((id) => String(id || "").trim()).filter(Boolean));
+      if (checked) {
+        nextSet.add(normalizedClientId);
+      } else {
+        nextSet.delete(normalizedClientId);
+      }
+      return Array.from(nextSet);
+    });
+  }
+
+  function toggleSelectAllClients() {
+    if (!visibleClientIds.length) {
+      return;
+    }
+    setSelectedClientIds((prev) => {
+      const nextSet = new Set(prev.map((id) => String(id || "").trim()).filter(Boolean));
+      if (allVisibleClientsSelected) {
+        visibleClientIds.forEach((id) => nextSet.delete(id));
+      } else {
+        visibleClientIds.forEach((id) => nextSet.add(id));
+      }
+      return Array.from(nextSet);
+    });
+  }
+
+  async function deleteSelectedClients() {
+    if (!canDeleteClientsTab || !selectedVisibleClientCount) {
+      return;
+    }
+    const targetIds = new Set(visibleClientIds.filter((id) => selectedClientIdSet.has(id)));
+    const shouldPermanentlyDelete = clientListTab === "deleted";
+    const nextCustomers = shouldPermanentlyDelete
+      ? sharedCustomers.filter((row) => !targetIds.has(String(row.id || "").trim()))
+      : sharedCustomers.map((row) => (
+        targetIds.has(String(row.id || "").trim())
+          ? {
+              ...row,
+              is_deleted: true,
+              deleted_at: new Date().toISOString(),
+            }
+          : row
+      ));
+    setSharedCustomers(nextCustomers);
+    await persistSharedAccountsCustomers(nextCustomers);
+    if (editingClientId && targetIds.has(String(editingClientId || "").trim())) {
+      resetClientForm();
+    }
+    setSelectedClientIds((prev) => prev.filter((id) => !targetIds.has(String(id || "").trim())));
+    setNotice(
+      shouldPermanentlyDelete
+        ? `Deleted ${targetIds.size} client(s) permanently.`
+        : `Moved ${targetIds.size} client(s) to deleted list.`
+    );
   }
 
   function exportClientsAsExcelCsv() {
@@ -5212,8 +5330,45 @@ export default function BusinessAutopilotUsersPage() {
           ) : null}
 
           <div style={{ paddingTop: "25px" }}>
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-              <h6 className="mb-0">Client List</h6>
+            <h6 className="mb-2">Client List</h6>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <div className="d-flex flex-wrap align-items-center gap-2">
+              <button
+                type="button"
+                className={`btn btn-sm ${clientListTab === "all" ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => {
+                  setClientListTab("all");
+                  setSelectedClientIds([]);
+                }}
+              >
+                All ({activeClients.length})
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${clientListTab === "deleted" ? "btn-danger" : "btn-outline-danger"}`}
+                onClick={() => {
+                  setClientListTab("deleted");
+                  setSelectedClientIds([]);
+                }}
+              >
+                Deleted ({deletedClients.length})
+              </button>
+              {canDeleteClientsTab ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-light"
+                  onClick={toggleSelectAllClients}
+                  disabled={!visibleClientIds.length}
+                >
+                  {allVisibleClientsSelected ? "Unselect All" : "Select All"}
+                </button>
+              ) : null}
+              {canDeleteClientsTab && selectedVisibleClientCount > 0 ? (
+                <button type="button" className="btn btn-sm btn-outline-danger" onClick={deleteSelectedClients}>
+                  Delete Selected ({selectedVisibleClientCount})
+                </button>
+              ) : null}
+              </div>
               <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
                 <input
                   ref={clientImportInputRef}
@@ -5250,7 +5405,7 @@ export default function BusinessAutopilotUsersPage() {
                     <th>Contact Number</th>
                     <th>Email ID</th>
                     <th>Location</th>
-                    <th>Action</th>
+                    <th className="table-actions">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5263,10 +5418,51 @@ export default function BusinessAutopilotUsersPage() {
                         <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerPhones(row).join(", ") || "-"}</td>
                         <td style={{ whiteSpace: "normal" }}>{formatSharedCustomerEmails(row).join(", ") || "-"}</td>
                         <td>{[row.billingState || row.state, row.billingCountry || row.country, row.billingPincode || row.pincode].filter(Boolean).join(", ") || "-"}</td>
-                        <td>
+                        <td className="table-actions">
                           <div className="d-inline-flex gap-2">
-                            <button type="button" className="btn btn-sm btn-outline-info" disabled={!canEditClientsTab} onClick={() => editClient(row)}>Edit</button>
-                            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteClientsTab} onClick={() => deleteClient(row.id)}>Delete</button>
+                            {canDeleteClientsTab ? (
+                              <input
+                                type="checkbox"
+                                className="form-check-input mt-2"
+                                checked={selectedClientIdSet.has(String(row.id || "").trim())}
+                                onChange={(event) => toggleClientRowSelection(row.id, event.target.checked)}
+                                aria-label={`Select client ${row.clientName || row.companyName || row.id}`}
+                              />
+                            ) : null}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                              title="View Client"
+                              data-wz-tooltip="View Client"
+                              aria-label="View Client"
+                              onClick={() => openClientDetails(row)}
+                            >
+                              <i className="bi bi-eye" aria-hidden="true" />
+                            </button>
+                            {clientListTab !== "deleted" ? (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-info saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                                title="Edit Client"
+                                data-wz-tooltip="Edit Client"
+                                aria-label="Edit Client"
+                                disabled={!canEditClientsTab}
+                                onClick={() => editClient(row)}
+                              >
+                                <i className="bi bi-pencil-square" aria-hidden="true" />
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                              title={clientListTab === "deleted" ? "Delete Permanently" : "Delete Client"}
+                              data-wz-tooltip={clientListTab === "deleted" ? "Delete Permanently" : "Delete Client"}
+                              aria-label={clientListTab === "deleted" ? "Delete Permanently" : "Delete Client"}
+                              disabled={!canDeleteClientsTab}
+                              onClick={() => deleteClient(row.id)}
+                            >
+                              <i className="bi bi-trash3" aria-hidden="true" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -5549,6 +5745,70 @@ export default function BusinessAutopilotUsersPage() {
           </div>
         </>
       )}
+      {viewClientModal.open ? (
+        <div className="modal-overlay" onClick={() => setViewClientModal({ open: false, client: null })}>
+          <div className="modal-panel" style={{ width: "min(920px, 96vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+              <div>
+                <h5 className="mb-1">Client Details</h5>
+                <div className="text-secondary">
+                  {String(
+                    viewClientModal.client?.companyName
+                    || viewClientModal.client?.clientName
+                    || viewClientModal.client?.name
+                    || "Client"
+                  ).trim()}
+                </div>
+              </div>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewClientModal({ open: false, client: null })}>
+                Close
+              </button>
+            </div>
+
+            <div className="card p-3">
+              <div className="row g-3">
+                {[
+                  { key: "companyName", label: "Company Name", value: viewClientModal.client?.companyName },
+                  { key: "clientName", label: "Client Name", value: viewClientModal.client?.clientName },
+                  { key: "gstin", label: "GSTIN", value: viewClientModal.client?.gstin },
+                  { key: "phone", label: "Contact Numbers", value: formatSharedCustomerPhones(viewClientModal.client || {}).join(", ") },
+                  { key: "email", label: "Email IDs", value: formatSharedCustomerEmails(viewClientModal.client || {}).join(", ") },
+                  { key: "billingAddress", label: "Billing Address", value: viewClientModal.client?.billingAddress },
+                  {
+                    key: "billingLocation",
+                    label: "Billing Location",
+                    value: [
+                      viewClientModal.client?.billingState,
+                      viewClientModal.client?.billingCountry,
+                      viewClientModal.client?.billingPincode,
+                    ].filter(Boolean).join(", "),
+                  },
+                  { key: "shippingAddress", label: "Shipping Address", value: viewClientModal.client?.shippingAddress },
+                  {
+                    key: "shippingLocation",
+                    label: "Shipping Location",
+                    value: [
+                      viewClientModal.client?.shippingState,
+                      viewClientModal.client?.shippingCountry,
+                      viewClientModal.client?.shippingPincode,
+                    ].filter(Boolean).join(", "),
+                  },
+                  {
+                    key: "billingShippingSame",
+                    label: "Billing And Shipping Same",
+                    value: viewClientModal.client?.billingShippingSame ? "Yes" : "No",
+                  },
+                ].map((field) => (
+                  <div className="col-12 col-md-6 col-xl-4" key={`client-detail-${field.key}`}>
+                    <div className="small text-secondary mb-1">{field.label}</div>
+                    <div>{String(field.value || "").trim() || "-"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {actionDialog.open ? (
         <div className="modal-overlay" onClick={() => closeActionDialog(actionDialog.variant !== "confirm")}>
           <div className="modal-panel" data-confirm-dialog="true" style={{ width: "min(520px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
