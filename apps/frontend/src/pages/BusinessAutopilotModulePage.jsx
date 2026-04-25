@@ -580,29 +580,28 @@ const CRM_SECTION_CONFIG = {
       { key: "notes", label: "Notes", placeholder: "Short activity notes" }
     ]
   },
-  meetings: {
-    label: "Meetings",
-    itemLabel: "Meeting",
-    icon: "bi-calendar-event",
-    columns: [
-      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
-      { key: "title", label: "Meeting Title" },
-      { key: "relatedTo", label: "Related To" },
-      { key: "meetingDate", label: "Date" },
-      { key: "meetingTime", label: "Time" },
-      { key: "owner", label: "Owner" },
-      { key: "reminderSummary", label: "Reminder" },
-      { key: "status", label: "Status" }
-    ],
-    fields: [
-      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
-      { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
-      { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
-      { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal / Company" },
-      { key: "meetingDate", label: "Meeting Date", type: "date" },
-      { key: "meetingTime", label: "Meeting Time", type: "time" },
-      { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
-      { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "" },
+	  meetings: {
+	    label: "Meetings",
+	    itemLabel: "Meeting",
+	    icon: "bi-calendar-event",
+	    columns: [
+	      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
+	      { key: "title", label: "Meeting Title" },
+	      { key: "relatedTo", label: "Related To" },
+	      { key: "meetingDate", label: "Date" },
+	      { key: "meetingTime", label: "Time" },
+	      { key: "owner", label: "Owner" },
+	      { key: "reminderSummary", label: "Reminder" },
+	      { key: "status", label: "Status" }
+	    ],
+	    fields: [
+	      { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
+	      { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
+	      { key: "relatedTo", label: "Select Lead", type: "datalist", datalistSource: "crmLeads", placeholder: "Search lead (optional)", required: false },
+	      { key: "meetingDate", label: "Meeting Date", type: "date" },
+	      { key: "meetingTime", label: "Meeting Time", type: "time" },
+	      { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
+	      { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "" },
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: [] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
       { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: [] },
@@ -2367,15 +2366,16 @@ function parseCrmMeetingDateValue(dateValue) {
   if (!normalizedDate) {
     return null;
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
-    const [year, month, day] = normalizedDate.split("-").map((part) => Number(part));
+  const normalizedIso = normalizeMeetingDateValue(normalizedDate);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedIso)) {
+    const [year, month, day] = normalizedIso.split("-").map((part) => Number(part));
     const parsed = new Date(year, month - 1, day);
     if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
       return parsed;
     }
     return null;
   }
-  const slashOrDashMatch = normalizedDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  const slashOrDashMatch = normalizedDate.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
   if (slashOrDashMatch) {
     const day = Number(slashOrDashMatch[1]);
     const month = Number(slashOrDashMatch[2]);
@@ -2405,18 +2405,37 @@ function getCrmMeetingReminderDayOptions(dateValue) {
     });
   };
 
-  const target = parseCrmMeetingDateValue(dateValue);
+  const allOptions = buildOptions(7);
+  const isoDate = normalizeMeetingDateValue(dateValue);
+  const isoMatch = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let target = null;
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+      target = parsed;
+    }
+  }
   if (!target) {
-    return buildOptions(7);
+    target = parseCrmMeetingDateValue(dateValue);
   }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  target.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  if (!target) {
+    return allOptions.map((option) => ({ ...option, disabled: true }));
+  }
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetUtc = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  const diffDays = Math.floor((targetUtc - todayUtc) / (24 * 60 * 60 * 1000));
   if (diffDays < 0) {
-    return buildOptions(7);
+    return allOptions.map((option) => ({ ...option, disabled: true }));
   }
-  return buildOptions(Math.min(Math.max(diffDays, 0), 7));
+  const maxSelectableDays = Math.min(Math.max(diffDays, 0), 7);
+  return allOptions.map((option) => ({
+    ...option,
+    disabled: Number(option.value) > maxSelectableDays,
+  }));
 }
 
 function buildCrmMeetingReminderSummary(reminderChannels, reminderDays, reminderMinutes) {
@@ -2624,6 +2643,23 @@ function formatIsoDateForDisplay(value) {
     return isoValue || "-";
   }
   return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function formatCrmReferenceIdForDisplay(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+  const match = rawValue.match(/^(CRM)-(\d{2})-(\d{2})-(\d{4})-(\d{2})$/i);
+  if (!match) {
+    return rawValue;
+  }
+  const prefix = match[1].toUpperCase();
+  const dd = match[2];
+  const mm = match[3];
+  const yyyy = match[4];
+  const seq = match[5];
+  return `${prefix}-${dd}${mm}${yyyy}-${seq}`;
 }
 
 function formatDateLikeCellValue(columnKey, value, fallback = "-") {
@@ -6461,9 +6497,18 @@ function normalizeMeetingTimeValue(value) {
 }
 
 function normalizeMeetingDateValue(value) {
-  const raw = String(value || "").trim();
+  let raw = String(value || "").trim();
   if (!raw) {
     return "";
+  }
+  const embeddedIsoMatch = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (embeddedIsoMatch) {
+    raw = embeddedIsoMatch[1];
+  } else {
+    const embeddedDmyMatch = raw.match(/(\d{1,2}[/-]\d{1,2}[/-]\d{4})/);
+    if (embeddedDmyMatch) {
+      raw = embeddedDmyMatch[1];
+    }
   }
   const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) {
@@ -6495,6 +6540,27 @@ function normalizeMeetingDateValue(value) {
     return `${yyyy}-${mm}-${dd}`;
   }
   return "";
+}
+
+function getCurrentTimeHHMM() {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function isMeetingTimeInvalidForToday(meetingDateValue, meetingTimeValue) {
+  const meetingDate = normalizeMeetingDateValue(meetingDateValue);
+  const meetingTime = normalizeMeetingTimeValue(meetingTimeValue);
+  if (!meetingDate || !meetingTime) {
+    return false;
+  }
+  const today = getTodayIsoDate();
+  if (meetingDate !== today) {
+    return false;
+  }
+  const nowTime = getCurrentTimeHHMM();
+  return meetingTime <= nowTime;
 }
 
 function syncDateTimeFieldValuesFromForm(form, fields, values) {
@@ -8451,6 +8517,7 @@ function CrmOnePageModule() {
   const crmStorageHydratedRef = useRef(false);
   const crmActiveSectionHydratedKeyRef = useRef("");
   const crmContactsBackfilledKeyRef = useRef("");
+  const crmSectionLinkHydratedRef = useRef("");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
   const [teamMembersPopup, setTeamMembersPopup] = useState(null);
@@ -8461,6 +8528,7 @@ function CrmOnePageModule() {
   const [dealQuickEditPopup, setDealQuickEditPopup] = useState(null);
   const [dealViewPopup, setDealViewPopup] = useState(null);
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
+  const [meetingLeadSearchOpen, setMeetingLeadSearchOpen] = useState(false);
   const [dealCompanySearchOpen, setDealCompanySearchOpen] = useState(false);
   const [activityClientSearchOpen, setActivityClientSearchOpen] = useState(false);
   const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
@@ -8908,6 +8976,34 @@ function CrmOnePageModule() {
   }, [crmStorageKey, crmSharedContactsKey]);
 
   useEffect(() => {
+    const params = new URLSearchParams(String(location.search || ""));
+    const queryTab = String(params.get("tab") || "").trim();
+    const querySearch = String(params.get("search") || "").trim();
+    if (!queryTab) {
+      crmSectionLinkHydratedRef.current = "";
+      return;
+    }
+    if (crmSectionLinkHydratedRef.current === location.search) {
+      return;
+    }
+    const normalizedTab = queryTab.toLowerCase();
+    const matchedSection = sectionOrder.find((key) => String(key).toLowerCase() === normalizedTab) || "";
+    crmSectionLinkHydratedRef.current = location.search;
+    if (!matchedSection) {
+      return;
+    }
+    if (matchedSection !== activeSection) {
+      setActiveSection(matchedSection);
+    }
+    if (querySearch) {
+      setSectionSearchPrefill((prev) => ({
+        ...prev,
+        [matchedSection]: querySearch,
+      }));
+    }
+  }, [location.search]);
+
+  useEffect(() => {
     if (!crmStorageKey) {
       return;
     }
@@ -9281,7 +9377,7 @@ function CrmOnePageModule() {
     if (!selectedReminderDays.length) {
       return;
     }
-    const reminderDayOptionSet = new Set(reminderDayOptions.map((option) => option.value));
+    const reminderDayOptionSet = new Set(reminderDayOptions.filter((option) => !option.disabled).map((option) => option.value));
     const nextReminderDays = selectedReminderDays.filter((value) => reminderDayOptionSet.has(value));
     if (nextReminderDays.length !== selectedReminderDays.length) {
       setForms((prev) => ({
@@ -10075,11 +10171,11 @@ function CrmOnePageModule() {
     }
   }
 
-  function setField(sectionKey, fieldKey, value) {
-    const fieldMeta = (CRM_SECTION_CONFIG[sectionKey]?.fields || []).find((field) => field.key === fieldKey);
-    let normalizedValue = typeof value === "string"
-      ? clampBusinessAutopilotText(fieldKey, value, { isTextarea: fieldMeta?.type === "textarea" })
-      : value;
+	  function setField(sectionKey, fieldKey, value) {
+	    const fieldMeta = (CRM_SECTION_CONFIG[sectionKey]?.fields || []).find((field) => field.key === fieldKey);
+	    let normalizedValue = typeof value === "string"
+	      ? clampBusinessAutopilotText(fieldKey, value, { isTextarea: fieldMeta?.type === "textarea" })
+	      : value;
     if (sectionKey === "meetings" && fieldKey === "meetingDate") {
       const normalizedMeetingDate = normalizeMeetingDateValue(normalizedValue);
       if (normalizedMeetingDate) {
@@ -10095,31 +10191,88 @@ function CrmOnePageModule() {
     if (isAmountFieldKey(fieldKey)) {
       normalizedValue = formatCurrencyNumberInput(sanitizeCurrencyInput(normalizedValue), crmCurrencyCode);
     }
-    const normalizedFieldKey = String(fieldKey || "").toLowerCase();
-    const isEmailInput = normalizedFieldKey.includes("email");
-    const trimmedValue = String(normalizedValue || "").trim();
-    const hasInvalidEmail = isEmailInput && trimmedValue && !EMAIL_ADDRESS_RE.test(trimmedValue);
-    if (!hasInvalidEmail) {
-      setSectionFormErrors((prev) => ({
-        ...prev,
-        [sectionKey]: "",
-      }));
-    }
-    setSectionFieldErrors((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        ...(prev[sectionKey] || {}),
-        [fieldKey]: hasInvalidEmail,
-      },
-    }));
-    setForms((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        ...prev[sectionKey],
-        [fieldKey]: normalizedValue,
-      },
-    }));
-  }
+	    const normalizedFieldKey = String(fieldKey || "").toLowerCase();
+	    const isEmailInput = normalizedFieldKey.includes("email");
+	    const trimmedValue = String(normalizedValue || "").trim();
+	    const hasInvalidEmail = isEmailInput && trimmedValue && !EMAIL_ADDRESS_RE.test(trimmedValue);
+	    const shouldValidateMeetingTime = sectionKey === "meetings" && (fieldKey === "meetingDate" || fieldKey === "meetingTime");
+	    const nextMeetingDateCandidate = sectionKey === "meetings"
+	      ? String(fieldKey === "meetingDate" ? normalizedValue : (forms.meetings?.meetingDate || "")).trim()
+	      : "";
+	    const nextMeetingTimeCandidate = sectionKey === "meetings"
+	      ? String(fieldKey === "meetingTime" ? normalizedValue : (forms.meetings?.meetingTime || "")).trim()
+	      : "";
+	    const hasInvalidMeetingTime = shouldValidateMeetingTime
+	      ? isMeetingTimeInvalidForToday(nextMeetingDateCandidate, nextMeetingTimeCandidate)
+	      : false;
+	    if (!hasInvalidEmail && !hasInvalidMeetingTime) {
+	      setSectionFormErrors((prev) => ({
+	        ...prev,
+	        [sectionKey]: "",
+	      }));
+	    } else if (hasInvalidMeetingTime && sectionKey === "meetings") {
+	      setSectionFormErrors((prev) => ({
+	        ...prev,
+	        meetings: "Meeting time must be later than current time.",
+	      }));
+	    }
+	    setSectionFieldErrors((prev) => {
+	      const previousSectionErrors = prev[sectionKey] || {};
+	      const nextSectionErrors = {
+	        ...previousSectionErrors,
+	        [fieldKey]: hasInvalidEmail,
+	      };
+	      if (sectionKey === "meetings" && (fieldKey === "meetingDate" || fieldKey === "meetingTime")) {
+	        nextSectionErrors.meetingTime = hasInvalidMeetingTime;
+	      }
+	      return {
+	        ...prev,
+	        [sectionKey]: nextSectionErrors,
+	      };
+	    });
+	    setForms((prev) => {
+	      const previousSection = prev[sectionKey] || {};
+	      const nextSection = {
+	        ...previousSection,
+	        [fieldKey]: normalizedValue,
+	      };
+	      if (sectionKey === "meetings" && fieldKey === "meetingDate") {
+	        const allowedDayValues = new Set(
+	          getCrmMeetingReminderDayOptions(nextSection.meetingDate)
+	            .filter((option) => !option.disabled)
+	            .map((option) => String(option.value))
+	        );
+	        const nextDays = parseCrmMeetingReminderDayValues(nextSection.reminderDays).filter((dayValue) => allowedDayValues.has(String(dayValue)));
+	        nextSection.reminderDays = nextDays;
+	      }
+	      if (sectionKey === "meetings" && (fieldKey === "relatedTo" || fieldKey === "companyOrClientName")) {
+	        const normalizedRelatedTo = String(nextSection.relatedTo || "").trim();
+	        const normalizedCompanyOrContacts = String(nextSection.companyOrClientName || "").trim();
+	        let resolvedReference = "";
+	        if (normalizedRelatedTo) {
+	          const normalizedTarget = normalizedRelatedTo.toLowerCase();
+	          const matchedLead = (moduleData.leads || []).find((lead) => {
+	            const leadName = String(lead?.name || lead?.lead_name || "").trim().toLowerCase();
+	            const leadCompany = String(lead?.company || "").trim().toLowerCase();
+	            return Boolean(
+	              (leadName && leadName === normalizedTarget)
+	              || (leadCompany && leadCompany === normalizedTarget)
+	            );
+	          });
+	          resolvedReference = String(matchedLead?.crmReferenceId || matchedLead?.crm_reference_id || "").trim()
+	            || resolveCrmReferenceIdByText(normalizedRelatedTo);
+	        }
+	        if (!resolvedReference && normalizedCompanyOrContacts) {
+	          resolvedReference = resolveCrmReferenceIdByText(normalizedCompanyOrContacts);
+	        }
+	        nextSection.crmReferenceId = resolvedReference || "";
+	      }
+	      return {
+	        ...prev,
+	        [sectionKey]: nextSection,
+	      };
+	    });
+	  }
 
   function resetCrmTeamBuilderState() {
     setSelectedTeamDepartments([]);
@@ -12797,24 +12950,38 @@ function CrmOnePageModule() {
       payload.employeeRoleFilters = [...selectedTeamEmployeeRoles];
       payload = normalizeCrmTeamRecord(payload);
     }
-    if (sectionKey === "meetings") {
-      const meetingOwnersRaw = Array.isArray(payload.owner)
-        ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
-        : String(payload.owner || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-      const meetingOwners = resolveAssignedUserNames(meetingOwnersRaw);
-      const effectiveMeetingOwners = meetingOwners.length ? meetingOwners : [String(currentUserName || "Current User").trim()];
-      const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
-      payload.meetingDate = normalizeMeetingDateValue(payload.meetingDate);
-      payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
-      payload.owner = effectiveMeetingOwners.join(", ");
-      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveMeetingOwners);
-      payload.crmReferenceId = String(
-        payload.crmReferenceId
-        || resolveCrmReferenceIdByText(payload.relatedTo || payload.companyOrClientName || "")
-        || ""
+	    if (sectionKey === "meetings") {
+	      const meetingOwnersRaw = Array.isArray(payload.owner)
+	        ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
+	        : String(payload.owner || "")
+	          .split(",")
+	          .map((item) => item.trim())
+	          .filter(Boolean);
+	      const meetingOwners = resolveAssignedUserNames(meetingOwnersRaw);
+	      const effectiveMeetingOwners = meetingOwners.length ? meetingOwners : [String(currentUserName || "Current User").trim()];
+	      const reminderChannels = Array.isArray(payload.reminderChannel) ? payload.reminderChannel : [payload.reminderChannel].filter(Boolean);
+	      payload.meetingDate = normalizeMeetingDateValue(payload.meetingDate);
+	      payload.meetingTime = normalizeMeetingTimeValue(payload.meetingTime);
+	      if (isMeetingTimeInvalidForToday(payload.meetingDate, payload.meetingTime)) {
+	        setSectionFormErrors((prev) => ({
+	          ...prev,
+	          meetings: "Meeting time must be later than current time.",
+	        }));
+	        setSectionFieldErrors((prev) => ({
+	          ...prev,
+	          meetings: {
+	            ...(prev.meetings || {}),
+	            meetingTime: true,
+	          },
+	        }));
+	        return;
+	      }
+	      payload.owner = effectiveMeetingOwners.join(", ");
+	      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveMeetingOwners);
+	      payload.crmReferenceId = String(
+	        payload.crmReferenceId
+	        || resolveCrmReferenceIdByText(payload.relatedTo || payload.companyOrClientName || "")
+	        || ""
       ).trim();
       payload.reminderChannel = reminderChannels;
       payload.reminderDays = parseCrmMeetingReminderDayValues(payload.reminderDays);
@@ -13122,9 +13289,40 @@ function CrmOnePageModule() {
       const newRowId = sectionKey === "meetings"
         ? (String(meetingServerId || payload.serverMeetingId || payload.id || "").trim() || `${sectionKey}_${Date.now()}`)
         : `${sectionKey}_${Date.now()}`;
+      const nextRows = [{ id: newRowId, ...payload, serverMeetingId: meetingServerId || payload.serverMeetingId || "" }, ...rows];
+      if (sectionKey === "meetings") {
+        const noteCrmRef = String(payload.crmReferenceId || "").trim();
+        const noteTitle = String(payload.title || "").trim();
+        const noteDate = String(payload.meetingDate || "").trim();
+        const noteStatus = String(payload.status || "Scheduled").trim();
+        if (noteCrmRef && noteTitle && noteDate) {
+          const nextEntry = {
+            id: `lead_note_meeting_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            noteDate,
+            noteText: `Noted: ${noteTitle} (${noteStatus})`,
+            createdAt: new Date().toISOString(),
+          };
+          const nextLeads = (prev.leads || []).map((row) => {
+            const normalizedRow = normalizeCrmLeadRecord(row);
+            const rowCrmRef = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
+            if (!rowCrmRef || rowCrmRef !== noteCrmRef) {
+              return row;
+            }
+            return {
+              ...normalizedRow,
+              leadNotesHistory: [nextEntry, ...(normalizedRow.leadNotesHistory || [])],
+            };
+          });
+          return {
+            ...prev,
+            [sectionKey]: nextRows,
+            leads: nextLeads,
+          };
+        }
+      }
       return {
         ...prev,
-        [sectionKey]: [{ id: newRowId, ...payload, serverMeetingId: meetingServerId || payload.serverMeetingId || "" }, ...rows],
+        [sectionKey]: nextRows,
       };
     });
     resetSectionForm(sectionKey);
@@ -13727,6 +13925,47 @@ function CrmOnePageModule() {
     ));
   }
 
+  function appendLeadMeetingNote(crmReferenceId, { noteDate, title, status }) {
+    const normalizedCrmReferenceId = String(crmReferenceId || "").trim();
+    const normalizedTitle = String(title || "").trim();
+    const normalizedStatus = String(status || "").trim();
+    const normalizedNoteDate = String(noteDate || "").trim();
+    if (!normalizedCrmReferenceId || !normalizedTitle || !normalizedNoteDate) {
+      return;
+    }
+    const nextEntry = {
+      id: `lead_note_meeting_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      noteDate: normalizedNoteDate,
+      noteText: `Noted: ${normalizedTitle}${normalizedStatus ? ` (${normalizedStatus})` : ""}`,
+      createdAt: new Date().toISOString(),
+    };
+    setModuleData((prev) => ({
+      ...prev,
+      leads: (prev.leads || []).map((row) => {
+        const normalizedRow = normalizeCrmLeadRecord(row);
+        const rowCrmRef = String(normalizedRow.crmReferenceId || normalizedRow.crm_reference_id || "").trim();
+        if (!rowCrmRef || rowCrmRef !== normalizedCrmReferenceId) {
+          return row;
+        }
+        return {
+          ...normalizedRow,
+          leadNotesHistory: [nextEntry, ...(normalizedRow.leadNotesHistory || [])],
+        };
+      }),
+    }));
+    setLeadNotesPopup((prev) => {
+      if (!prev) return prev;
+      const popupCrmRef = String(prev.crmReferenceId || "").trim();
+      if (popupCrmRef && popupCrmRef === normalizedCrmReferenceId) {
+        return {
+          ...prev,
+          history: [nextEntry, ...(prev.history || [])],
+        };
+      }
+      return prev;
+    });
+  }
+
   async function updateMeetingStatus(meetingId, nextStatus) {
     const status = String(nextStatus || "").trim();
     if (!meetingId || !status) return;
@@ -13741,6 +13980,17 @@ function CrmOnePageModule() {
             : row
         )),
       }));
+      const meetingForNote = backendMeeting
+        || (moduleData.meetings || []).find((row) => String(row?.id || "") === String(meetingId))
+        || null;
+      if (meetingForNote) {
+        const noteCrmRef = String(meetingForNote?.crmReferenceId || meetingForNote?.crm_reference_id || "").trim();
+        const noteDate = String(meetingForNote?.meetingDate || "").trim();
+        const noteTitle = String(meetingForNote?.title || "").trim();
+        if (noteCrmRef && noteDate && noteTitle) {
+          appendLeadMeetingNote(noteCrmRef, { noteDate, title: noteTitle, status: String(backendMeeting?.status || status || "").trim() });
+        }
+      }
       setMeetingPopup((prev) => (
         prev && String(prev.id) === String(meetingId)
           ? { ...prev, ...(backendMeeting || { status }) }
@@ -14024,19 +14274,66 @@ function CrmOnePageModule() {
     const [groupBy, setGroupBy] = useState("user");
     const [fromDate, setFromDate] = useState("");
     const [toDate, setToDate] = useState("");
+    const [availableRange, setAvailableRange] = useState({ from: "", to: "" });
     const [report, setReport] = useState(null);
+    const [hasGenerated, setHasGenerated] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+
+    const PRESET_DAYS_MAP = {
+      last_7_days: 7,
+      last_15_days: 15,
+      last_30_days: 30,
+      last_60_days: 60,
+      last_90_days: 90,
+    };
+
+    const toLocalISODate = (dateValue) => {
+      const raw = dateValue instanceof Date ? dateValue : new Date(dateValue);
+      if (Number.isNaN(raw.getTime())) {
+        return "";
+      }
+      const local = new Date(raw.getTime() - raw.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 10);
+    };
+
+    const addDays = (isoDate, deltaDays) => {
+      if (!isoDate) return "";
+      const base = new Date(`${isoDate}T00:00:00`);
+      if (Number.isNaN(base.getTime())) return "";
+      base.setDate(base.getDate() + Number(deltaDays || 0));
+      return toLocalISODate(base);
+    };
+
+    const clampISODate = (isoDate, minIso, maxIso) => {
+      const value = String(isoDate || "").trim();
+      if (!value) return "";
+      if (minIso && value < minIso) return minIso;
+      if (maxIso && value > maxIso) return maxIso;
+      return value;
+    };
+
+    const todayIso = toLocalISODate(new Date());
+
+    const formatDDMMYYYY = (isoDate) => {
+      const raw = String(isoDate || "").trim();
+      if (!raw) return "";
+      const [yyyy, mm, dd] = raw.split("-");
+      if (!yyyy || !mm || !dd) return raw;
+      return `${dd}-${mm}-${yyyy}`;
+    };
 
     const buildQueryString = useCallback((formatValue = "json") => {
       const params = new URLSearchParams();
       params.set("preset", String(preset || "last_30_days"));
       params.set("group_by", String(groupBy || "user"));
-      if (fromDate) {
-        params.set("from_date", fromDate);
-      }
-      if (toDate) {
-        params.set("to_date", toDate);
+      if (String(preset || "").toLowerCase() === "custom") {
+        if (fromDate) {
+          params.set("from_date", fromDate);
+        }
+        if (toDate) {
+          params.set("to_date", toDate);
+        }
       }
       if (formatValue && formatValue !== "json") {
         params.set("format", formatValue);
@@ -14044,7 +14341,7 @@ function CrmOnePageModule() {
       return params.toString();
     }, [preset, groupBy, fromDate, toDate]);
 
-    const fetchReport = useCallback(async () => {
+    const fetchReport = useCallback(async ({ markGenerated = false } = {}) => {
       setBusy(true);
       setError("");
       try {
@@ -14055,6 +14352,20 @@ function CrmOnePageModule() {
           throw new Error("Report data not available.");
         }
         setReport(payload);
+        const range = response?.available_range || {};
+        setAvailableRange({
+          from: String(range?.from_date || "").trim(),
+          to: String(range?.to_date || "").trim(),
+        });
+        if (payload?.period?.from_date) {
+          setFromDate(String(payload.period.from_date));
+        }
+        if (payload?.period?.to_date) {
+          setToDate(String(payload.period.to_date));
+        }
+        if (markGenerated) {
+          setHasGenerated(true);
+        }
       } catch (err) {
         setError(err?.message || "Unable to generate report right now.");
       } finally {
@@ -14063,16 +14374,17 @@ function CrmOnePageModule() {
     }, [buildQueryString, panelApiFetch]);
 
     useEffect(() => {
-      fetchReport();
+      fetchReport({ markGenerated: false });
     }, []);
 
     const summary = report?.summary || {};
     const period = report?.period || {};
     const chartItems = Array.isArray(report?.chart_items) ? report.chart_items : [];
     const groupRows = Array.isArray(report?.group_rows) ? report.group_rows : [];
+    const leadRows = Array.isArray(report?.lead_details) ? report.lead_details : [];
 
     const periodLabel = period?.from_date && period?.to_date
-      ? `${period.from_date} to ${period.to_date}`
+      ? `${formatDDMMYYYY(period.from_date)} to ${formatDDMMYYYY(period.to_date)}`
       : "";
 
     const exportReport = (formatValue) => {
@@ -14121,11 +14433,11 @@ function CrmOnePageModule() {
               </div>
             </div>
             <div className="d-flex flex-wrap gap-2">
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => exportReport("pdf")} disabled={!report || busy}>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => exportReport("pdf")} disabled={!report || busy || !hasGenerated}>
                 <i className="bi bi-file-earmark-pdf me-1" aria-hidden="true" />
                 Export PDF
               </button>
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => exportReport("xlsx")} disabled={!report || busy}>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => exportReport("xlsx")} disabled={!report || busy || !hasGenerated}>
                 <i className="bi bi-file-earmark-spreadsheet me-1" aria-hidden="true" />
                 Export Excel
               </button>
@@ -14134,12 +14446,40 @@ function CrmOnePageModule() {
 
           <div className="row g-3 align-items-end mb-3">
             <div className="col-12 col-md-3">
+              <label className="form-label">Group By</label>
+              <select
+                className="form-select form-select-sm"
+                value={groupBy}
+                onChange={(event) => {
+                  setHasGenerated(false);
+                  setGroupBy(event.target.value);
+                }}
+              >
+                <option value="user">User Wise</option>
+                <option value="team">Team Wise</option>
+              </select>
+            </div>
+            <div className="col-12 col-md-3">
               <label className="form-label">Preset</label>
               <select
                 className="form-select form-select-sm"
                 value={preset}
                 onChange={(event) => {
-                  setPreset(event.target.value);
+                  const nextPreset = String(event.target.value || "").trim();
+                  setHasGenerated(false);
+                  setPreset(nextPreset);
+                  if (nextPreset.toLowerCase() === "custom") {
+                    const nextFrom = clampISODate(todayIso, availableRange.from, availableRange.to);
+                    const nextTo = clampISODate(todayIso, availableRange.from, availableRange.to);
+                    setFromDate(nextFrom);
+                    setToDate(nextTo);
+                    return;
+                  }
+                  const presetDays = Number(PRESET_DAYS_MAP[nextPreset] || 30);
+                  const computedTo = todayIso;
+                  const computedFrom = addDays(computedTo, -(Math.max(presetDays - 1, 0)));
+                  setFromDate(computedFrom);
+                  setToDate(computedTo);
                 }}
               >
                 <option value="last_7_days">Last 7 Days</option>
@@ -14147,17 +14487,7 @@ function CrmOnePageModule() {
                 <option value="last_30_days">Last 30 Days</option>
                 <option value="last_60_days">Last 60 Days</option>
                 <option value="last_90_days">Last 90 Days</option>
-              </select>
-            </div>
-            <div className="col-12 col-md-3">
-              <label className="form-label">Group By</label>
-              <select
-                className="form-select form-select-sm"
-                value={groupBy}
-                onChange={(event) => setGroupBy(event.target.value)}
-              >
-                <option value="user">User Wise</option>
-                <option value="team">Team Wise</option>
+                <option value="custom">Custom</option>
               </select>
             </div>
             <div className="col-12 col-md-3">
@@ -14166,7 +14496,13 @@ function CrmOnePageModule() {
                 type="date"
                 className="form-control form-control-sm"
                 value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
+                onChange={(event) => {
+                  setHasGenerated(false);
+                  setFromDate(event.target.value);
+                }}
+                disabled={String(preset || "").toLowerCase() !== "custom"}
+                min={availableRange.from || undefined}
+                max={availableRange.to || undefined}
               />
             </div>
             <div className="col-12 col-md-3">
@@ -14175,11 +14511,28 @@ function CrmOnePageModule() {
                 type="date"
                 className="form-control form-control-sm"
                 value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
+                onChange={(event) => {
+                  setHasGenerated(false);
+                  setToDate(event.target.value);
+                }}
+                disabled={String(preset || "").toLowerCase() !== "custom"}
+                min={availableRange.from || undefined}
+                max={availableRange.to || undefined}
               />
             </div>
             <div className="col-12 d-flex justify-content-end">
-              <button type="button" className="btn btn-success btn-sm" onClick={fetchReport} disabled={busy}>
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                onClick={() => {
+                  if (String(preset || "").toLowerCase() === "custom" && (!fromDate || !toDate)) {
+                    setError("Select From and To dates for Custom preset.");
+                    return;
+                  }
+                  fetchReport({ markGenerated: true });
+                }}
+                disabled={busy}
+              >
                 {busy ? "Generating..." : "Generate Report"}
               </button>
             </div>
@@ -14213,19 +14566,50 @@ function CrmOnePageModule() {
           PDF export includes infographic layout. Excel export contains raw data (Summary, Performance, Lead Details).
         </div>
 
-        <div className="fw-semibold mt-4 mb-2">{groupBy === "team" ? "Team Performance" : "User Performance"}</div>
-        {/* Don't use `.table-responsive` here because app-shell adds a border-box style. */}
-        <div className="overflow-auto">
-          <table className="table table-sm align-middle mb-0">
+        <div className="fw-semibold mt-4 mb-2">Lead Details</div>
+        <div className="table-responsive">
+          <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table wz-crm-report-table">
             <thead>
               <tr>
-                <th style={{ minWidth: 180 }}>{groupBy === "team" ? "Team" : "User"}</th>
-                <th>Total</th>
-                <th>Pending</th>
-                <th>Completed</th>
-                <th>SO</th>
-                <th>Estimate</th>
-                <th>Invoice</th>
+                <th className="fw-semibold" style={{ minWidth: 110 }}>Date</th>
+                <th className="fw-semibold" style={{ minWidth: 140 }}>CRM ID</th>
+                <th className="fw-semibold" style={{ minWidth: 220 }}>Lead</th>
+                <th className="fw-semibold" style={{ minWidth: 220 }}>Company</th>
+                <th className="fw-semibold" style={{ minWidth: 120 }}>Status</th>
+                <th className="fw-semibold" style={{ minWidth: 160 }}>Assigned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leadRows.length ? leadRows.map((row, index) => (
+                <tr key={`${String(row?.crm_reference_id || row?.lead_name || "row")}-${index}`}>
+                  <td>{formatDDMMYYYY(String(row?.date || "")) || "-"}</td>
+                  <td className="text-secondary">{String(row?.crm_reference_id || "-")}</td>
+                  <td className="fw-semibold">{String(row?.lead_name || "-")}</td>
+                  <td>{String(row?.company || "-")}</td>
+                  <td>{String(row?.status || "-")}</td>
+                  <td>{String(row?.assigned_to || row?.group_name || "-")}</td>
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={6} className="text-secondary">No lead data found for selected period.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="fw-semibold mt-4 mb-2">{groupBy === "team" ? "Team Performance" : "User Performance"}</div>
+        <div className="table-responsive">
+          <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table wz-crm-report-table">
+            <thead>
+              <tr>
+                <th className="fw-semibold" style={{ minWidth: 180 }}>{groupBy === "team" ? "Team" : "User"}</th>
+                <th className="fw-semibold">Total</th>
+                <th className="fw-semibold">Pending</th>
+                <th className="fw-semibold">Completed</th>
+                <th className="fw-semibold">SO</th>
+                <th className="fw-semibold">Estimate</th>
+                <th className="fw-semibold">Invoice</th>
               </tr>
             </thead>
             <tbody>
@@ -14502,10 +14886,11 @@ function CrmOnePageModule() {
         const canSubmitSectionForm = editingId ? hasCrmEditAccess : canCreateCrmRows;
         const shouldShowCrmForm = sectionKey !== "deals" && (canCreateCrmRows || Boolean(editingId));
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
-        const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
-        const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
-        const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
-        const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
+	        const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
+	        const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
+	        const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
+	        const meetingLeadQuery = sectionKey === "meetings" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
+	        const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads"
           ? activeCrmContacts.filter((contact) => {
               if (!leadCompanyQuery) {
@@ -14589,15 +14974,31 @@ function CrmOnePageModule() {
               return haystack.includes(meetingCompanyQuery);
             }).slice(0, 6)
           : [];
-        const meetingCustomerMatches = sectionKey === "meetings"
-          ? sharedCustomerOptions.filter((customer) => {
-              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
-              if (!meetingCompanyQuery) {
-                return true;
-              }
-              return haystack.includes(meetingCompanyQuery);
-            }).slice(0, 6)
-          : [];
+	        const meetingCustomerMatches = sectionKey === "meetings"
+	          ? sharedCustomerOptions.filter((customer) => {
+	              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
+	              if (!meetingCompanyQuery) {
+	                return true;
+	              }
+	              return haystack.includes(meetingCompanyQuery);
+	            }).slice(0, 6)
+	          : [];
+	        const meetingLeadMatches = sectionKey === "meetings"
+	          ? (moduleData.leads || []).filter((lead) => !isSoftDeletedCrmRow(lead)).map((lead) => {
+	              const normalizedLead = normalizeCrmLeadRecord(lead);
+	              const name = String(normalizedLead.name || "").trim();
+	              const company = String(normalizedLead.company || "").trim();
+	              const crmRef = String(normalizedLead.crmReferenceId || "").trim();
+	              const haystack = `${name} ${company} ${crmRef}`.toLowerCase();
+	              return {
+	                id: String(normalizedLead.id || "").trim() || crmRef || name || company,
+	                name,
+	                company,
+	                crmReferenceId: crmRef,
+	                haystack,
+	              };
+	            }).filter((lead) => !meetingLeadQuery || lead.haystack.includes(meetingLeadQuery)).slice(0, 6)
+	          : [];
         const activityContactMatches = sectionKey === "activities"
           ? (moduleData.contacts || []).filter((contact) => {
               const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
@@ -14975,28 +15376,45 @@ function CrmOnePageModule() {
                           >
                             <i className="bi bi-eye" aria-hidden="true" />
                           </button>
-                          {(() => {
-                            const convertedDocumentKind = String(row.convertedDocumentKind || "").trim();
-                            const convertedDocumentId = String(row.convertedDocumentId || "").trim();
-                            const isConverted = Boolean(convertedDocumentKind && convertedDocumentId);
-                            const handleConvertOrDownload = () => {
-                              if (isConverted) {
-                                openConvertedSalesOrderDocumentForEditing(row);
-                                return;
-                              }
-                              openCrmSalesOrderConvertPopup(row);
-                            };
-                            return (
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${isConverted ? "btn-outline-success" : "btn-outline-info"}`}
-                                onClick={handleConvertOrDownload}
-                                title={isConverted ? `Open ${String(row.convertedDocumentNo || "").trim() || "converted document"} for editing` : "Convert"}
-                              >
-                                {isConverted ? "Converted" : "Convert"}
-                              </button>
-                            );
-                          })()}
+	                          {(() => {
+	                            const hasEstimate = Boolean(row.convertedToEstimate) && !Boolean(row.convertedToInvoice);
+	                            const hasInvoice = Boolean(row.convertedToInvoice);
+	                            const shouldConvertToInvoice = hasEstimate && !hasInvoice;
+	                            const isDisabled = hasInvoice;
+	                            const handleConvertClick = () => {
+	                              if (isDisabled) {
+	                                return;
+	                              }
+	                              if (shouldConvertToInvoice) {
+	                                convertCrmSalesOrderToBillingDocument("invoice", row);
+	                                return;
+	                              }
+	                              openCrmSalesOrderConvertPopup(row);
+	                            };
+	                            const title = hasInvoice
+	                              ? "Completed"
+	                              : shouldConvertToInvoice
+	                                ? "Convert to Invoice"
+	                                : "Convert";
+	                            return (
+	                              <button
+	                                type="button"
+	                                className={`btn btn-sm ${
+	                                  hasInvoice ? "btn-outline-secondary wz-sales-order-convert-disabled" : shouldConvertToInvoice ? "btn-outline-success" : "btn-outline-info"
+	                                }`}
+	                                onClick={handleConvertClick}
+	                                disabled={isDisabled}
+	                                title={title}
+	                                aria-label={title}
+	                              >
+	                                {hasEstimate || hasInvoice ? (
+	                                  <i className="bi bi-file-earmark-text" aria-hidden="true" />
+	                                ) : (
+	                                  <i className="bi bi-arrow-left-right" aria-hidden="true" />
+	                                )}
+	                              </button>
+	                            );
+	                          })()}
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-light"
@@ -16169,6 +16587,67 @@ function CrmOnePageModule() {
                                   </div>
                                 );
                               }
+                              if (sectionKey === "meetings" && field.key === "relatedTo") {
+                                return (
+                                  <div className="crm-inline-suggestions-wrap">
+                                    <input
+                                      type="text"
+                                      className="form-control crm-meeting-relatedto-input"
+                                      autoComplete="off"
+                                      placeholder={field.placeholder}
+                                      value={formValues[field.key] || ""}
+                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
+                                      onFocus={() => setMeetingLeadSearchOpen(true)}
+                                      onClick={() => setMeetingLeadSearchOpen(true)}
+                                      onBlur={() => window.setTimeout(() => setMeetingLeadSearchOpen(false), 120)}
+                                      onChange={(event) => {
+                                        setField(sectionKey, field.key, event.target.value);
+                                        setMeetingLeadSearchOpen(true);
+                                      }}
+                                    />
+                                    {meetingLeadSearchOpen ? (
+                                      meetingLeadMatches.length ? (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__group">
+                                            <div className="crm-inline-suggestions__title">Leads</div>
+                                            {meetingLeadMatches.map((lead) => {
+                                              const main = lead.name || lead.company || "-";
+                                              const sub = [
+                                                (lead.company && lead.company !== lead.name) ? lead.company : "",
+                                                lead.crmReferenceId ? formatCrmReferenceIdForDisplay(lead.crmReferenceId) : "",
+                                              ].filter(Boolean).join(" • ") || "-";
+                                              return (
+                                                <button
+                                                  key={`meeting-lead-${lead.id}`}
+                                                  type="button"
+                                                  className="crm-inline-suggestions__item"
+                                                  onMouseDown={(event) => event.preventDefault()}
+                                                  onClick={() => {
+                                                    setField(sectionKey, field.key, main);
+                                                    if (lead.crmReferenceId) {
+                                                      setField(sectionKey, "crmReferenceId", lead.crmReferenceId);
+                                                    }
+                                                    setMeetingLeadSearchOpen(false);
+                                                  }}
+                                                >
+                                                  <span className="crm-inline-suggestions__item-main">{main}</span>
+                                                  <span className="crm-inline-suggestions__item-sub">{sub}</span>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="crm-inline-suggestions">
+                                          <div className="crm-inline-suggestions__item">
+                                            <span className="crm-inline-suggestions__item-main">No lead results found</span>
+                                          </div>
+                                        </div>
+                                      )
+                                    ) : null}
+                                  </div>
+                                );
+                              }
                               if (sectionKey === "meetings" && field.key === "owner") {
                                 return (
                                   <div className="d-flex flex-column gap-2">
@@ -16336,25 +16815,30 @@ function CrmOnePageModule() {
                                         <div className="crm-inline-suggestions">
                                           <div className="crm-inline-suggestions__group">
                                             <div className="crm-inline-suggestions__title">Remind Before Days</div>
-                                            {filteredMeetingReminderDayOptions.length ? filteredMeetingReminderDayOptions.map((option) => (
-                                              <button
-                                                key={`meeting-reminder-day-${option.value}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => toggleMeetingReminderDay(option.value)}
-                                              >
-                                                <span className="d-flex align-items-center gap-2">
-                                                  <input
-                                                    type="checkbox"
-                                                    className="form-check-input mt-0"
-                                                    checked={selectedMeetingReminderDays.includes(option.value)}
-                                                    readOnly
-                                                  />
-                                                  <span className="crm-inline-suggestions__item-main">{option.label}</span>
-                                                </span>
-                                              </button>
-                                            )) : (
+	                                            {filteredMeetingReminderDayOptions.length ? filteredMeetingReminderDayOptions.map((option) => (
+	                                              <button
+	                                                key={`meeting-reminder-day-${option.value}`}
+	                                                type="button"
+	                                                className={`crm-inline-suggestions__item ${option.disabled ? "opacity-50" : ""}`}
+	                                                disabled={Boolean(option.disabled)}
+	                                                onMouseDown={(event) => event.preventDefault()}
+	                                                onClick={() => {
+	                                                  if (option.disabled) return;
+	                                                  toggleMeetingReminderDay(option.value);
+	                                                }}
+	                                              >
+	                                                <span className="d-flex align-items-center gap-2">
+	                                                  <input
+	                                                    type="checkbox"
+	                                                    className="form-check-input mt-0"
+	                                                    checked={selectedMeetingReminderDays.includes(option.value)}
+	                                                    disabled={Boolean(option.disabled)}
+	                                                    readOnly
+	                                                  />
+	                                                  <span className="crm-inline-suggestions__item-main">{option.label}</span>
+	                                                </span>
+	                                              </button>
+	                                            )) : (
                                               <div className="crm-inline-suggestions__item">
                                                 <span className="crm-inline-suggestions__item-main">No reminder day options found</span>
                                               </div>
@@ -16474,21 +16958,38 @@ function CrmOnePageModule() {
                                       required={isCrmFieldRequired(sectionKey, field, formValues)}
                                       onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                     />
-                                    <datalist id={`${sectionKey}-${field.key}-datalist`}>
-                                      {field.datalistSource === "crmContacts"
-                                        ? (moduleData.contacts || []).flatMap((contact) => {
-                                            const options = [];
-                                            if (String(contact.name || "").trim()) options.push(contact.name.trim());
-                                            if (String(contact.company || "").trim()) options.push(contact.company.trim());
-                                            return options;
-                                          }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
-                                            <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                          ))
-                                        : field.datalistSource === "erpUsers"
-                                          ? crmUserOptions.map((value) => (
-                                              <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
-                                            ))
-                                          : field.datalistSource === "accountsCustomers"
+	                                    <datalist id={`${sectionKey}-${field.key}-datalist`}>
+	                                      {field.datalistSource === "crmContacts"
+	                                        ? (moduleData.contacts || []).flatMap((contact) => {
+	                                            const options = [];
+	                                            if (String(contact.name || "").trim()) options.push(contact.name.trim());
+	                                            if (String(contact.company || "").trim()) options.push(contact.company.trim());
+	                                            return options;
+	                                          }).filter((value, index, arr) => arr.indexOf(value) === index).map((value) => (
+	                                            <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+	                                          ))
+	                                        : field.datalistSource === "crmLeads"
+	                                          ? (moduleData.leads || []).map((lead) => {
+	                                              const leadName = String(lead?.name || lead?.lead_name || "").trim();
+	                                              const leadCompany = String(lead?.company || "").trim();
+	                                              const leadRef = String(lead?.crmReferenceId || lead?.crm_reference_id || "").trim();
+	                                              const value = leadName || leadCompany;
+	                                              const labelParts = [leadName || leadCompany, leadRef].filter(Boolean);
+	                                              if (!value) {
+	                                                return null;
+	                                              }
+	                                              return { value, label: labelParts.join(" • ") };
+	                                            })
+	                                              .filter(Boolean)
+	                                              .filter((entry, index, arr) => arr.findIndex((row) => row.value === entry.value) === index)
+	                                              .map((entry) => (
+	                                                <option key={`${sectionKey}-${field.key}-${entry.value}`} value={entry.value} label={entry.label} />
+	                                              ))
+	                                        : field.datalistSource === "erpUsers"
+	                                          ? crmUserOptions.map((value) => (
+	                                              <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
+	                                            ))
+	                                          : field.datalistSource === "accountsCustomers"
                                             ? sharedCustomerDatalistOptions.map((value) => (
                                                 <option key={`${sectionKey}-${field.key}-${value}`} value={value} />
                                               ))
@@ -16535,9 +17036,12 @@ function CrmOnePageModule() {
                                 );
                               }
                               if (field.type === "date" || field.type === "time") {
+                                const meetingDateValue = sectionKey === "meetings" ? normalizeMeetingDateValue(formValues.meetingDate) : "";
                                 const minValue = sectionKey === "meetings" && field.key === "meetingDate"
                                   ? getTodayIsoDate()
-                                  : undefined;
+                                  : sectionKey === "meetings" && field.key === "meetingTime" && meetingDateValue === getTodayIsoDate()
+                                    ? getCurrentTimeHHMM()
+                                    : undefined;
                                 return (
                                   <input
                                     type={field.type}
@@ -16952,13 +17456,16 @@ function CrmOnePageModule() {
                   if (sectionKey === "meetings" && column.key === "meetingTime") {
                     return formatTimeToAmPm(row[column.key]);
                   }
-                  if (sectionKey === "followUps" && column.key === "status") {
-                    const effectiveStatus = getFollowUpEffectiveStatus(row);
-                    return `${effectiveStatus[0].toUpperCase()}${effectiveStatus.slice(1)}`;
-                  }
-                  if (sectionKey === "contacts" && column.key === "tag") {
-                    return formatDateLikeCellValue(column.key, normalizeCrmContactTag(row[column.key]), "-");
-                  }
+	                  if (sectionKey === "followUps" && column.key === "status") {
+	                    const effectiveStatus = getFollowUpEffectiveStatus(row);
+	                    return `${effectiveStatus[0].toUpperCase()}${effectiveStatus.slice(1)}`;
+	                  }
+	                  if (column.key === "crmReferenceId") {
+	                    return formatCrmReferenceIdForDisplay(row[column.key]) || "-";
+	                  }
+	                  if (sectionKey === "contacts" && column.key === "tag") {
+	                    return formatDateLikeCellValue(column.key, normalizeCrmContactTag(row[column.key]), "-");
+	                  }
                   if (sectionKey === "leads" && column.key === "leadAmount") {
                     const amount = parseNumber(row[column.key]);
                     return amount ? formatCurrencyAmount(amount, crmCurrencyCode) : "-";
@@ -16997,20 +17504,31 @@ function CrmOnePageModule() {
                     ) : null}
                   </div>
                 ) : (
-                  <div className="d-inline-flex gap-2">
-                    {canEditCrmRow(sectionKey, row) ? (
-                      <input
-                        type="checkbox"
-                        className="form-check-input mt-0 align-self-center"
-                        checked={selectedIdSet.has(String(row.id || "").trim())}
-                        onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
-                      />
-                    ) : null}
-                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (() => {
-                      const linkedDeal = findLinkedDealForLead(row);
-                      const leadRowId = String(row?.id || "").trim();
-                      const isConverting = Boolean(leadRowId) && convertingLeadIds.has(leadRowId);
-                      const isStatusBlocked = ["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase());
+	                  <div className="d-inline-flex gap-2">
+	                    {canEditCrmRow(sectionKey, row) ? (
+	                      <input
+	                        type="checkbox"
+	                        className="form-check-input mt-0 align-self-center"
+	                        checked={selectedIdSet.has(String(row.id || "").trim())}
+	                        onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
+	                      />
+	                    ) : null}
+	                    {sectionKey === "leads" ? (
+	                      <button
+	                        type="button"
+	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                        title="View Lead"
+	                        aria-label="View Lead"
+	                        onClick={() => openLeadViewPopup(row)}
+	                      >
+	                        <i className="bi bi-eye" aria-hidden="true" />
+	                      </button>
+	                    ) : null}
+	                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (() => {
+	                      const linkedDeal = findLinkedDealForLead(row);
+	                      const leadRowId = String(row?.id || "").trim();
+	                      const isConverting = Boolean(leadRowId) && convertingLeadIds.has(leadRowId);
+	                      const isStatusBlocked = ["closed", "onhold"].includes(String(row.status || "").trim().toLowerCase());
                       if (linkedDeal) {
                         return (
                           <button
@@ -17037,10 +17555,10 @@ function CrmOnePageModule() {
                             className="bi bi-arrow-repeat"
                             aria-hidden="true"
                             style={isConverting ? { animation: "spin 0.9s linear infinite" } : undefined}
-                          />
-                        </button>
-                      );
-                    })() : null}
+	                          />
+	                        </button>
+	                      );
+	                    })() : null}
                     {sectionKey === "deals" ? (
                       <button
                         type="button"
@@ -17072,28 +17590,17 @@ function CrmOnePageModule() {
                         Cancel
                       </button>
                     ) : null}
-                    {sectionKey === "leads" ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-                        title="View Lead"
-                        aria-label="View Lead"
-                        onClick={() => openLeadViewPopup(row)}
-                      >
-                        <i className="bi bi-eye" aria-hidden="true" />
-                      </button>
-                    ) : null}
-                    {sectionKey === "leads" ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-                        title="Lead Notes"
+	                    {sectionKey === "leads" ? (
+	                      <button
+	                        type="button"
+	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                        title="Lead Notes"
                         aria-label="Lead Notes"
                         onClick={() => openLeadNotesPopup(row)}
                       >
                         <i className="bi bi-journal-text" aria-hidden="true" />
-                      </button>
-                    ) : null}
+	                      </button>
+	                    ) : null}
                     {sectionKey === "contacts" && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
@@ -17268,11 +17775,11 @@ function CrmOnePageModule() {
           className="modal-overlay wz-crm-popup-overlay"
           onClick={closeLeadViewPopup}
         >
-          <div
-            className="card p-3 wz-crm-popup"
-            style={{ width: "min(980px, 96vw)", maxHeight: "88vh", overflowY: "auto" }}
-            onClick={(event) => event.stopPropagation()}
-          >
+	          <div
+	            className="card p-3 wz-crm-popup"
+	            style={{ width: "min(1050px, 96vw)", maxHeight: "88vh", overflowY: "auto" }}
+	            onClick={(event) => event.stopPropagation()}
+	          >
             {(() => {
               const assignedToDisplay = Array.isArray(leadViewPopup.assignedUser)
                 ? (
@@ -17287,13 +17794,122 @@ function CrmOnePageModule() {
               const phoneDisplay = String(leadViewPopup.phone || "").trim()
                 ? `${String(leadViewPopup.phoneCountryCode || "+91").trim()} ${String(leadViewPopup.phone || "").trim()}`
                 : "-";
-              const amountDisplay = parseNumber(leadViewPopup.leadAmount)
-                ? formatCurrencyAmount(parseNumber(leadViewPopup.leadAmount), crmCurrencyCode)
-                : "-";
-              const details = [
-                { label: "Company", value: leadViewPopup.company || "-" },
-                { label: "Contact Person", value: leadViewPopup.contactPerson || "-" },
-                { label: "Phone", value: phoneDisplay },
+	              const amountDisplay = parseNumber(leadViewPopup.leadAmount)
+	                ? formatCurrencyAmount(parseNumber(leadViewPopup.leadAmount), crmCurrencyCode)
+	                : "-";
+	              const leadCrmReferenceId = normalizePlaceholderText(String(
+	                leadViewPopup.crmReferenceId
+	                || leadViewPopup.crm_reference_id
+	                || resolveCrmReferenceIdByText(leadViewPopup.company || leadViewPopup.name || "")
+	                || ""
+	              ).trim());
+	              const leadCrmReferenceKey = leadCrmReferenceId.toLowerCase();
+	              const linkedDeal = findLinkedDealForLead(leadViewPopup || {});
+	              const normalizedSalesOrders = (moduleData.salesOrders || []).map((row) => normalizeCrmSalesOrderRecord(row || {}));
+	              const linkedSalesOrder = leadCrmReferenceKey
+	                ? (normalizedSalesOrders.find((row) => normalizePlaceholderText(String(row?.crmReferenceId || row?.crm_reference_id || "").trim()).toLowerCase() === leadCrmReferenceKey) || null)
+	                : null;
+	              const conversionSummary = linkedSalesOrder ? getAccountsConversionSummaryForSalesOrder(linkedSalesOrder) : null;
+	              const estimateFallback = leadCrmReferenceKey
+	                ? ((crmAccountsWorkspace?.estimates || []).find((row) => normalizePlaceholderText(String(row?.crmReferenceId || row?.crm_reference_id || "").trim()).toLowerCase() === leadCrmReferenceKey) || null)
+	                : null;
+	              const invoiceFallback = leadCrmReferenceKey
+	                ? ((crmAccountsWorkspace?.invoices || []).find((row) => normalizePlaceholderText(String(row?.crmReferenceId || row?.crm_reference_id || "").trim()).toLowerCase() === leadCrmReferenceKey) || null)
+	                : null;
+	              const linkedEstimate = conversionSummary?.linkedEstimate || estimateFallback;
+	              const linkedInvoice = conversionSummary?.linkedInvoice || invoiceFallback;
+	              const normalizedEstimate = linkedEstimate ? normalizeAccountsBillingDocumentRecord(linkedEstimate, "estimate") : null;
+	              const normalizedInvoice = linkedInvoice ? normalizeAccountsBillingDocumentRecord(linkedInvoice, "invoice") : null;
+	              const salesOrderDocNo = String(linkedSalesOrder?.docNo || linkedSalesOrder?.orderId || linkedSalesOrder?.order_id || "").trim();
+	              const dealDisplay = String(
+	                linkedDeal?.dealName
+	                || linkedDeal?.deal_name
+	                || linkedDeal?.crmReferenceId
+	                || linkedDeal?.crm_reference_id
+	                || ""
+	              ).trim();
+	              const estimateNo = String(normalizedEstimate?.docNo || "").trim();
+	              const invoiceNo = String(normalizedInvoice?.docNo || "").trim();
+
+		              const openAccountsDocumentInNewTab = (tab, searchTerm) => {
+		                const safeTab = String(tab || "").trim().toLowerCase();
+		                const safeSearch = String(searchTerm || "").trim();
+		                if (!safeTab) {
+		                  return;
+		                }
+		                const query = new URLSearchParams();
+		                query.set("tab", safeTab);
+		                if (safeSearch) {
+		                  query.set("search", safeSearch);
+		                }
+		                window.open(`/app/business-autopilot/accounts?${query.toString()}`, "_blank", "noopener,noreferrer");
+		              };
+
+		              const openCrmSectionInNewTab = (tab, searchTerm) => {
+		                const safeTab = String(tab || "").trim().toLowerCase();
+		                const safeSearch = String(searchTerm || "").trim();
+		                if (!safeTab) {
+		                  return;
+		                }
+		                const query = new URLSearchParams();
+		                query.set("tab", safeTab);
+		                if (safeSearch) {
+		                  query.set("search", safeSearch);
+		                }
+		                window.open(`/app/business-autopilot/crm?${query.toString()}`, "_blank", "noopener,noreferrer");
+		              };
+
+	              const pipelineSteps = [
+	                {
+	                  key: "lead",
+	                  label: "Lead",
+	                  icon: "bi-person",
+	                  isDone: true,
+	                  detail: leadCrmReferenceId || "-",
+	                  statusLabel: "Created",
+	                },
+		                {
+		                  key: "deal",
+		                  label: "Deal",
+		                  icon: "bi-briefcase",
+		                  isDone: Boolean(linkedDeal),
+		                  detail: dealDisplay,
+		                  statusLabel: linkedDeal ? "Converted" : "Pending",
+		                  onOpen: linkedDeal && dealDisplay ? () => openCrmSectionInNewTab("deals", dealDisplay) : null,
+		                },
+		                {
+		                  key: "sales-order",
+		                  label: "Sales Order",
+		                  icon: "bi-file-earmark-text",
+		                  isDone: Boolean(linkedSalesOrder),
+		                  detail: salesOrderDocNo,
+		                  statusLabel: linkedSalesOrder ? "Created" : "Pending",
+		                  onOpen: salesOrderDocNo ? () => openCrmSectionInNewTab("salesOrders", salesOrderDocNo) : null,
+		                },
+	                {
+	                  key: "estimate",
+	                  label: "Estimate",
+	                  icon: "bi-file-earmark-text",
+	                  isDone: Boolean(estimateNo),
+	                  detail: estimateNo,
+	                  statusLabel: estimateNo ? "Created" : "Pending",
+	                  onOpen: estimateNo ? () => openAccountsDocumentInNewTab("estimates", estimateNo) : null,
+	                },
+		                {
+		                  key: "invoice",
+		                  label: "Invoice",
+		                  icon: "bi-file-earmark-text",
+		                  isDone: Boolean(invoiceNo),
+		                  detail: invoiceNo,
+		                  statusLabel: invoiceNo ? "Created" : "Pending",
+		                  onOpen: invoiceNo ? () => openAccountsDocumentInNewTab("invoices", invoiceNo) : null,
+		                },
+	              ];
+	              const pipelineStageIndex = Math.max(0, pipelineSteps.reduce((acc, step, idx) => (step.isDone ? idx : acc), 0));
+	              const details = [
+	                { label: "Company", value: leadViewPopup.company || "-" },
+	                { label: "Contact Person", value: leadViewPopup.contactPerson || "-" },
+	                { label: "Phone", value: phoneDisplay },
                 { label: "Amount", value: amountDisplay },
                 { label: "Lead Source", value: leadViewPopup.leadSource || "-" },
                 { label: "Priority", value: leadViewPopup.priority || "-" },
@@ -17312,19 +17928,74 @@ function CrmOnePageModule() {
                       <i className="bi bi-x-lg" aria-hidden="true" />
                     </button>
                   </div>
-                  <div className="row g-3 small">
-                    {details.map((item) => (
-                      <div className="col-12 col-md-6 col-lg-4" key={`lead-view-${item.label}`}>
-                        <div className="text-secondary">{item.label}</div>
-                        <div className="fw-semibold text-break">{item.value || "-"}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+	                  <div className="row g-3 small">
+	                    {details.map((item) => (
+	                      <div className="col-12 col-sm-6 col-lg-4 col-xl-2" key={`lead-view-${item.label}`}>
+	                        <div className="text-secondary">{item.label}</div>
+	                        <div className="fw-semibold text-break">{item.value || "-"}</div>
+	                      </div>
+	                    ))}
+	                  </div>
+	                  <div className="mt-4">
+	                    <div className="d-flex align-items-center justify-content-between gap-3 mb-2">
+	                      <div className="fw-semibold">
+	                        Process Pipeline{" "}
+	                        <span className="small text-secondary fw-normal">
+	                          (Step {Math.min(pipelineStageIndex + 1, pipelineSteps.length)} / {pipelineSteps.length})
+	                        </span>
+	                      </div>
+	                    </div>
+	                    <div className="wz-pipeline-ruler" aria-hidden="true" />
+	                    <div className="wz-process-stepper" role="list" aria-label="Lead pipeline">
+	                      {pipelineSteps.map((step, idx) => {
+	                        const stateClass = idx < pipelineStageIndex ? "wz-step--done" : idx === pipelineStageIndex ? "wz-step--active" : "wz-step--todo";
+	                        const hasDetail = Boolean(String(step.detail || "").trim());
+	                        return (
+		                          <Fragment key={`lead-pipeline-${step.key}`}>
+		                            <div className={`wz-process-step ${stateClass}`} role="listitem">
+		                              <div className="wz-step-icon">
+		                                <i className={`bi ${step.icon}`} aria-hidden="true" />
+		                              </div>
+		                              <div className="wz-step-body">
+		                                <div className="wz-step-title">{step.label}</div>
+		                                <div className="wz-step-status">{step.statusLabel}</div>
+		                              </div>
+		                              <div className="wz-step-detail-row">
+		                                {hasDetail ? (
+		                                  step.onOpen ? (
+		                                    <button
+		                                      type="button"
+		                                      className="btn btn-link p-0 wz-step-detail-link"
+		                                      onClick={step.onOpen}
+		                                      title={`Open ${step.label}`}
+		                                    >
+		                                      {step.detail}
+		                                      <i className="bi bi-box-arrow-up-right ms-1" aria-hidden="true" />
+		                                    </button>
+		                                  ) : (
+		                                    <div className="wz-step-detail">{step.detail}</div>
+		                                  )
+		                                ) : (
+		                                  <div className="wz-step-detail text-secondary">—</div>
+		                                )}
+		                              </div>
+		                            </div>
+		                            {idx < pipelineSteps.length - 1 ? (
+		                              <div
+		                                className={`wz-process-step-connector ${idx < pipelineStageIndex ? "wz-connector--done" : "wz-connector--todo"}`}
+		                                aria-hidden="true"
+	                              />
+	                            ) : null}
+	                          </Fragment>
+	                        );
+	                      })}
+	                    </div>
+	                  </div>
+	                </>
+	              );
+	            })()}
+	          </div>
+	        </div>
       ) : null}
       {dealViewPopup ? (
         <div
@@ -24857,6 +25528,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
   const [accountsFormNotice, setAccountsFormNotice] = useState("");
   const [accountsActionPopup, setAccountsActionPopup] = useState({ open: false, title: "", message: "" });
+  const [accountsDocumentViewPopup, setAccountsDocumentViewPopup] = useState(null);
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
   const shouldResumeEstimate = useMemo(() => String(accountsQueryParams.get("resume-estimate") || "").trim() === "1", [accountsQueryParams]);
@@ -24883,6 +25555,226 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         { key: "items", label: "Items" },
         { key: "customers", label: "Clients" },
       ];
+
+  const openAccountsDocumentViewPopup = useCallback((kind, row) => {
+    const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
+    const safeRow = normalizeAccountsBillingDocumentRecord(row, normalizedKind);
+    setAccountsDocumentViewPopup({ kind: normalizedKind, row: safeRow });
+  }, []);
+
+  const closeAccountsDocumentViewPopup = useCallback(() => {
+    setAccountsDocumentViewPopup(null);
+  }, []);
+
+  const renderAccountsDocumentPreview = useCallback((kind, row) => {
+    const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
+    const gstRows = moduleData.gstTemplates || [];
+    const templateRows = moduleData.billingTemplates || [];
+    const totals = computeDocumentTotals(row, gstRows);
+    const gstTemplateName = resolveGstTemplateName(row.gstTemplateId) || "-";
+    const billingTemplate = (templateRows || []).find((tpl) => String(tpl?.id || "").trim() === String(row.billingTemplateId || "").trim());
+    const billingTemplateName = String(billingTemplate?.name || "").trim() || "-";
+    const items = Array.isArray(row?.items) ? row.items : [];
+    const gstTemplate = (gstRows || []).find((gst) => String(gst?.id || "").trim() === String(row.gstTemplateId || "").trim());
+    const { mode: templateTaxMode, components: templateComponents } = getGstTemplateTaxComponents(gstTemplate);
+    const defaultTax = sumTaxComponents(templateComponents);
+
+    const computedItems = items.map((item) => {
+      const qty = parseNumber(item.qty);
+      const rate = parseNumber(item.rate);
+      const lineAmount = qty * rate;
+      const taxOverride = resolveDocumentLineTaxOverride(item);
+      const taxPct = taxOverride.hasOverride ? parseNumber(taxOverride.taxPercent) : defaultTax;
+      const effectiveComponents = taxOverride.hasOverride
+        ? distributeTaxPercentByComponents(taxPct, templateComponents, templateTaxMode)
+        : templateComponents;
+      const effectiveTaxPercent = sumTaxComponents(effectiveComponents);
+      const taxAmount = lineAmount * (effectiveTaxPercent / 100);
+      return {
+        ...item,
+        qty,
+        rate,
+        lineAmount,
+        taxPercent: effectiveTaxPercent,
+        taxAmount,
+        totalAmount: lineAmount + taxAmount,
+      };
+    });
+
+    const metaRows = [
+      { label: normalizedKind === "estimate" ? "Estimate No" : "Invoice No", value: row.docNo || "-" },
+      { label: "Customer", value: row.customerName || "-" },
+      { label: "Issue Date", value: formatDateLikeCellValue("issueDate", row.issueDate, "-") },
+      ...(normalizedKind === "invoice" ? [{ label: "Due Date", value: formatDateLikeCellValue("dueDate", row.dueDate, "-") }] : []),
+      { label: "GST Template", value: gstTemplateName },
+      { label: "Billing Template", value: billingTemplateName },
+      ...(normalizedKind === "invoice" ? [{ label: "Delivery Status", value: row.deliveryStatus || "-" }] : []),
+      { label: "Status", value: row.status || "-" },
+      ...(String(row.crmReferenceId || "").trim() ? [{ label: "CRM ID", value: row.crmReferenceId }] : []),
+    ];
+
+    return (
+      <div className="d-flex flex-column gap-3">
+        <div className="d-flex align-items-start justify-content-between gap-3">
+          <div>
+            <h5 className="mb-1">{normalizedKind === "estimate" ? "Estimate Preview" : "Invoice Preview"}</h5>
+            <div className="small text-secondary">{row.docNo || "-"}</div>
+          </div>
+          <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeAccountsDocumentViewPopup}>
+            <i className="bi bi-x-lg" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="row g-3 small">
+          {metaRows.map((item) => (
+            <div className="col-12 col-md-6 col-lg-4" key={`accounts-doc-preview-${item.label}`}>
+              <div className="text-secondary">{item.label}</div>
+              <div className="fw-semibold text-break">{item.value || "-"}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="table-responsive">
+          <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: 220 }}>Item</th>
+                <th style={{ minWidth: 90 }}>HSN/SAC</th>
+                <th style={{ minWidth: 70 }} className="text-end">Qty</th>
+                <th style={{ minWidth: 110 }} className="text-end">Rate</th>
+                <th style={{ minWidth: 80 }} className="text-end">Tax %</th>
+                <th style={{ minWidth: 120 }} className="text-end">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {computedItems.length ? computedItems.map((item, index) => (
+                <tr key={`${String(item?.id || "line")}-${index}`}>
+                  <td>
+                    <div className="fw-semibold">{String(item?.description || item?.customText || "-")}</div>
+                    {String(item?.customText || "").trim() && String(item?.description || "").trim() ? (
+                      <div className="small text-secondary">{String(item.customText).trim()}</div>
+                    ) : null}
+                  </td>
+                  <td className="text-secondary">{String(item?.hsnSacCode || "-")}</td>
+                  <td className="text-end">{Number.isFinite(item.qty) ? item.qty : "-"}</td>
+                  <td className="text-end">{formatInr(item.rate)}</td>
+                  <td className="text-end">{Number(item.taxPercent || 0).toFixed(2)}</td>
+                  <td className="text-end fw-semibold">{formatInr(item.totalAmount)}</td>
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={6} className="text-secondary">No items.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="row g-3">
+          <div className="col-12 col-lg-7">
+            {String(row.notes || "").trim() ? (
+              <div className="card p-3 wz-card-borderless">
+                <div className="fw-semibold mb-1">Customer Notes</div>
+                <div className="text-secondary small" style={{ whiteSpace: "pre-wrap" }}>{row.notes}</div>
+              </div>
+            ) : null}
+            {String(row.termsText || "").trim() ? (
+              <div className="card p-3 wz-card-borderless">
+                <div className="fw-semibold mb-1">Terms &amp; Conditions</div>
+                <div className="text-secondary small" style={{ whiteSpace: "pre-wrap" }}>{row.termsText}</div>
+              </div>
+            ) : null}
+          </div>
+          <div className="col-12 col-lg-5">
+            <div className="card p-3">
+              <div className="fw-semibold mb-2">Summary</div>
+              <div className="d-flex justify-content-between gap-3 small mb-1">
+                <span className="text-secondary">Sub Total</span>
+                <span className="fw-semibold">{formatInr(totals.subtotal)}</span>
+              </div>
+              {(() => {
+                const parts = [
+                  { key: "cgst", label: `CGST (${Number(totals.breakdownPercent.cgst || 0).toFixed(2)}%)`, value: totals.taxBreakdown.cgst },
+                  { key: "sgst", label: `SGST (${Number(totals.breakdownPercent.sgst || 0).toFixed(2)}%)`, value: totals.taxBreakdown.sgst },
+                  { key: "igst", label: `IGST (${Number(totals.breakdownPercent.igst || 0).toFixed(2)}%)`, value: totals.taxBreakdown.igst },
+                  { key: "cess", label: `CESS (${Number(totals.breakdownPercent.cess || 0).toFixed(2)}%)`, value: totals.taxBreakdown.cess },
+                ].filter((p) => parseNumber(p.value) > 0);
+                return parts.length ? (
+                  <div className="mt-2">
+                    {parts.map((part) => (
+                      <div className="d-flex justify-content-between gap-3 small mb-1" key={`tax-${part.key}`}>
+                        <span className="text-secondary">{part.label}</span>
+                        <span className="fw-semibold">{formatInr(part.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+              <div className="d-flex justify-content-between gap-3 small mt-2">
+                <span className="text-secondary">GST / Tax</span>
+                <span className="fw-semibold">{formatInr(totals.taxTotal)}</span>
+              </div>
+              <hr className="my-2" />
+              <div className="d-flex justify-content-between gap-3">
+                <span className="fw-semibold">Total</span>
+                <span className="fw-semibold">{formatInr(totals.grandTotal)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }, [closeAccountsDocumentViewPopup, moduleData.billingTemplates, moduleData.gstTemplates]);
+
+  const clearAccountsEditorQueryParams = useCallback((nextTabKey) => {
+    const normalizedNextTab = String(nextTabKey || "").trim().toLowerCase();
+    const nextQuery = new URLSearchParams(String(location.search || ""));
+    nextQuery.set("tab", normalizedNextTab || "overview");
+    if (normalizedNextTab !== "invoices") {
+      nextQuery.delete("edit-invoice");
+      nextQuery.delete("resume-invoice");
+    }
+    if (normalizedNextTab !== "estimates") {
+      nextQuery.delete("edit-estimate");
+      nextQuery.delete("resume-estimate");
+    }
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextQuery.toString() ? `?${nextQuery.toString()}` : "",
+      },
+      { replace: true }
+    );
+  }, [location.pathname, location.search, navigate]);
+
+  const handleAccountsTabClick = useCallback((nextTabKey) => {
+    const normalizedNextTab = String(nextTabKey || "").trim().toLowerCase();
+    if (!normalizedNextTab) {
+      return;
+    }
+    // When leaving an editor tab, close the editor state + clear URL edit params
+    // so navigation doesn't get "stuck" on the edit page.
+    if (normalizedNextTab !== "invoices" && (editingInvoiceId || accountsQueryEditInvoiceId)) {
+      setEditingInvoiceId("");
+      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData?.invoices || [], moduleData?.gstTemplates || [], moduleData?.billingTemplates || []));
+    }
+    if (normalizedNextTab !== "estimates" && (editingEstimateId || accountsQueryEditEstimateId)) {
+      setEditingEstimateId("");
+      setEstimateForm(createEmptyBillingDocument("estimate", moduleData?.estimates || [], moduleData?.gstTemplates || [], moduleData?.billingTemplates || []));
+    }
+    setActiveTab(normalizedNextTab);
+    clearAccountsEditorQueryParams(normalizedNextTab);
+  }, [
+    accountsQueryEditEstimateId,
+    accountsQueryEditInvoiceId,
+    clearAccountsEditorQueryParams,
+    editingEstimateId,
+    editingInvoiceId,
+    moduleData?.billingTemplates,
+    moduleData?.estimates,
+    moduleData?.gstTemplates,
+    moduleData?.invoices,
+  ]);
 
   function buildAccountsBillingDocumentFromSalesOrder(sourceRow, kind = "estimate", preferredDocumentId = "") {
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
@@ -29264,6 +30156,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             <button
               type="button"
               className="btn btn-sm btn-outline-light"
+              title="View"
+              aria-label="View"
+              onClick={() => openAccountsDocumentViewPopup(kind, row)}
+            >
+              <i className="bi bi-eye" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-light"
               title="Download PDF"
               aria-label="Download PDF"
               onClick={() => downloadDocumentPdf(kind, row.id)}
@@ -29342,7 +30243,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 key={tab.key}
                 type="button"
                 className={`btn btn-sm ${activeTab === tab.key ? "btn-success" : "btn-outline-light"}`}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => handleAccountsTabClick(tab.key)}
               >
                 {tab.label}
               </button>
@@ -29382,6 +30283,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {accountsDocumentViewPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeAccountsDocumentViewPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(1080px, 96vw)", maxHeight: "88vh", overflowY: "auto", padding: 20 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {renderAccountsDocumentPreview(accountsDocumentViewPopup.kind, accountsDocumentViewPopup.row)}
           </div>
         </div>
       ) : null}
@@ -29490,7 +30407,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             )}
           />
 
-          <div className="card p-3">
+          <div className="card p-3 wz-card-borderless">
             <h6 className="mb-1">{editingGstId ? taxUi.editTitle : taxUi.createTitle}</h6>
             <div className="small text-secondary mb-3">{taxUi.helperText}</div>
             <form className="d-flex flex-column gap-3" onSubmit={saveGstTemplate}>
@@ -30000,7 +30917,68 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
       {activeTab === "templates" ? (
         <>
-          <div className="card p-3">
+          <SearchablePaginatedTableCard
+            title="Billing Template List"
+            badgeLabel={`${(moduleData.billingTemplates || []).length} templates`}
+            rows={moduleData.billingTemplates || []}
+            withoutOuterCard
+            columns={[
+              { key: "name", label: "Template" },
+              { key: "docType", label: "Type" },
+              { key: "gstTemplateId", label: "GST Template" },
+              { key: "companyLogoDataUrl", label: "Logo" },
+              { key: "prefix", label: "Prefix" },
+              { key: "themeColor", label: "Theme" },
+              { key: "status", label: "Status" },
+            ]}
+            searchPlaceholder="Search billing templates"
+            noRowsText="No billing templates yet."
+            searchBy={(row) => [row.name, row.docType, row.prefix, row.status, row.footerNote].join(" ")}
+            renderCells={(row) => [
+              <div>
+                <div className="fw-semibold">{row.name}</div>
+                <div className="small text-secondary">{row.footerNote || "-"}</div>
+              </div>,
+              row.docType,
+              resolveGstTemplateName(row.gstTemplateId),
+              row.companyLogoDataUrl ? (
+                <div className="d-flex align-items-center gap-2">
+                  <img
+                    src={row.companyLogoDataUrl}
+                    alt={row.companyLogoName || "Company logo"}
+                    style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 4, border: "1px solid var(--bs-border-color)" }}
+                  />
+                  <span className="small text-secondary">{row.companyLogoName || "Logo"}</span>
+                </div>
+              ) : (
+                <span className="small text-secondary">No logo</span>
+              ),
+              row.prefix || "-",
+              <div className="d-flex align-items-center gap-2">
+                <span style={{ width: 14, height: 14, borderRadius: 4, background: row.themeColor || "#22c55e", display: "inline-block" }} />
+                <span>{row.themeColor || "-"}</span>
+              </div>,
+              (
+                <select
+                  className="form-select form-select-sm"
+                  value={row.status || "Active"}
+                  onChange={(e) => updateBillingTemplateStatus(row.id, e.target.value)}
+                >
+                  {GST_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              ),
+            ]}
+            renderActions={(row) => (
+              <div className="d-inline-flex gap-2">
+                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editBillingTemplate(row)}>Edit</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteBillingTemplate(row.id)}>Delete</button>
+              </div>
+            )}
+          />
+
+          <div className="card p-3 wz-card-borderless">
             <div className="d-flex align-items-center justify-content-between mb-3">
               <h6 className="mb-0">{editingTemplateId ? "Edit Billing Template" : "Create Billing Template"}</h6>
               <span className="badge bg-dark border">GST Template option included</span>
@@ -30103,67 +31081,6 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
             </form>
           </div>
-
-          <SearchablePaginatedTableCard
-            title="Billing Template List"
-            badgeLabel={`${(moduleData.billingTemplates || []).length} templates`}
-            rows={moduleData.billingTemplates || []}
-            withoutOuterCard
-            columns={[
-              { key: "name", label: "Template" },
-              { key: "docType", label: "Type" },
-              { key: "gstTemplateId", label: "GST Template" },
-              { key: "companyLogoDataUrl", label: "Logo" },
-              { key: "prefix", label: "Prefix" },
-              { key: "themeColor", label: "Theme" },
-              { key: "status", label: "Status" },
-            ]}
-            searchPlaceholder="Search billing templates"
-            noRowsText="No billing templates yet."
-            searchBy={(row) => [row.name, row.docType, row.prefix, row.status, row.footerNote].join(" ")}
-            renderCells={(row) => [
-              <div>
-                <div className="fw-semibold">{row.name}</div>
-                <div className="small text-secondary">{row.footerNote || "-"}</div>
-              </div>,
-              row.docType,
-              resolveGstTemplateName(row.gstTemplateId),
-              row.companyLogoDataUrl ? (
-                <div className="d-flex align-items-center gap-2">
-                  <img
-                    src={row.companyLogoDataUrl}
-                    alt={row.companyLogoName || "Company logo"}
-                    style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 4, border: "1px solid var(--bs-border-color)" }}
-                  />
-                  <span className="small text-secondary">{row.companyLogoName || "Logo"}</span>
-                </div>
-              ) : (
-                <span className="small text-secondary">No logo</span>
-              ),
-              row.prefix || "-",
-              <div className="d-flex align-items-center gap-2">
-                <span style={{ width: 14, height: 14, borderRadius: 4, background: row.themeColor || "#22c55e", display: "inline-block" }} />
-                <span>{row.themeColor || "-"}</span>
-              </div>,
-              (
-                <select
-                  className="form-select form-select-sm"
-                  value={row.status || "Active"}
-                  onChange={(e) => updateBillingTemplateStatus(row.id, e.target.value)}
-                >
-                  {GST_STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>{status}</option>
-                  ))}
-                </select>
-              ),
-            ]}
-            renderActions={(row) => (
-              <div className="d-inline-flex gap-2">
-                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editBillingTemplate(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteBillingTemplate(row.id)}>Delete</button>
-              </div>
-            )}
-          />
         </>
       ) : null}
 

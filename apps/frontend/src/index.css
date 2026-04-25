@@ -1654,6 +1654,169 @@ html[data-theme="light"] .wz-country-picker__empty{
   line-height: 1;
   font-size: 0.965rem;
 }
+.app-shell .card.wz-card-borderless{
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.wz-process-stepper{
+  display:flex;
+  align-items:flex-start;
+  overflow-x:auto;
+  padding: 10px 4px;
+  gap: 14px;
+}
+.wz-process-step{
+  display:grid;
+  grid-template-columns: 38px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items:start;
+  min-width: 190px;
+  flex: 0 0 auto;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: transparent;
+}
+.wz-process-step-connector{
+  flex: 0 0 26px;
+  height: 2px;
+  border-radius: 999px;
+  margin-top: 22px;
+  background: rgba(148, 163, 184, 0.25);
+  display: none !important;
+}
+.wz-process-step-connector.wz-connector--done{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.90);
+}
+.wz-step-icon{
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid rgba(148, 163, 184, 0.30);
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--color-text, #e5e7eb);
+}
+.wz-step-body{
+  min-width: 0;
+}
+.wz-step-detail-row{
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.wz-pipeline-ruler{
+  width: 100%;
+  height: 1px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  margin: 8px 0 10px;
+}
+html[data-theme="light"] .wz-pipeline-ruler{
+  background: rgba(var(--color-primary-rgb, 29, 78, 216), 0.18);
+}
+.wz-step-title{
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+.wz-step-status{
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #9ca3af);
+}
+.wz-step-detail{
+  margin-top: 6px;
+  font-size: 0.86rem;
+  word-break: break-word;
+}
+.wz-step-detail-link{
+  margin-top: 6px;
+  font-size: 0.86rem;
+  text-decoration: none;
+  color: var(--color-primary, #4f46e5);
+}
+.wz-step-detail-link:hover{
+  text-decoration: underline;
+  color: var(--color-primary, #4f46e5);
+}
+.wz-process-step.wz-step--done{
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.42);
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.12);
+}
+.wz-process-step.wz-step--done .wz-step-icon{
+  background: transparent;
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.55);
+  color: var(--color-primary, #4f46e5);
+}
+.wz-process-step.wz-step--active{
+  border-color: rgba(var(--color-primary-rgb, 79, 70, 229), 0.72);
+  box-shadow: none !important;
+  background: var(--color-primary, #4f46e5);
+  color: #ffffff;
+}
+.wz-process-step.wz-step--active .wz-step-icon{
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.35);
+  color:#ffffff;
+}
+.wz-process-step.wz-step--active .wz-step-status{
+  color: rgba(255,255,255,0.82);
+}
+.wz-process-step.wz-step--active .wz-step-detail,
+.wz-process-step.wz-step--active .wz-step-title{
+  color: #ffffff;
+}
+.wz-process-step.wz-step--active .wz-step-detail-link{
+  color: #ffffff;
+}
+.wz-process-step.wz-step--active .wz-step-detail-link:hover{
+  color: #ffffff;
+}
+.wz-process-step.wz-step--todo{
+  opacity: 0.70;
+  filter: grayscale(0.25);
+}
+.wz-process-step.wz-step--todo .wz-step-icon{
+  background: rgba(148, 163, 184, 0.10);
+  border-color: rgba(148, 163, 184, 0.24);
+  color: var(--color-text-muted, #9ca3af);
+}
+html[data-theme="light"] .wz-process-step{
+  background: transparent;
+}
+html[data-theme="light"] .wz-process-step.wz-step--todo{
+  background: transparent;
+}
+html[data-theme="light"] .wz-process-step.wz-step--active{
+  background: var(--color-primary, #1d4ed8) !important;
+}
+.wz-sales-order-convert-disabled{
+  opacity: 1;
+  cursor: not-allowed;
+  box-shadow: none !important;
+  border-color: rgba(148, 163, 184, 0.55) !important;
+  color: var(--color-text-muted, #9ca3af) !important;
+  background: rgba(148, 163, 184, 0.10) !important;
+}
+.wz-sales-order-convert-disabled:hover,
+.wz-sales-order-convert-disabled:focus,
+.wz-sales-order-convert-disabled:active{
+  border-color: rgba(148, 163, 184, 0.55) !important;
+  color: var(--color-text-muted, #9ca3af) !important;
+  background: rgba(148, 163, 184, 0.10) !important;
+  box-shadow: none !important;
+}
+@media (max-width: 700px){
+  .wz-process-step{
+    min-width: 168px;
+  }
+}
 .app-shell .table.wz-priority-header-table thead th,
 .app-shell .table.wz-priority-header-table thead th *{
   color:#ffffff !important;

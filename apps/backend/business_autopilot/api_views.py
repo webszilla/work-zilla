@@ -15,7 +15,7 @@ import requests
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
-from django.db.models import Q
+from django.db.models import Q, Min, Max
 from django.shortcuts import render
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
@@ -27,6 +27,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
+from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.products.models import Product
 from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, log_admin_activity
 from core.email_utils import send_templated_email
@@ -170,6 +171,59 @@ def _ba_pdf_image_from_file(file_field):
         return None
 
 
+BA_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{6})$")
+
+
+def _ba_normalize_hex_color(value, fallback=""):
+    color = str(value or "").strip()
+    if not color:
+        return fallback
+    if not BA_HEX_COLOR_RE.match(color):
+        return fallback
+    return color.lower()
+
+
+def _ba_effective_theme_primary_hex(org: Organization, fallback="#1f6f8b"):
+    theme_primary = ""
+    try:
+        settings_obj = OrganizationSettings.objects.filter(organization=org).only("theme_primary_color").first()
+        theme_primary = _ba_normalize_hex_color(getattr(settings_obj, "theme_primary_color", ""), "")
+    except Exception:
+        theme_primary = ""
+
+    if not theme_primary:
+        try:
+            global_theme = SiteBrandSettings.get_active()
+            theme_primary = _ba_normalize_hex_color(getattr(global_theme, "primary_color", ""), "")
+        except Exception:
+            theme_primary = ""
+
+    return theme_primary or _ba_normalize_hex_color(fallback, "#1f6f8b") or "#1f6f8b"
+
+
+def _ba_hex_to_rgb01(hex_color: str):
+    raw = _ba_normalize_hex_color(hex_color, "")
+    if not raw:
+        return (0.12, 0.44, 0.55)
+    value = raw.lstrip("#")
+    r = int(value[0:2], 16) / 255.0
+    g = int(value[2:4], 16) / 255.0
+    b = int(value[4:6], 16) / 255.0
+    return (r, g, b)
+
+
+def _ba_blend_rgb(rgb, other_rgb, other_weight=0.0):
+    w = float(other_weight or 0.0)
+    w = 0.0 if w < 0 else 1.0 if w > 1 else w
+    r, g, b = rgb
+    or_, og, ob = other_rgb
+    return (
+        r * (1 - w) + or_ * w,
+        g * (1 - w) + og * w,
+        b * (1 - w) + ob * w,
+    )
+
+
 def _ba_resolve_org_logo_image(org, current_user=None):
     if not org:
         return None
@@ -207,6 +261,14 @@ def _ba_resolve_org_logo_image(org, current_user=None):
         logo_image = _ba_pdf_image_from_file(getattr(profile, "profile_photo", None))
         if logo_image:
             return logo_image
+
+    try:
+        global_brand = SiteBrandSettings.get_active()
+        logo_image = _ba_pdf_image_from_file(getattr(global_brand, "logo", None))
+        if logo_image:
+            return logo_image
+    except Exception:
+        pass
 
     return None
 
@@ -5865,6 +5927,62 @@ def _crm_report_build_payload(request_user: User, org: Organization, start_date:
     }
 
 
+def _crm_report_available_range(org: Organization):
+    today = timezone.localdate()
+    if not org:
+        return {"from_date": today.isoformat(), "to_date": today.isoformat()}
+    lead_agg = (
+        CrmLead.objects
+        .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+        .aggregate(min_created=Min("created_at"), max_created=Max("created_at"))
+    )
+    deal_agg = (
+        CrmDeal.objects
+        .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+        .aggregate(min_created=Min("created_at"), max_created=Max("created_at"))
+    )
+    so_agg = (
+        CrmSalesOrder.objects
+        .filter(organization=org, is_deleted=False, deleted_at__isnull=True)
+        .aggregate(min_created=Min("created_at"), max_created=Max("created_at"))
+    )
+
+    min_candidates = [lead_agg.get("min_created"), deal_agg.get("min_created"), so_agg.get("min_created")]
+    max_candidates = [lead_agg.get("max_created"), deal_agg.get("max_created"), so_agg.get("max_created")]
+    min_dt = min([dt for dt in min_candidates if dt], default=None)
+    max_dt = max([dt for dt in max_candidates if dt], default=None)
+
+    min_date = min_dt.date() if min_dt else today
+    max_date = max_dt.date() if max_dt else today
+    if min_date > max_date:
+        min_date, max_date = max_date, min_date
+    return {"from_date": min_date.isoformat(), "to_date": max_date.isoformat()}
+
+
+def _crm_report_available_range_dates(org: Organization):
+    today = timezone.localdate()
+    payload = _crm_report_available_range(org)
+    min_raw = str(payload.get("from_date") or "").strip()
+    max_raw = str(payload.get("to_date") or "").strip()
+    min_date = _crm_report_parse_date(min_raw) or today
+    max_date = _crm_report_parse_date(max_raw) or today
+    if min_date > max_date:
+        min_date, max_date = max_date, min_date
+    return min_date, max_date
+
+
+def _ba_format_ddmmyyyy(value):
+    if not value:
+        return ""
+    if isinstance(value, date):
+        return value.strftime("%d-%m-%Y")
+    parsed = _crm_report_parse_date(str(value))
+    if parsed:
+        return parsed.strftime("%d-%m-%Y")
+    raw = str(value).strip()
+    return raw
+
+
 def _crm_report_xlsx_response(org: Organization, request_user: User, payload):
     try:
         from openpyxl import Workbook
@@ -5882,8 +6000,11 @@ def _crm_report_xlsx_response(org: Organization, request_user: User, payload):
     ws_summary = wb.active
     ws_summary.title = "Summary"
 
+    theme_primary_hex = _ba_effective_theme_primary_hex(org)
+    theme_primary_rgb = theme_primary_hex.lstrip("#").upper()
+
     header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_fill = PatternFill("solid", fgColor=theme_primary_rgb or "1F4E79")
     label_font = Font(bold=True, color="1F2937")
 
     def write_kv_sheet(ws, title, rows):
@@ -5906,8 +6027,8 @@ def _crm_report_xlsx_response(org: Organization, request_user: User, payload):
         f"CRM Report ({'User' if group_by == 'user' else 'Team'})",
         [
             ("Organization", str(getattr(org, "name", "") or "Organization").strip()),
-            ("From Date", str(period.get("from_date") or "")),
-            ("To Date", str(period.get("to_date") or "")),
+            ("From Date", _ba_format_ddmmyyyy(period.get("from_date"))),
+            ("To Date", _ba_format_ddmmyyyy(period.get("to_date"))),
             ("Days", int(period.get("days") or 0)),
             ("Generated At", str(period.get("generated_at") or "")),
             ("Total Leads", int(summary.get("total_leads") or 0)),
@@ -6013,8 +6134,8 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
 
     company_name = str(org.name or "Organization").strip() or "Organization"
     generated_at = timezone.localtime(timezone.now())
-    from_date = str(period.get("from_date") or "").strip() or "-"
-    to_date = str(period.get("to_date") or "").strip() or "-"
+    from_date = _ba_format_ddmmyyyy(period.get("from_date")) or "-"
+    to_date = _ba_format_ddmmyyyy(period.get("to_date")) or "-"
 
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -6025,6 +6146,9 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
     row_gap = 4 * mm
     money_font = _ba_get_unicode_pdf_font() or "Helvetica"
     logo_image = _ba_resolve_org_logo_image(org, request_user)
+    theme_primary_hex = _ba_effective_theme_primary_hex(org)
+    theme_primary_rgb = _ba_hex_to_rgb01(theme_primary_hex)
+    theme_primary_card_rgb = _ba_blend_rgb(theme_primary_rgb, (1.0, 1.0, 1.0), 0.90)
     metric_cards = [
         ("Total Leads", str(summary.get("total_leads", 0))),
         ("New Leads", str(summary.get("new_leads", 0))),
@@ -6046,8 +6170,10 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
         if include_title:
             pdf.setFont("Helvetica-Bold", 16)
             pdf.drawString(title_x, y, "CRM Performance Report")
-            pdf.setFont("Helvetica", 10)
+            pdf.setFillColorRGB(0.07, 0.12, 0.2)
+            pdf.setFont("Helvetica-Bold", 11)
             pdf.drawString(title_x, y - 5 * mm, company_name)
+            pdf.setFont("Helvetica", 10)
             pdf.drawString(title_x, y - 9 * mm, f"Period: {from_date} to {to_date}")
             pdf.drawString(title_x, y - 13 * mm, f"Generated: {generated_at.strftime('%d-%m-%Y %I:%M %p')}")
             pdf.drawRightString(right, y, f"Group By: {'User' if group_by == 'user' else 'Team'}")
@@ -6073,7 +6199,7 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
         card_x = left + col_index * (card_width + card_gap)
         card_y = y - row_index * (card_height + card_gap)
         ensure_space(card_height + 2 * mm)
-        pdf.setFillColorRGB(0.94, 0.97, 1)
+        pdf.setFillColorRGB(*theme_primary_card_rgb)
         pdf.roundRect(card_x, card_y - card_height, card_width, card_height, 2 * mm, stroke=0, fill=1)
         pdf.setFillColorRGB(0.18, 0.27, 0.41)
         pdf.setFont("Helvetica", 8)
@@ -6104,7 +6230,7 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
         pdf.drawString(left, y, label)
         pdf.setFillColorRGB(0.90, 0.92, 0.97)
         pdf.roundRect(bar_x, y - 3 * mm, bar_width, bar_height, 1 * mm, stroke=0, fill=1)
-        pdf.setFillColorRGB(0.24, 0.56, 0.96)
+        pdf.setFillColorRGB(*theme_primary_rgb)
         if fill_width > 0:
             pdf.roundRect(bar_x, y - 3 * mm, fill_width, bar_height, 1 * mm, stroke=0, fill=1)
         pdf.setFillColorRGB(0.07, 0.12, 0.2)
@@ -6113,6 +6239,57 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
         y -= 6 * mm
 
     y -= 2 * mm
+
+    # Lead Details (keep this before performance table so user performance is last section).
+    ensure_space(15 * mm)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.setFillColorRGB(0.07, 0.12, 0.2)
+    pdf.drawString(left, y, "Lead Details")
+    y -= 5 * mm
+    lead_headers = ["Date", "CRM ID", "Lead Name", "Company", "Status", "Assigned"]
+    lead_col_widths = [20 * mm, 26 * mm, 44 * mm, 40 * mm, 18 * mm, 34 * mm]
+
+    def draw_lead_header():
+        nonlocal y
+        x = left
+        pdf.setFillColorRGB(*theme_primary_rgb)
+        for header, col_width in zip(lead_headers, lead_col_widths):
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
+            pdf.setFillColorRGB(1, 1, 1)
+            pdf.setFont("Helvetica-Bold", 8)
+            pdf.drawString(x + 1.0 * mm, y - 3.6 * mm, header)
+            x += col_width
+        y -= 5.4 * mm
+
+    draw_lead_header()
+    for row in lead_rows[:50]:
+        ensure_space(5.5 * mm)
+        if y - 5.5 * mm < page_bottom:
+            pdf.showPage()
+            draw_page_header(include_title=False)
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(left, y, "Lead Details")
+            y -= 5 * mm
+            draw_lead_header()
+        values = [
+            str(row.get("date") or "-"),
+            str(row.get("crm_reference_id") or "-"),
+            str(row.get("lead_name") or "-"),
+            str(row.get("company") or "-"),
+            str(row.get("status") or "-"),
+            str(row.get("assigned_to") or row.get("group_name") or "-"),
+        ]
+        x = left
+        for value, col_width in zip(values, lead_col_widths):
+            pdf.setStrokeColorRGB(0.87, 0.89, 0.93)
+            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=1, fill=0)
+            pdf.setFillColorRGB(0.09, 0.14, 0.22)
+            pdf.setFont("Helvetica", 7.5)
+            pdf.drawString(x + 1.0 * mm, y - 3.5 * mm, str(value)[:42])
+            x += col_width
+        y -= 5 * mm
+
+    y -= 3 * mm
     table_title = "User Performance Table" if group_by == "user" else "Team Performance Table"
     ensure_space(16 * mm)
     pdf.setFont("Helvetica-Bold", 11)
@@ -6123,11 +6300,11 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
 
     def draw_table_header():
         nonlocal y
-        pdf.setFillColorRGB(0.88, 0.91, 0.96)
+        pdf.setFillColorRGB(*theme_primary_rgb)
         x = left
         for header, col_width in zip(headers, col_widths):
             pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
-            pdf.setFillColorRGB(0.07, 0.12, 0.2)
+            pdf.setFillColorRGB(1, 1, 1)
             pdf.setFont("Helvetica-Bold", 8)
             pdf.drawString(x + 1.2 * mm, y - 3.6 * mm, header)
             x += col_width
@@ -6159,55 +6336,6 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
             pdf.setFillColorRGB(0.09, 0.14, 0.22)
             pdf.setFont("Helvetica", 8)
             pdf.drawString(x + 1.2 * mm, y - 3.6 * mm, str(value)[:48])
-            x += col_width
-        y -= 5 * mm
-
-    y -= 3 * mm
-    ensure_space(15 * mm)
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.setFillColorRGB(0.07, 0.12, 0.2)
-    pdf.drawString(left, y, "Lead Details")
-    y -= 5 * mm
-    lead_headers = ["Date", "CRM ID", "Lead Name", "Company", "Status", "Assigned"]
-    lead_col_widths = [20 * mm, 26 * mm, 44 * mm, 40 * mm, 18 * mm, 34 * mm]
-
-    def draw_lead_header():
-        nonlocal y
-        x = left
-        pdf.setFillColorRGB(0.88, 0.91, 0.96)
-        for header, col_width in zip(lead_headers, lead_col_widths):
-            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
-            pdf.setFillColorRGB(0.07, 0.12, 0.2)
-            pdf.setFont("Helvetica-Bold", 8)
-            pdf.drawString(x + 1.0 * mm, y - 3.6 * mm, header)
-            x += col_width
-        y -= 5.4 * mm
-
-    draw_lead_header()
-    for row in lead_rows[:50]:
-        ensure_space(5.5 * mm)
-        if y - 5.5 * mm < page_bottom:
-            pdf.showPage()
-            draw_page_header(include_title=False)
-            pdf.setFont("Helvetica-Bold", 11)
-            pdf.drawString(left, y, "Lead Details")
-            y -= 5 * mm
-            draw_lead_header()
-        values = [
-            str(row.get("date") or "-"),
-            str(row.get("crm_reference_id") or "-"),
-            str(row.get("lead_name") or "-"),
-            str(row.get("company") or "-"),
-            str(row.get("status") or "-"),
-            str(row.get("assigned_to") or row.get("group_name") or "-"),
-        ]
-        x = left
-        for value, col_width in zip(values, lead_col_widths):
-            pdf.setStrokeColorRGB(0.87, 0.89, 0.93)
-            pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=1, fill=0)
-            pdf.setFillColorRGB(0.09, 0.14, 0.22)
-            pdf.setFont("Helvetica", 7.5)
-            pdf.drawString(x + 1.0 * mm, y - 3.5 * mm, str(value)[:42])
             x += col_width
         y -= 5 * mm
 
@@ -6252,6 +6380,17 @@ def crm_reports(request):
     default_start = today - timedelta(days=max(default_span - 1, 0))
     start_date = _crm_report_parse_date(from_raw) or default_start
     end_date = _crm_report_parse_date(to_raw) or today
+
+    # If the selected preset range starts before CRM has any data,
+    # clamp to the first/last available activity dates so the UI period label
+    # doesn't show "empty" early days.
+    is_custom = preset == "custom"
+    available_min, available_max = _crm_report_available_range_dates(org)
+    if not is_custom and not from_raw:
+        start_date = max(start_date, available_min)
+    if not is_custom and not to_raw:
+        end_date = min(end_date, available_max)
+
     if start_date > end_date:
         start_date, end_date = end_date, start_date
     max_span_days = 365
@@ -6265,7 +6404,12 @@ def crm_reports(request):
     if requested_format in {"xlsx", "excel"}:
         return _crm_report_xlsx_response(org, request.user, report_payload)
 
-    return JsonResponse({"report": report_payload})
+    return JsonResponse(
+        {
+            "report": report_payload,
+            "available_range": _crm_report_available_range(org),
+        }
+    )
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
