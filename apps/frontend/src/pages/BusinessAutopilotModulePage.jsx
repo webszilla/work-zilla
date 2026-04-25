@@ -3695,6 +3695,7 @@ function normalizeCrmLeadRecord(row = {}) {
     ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
     : String(
       row.assignedUser
+      || (Array.isArray(row.assigned_user_names) ? row.assigned_user_names.join(",") : "")
       || row.assigned_user_name
       || (assignType.toLowerCase() !== "team" ? row.assignedTo || "" : "")
     )
@@ -8756,6 +8757,32 @@ function CrmOnePageModule() {
     return Array.from(idSet);
   }
 
+  function resolveAssignedUserNamesFromIds(rawValues) {
+    const rawTokens = Array.isArray(rawValues)
+      ? rawValues
+      : String(rawValues || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    if (!rawTokens.length) {
+      return [];
+    }
+    const resolved = new Set();
+    rawTokens.forEach((token) => {
+      const parsedId = Number.parseInt(String(token || "").trim(), 10);
+      if (!Number.isFinite(parsedId) || parsedId <= 0) {
+        return;
+      }
+      const matchedDirectoryUser = crmDirectoryPool.find((row) => (
+        Number.parseInt(String(row?.id || "").trim(), 10) === parsedId
+      ));
+      if (matchedDirectoryUser?.name) {
+        resolved.add(String(matchedDirectoryUser.name || "").trim());
+      }
+    });
+    return Array.from(resolved).filter(Boolean);
+  }
+
   function isRowAssignedToCurrentUser(sectionKey, row) {
     if (!row || isCrmAdmin) {
       return true;
@@ -10373,6 +10400,30 @@ function CrmOnePageModule() {
     });
     if ((sectionKey === "followUps" || sectionKey === "activities") && !String(nextValues.crmReferenceId || "").trim()) {
       nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.relatedTo || "");
+    }
+    if (sectionKey === "leads" && String(nextValues.assignType || "Users").trim().toLowerCase() !== "team") {
+      const assignedUserIds = Array.isArray(normalizedRow?.assigned_user_ids)
+        ? normalizedRow.assigned_user_ids
+        : Array.isArray(normalizedRow?.assignedUserIds)
+          ? normalizedRow.assignedUserIds
+          : [normalizedRow?.assigned_user_id || normalizedRow?.assignedUserId].filter(Boolean);
+      const assignedUserNamesFromPayload = Array.isArray(normalizedRow?.assigned_user_names)
+        ? normalizedRow.assigned_user_names.map((item) => String(item || "").trim()).filter(Boolean)
+        : Array.isArray(normalizedRow?.assignedUserNames)
+          ? normalizedRow.assignedUserNames.map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+      const assignedUserNamesFromIds = resolveAssignedUserNamesFromIds(assignedUserIds);
+      const currentAssignedUsers = Array.isArray(nextValues.assignedUser)
+        ? nextValues.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+        : String(nextValues.assignedUser || "").split(",").map((item) => item.trim()).filter(Boolean);
+      const mergedAssignedUsers = Array.from(new Set([
+        ...assignedUserNamesFromPayload,
+        ...assignedUserNamesFromIds,
+        ...currentAssignedUsers,
+      ])).filter(Boolean);
+      if (mergedAssignedUsers.length) {
+        nextValues.assignedUser = mergedAssignedUsers;
+      }
     }
     if (sectionKey === "contacts" && !String(nextValues.crmReferenceId || "").trim()) {
       nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.company || nextValues.name || "");
@@ -13088,6 +13139,7 @@ function CrmOnePageModule() {
               assign_type: payload.assignType || "Users",
               assigned_user_id: primaryAssignedUserId,
               assigned_user_ids: assignedUserIds,
+              assigned_user_names: assignedUserNames,
               assigned_team: payload.assignedTeam || "",
               stage: payload.stage || "New",
               priority: payload.priority || "Medium",
@@ -13205,6 +13257,7 @@ function CrmOnePageModule() {
                   assign_type: payload.assignType || "Users",
                   assigned_user_id: primaryAssignedUserId,
                   assigned_user_ids: assignedUserIds,
+                  assigned_user_names: assignedUserNames,
                   assigned_team: payload.assignedTeam || "",
                   stage: payload.stage || "New",
                   priority: payload.priority || "Medium",
@@ -13853,7 +13906,7 @@ function CrmOnePageModule() {
   }
 
   function openLeadViewPopup(row) {
-    setLeadViewPopup(row);
+    setLeadViewPopup(normalizeCrmLeadRecord(row));
   }
 
   function closeLeadViewPopup() {
@@ -17486,12 +17539,28 @@ function CrmOnePageModule() {
 	                  }
                   if (sectionKey === "leads" && column.key === "assignedTo") {
                     const assignType = String(row.assignType || "").trim().toLowerCase();
+                    const assignedUserIds = Array.isArray(row?.assigned_user_ids)
+                      ? row.assigned_user_ids
+                      : Array.isArray(row?.assignedUserIds)
+                        ? row.assignedUserIds
+                        : [row?.assigned_user_id || row?.assignedUserId].filter(Boolean);
+                    const assignedUsersFromPayload = Array.isArray(row?.assigned_user_names)
+                      ? row.assigned_user_names.map((item) => String(item || "").trim()).filter(Boolean)
+                      : Array.isArray(row?.assignedUserNames)
+                        ? row.assignedUserNames.map((item) => String(item || "").trim()).filter(Boolean)
+                        : [];
                     const assignedUsers = Array.isArray(row.assignedUser)
                       ? row.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
                       : String(row.assignedUser || row.assignedTo || "")
                         .split(",")
                         .map((item) => item.trim())
                         .filter(Boolean);
+                    const assignedUsersFromIds = resolveAssignedUserNamesFromIds(assignedUserIds);
+                    const resolvedAssignedUsers = Array.from(new Set([
+                      ...assignedUsersFromPayload,
+                      ...assignedUsersFromIds,
+                      ...assignedUsers,
+                    ])).filter(Boolean);
                     if (assignType === "team") {
                       return formatDateLikeCellValue(
                         column.key,
@@ -17499,18 +17568,18 @@ function CrmOnePageModule() {
                         "-"
                       );
                     }
-                    if (assignedUsers.length) {
-                      if (assignedUsers.length === 1) {
-                        return assignedUsers[0];
+                    if (resolvedAssignedUsers.length || assignedUserIds.length > 1) {
+                      if (resolvedAssignedUsers.length === 1 && assignedUserIds.length <= 1) {
+                        return resolvedAssignedUsers[0];
                       }
-                      const label = `${assignedUsers.length} Employees`;
                       return (
                         <button
                           type="button"
                           className="btn btn-link btn-sm p-0 align-baseline"
-                          onClick={() => openLeadAssignedEmployeesPopup(row)}
+                          title="View assigned users"
+                          onClick={() => openLeadViewPopup(row)}
                         >
-                          {label}
+                          Click to view
                         </button>
                       );
                     }
@@ -17860,16 +17929,29 @@ function CrmOnePageModule() {
 	            onClick={(event) => event.stopPropagation()}
 	          >
             {(() => {
-              const assignedToDisplay = Array.isArray(leadViewPopup.assignedUser)
-                ? (
-                  leadViewPopup.assignedUser
-                    .map((item) => String(item || "").trim())
-                    .filter(Boolean)
-                    .join(", ")
-                  || leadViewPopup.assignedTo
-                  || "-"
-                )
-                : (leadViewPopup.assignedTo || leadViewPopup.assignedUser || "-");
+              const assignedUserIds = Array.isArray(leadViewPopup?.assigned_user_ids)
+                ? leadViewPopup.assigned_user_ids
+                : Array.isArray(leadViewPopup?.assignedUserIds)
+                  ? leadViewPopup.assignedUserIds
+                  : [leadViewPopup?.assigned_user_id || leadViewPopup?.assignedUserId].filter(Boolean);
+              const assignedUsersFromValues = Array.isArray(leadViewPopup?.assignedUser)
+                ? leadViewPopup.assignedUser.map((item) => String(item || "").trim()).filter(Boolean)
+                : String(leadViewPopup?.assignedUser || leadViewPopup?.assignedTo || "")
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean);
+              const assignedUsersFromPayload = Array.isArray(leadViewPopup?.assigned_user_names)
+                ? leadViewPopup.assigned_user_names.map((item) => String(item || "").trim()).filter(Boolean)
+                : Array.isArray(leadViewPopup?.assignedUserNames)
+                  ? leadViewPopup.assignedUserNames.map((item) => String(item || "").trim()).filter(Boolean)
+                  : [];
+              const assignedUsersFromIds = resolveAssignedUserNamesFromIds(assignedUserIds);
+              const assignedUsersList = Array.from(new Set([
+                ...assignedUsersFromPayload,
+                ...assignedUsersFromIds,
+                ...assignedUsersFromValues,
+              ])).filter(Boolean);
+              const assignedToDisplay = assignedUsersList.join(", ") || leadViewPopup.assignedTo || "-";
               const phoneDisplay = String(leadViewPopup.phone || "").trim()
                 ? `${String(leadViewPopup.phoneCountryCode || "+91").trim()} ${String(leadViewPopup.phone || "").trim()}`
                 : "-";
@@ -18007,14 +18089,26 @@ function CrmOnePageModule() {
                       <i className="bi bi-x-lg" aria-hidden="true" />
                     </button>
                   </div>
-	                  <div className="row g-3 small">
-	                    {details.map((item) => (
-	                      <div className="col-12 col-sm-6 col-lg-4 col-xl-2" key={`lead-view-${item.label}`}>
-	                        <div className="text-secondary">{item.label}</div>
-	                        <div className="fw-semibold text-break">{item.value || "-"}</div>
-	                      </div>
-	                    ))}
-	                  </div>
+                  <div className="row g-3 small">
+                    {details.map((item) => (
+                      <div className="col-12 col-sm-6 col-lg-4 col-xl-2" key={`lead-view-${item.label}`}>
+                        <div className="text-secondary">{item.label}</div>
+                        <div className="fw-semibold text-break">{item.value || "-"}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {assignedUsersList.length ? (
+                    <div className="mt-3">
+                      <div className="small text-secondary mb-2">Assigned Users</div>
+                      <div className="d-flex flex-wrap gap-2">
+                        {assignedUsersList.map((userName) => (
+                          <span key={`lead-assigned-user-${userName}`} className="badge text-bg-light border">
+                            {userName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 	                  <div className="mt-4">
 	                    <div className="d-flex align-items-center justify-content-between gap-3 mb-2">
 	                      <div className="fw-semibold">

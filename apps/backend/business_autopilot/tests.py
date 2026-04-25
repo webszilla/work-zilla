@@ -365,6 +365,119 @@ class BusinessAutopilotUserAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["lead"]["priority"], "High")
 
+    def test_crm_lead_detail_includes_all_assigned_user_names(self):
+        first_assignee = User.objects.create_user(
+            username="lead.multi.one@workzilla.test",
+            email="lead.multi.one@workzilla.test",
+            password="pw123456",
+            first_name="Lead",
+            last_name="One",
+        )
+        second_assignee = User.objects.create_user(
+            username="lead.multi.two@workzilla.test",
+            email="lead.multi.two@workzilla.test",
+            password="pw123456",
+            first_name="Lead",
+            last_name="Two",
+        )
+        UserProfile.objects.create(
+            user=first_assignee,
+            organization=self.org,
+            role="org_user",
+        )
+        UserProfile.objects.create(
+            user=second_assignee,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=first_assignee,
+            role="org_user",
+            is_active=True,
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=second_assignee,
+            role="org_user",
+            is_active=True,
+        )
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Multi Assigned Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=first_assignee,
+            assigned_user_ids=[first_assignee.id, second_assignee.id],
+            stage="New",
+            status="Open",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(f"/api/business-autopilot/leads/{lead.id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["lead"]["assigned_user_ids"], [first_assignee.id, second_assignee.id])
+        self.assertEqual(payload["lead"]["assigned_user_names"], ["Lead One", "Lead Two"])
+
+    def test_crm_lead_patch_merges_assigned_user_ids_from_names(self):
+        first_assignee = User.objects.create_user(
+            username="lead.patch.one@workzilla.test",
+            email="lead.patch.one@workzilla.test",
+            password="pw123456",
+            first_name="Patch",
+            last_name="One",
+        )
+        second_assignee = User.objects.create_user(
+            username="lead.patch.two@workzilla.test",
+            email="lead.patch.two@workzilla.test",
+            password="pw123456",
+            first_name="Patch",
+            last_name="Two",
+        )
+        UserProfile.objects.create(user=first_assignee, organization=self.org, role="org_user")
+        UserProfile.objects.create(user=second_assignee, organization=self.org, role="org_user")
+        OrganizationUser.objects.create(organization=self.org, user=first_assignee, role="org_user", is_active=True)
+        OrganizationUser.objects.create(organization=self.org, user=second_assignee, role="org_user", is_active=True)
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Patch Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=first_assignee,
+            assigned_user_ids=[first_assignee.id],
+            stage="New",
+            status="Open",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{lead.id}",
+            data=json.dumps(
+                {
+                    "assigned_user_id": first_assignee.id,
+                    "assigned_user_ids": [first_assignee.id],
+                    "assigned_user_names": ["Patch One", "Patch Two"],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.assigned_user_ids, [first_assignee.id, second_assignee.id])
+
     def test_crm_contacts_post_blocks_duplicate_company_email_and_phone(self):
         existing_contact = CrmContact.objects.create(
             organization=self.org,

@@ -5049,6 +5049,31 @@ def _crm_clean_user_id_list(value):
     return list(dict.fromkeys(user_ids))
 
 
+def _crm_resolve_user_ids_from_names(org: Organization, value):
+    raw_names = value if isinstance(value, list) else []
+    normalized_names = [str(item or "").strip().lower() for item in raw_names if str(item or "").strip()]
+    if not normalized_names:
+        return []
+    member_users = [
+        membership.user
+        for membership in OrganizationUser.objects.filter(organization=org, is_active=True).select_related("user")
+        if membership.user_id
+    ]
+    resolved_ids = []
+    for user in member_users:
+        full_name = str(getattr(user, "get_full_name", lambda: "")() or "").strip()
+        display_name = _get_org_user_display_name(user)
+        candidates = {
+            str(getattr(user, "email", "") or "").strip().lower(),
+            str(getattr(user, "username", "") or "").strip().lower(),
+            full_name.lower(),
+            str(display_name or "").strip().lower(),
+        }
+        if any(candidate and candidate in normalized_names for candidate in candidates):
+            resolved_ids.append(int(user.id))
+    return list(dict.fromkeys(resolved_ids))
+
+
 def _crm_clean_int_list(value):
     raw = value if isinstance(value, list) else []
     numbers = []
@@ -5139,7 +5164,31 @@ def _crm_can_access_row(user: User, org: Organization, row):
     return _crm_can_view_row(user, org, row)
 
 
+def _crm_assigned_user_names(primary_user, raw_user_ids):
+    ordered_ids = []
+    primary_user_id = getattr(primary_user, "id", None)
+    if primary_user_id:
+        ordered_ids.append(int(primary_user_id))
+    for user_id in _crm_clean_user_id_list(raw_user_ids):
+        if user_id not in ordered_ids:
+            ordered_ids.append(int(user_id))
+    if not ordered_ids:
+        return []
+    users_by_id = {user.id: user for user in User.objects.filter(id__in=ordered_ids)}
+    resolved_names = []
+    for user_id in ordered_ids:
+        matched_user = users_by_id.get(user_id)
+        if not matched_user:
+            continue
+        display_name = _get_org_user_display_name(matched_user)
+        if display_name:
+            resolved_names.append(display_name)
+    return resolved_names
+
+
 def _serialize_crm_lead(row: CrmLead):
+    assigned_user_ids = _crm_clean_user_id_list(row.assigned_user_ids)
+    assigned_user_names = _crm_assigned_user_names(row.assigned_user, assigned_user_ids)
     return {
         "id": row.id,
         "crm_reference_id": str(row.crm_reference_id or "").strip(),
@@ -5151,7 +5200,8 @@ def _serialize_crm_lead(row: CrmLead):
         "assign_type": row.assign_type,
         "assigned_user_id": row.assigned_user_id,
         "assigned_user_name": row.assigned_user.get_full_name() or row.assigned_user.email if row.assigned_user_id else "",
-        "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
+        "assigned_user_ids": assigned_user_ids,
+        "assigned_user_names": assigned_user_names,
         "assigned_team": row.assigned_team,
         "stage": row.stage,
         "priority": row.priority or "Medium",
@@ -6451,10 +6501,17 @@ def crm_leads(request, lead_id: int = None):
         lead_name = str(payload.get("lead_name") or payload.get("name") or "").strip()
         if not lead_name:
             return JsonResponse({"detail": "lead_name_required"}, status=400)
+        assigned_user_ids = _crm_clean_user_id_list(payload.get("assigned_user_ids"))
+        assigned_user_ids_from_names = _crm_resolve_user_ids_from_names(org, payload.get("assigned_user_names"))
+        for user_id in assigned_user_ids_from_names:
+            if user_id not in assigned_user_ids:
+                assigned_user_ids.append(user_id)
         assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
         assigned_user = None
         if assigned_user_id:
             assigned_user = User.objects.filter(id=assigned_user_id).first()
+        elif assigned_user_ids:
+            assigned_user = User.objects.filter(id=assigned_user_ids[0]).first()
         row = CrmLead.objects.create(
             organization=org,
             lead_name=lead_name[:180],
@@ -6464,7 +6521,7 @@ def crm_leads(request, lead_id: int = None):
             lead_source=str(payload.get("lead_source") or "").strip()[:120],
             assign_type="Team" if str(payload.get("assign_type") or "").strip().lower() == "team" else "Users",
             assigned_user=assigned_user,
-            assigned_user_ids=_crm_clean_user_id_list(payload.get("assigned_user_ids")),
+            assigned_user_ids=assigned_user_ids,
             assigned_team=str(payload.get("assigned_team") or "").strip()[:180],
             stage=str(payload.get("stage") or "New").strip()[:30] or "New",
             priority=str(payload.get("priority") or "Medium").strip()[:30] or "Medium",
@@ -6537,11 +6594,19 @@ def crm_leads(request, lead_id: int = None):
             update_fields.append("assigned_user")
             sync_related_deal = True
         if "assigned_user_ids" in payload or "assignedUserIds" in payload:
-            row.assigned_user_ids = _crm_clean_user_id_list(
+            next_assigned_user_ids = _crm_clean_user_id_list(
                 payload.get("assigned_user_ids") if "assigned_user_ids" in payload else payload.get("assignedUserIds")
             )
+            assigned_user_names_payload = payload.get("assigned_user_names") if "assigned_user_names" in payload else payload.get("assignedUserNames")
+            for user_id in _crm_resolve_user_ids_from_names(org, assigned_user_names_payload):
+                if user_id not in next_assigned_user_ids:
+                    next_assigned_user_ids.append(user_id)
+            row.assigned_user_ids = next_assigned_user_ids
             update_fields.append("assigned_user_ids")
             sync_related_deal = True
+            if not row.assigned_user_id and next_assigned_user_ids:
+                row.assigned_user = User.objects.filter(id=next_assigned_user_ids[0]).first()
+                update_fields.append("assigned_user")
         if "assigned_team" in payload or "assignedTeam" in payload:
             row.assigned_team = str(payload.get("assigned_team") or payload.get("assignedTeam") or "").strip()[:180]
             update_fields.append("assigned_team")
