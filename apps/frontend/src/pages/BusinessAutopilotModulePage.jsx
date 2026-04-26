@@ -15508,11 +15508,11 @@ function CrmOnePageModule() {
                           >
                             <i className="bi bi-eye" aria-hidden="true" />
                           </button>
-	                          {(() => {
-	                            const hasEstimate = Boolean(row.convertedToEstimate) && !Boolean(row.convertedToInvoice);
-	                            const hasInvoice = Boolean(row.convertedToInvoice);
-	                            const shouldConvertToInvoice = hasEstimate && !hasInvoice;
-	                            const isDisabled = hasInvoice;
+		                          {(() => {
+		                            const hasEstimate = Boolean(row.convertedToEstimate) && !Boolean(row.convertedToInvoice);
+		                            const hasInvoice = Boolean(row.convertedToInvoice);
+		                            const shouldConvertToInvoice = hasEstimate && !hasInvoice;
+		                            const isDisabled = hasInvoice;
 	                            const handleConvertClick = () => {
 	                              if (isDisabled) {
 	                                return;
@@ -15523,33 +15523,38 @@ function CrmOnePageModule() {
 	                              }
 	                              openCrmSalesOrderConvertPopup(row);
 	                            };
-	                            const title = hasInvoice
-	                              ? "Completed"
-	                              : shouldConvertToInvoice
-	                                ? "Convert to Invoice"
-	                                : "Convert";
-	                            return (
-	                              <button
-	                                type="button"
-	                                className={`btn btn-sm ${
-	                                  hasInvoice ? "btn-outline-secondary wz-sales-order-convert-disabled" : shouldConvertToInvoice ? "btn-outline-success" : "btn-outline-info"
-	                                }`}
-	                                onClick={handleConvertClick}
-	                                disabled={isDisabled}
-	                                title={title}
-	                                aria-label={title}
-	                              >
-	                                {hasEstimate || hasInvoice ? (
-	                                  <i className="bi bi-file-earmark-text" aria-hidden="true" />
-	                                ) : (
-	                                  <i className="bi bi-arrow-left-right" aria-hidden="true" />
-	                                )}
-	                              </button>
-	                            );
-	                          })()}
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-light"
+		                            const title = hasInvoice
+		                              ? "Completed"
+		                              : shouldConvertToInvoice
+		                                ? "Convert to Invoice"
+		                                : "Convert";
+		                            const button = (
+		                              <button
+		                                type="button"
+		                                className={`btn btn-sm ${
+		                                  hasInvoice ? "btn-outline-secondary wz-sales-order-convert-disabled" : shouldConvertToInvoice ? "btn-outline-success" : "btn-outline-info"
+		                                }`}
+		                                onClick={handleConvertClick}
+		                                disabled={isDisabled}
+		                                title={isDisabled ? undefined : title}
+		                                aria-label={title}
+		                              >
+		                                {hasEstimate || hasInvoice ? (
+		                                  <i className="bi bi-file-earmark-text" aria-hidden="true" />
+		                                ) : (
+		                                  <i className="bi bi-arrow-left-right" aria-hidden="true" />
+		                                )}
+		                              </button>
+		                            );
+		                            return isDisabled ? (
+		                              <span className="d-inline-flex" title={title} aria-label={title}>
+		                                {button}
+		                              </span>
+		                            ) : button;
+		                          })()}
+	                          <button
+	                            type="button"
+	                            className="btn btn-sm btn-outline-light"
                             title="Download PDF"
                             aria-label="Download PDF"
                             onClick={() => downloadDocumentPdf("salesOrder", row.id)}
