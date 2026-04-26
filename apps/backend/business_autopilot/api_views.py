@@ -5049,6 +5049,24 @@ def _crm_clean_user_id_list(value):
     return list(dict.fromkeys(user_ids))
 
 
+def _crm_extract_assigned_user_names_from_payload(payload) -> list:
+    if not isinstance(payload, dict):
+        return []
+    if isinstance(payload.get("assigned_user_names"), list):
+        return [str(item or "").strip() for item in payload.get("assigned_user_names") if str(item or "").strip()]
+    if isinstance(payload.get("assignedUserNames"), list):
+        return [str(item or "").strip() for item in payload.get("assignedUserNames") if str(item or "").strip()]
+    if isinstance(payload.get("assignedUser"), list):
+        return [str(item or "").strip() for item in payload.get("assignedUser") if str(item or "").strip()]
+    if isinstance(payload.get("assigned_user"), list):
+        return [str(item or "").strip() for item in payload.get("assigned_user") if str(item or "").strip()]
+    if payload.get("assignedUser"):
+        return [str(item or "").strip() for item in str(payload.get("assignedUser") or "").split(",") if str(item or "").strip()]
+    if payload.get("assignedTo"):
+        return [str(item or "").strip() for item in str(payload.get("assignedTo") or "").split(",") if str(item or "").strip()]
+    return []
+
+
 def _crm_resolve_user_ids_from_names(org: Organization, value):
     raw_names = value if isinstance(value, list) else []
     normalized_names = [str(item or "").strip().lower() for item in raw_names if str(item or "").strip()]
@@ -5056,7 +5074,7 @@ def _crm_resolve_user_ids_from_names(org: Organization, value):
         return []
     member_users = [
         membership.user
-        for membership in OrganizationUser.objects.filter(organization=org, is_active=True).select_related("user")
+        for membership in OrganizationUser.objects.filter(organization=org, is_deleted=False).select_related("user")
         if membership.user_id
     ]
     resolved_ids = []
@@ -6501,17 +6519,23 @@ def crm_leads(request, lead_id: int = None):
         lead_name = str(payload.get("lead_name") or payload.get("name") or "").strip()
         if not lead_name:
             return JsonResponse({"detail": "lead_name_required"}, status=400)
-        assigned_user_ids = _crm_clean_user_id_list(payload.get("assigned_user_ids"))
-        assigned_user_ids_from_names = _crm_resolve_user_ids_from_names(org, payload.get("assigned_user_names"))
+        raw_assigned_user_ids = payload.get("assigned_user_ids")
+        if raw_assigned_user_ids is None:
+            raw_assigned_user_ids = payload.get("assignedUserIds")
+        assigned_user_ids = _crm_clean_user_id_list(raw_assigned_user_ids)
+        assigned_user_names_payload = _crm_extract_assigned_user_names_from_payload(payload)
+        assigned_user_ids_from_names = _crm_resolve_user_ids_from_names(org, assigned_user_names_payload)
         for user_id in assigned_user_ids_from_names:
             if user_id not in assigned_user_ids:
                 assigned_user_ids.append(user_id)
-        assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id"))
+        assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id") if "assigned_user_id" in payload else payload.get("assignedUserId"))
         assigned_user = None
         if assigned_user_id:
             assigned_user = User.objects.filter(id=assigned_user_id).first()
         elif assigned_user_ids:
             assigned_user = User.objects.filter(id=assigned_user_ids[0]).first()
+        if getattr(assigned_user, "id", None) and assigned_user.id not in assigned_user_ids:
+            assigned_user_ids.insert(0, int(assigned_user.id))
         row = CrmLead.objects.create(
             organization=org,
             lead_name=lead_name[:180],
@@ -6588,19 +6612,36 @@ def crm_leads(request, lead_id: int = None):
             assign_type = str(payload.get("assign_type") or payload.get("assignType") or "").strip().lower()
             row.assign_type = "Team" if assign_type == "team" else "Users"
             update_fields.append("assign_type")
+        has_assigned_user_id_update = False
         if "assigned_user_id" in payload or "assignedUserId" in payload:
             assigned_user_id = _coerce_positive_int(payload.get("assigned_user_id") if "assigned_user_id" in payload else payload.get("assignedUserId"))
             row.assigned_user = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
             update_fields.append("assigned_user")
             sync_related_deal = True
-        if "assigned_user_ids" in payload or "assignedUserIds" in payload:
-            next_assigned_user_ids = _crm_clean_user_id_list(
-                payload.get("assigned_user_ids") if "assigned_user_ids" in payload else payload.get("assignedUserIds")
-            )
-            assigned_user_names_payload = payload.get("assigned_user_names") if "assigned_user_names" in payload else payload.get("assignedUserNames")
+            has_assigned_user_id_update = True
+        should_update_assigned_user_ids = (
+            "assigned_user_ids" in payload
+            or "assignedUserIds" in payload
+            or "assigned_user_names" in payload
+            or "assignedUserNames" in payload
+            or "assignedUser" in payload
+            or "assigned_user" in payload
+            or "assignedTo" in payload
+            or has_assigned_user_id_update
+        )
+        if should_update_assigned_user_ids:
+            if "assigned_user_ids" in payload or "assignedUserIds" in payload:
+                next_assigned_user_ids = _crm_clean_user_id_list(
+                    payload.get("assigned_user_ids") if "assigned_user_ids" in payload else payload.get("assignedUserIds")
+                )
+            else:
+                next_assigned_user_ids = []
+            assigned_user_names_payload = _crm_extract_assigned_user_names_from_payload(payload)
             for user_id in _crm_resolve_user_ids_from_names(org, assigned_user_names_payload):
                 if user_id not in next_assigned_user_ids:
                     next_assigned_user_ids.append(user_id)
+            if getattr(row.assigned_user, "id", None) and row.assigned_user.id not in next_assigned_user_ids:
+                next_assigned_user_ids.insert(0, int(row.assigned_user.id))
             row.assigned_user_ids = next_assigned_user_ids
             update_fields.append("assigned_user_ids")
             sync_related_deal = True
