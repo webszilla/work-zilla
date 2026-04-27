@@ -14778,23 +14778,23 @@ function CrmOnePageModule() {
           { key: "won", label: "Won" },
           { key: "lost", label: "Lost" },
         ];
-        const salesOrderStatusTabs = [
-          { key: "all", label: "All" },
-          { key: "pending", label: "Pending" },
-          { key: "estimated", label: "Estimated" },
-          { key: "invoiced", label: "Invoiced" },
-          { key: "deleted", label: "Deleted" },
-        ];
-        const getSalesOrderStatusKey = (row) => {
-          const summary = getAccountsConversionSummaryForSalesOrder(row);
-          if (summary.hasInvoice) {
-            return "invoiced";
-          }
-          if (summary.hasEstimate) {
-            return "estimated";
-          }
-          return "pending";
-        };
+	        const salesOrderStatusTabs = [
+	          { key: "all", label: "All" },
+	          { key: "pending", label: "Pending" },
+	          { key: "estimated", label: "Estimated" },
+	          { key: "invoiced", label: "Invoiced" },
+	          { key: "deleted", label: "Deleted" },
+	        ];
+	        const getSalesOrderStatusKey = (row) => {
+	          const summary = getAccountsConversionSummaryForSalesOrder(row);
+	          if (summary.hasInvoice) {
+	            return "invoiced";
+	          }
+	          if (summary.hasEstimate) {
+	            return "estimated";
+	          }
+	          return "pending";
+	        };
         const meetingStatusTabs = [
           { key: "all", label: "All" },
           { key: "scheduled", label: "Scheduled" },
@@ -15497,12 +15497,20 @@ function CrmOnePageModule() {
                           </div>
                         ),
                       ]}
-                      renderActions={(row) => (
-                        <div className="d-inline-flex gap-2">
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-light"
-                            title="View Sales Order"
+	                      renderActions={(row) => (
+	                        <div className="d-inline-flex gap-2">
+	                          {canEditCrmRow(sectionKey, row) ? (
+	                            <input
+	                              type="checkbox"
+	                              className="form-check-input mt-0 align-self-center"
+	                              checked={selectedIdSet.has(String(row.id || "").trim())}
+	                              onChange={(event) => toggleCrmRowSelection(sectionKey, row.id, event.target.checked)}
+	                            />
+	                          ) : null}
+	                          <button
+	                            type="button"
+	                            className="btn btn-sm btn-outline-light"
+	                            title="View Sales Order"
                             aria-label="View Sales Order"
                             onClick={() => openCrmSalesOrderViewPopup(row)}
                           >
@@ -15547,7 +15555,13 @@ function CrmOnePageModule() {
 		                              </button>
 		                            );
 		                            return isDisabled ? (
-		                              <span className="d-inline-flex" title={title} aria-label={title}>
+		                              <span
+		                                className="d-inline-flex"
+		                                data-wz-tooltip={title}
+		                                aria-label={title}
+		                                role="button"
+		                                tabIndex={-1}
+		                              >
 		                                {button}
 		                              </span>
 		                            ) : button;
@@ -17154,24 +17168,49 @@ function CrmOnePageModule() {
                                   </select>
                                 );
                               }
-                              if (field.type === "select") {
-                                const emptyOptionLabel = sectionKey === "meetings" && field.key === "meetingMode"
-                                  ? "Select Mode"
-                                  : `Select ${field.label}`;
-                                return (
-                                  <select
-                                    className="form-select"
-                                    value={formValues[field.key] || ""}
-                                    required={isCrmFieldRequired(sectionKey, field, formValues)}
-                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
-                                  >
-                                    <option value="">{emptyOptionLabel}</option>
-                                    {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
-                                      <option key={option} value={option}>{option}</option>
-                                    ))}
-                                  </select>
-                                );
-                              }
+	                              if (field.type === "select") {
+	                                const emptyOptionLabel = sectionKey === "meetings" && field.key === "meetingMode"
+	                                  ? "Select Mode"
+	                                  : `Select ${field.label}`;
+	                                const selectControl = (
+	                                  <select
+	                                    className="form-select"
+	                                    value={formValues[field.key] || ""}
+	                                    required={isCrmFieldRequired(sectionKey, field, formValues)}
+	                                    onChange={(event) => setField(sectionKey, field.key, event.target.value)}
+	                                  >
+	                                    <option value="">{emptyOptionLabel}</option>
+	                                    {((field.optionSource === "crmTeams" ? crmTeamOptions : field.options) || []).map((option) => (
+	                                      <option key={option} value={option}>{option}</option>
+	                                    ))}
+	                                  </select>
+	                                );
+
+	                                if (sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "Users").trim().toLowerCase() === "team") {
+	                                  const selectedTeamName = String(formValues.assignedTeam || "").trim();
+	                                  const matchedTeam = selectedTeamName
+	                                    ? (moduleData.teams || []).find((team) => String(team?.name || "").trim().toLowerCase() === selectedTeamName.toLowerCase())
+	                                    : null;
+	                                  const teamMembers = matchedTeam ? Array.from(new Set(parseTeamMemberList(matchedTeam?.members))) : [];
+	                                  return (
+	                                    <div className="d-flex flex-column gap-1">
+	                                      {selectControl}
+	                                      {selectedTeamName && teamMembers.length ? (
+	                                        <button
+	                                          type="button"
+	                                          className="btn btn-link btn-sm p-0 align-baseline wz-link-primary align-self-start"
+	                                          title="View assigned users"
+	                                          onClick={() => openLeadAssignedEmployeesPopup({ assignType: "Team", assignedTeam: selectedTeamName, assignedTo: selectedTeamName })}
+	                                        >
+	                                          Click to view
+	                                        </button>
+	                                      ) : null}
+	                                    </div>
+	                                  );
+	                                }
+
+	                                return selectControl;
+	                              }
                               if (field.type === "date" || field.type === "time") {
                                 const meetingDateValue = sectionKey === "meetings" ? normalizeMeetingDateValue(formValues.meetingDate) : "";
                                 const minValue = sectionKey === "meetings" && field.key === "meetingDate"
@@ -17577,16 +17616,16 @@ function CrmOnePageModule() {
                       if (resolvedAssignedUsers.length === 1 && assignedUserIds.length <= 1) {
                         return resolvedAssignedUsers[0];
                       }
-                      return (
-                        <button
-                          type="button"
-                          className="btn btn-link btn-sm p-0 align-baseline"
-                          title="View assigned users"
-                          onClick={() => openLeadViewPopup(row)}
-                        >
-                          Click to view
-                        </button>
-                      );
+	                      return (
+	                        <button
+	                          type="button"
+	                          className="btn btn-link btn-sm p-0 align-baseline wz-link-primary"
+	                          title="View assigned users"
+	                          onClick={() => openLeadViewPopup(row)}
+	                        >
+	                          Click to view
+	                        </button>
+	                      );
                     }
                     return formatDateLikeCellValue(column.key, row[column.key], "-");
                   }
@@ -29161,32 +29200,78 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const accountsInvoiceSearchTerm = activeTab === "invoices" ? accountsQuerySearch : "";
   const accountsEstimateSearchTerm = activeTab === "estimates" ? accountsQuerySearch : "";
 
-  function deleteDocument(kind, id) {
-    const listKey = kind === "estimate" ? "estimates" : "invoices";
-    const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
-    const deletedRow = existingRows.find((row) => String(row?.id || "").trim() === String(id || "").trim()) || null;
-    setModuleData((prev) => {
-      const rows = prev[listKey] || [];
-      const targetRow = rows.find((row) => row.id === id);
-      if (kind === "invoice" && targetRow) {
-        applyInventorySyncForInvoiceChange(targetRow, null);
-      }
-      return {
-        ...prev,
-        [listKey]: rows.filter((row) => row.id !== id)
-      };
-    });
-    if (kind === "estimate" && accountsDocumentMatchesReference(deletedRow || { id }, editingEstimateId)) {
-      setEditingEstimateId("");
-      setDocumentHsnErrors((prev) => ({ ...prev, estimate: {} }));
-      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
-    }
-    if (kind === "invoice" && accountsDocumentMatchesReference(deletedRow || { id }, editingInvoiceId)) {
-      setEditingInvoiceId("");
-      setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
-      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
-    }
-  }
+	  function deleteDocument(kind, id, options = {}) {
+	    const listKey = kind === "estimate" ? "estimates" : "invoices";
+	    const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
+	    const deletedRow = existingRows.find((row) => accountsDocumentMatchesReference(row, id)) || null;
+	    const permanent = Boolean(options?.permanent);
+	    const nowIso = new Date().toISOString();
+
+	    setModuleData((prev) => {
+	      const rows = Array.isArray(prev?.[listKey]) ? prev[listKey] : [];
+	      const targetRow = rows.find((row) => accountsDocumentMatchesReference(row, id)) || null;
+
+	      if (kind === "invoice" && targetRow) {
+	        applyInventorySyncForInvoiceChange(targetRow, null);
+	      }
+
+	      if (permanent) {
+	        return {
+	          ...prev,
+	          [listKey]: rows.filter((row) => !accountsDocumentMatchesReference(row, id)),
+	        };
+	      }
+
+	      return {
+	        ...prev,
+	        [listKey]: rows.map((row) => (
+	          accountsDocumentMatchesReference(row, id)
+	            ? {
+	                ...row,
+	                isDeleted: true,
+	                is_deleted: true,
+	                deletedAt: nowIso,
+	                deleted_at: nowIso,
+	              }
+	            : row
+	        )),
+	      };
+	    });
+
+	    if (kind === "estimate" && accountsDocumentMatchesReference(deletedRow || { id }, editingEstimateId)) {
+	      setEditingEstimateId("");
+	      setDocumentHsnErrors((prev) => ({ ...prev, estimate: {} }));
+	      setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
+	    }
+	    if (kind === "invoice" && accountsDocumentMatchesReference(deletedRow || { id }, editingInvoiceId)) {
+	      setEditingInvoiceId("");
+	      setDocumentHsnErrors((prev) => ({ ...prev, invoice: {} }));
+	      setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
+	    }
+	  }
+
+	  function restoreDocument(kind, id) {
+	    const listKey = kind === "estimate" ? "estimates" : "invoices";
+	    setModuleData((prev) => ({
+	      ...prev,
+	      [listKey]: (Array.isArray(prev?.[listKey]) ? prev[listKey] : []).map((row) => {
+	        if (!accountsDocumentMatchesReference(row, id)) {
+	          return row;
+	        }
+	        const restored = {
+	          ...row,
+	          isDeleted: false,
+	          is_deleted: false,
+	          deletedAt: "",
+	          deleted_at: "",
+	        };
+	        if (kind === "invoice") {
+	          return applyInventorySyncForInvoiceChange(null, restored);
+	        }
+	        return restored;
+	      }),
+	    }));
+	  }
 
   function updateDocumentStatus(kind, id, status) {
     const listKey = kind === "estimate" ? "estimates" : "invoices";
@@ -30264,23 +30349,218 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     );
   }
 
-  function DocumentTable({ kind, rows, statusOptions, initialSearchTerm = "" }) {
-    const gstRows = moduleData.gstTemplates || [];
-    return (
-      <SearchablePaginatedTableCard
-        title={kind === "estimate" ? "Estimate List" : "Invoice List"}
-        badgeLabel={`${rows.length} items`}
-        rows={rows}
-        withoutOuterCard={
-          activeTab === "overview"
-          || (kind === "invoice" && activeTab === "invoices")
-          || (kind === "estimate" && activeTab === "estimates")
-        }
-	        columns={[
-	          { key: "docNo", label: kind === "estimate" ? "Estimate No" : "Invoice No" },
-	          { key: "customerName", label: "Customer" },
-	          { key: "issueDate", label: "Date" },
-	          { key: "total", label: "Total" },
+	  function DocumentTable({ kind, rows, statusOptions, initialSearchTerm = "" }) {
+	    const gstRows = moduleData.gstTemplates || [];
+	    const isInvoice = kind === "invoice";
+	    const [invoiceStatusTab, setInvoiceStatusTab] = useState("all");
+	    const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => []);
+
+	    const isSoftDeletedDocumentRow = (row) => (
+	      Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at)
+	    );
+
+	    const activeRows = useMemo(
+	      () => (Array.isArray(rows) ? rows : []).filter((row) => !isSoftDeletedDocumentRow(row)),
+	      [rows]
+	    );
+	    const deletedRows = useMemo(
+	      () => (Array.isArray(rows) ? rows : []).filter((row) => isSoftDeletedDocumentRow(row)),
+	      [rows]
+	    );
+
+	    const getInvoiceStatusKey = (row) => {
+	      const status = String(row?.status || "").trim().toLowerCase();
+	      if (status === "draft") {
+	        return "draft";
+	      }
+	      const paymentStatus = String(row?.paymentStatus || row?.payment_status || "").trim().toLowerCase();
+	      if (paymentStatus && paymentStatus !== "paid") {
+	        return "pending_payments";
+	      }
+	      const deliveryStatus = String(row?.deliveryStatus || row?.delivery_status || "Pending").trim().toLowerCase();
+	      if (deliveryStatus && !["completed", "cancelled", "canceled"].includes(deliveryStatus)) {
+	        return "pending_delivery";
+	      }
+	      return "completed";
+	    };
+
+	    const invoiceStatusTabs = [
+	      { key: "all", label: "All" },
+	      { key: "draft", label: "Draft" },
+	      { key: "pending_payments", label: "Pending Payments" },
+	      { key: "pending_delivery", label: "Pending Delivery" },
+	      { key: "deleted", label: "Deleted" },
+	    ];
+
+	    const tabCounts = useMemo(() => {
+	      if (!isInvoice) {
+	        return { all: activeRows.length, deleted: deletedRows.length };
+	      }
+	      return invoiceStatusTabs.reduce((acc, tab) => {
+	        if (tab.key === "deleted") {
+	          acc[tab.key] = deletedRows.length;
+	          return acc;
+	        }
+	        acc[tab.key] = tab.key === "all"
+	          ? activeRows.length
+	          : activeRows.filter((row) => getInvoiceStatusKey(row) === tab.key).length;
+	        return acc;
+	      }, {});
+	    }, [activeRows, deletedRows, isInvoice]);
+
+	    const tableRows = useMemo(() => {
+	      if (!isInvoice) {
+	        return activeRows;
+	      }
+	      if (invoiceStatusTab === "deleted") {
+	        return deletedRows;
+	      }
+	      if (invoiceStatusTab === "all") {
+	        return activeRows;
+	      }
+	      return activeRows.filter((row) => getInvoiceStatusKey(row) === invoiceStatusTab);
+	    }, [activeRows, deletedRows, invoiceStatusTab, isInvoice]);
+
+	    const selectedIdSet = useMemo(
+	      () => new Set((Array.isArray(selectedDocumentIds) ? selectedDocumentIds : []).map((value) => String(value || "").trim()).filter(Boolean)),
+	      [selectedDocumentIds]
+	    );
+
+	    const getDocumentRowId = (row) => String(row?.id || row?.docNo || "").trim();
+
+	    const selectableRowIds = useMemo(
+	      () => tableRows.map((row) => getDocumentRowId(row)).filter(Boolean),
+	      [tableRows]
+	    );
+	    const selectedVisibleCount = useMemo(
+	      () => selectableRowIds.reduce((count, rowId) => (selectedIdSet.has(rowId) ? count + 1 : count), 0),
+	      [selectableRowIds, selectedIdSet]
+	    );
+	    const hasSelectableRows = selectableRowIds.length > 0;
+	    const allVisibleSelected = hasSelectableRows && selectedVisibleCount === selectableRowIds.length;
+
+	    function toggleDocumentRowSelection(rowId, checked) {
+	      const normalizedId = String(rowId || "").trim();
+	      if (!normalizedId) {
+	        return;
+	      }
+	      setSelectedDocumentIds((prev) => {
+	        const current = Array.isArray(prev) ? prev : [];
+	        const next = new Set(current.map((value) => String(value || "").trim()).filter(Boolean));
+	        if (checked) {
+	          next.add(normalizedId);
+	        } else {
+	          next.delete(normalizedId);
+	        }
+	        return Array.from(next);
+	      });
+	    }
+
+	    function toggleSelectAllDocuments(rowIds, shouldSelect) {
+	      const normalized = (Array.isArray(rowIds) ? rowIds : [])
+	        .map((value) => String(value || "").trim())
+	        .filter(Boolean);
+	      if (!normalized.length) {
+	        return;
+	      }
+	      setSelectedDocumentIds((prev) => {
+	        const current = new Set((Array.isArray(prev) ? prev : []).map((value) => String(value || "").trim()).filter(Boolean));
+	        if (shouldSelect) {
+	          normalized.forEach((id) => current.add(id));
+	        } else {
+	          normalized.forEach((id) => current.delete(id));
+	        }
+	        return Array.from(current);
+	      });
+	    }
+
+	    function clearSelectedDocuments(rowIds) {
+	      const normalized = new Set((Array.isArray(rowIds) ? rowIds : []).map((value) => String(value || "").trim()).filter(Boolean));
+	      if (!normalized.size) {
+	        return;
+	      }
+	      setSelectedDocumentIds((prev) => (Array.isArray(prev) ? prev : []).filter((id) => !normalized.has(String(id || "").trim())));
+	    }
+
+	    const headerBottom = isInvoice ? (
+	      <div className="d-flex flex-column gap-2">
+	        <div className="d-flex flex-wrap gap-2">
+	          {invoiceStatusTabs.map((tab) => (
+	            <button
+	              key={`invoice-status-tab-${tab.key}`}
+	              type="button"
+	              className={`btn btn-sm ${invoiceStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+	              onClick={() => setInvoiceStatusTab(tab.key)}
+	            >
+	              {tab.label} ({tabCounts[tab.key] || 0})
+	            </button>
+	          ))}
+	          {hasSelectableRows ? (
+	            <button
+	              type="button"
+	              className="btn btn-sm btn-outline-light"
+	              onClick={() => toggleSelectAllDocuments(selectableRowIds, !allVisibleSelected)}
+	            >
+	              {allVisibleSelected ? "Unselect All" : "Select All"}
+	            </button>
+	          ) : null}
+	          {selectedVisibleCount > 0 ? (
+	            invoiceStatusTab === "deleted" ? (
+	              <>
+	                <button
+	                  type="button"
+	                  className="btn btn-sm btn-outline-success"
+	                  onClick={() => {
+	                    selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)).forEach((rowId) => restoreDocument("invoice", rowId));
+	                    clearSelectedDocuments(selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)));
+	                  }}
+	                >
+	                  Restore Selected ({selectedVisibleCount})
+	                </button>
+	                <button
+	                  type="button"
+	                  className="btn btn-sm btn-outline-danger"
+	                  onClick={() => {
+	                    selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)).forEach((rowId) => deleteDocument("invoice", rowId, { permanent: true }));
+	                    clearSelectedDocuments(selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)));
+	                  }}
+	                >
+	                  Delete Selected ({selectedVisibleCount})
+	                </button>
+	              </>
+	            ) : (
+	              <button
+	                type="button"
+	                className="btn btn-sm btn-outline-danger"
+	                onClick={() => {
+	                  selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)).forEach((rowId) => deleteDocument("invoice", rowId));
+	                  clearSelectedDocuments(selectableRowIds.filter((rowId) => selectedIdSet.has(rowId)));
+	                }}
+	              >
+	                Delete Selected ({selectedVisibleCount})
+	              </button>
+	            )
+	          ) : null}
+	        </div>
+	      </div>
+	    ) : null;
+
+	    return (
+	      <SearchablePaginatedTableCard
+	        title={kind === "estimate" ? "Estimate List" : "Invoice List"}
+	        badgeLabel={`${isInvoice ? activeRows.length : rows.length} items`}
+	        rows={tableRows}
+	        withoutOuterCard={
+	          activeTab === "overview"
+	          || (kind === "invoice" && activeTab === "invoices")
+	          || (kind === "estimate" && activeTab === "estimates")
+	        }
+	        headerBottom={headerBottom}
+		        columns={[
+		          { key: "docNo", label: kind === "estimate" ? "Estimate No" : "Invoice No" },
+		          { key: "customerName", label: "Customer" },
+		          { key: "issueDate", label: "Date" },
+		          { key: "total", label: "Total" },
 	          { key: "crmReferenceId", label: "CRM" },
 	          ...(kind === "invoice" ? [
 	            { key: "deliveryStatus", label: "Delivery Status" },
@@ -30291,109 +30571,149 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         noRowsText="No records yet."
         initialSearchTerm={initialSearchTerm}
         searchBy={(row) => [row.docNo, row.customerName, row.crmReferenceId, row.status, row.issueDate, row.dueDate].join(" ")}
-	        renderCells={(row) => {
-	          const totals = computeDocumentTotals(row, gstRows);
-	          return [
-	            <span className="fw-semibold">{row.docNo || "-"}</span>,
-	            row.customerName || "-",
-	            formatDateLikeCellValue("issueDate", row.issueDate, "-"),
-	            formatInr(totals.grandTotal),
-	            row.crmReferenceId || "-",
-	            ...(kind === "invoice" ? [
-	              (
-	                <select
-	                  className="form-select form-select-sm"
-                  value={row.deliveryStatus || "Pending"}
-                  onChange={(e) => updateInvoiceDeliveryStatus(row.id, e.target.value)}
-                >
-                  {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
-                    <option key={`${row.id}-delivery-${status}`} value={status}>{status}</option>
-                  ))}
-                </select>
-              ),
-            ] : []),
-            (
-              <select
-                className="form-select form-select-sm"
-                value={row.status || statusOptions[0]}
-                onChange={(e) => updateDocumentStatus(kind, row.id, e.target.value)}
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>{status}</option>
+		        renderCells={(row) => {
+		          const totals = computeDocumentTotals(row, gstRows);
+		          const isDeletedRow = isSoftDeletedDocumentRow(row);
+		          return [
+		            <span className="fw-semibold">{row.docNo || "-"}</span>,
+		            row.customerName || "-",
+		            formatDateLikeCellValue("issueDate", row.issueDate, "-"),
+		            formatInr(totals.grandTotal),
+		            row.crmReferenceId || "-",
+		            ...(kind === "invoice" ? [
+		              (
+		                <select
+		                  className="form-select form-select-sm"
+		                  disabled={isDeletedRow}
+	                  value={row.deliveryStatus || "Pending"}
+	                  onChange={(e) => updateInvoiceDeliveryStatus(row.id, e.target.value)}
+	                >
+	                  {INVOICE_DELIVERY_STATUS_OPTIONS.map((status) => (
+	                    <option key={`${row.id}-delivery-${status}`} value={status}>{status}</option>
+	                  ))}
+	                </select>
+	              ),
+	            ] : []),
+	            (
+	              <select
+	                className="form-select form-select-sm"
+	                disabled={isDeletedRow}
+	                value={row.status || statusOptions[0]}
+	                onChange={(e) => updateDocumentStatus(kind, row.id, e.target.value)}
+	              >
+	                {statusOptions.map((status) => (
+	                  <option key={status} value={status}>{status}</option>
                 ))}
               </select>
             ),
           ];
         }}
-        renderActions={(row) => (
-          (() => {
-            const editLocation = buildDocumentEditLocation(kind, row);
-            const editHref = `${editLocation.pathname}${editLocation.search}`;
-            return (
-          <div className="d-inline-flex gap-2">
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-light"
-              title="View"
+		        renderActions={(row) => (
+		          (() => {
+		            const editLocation = buildDocumentEditLocation(kind, row);
+		            const editHref = `${editLocation.pathname}${editLocation.search}`;
+		            const rowId = getDocumentRowId(row);
+		            const isDeletedRow = isSoftDeletedDocumentRow(row);
+		            return (
+	          <div className="d-inline-flex gap-2">
+	            {isInvoice ? (
+	              <input
+	                type="checkbox"
+	                className="form-check-input mt-0 align-self-center"
+	                checked={Boolean(rowId && selectedIdSet.has(rowId))}
+	                onChange={(event) => toggleDocumentRowSelection(rowId, event.target.checked)}
+	              />
+	            ) : null}
+	            <button
+	              type="button"
+	              className="btn btn-sm btn-outline-light"
+	              title="View"
               aria-label="View"
               onClick={() => openAccountsDocumentViewPopup(kind, row)}
             >
               <i className="bi bi-eye" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-light"
-              title="Download PDF"
-              aria-label="Download PDF"
-              onClick={() => downloadDocumentPdf(kind, row.id)}
-            >
-              <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-info"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                requestDocumentEdit(kind, row, { forceWorkspaceRefresh: true });
-              }}
-            >
-              Edit
-            </button>
-            {kind === "estimate" ? (
-              row.convertedInvoiceId ? (() => {
-                const linkedInvoice = (moduleData.invoices || []).find((invoiceRow) => String(invoiceRow.id || "").trim() === String(row.convertedInvoiceId || "").trim());
-                return (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-success"
-                    title={linkedInvoice ? `Open ${String(linkedInvoice.docNo || "").trim() || "converted invoice"} for editing` : "Converted invoice not found"}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (linkedInvoice) {
-                        requestDocumentEdit("invoice", linkedInvoice, { forceWorkspaceRefresh: true });
-                      }
-                    }}
-                    disabled={!linkedInvoice}
-                  >
-                    Converted
-                  </button>
-                );
-              })() : (
-                <button type="button" className="btn btn-sm btn-success" onClick={() => convertEstimateToInvoice(row)}>
-                  Convert to Invoice
-                </button>
-              )
-            ) : null}
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id)}>
-              Delete
-            </button>
-          </div>
-            );
-          })()
-        )}
-      />
+	            </button>
+	            <button
+	              type="button"
+	              className="btn btn-sm btn-outline-light"
+	              title="Download PDF"
+	              aria-label="Download PDF"
+	              onClick={() => downloadDocumentPdf(kind, row.id)}
+	            >
+	              <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
+	            </button>
+	            {!isDeletedRow ? (
+	              <button
+	                type="button"
+	                className="btn btn-sm btn-outline-info"
+	                onClick={(event) => {
+	                  event.preventDefault();
+	                  event.stopPropagation();
+	                  requestDocumentEdit(kind, row, { forceWorkspaceRefresh: true });
+	                }}
+	              >
+	                Edit
+	              </button>
+	            ) : null}
+			            {kind === "estimate" ? (
+			              row.convertedInvoiceId ? (() => {
+		                const linkedInvoice = (moduleData.invoices || []).find((invoiceRow) => String(invoiceRow.id || "").trim() === String(row.convertedInvoiceId || "").trim());
+		                const convertedTitle = linkedInvoice
+		                  ? `Open ${String(linkedInvoice.docNo || "").trim() || "converted invoice"} for editing`
+		                  : "Converted invoice not found";
+		                const convertedButton = (
+		                  <button
+		                    type="button"
+		                    className="btn btn-sm btn-outline-success"
+		                    title={linkedInvoice ? convertedTitle : undefined}
+		                    onClick={(event) => {
+		                      event.preventDefault();
+		                      event.stopPropagation();
+		                      if (linkedInvoice) {
+		                        requestDocumentEdit("invoice", linkedInvoice, { forceWorkspaceRefresh: true });
+		                      }
+		                    }}
+		                    disabled={!linkedInvoice}
+		                  >
+		                    Converted
+		                  </button>
+		                );
+		                return linkedInvoice ? convertedButton : (
+		                  <span
+		                    className="d-inline-flex"
+		                    data-wz-tooltip={convertedTitle}
+	                    aria-label={convertedTitle}
+	                    role="button"
+	                    tabIndex={-1}
+	                  >
+	                    {convertedButton}
+	                  </span>
+	                );
+	              })() : (
+	                <button type="button" className="btn btn-sm btn-success" onClick={() => convertEstimateToInvoice(row)}>
+	                  Convert to Invoice
+	                </button>
+	              )
+	            ) : null}
+	            {isDeletedRow ? (
+	              <>
+	                <button type="button" className="btn btn-sm btn-outline-success" onClick={() => restoreDocument(kind, row.id)}>
+	                  Restore
+	                </button>
+	                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id, { permanent: true })}>
+	                  Delete
+	                </button>
+	              </>
+	            ) : (
+	              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id)}>
+	                Delete
+	              </button>
+	            )}
+	          </div>
+		            );
+		          })()
+		        )}
+	      />
     );
   }
 

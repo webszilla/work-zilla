@@ -145,7 +145,7 @@ export async function apiFetch(url, options = {}) {
   }
 
   if (!response.ok) {
-    const message = data?.error || data?.detail || `Request failed (${response.status})`;
+    const message = data?.message || data?.error || data?.detail || `Request failed (${response.status})`;
     if (isFormDataBody && /size|too large|max(?:imum)?|image|file/i.test(String(message || ""))) {
       showUploadAlert(String(message));
     }

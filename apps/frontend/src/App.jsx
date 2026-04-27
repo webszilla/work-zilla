@@ -2144,33 +2144,42 @@ function GlobalDeleteConfirmBridge() {
         .toLowerCase();
     };
 
-    const isDeleteIntent = (el) => {
-      if (!(el instanceof HTMLElement)) {
-        return false;
-      }
-      if (el.hasAttribute("data-no-delete-confirm")) {
-        return false;
-      }
-      if (el.closest("[data-confirm-dialog='true']")) {
-        return false;
-      }
-      if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") {
-        return false;
-      }
-      const text = getActionText(el);
-      if (!text) {
-        return false;
-      }
-      if (text.includes("deleted items")) {
-        return false;
-      }
-      return (
-        text.includes("delete")
-        || text.includes("remove")
-        || text.includes("btn-danger")
-        || text.includes("outline-danger")
-      );
-    };
+	    const isDeleteIntent = (el) => {
+	      if (!(el instanceof HTMLElement)) {
+	        return false;
+	      }
+	      if (el.hasAttribute("data-no-delete-confirm")) {
+	        return false;
+	      }
+	      if (el.closest("[data-confirm-dialog='true']")) {
+	        return false;
+	      }
+	      if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") {
+	        return false;
+	      }
+	      const text = getActionText(el);
+	      if (!text) {
+	        return false;
+	      }
+	      if (text.includes("deleted items")) {
+	        return false;
+	      }
+	      const hasDeleteWord = /\bdelete\b/.test(text);
+	      const hasRemoveWord = /\bremove\b/.test(text);
+	      const hasDeletedWord = /\bdeleted\b/.test(text);
+
+	      // Ignore "Deleted" filter tabs (ex: "Deleted (3)") - these are views, not destructive actions.
+	      if (hasDeletedWord && !hasDeleteWord && !hasRemoveWord) {
+	        return false;
+	      }
+
+	      return (
+	        hasDeleteWord
+	        || hasRemoveWord
+	        || text.includes("btn-danger")
+	        || text.includes("outline-danger")
+	      );
+	    };
 
     const onGlobalDeleteClickCapture = (event) => {
       const actionEl = getActionElement(event.target);

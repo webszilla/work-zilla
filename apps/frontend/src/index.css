@@ -53,6 +53,15 @@ a{
   text-decoration: none;
 }
 
+.wz-link-primary{
+  color: var(--color-primary) !important;
+}
+
+.wz-link-primary:hover,
+.wz-link-primary:focus-visible{
+  color: var(--color-primary-hover) !important;
+}
+
 .page-center{
   min-height: 100vh;
   display:flex;

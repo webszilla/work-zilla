@@ -1259,6 +1259,15 @@ export default function BusinessAutopilotUsersPage() {
   const [deletingMembershipId, setDeletingMembershipId] = useState("");
   const [restoringMembershipId, setRestoringMembershipId] = useState("");
   const [permanentlyDeletingMembershipId, setPermanentlyDeletingMembershipId] = useState("");
+  const [userDeleteReassignModal, setUserDeleteReassignModal] = useState({
+    open: false,
+    membershipId: "",
+    user: null,
+    search: "",
+    searchOpen: false,
+    selectedMembershipIds: [],
+    error: "",
+  });
   const [togglingMembershipId, setTogglingMembershipId] = useState("");
   const [verifyingMembershipId, setVerifyingMembershipId] = useState("");
   const [sendingCredentialMembershipId, setSendingCredentialMembershipId] = useState("");
@@ -1710,36 +1719,130 @@ export default function BusinessAutopilotUsersPage() {
       await openAlertDialog(message, { title: "Delete Not Allowed" });
       return;
     }
-    const confirmed = await openConfirmDialog(
-      `Deleting ${String(targetUser?.name || targetUser?.email || "this user")} will remove their Business Autopilot access. Any CRM leads or deals assigned to this user will be shown again after deletion so you can reassign them. Do you want to continue?`,
+    const wantsCustomReassign = await openConfirmDialog(
+      `Delete ${String(targetUser?.name || targetUser?.email || "this user")}?\n\nYes: choose who should receive their CRM records.\nNo: CRM records will be reassigned to Org Admin.`,
       {
         title: "Delete User",
-        confirmText: "Delete",
-        cancelText: "Cancel",
+        confirmText: "Yes",
+        cancelText: "No",
       }
+    );
+
+    if (wantsCustomReassign) {
+      setUserDeleteReassignModal({
+        open: true,
+        membershipId: String(membershipId),
+        user: targetUser || null,
+        search: "",
+        searchOpen: true,
+        selectedMembershipIds: [],
+        error: "",
+      });
+      window.setTimeout(() => {
+        const el = document.querySelector("[data-user-delete-reassign-search='true']");
+        if (el && typeof el.focus === "function") {
+          el.focus();
+        }
+      }, 0);
+      return;
+    }
+
+    const confirmed = await openConfirmDialog(
+      "Deleting this user will reassign their CRM records to Org Admin. Do you want to continue?",
+      { title: "Delete User", confirmText: "Yes", cancelText: "No" }
     );
     if (!confirmed) {
       return;
     }
+
     setDeletingMembershipId(String(membershipId));
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
-        method: "DELETE"
+        method: "POST",
+        body: JSON.stringify({ action: "delete" }),
       });
       applyUsersResponse(data);
+      setUserListTab("deleted");
       if (String(editForm.membership_id) === String(membershipId)) {
         cancelEdit();
       }
       setNotice(String(data?.linked_records_message || data?.message || "User deleted successfully."));
-      if (Array.isArray(data?.affected_leads) && data.affected_leads.length) {
-        await openAlertDialog(
-          `This user was linked to ${data.affected_leads.length} lead(s) and ${Array.isArray(data?.affected_deals) ? data.affected_deals.length : 0} deal(s). Review and reassign them if needed.`,
-          { title: "Linked CRM Records" }
-        );
-      }
     } catch (error) {
       setNotice(error?.message || "Unable to delete user.");
+    } finally {
+      setDeletingMembershipId("");
+    }
+  }
+
+  function closeUserDeleteReassignModal() {
+    setUserDeleteReassignModal({
+      open: false,
+      membershipId: "",
+      user: null,
+      search: "",
+      searchOpen: false,
+      selectedMembershipIds: [],
+      error: "",
+    });
+  }
+
+  function toggleUserDeleteReassignSelection(nextMembershipId) {
+    const normalizedId = String(nextMembershipId || "").trim();
+    if (!normalizedId) {
+      return;
+    }
+    setUserDeleteReassignModal((prev) => {
+      const current = Array.isArray(prev.selectedMembershipIds) ? prev.selectedMembershipIds : [];
+      const next = new Set(current.map((value) => String(value || "").trim()).filter(Boolean));
+      if (next.has(normalizedId)) {
+        next.delete(normalizedId);
+      } else {
+        next.add(normalizedId);
+      }
+      return { ...prev, selectedMembershipIds: Array.from(next) };
+    });
+  }
+
+  async function confirmUserDeleteWithReassign() {
+    const membershipId = String(userDeleteReassignModal.membershipId || "").trim();
+    if (!membershipId || deletingMembershipId) {
+      return;
+    }
+    const selectedMembershipIds = Array.isArray(userDeleteReassignModal.selectedMembershipIds)
+      ? userDeleteReassignModal.selectedMembershipIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (!selectedMembershipIds.length) {
+      await openAlertDialog("Select at least one user to reassign CRM records.", { title: "Reassign Required" });
+      return;
+    }
+    setDeletingMembershipId(membershipId);
+    setNotice("");
+    setUserDeleteReassignModal((prev) => ({ ...prev, error: "" }));
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "delete",
+          reassign_to_membership_ids: selectedMembershipIds,
+        }),
+      });
+      applyUsersResponse(data);
+      setUserListTab("deleted");
+      if (String(editForm.membership_id) === String(membershipId)) {
+        cancelEdit();
+      }
+      closeUserDeleteReassignModal();
+      setNotice(String(data?.linked_records_message || data?.message || "User deleted successfully."));
+    } catch (error) {
+      const debugError = String(error?.data?.debug_error || "").trim();
+      const message = [
+        error?.message || "Unable to delete user.",
+        debugError ? `Debug: ${debugError}` : "",
+      ].filter(Boolean).join("\n");
+      setNotice(message);
+      setUserDeleteReassignModal((prev) => ({ ...prev, error: message }));
+      await openAlertDialog(message, { title: "Delete Failed" });
     } finally {
       setDeletingMembershipId("");
     }
@@ -1749,12 +1852,24 @@ export default function BusinessAutopilotUsersPage() {
     if (!canManageUsersTab || !membershipId || restoringMembershipId) {
       return;
     }
+    const targetUser = deletedUsers.find((user) => String(user?.membership_id || "") === String(membershipId));
+    const confirmed = await openConfirmDialog(
+      `Restore ${String(targetUser?.name || targetUser?.email || "this user")}?`,
+      { title: "Restore User", confirmText: "Yes", cancelText: "No" }
+    );
+    if (!confirmed) {
+      return;
+    }
+    const restoreCrm = await openConfirmDialog(
+      "Reassign this user's previous CRM records back to this user?",
+      { title: "Restore User", confirmText: "Yes", cancelText: "No" }
+    );
     setRestoringMembershipId(String(membershipId));
     setNotice("");
     try {
       const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
         method: "POST",
-        body: JSON.stringify({ action: "restore" }),
+        body: JSON.stringify({ action: "restore", restore_crm_assignments: Boolean(restoreCrm) }),
       });
       applyUsersResponse(data);
       setNotice(String(data?.message || "User restored successfully."));
@@ -5806,6 +5921,154 @@ export default function BusinessAutopilotUsersPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {userDeleteReassignModal.open ? (
+        <div className="modal-overlay" data-no-delete-confirm="true" onClick={closeUserDeleteReassignModal}>
+          <div
+            className="modal-panel"
+            data-no-delete-confirm="true"
+            style={{ width: "min(720px, 94vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {(() => {
+              const targetMembershipId = String(userDeleteReassignModal.membershipId || "").trim();
+              const targetUserLabel = String(userDeleteReassignModal.user?.name || userDeleteReassignModal.user?.email || "this user").trim() || "this user";
+              const normalizedSearch = String(userDeleteReassignModal.search || "").trim().toLowerCase();
+              const candidates = (users || [])
+                .filter((row) => String(row?.membership_id || "").trim() && String(row?.membership_id || "").trim() !== targetMembershipId)
+                .filter((row) => !row?.is_deleted)
+                .filter((row) => {
+                  if (!normalizedSearch) return true;
+                  const haystack = [
+                    row?.name,
+                    row?.email,
+                    row?.department,
+                    row?.employee_role,
+                  ].filter(Boolean).join(" ").toLowerCase();
+                  return haystack.includes(normalizedSearch);
+                })
+                .slice(0, 25);
+              const selectedSet = new Set((userDeleteReassignModal.selectedMembershipIds || []).map((value) => String(value || "").trim()).filter(Boolean));
+              const selectedRows = (users || [])
+                .filter((row) => selectedSet.has(String(row?.membership_id || "").trim()));
+              return (
+                <>
+                  <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
+                    <div>
+                      <h5 className="mb-1">Reassign CRM Records</h5>
+                      <div className="text-secondary small">
+                        Select user(s) to receive {targetUserLabel}&apos;s CRM leads/deals before deleting this account.
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-sm btn-outline-light" data-no-delete-confirm="true" onClick={closeUserDeleteReassignModal}>
+                      <i className="bi bi-x-lg" aria-hidden="true" />
+                    </button>
+                  </div>
+
+                  {String(userDeleteReassignModal.error || "").trim() ? (
+                    <div className="alert alert-danger py-2 mb-2">
+                      {String(userDeleteReassignModal.error || "").trim()}
+                    </div>
+                  ) : null}
+
+                  <div className="mb-2">
+                    <label className="form-label small text-secondary mb-1">Assign To</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="search"
+                        className="form-control"
+                        autoComplete="off"
+                        placeholder="Search users"
+                        value={userDeleteReassignModal.search}
+                        data-user-delete-reassign-search="true"
+                        onFocus={() => setUserDeleteReassignModal((prev) => ({ ...prev, searchOpen: true }))}
+                        onClick={() => setUserDeleteReassignModal((prev) => ({ ...prev, searchOpen: true }))}
+                        onBlur={() => window.setTimeout(() => setUserDeleteReassignModal((prev) => ({ ...prev, searchOpen: false })), 120)}
+                        onChange={(event) => setUserDeleteReassignModal((prev) => ({ ...prev, search: event.target.value, searchOpen: true }))}
+                      />
+                      {userDeleteReassignModal.searchOpen ? (
+                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Users</div>
+                            {candidates.length ? candidates.map((option) => {
+                              const optionMembershipId = String(option?.membership_id || "").trim();
+                              const checked = selectedSet.has(optionMembershipId);
+                              const label = String(option?.name || option?.email || "").trim() || "User";
+                              const subLabel = [option?.department, option?.employee_role, option?.email].filter(Boolean).join(" / ") || "No details";
+                              return (
+                                <button
+                                  key={`user-delete-reassign-${optionMembershipId}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  data-no-delete-confirm="true"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => toggleUserDeleteReassignSelection(optionMembershipId)}
+                                >
+                                  <span className="d-flex align-items-start gap-2">
+                                    <input type="checkbox" className="form-check-input mt-1" checked={checked} readOnly />
+                                    <span>
+                                      <span className="crm-inline-suggestions__item-main d-block">{label}</span>
+                                      <span className="crm-inline-suggestions__item-sub">{subLabel}</span>
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            }) : (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No users found</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="d-flex flex-wrap gap-2 mb-3">
+                    {selectedRows.length ? selectedRows.map((row) => {
+                      const membershipIdValue = String(row?.membership_id || "").trim();
+                      const label = String(row?.name || row?.email || "").trim() || "User";
+                      return (
+                        <span
+                          key={`user-delete-selected-${membershipIdValue}`}
+                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                            aria-label={`Remove ${label}`}
+                            data-no-delete-confirm="true"
+                            onClick={() => toggleUserDeleteReassignSelection(membershipIdValue)}
+                          >
+                            &times;
+                          </button>
+                          <span>{label}</span>
+                        </span>
+                      );
+                    }) : (
+                      <div className="small text-secondary">No users selected yet.</div>
+                    )}
+                  </div>
+
+                  <div className="d-flex justify-content-end gap-2">
+                    <button type="button" className="btn btn-outline-light btn-sm" data-no-delete-confirm="true" onClick={closeUserDeleteReassignModal}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      data-no-delete-confirm="true"
+                      disabled={deletingMembershipId === targetMembershipId}
+                      onClick={confirmUserDeleteWithReassign}
+                    >
+                      {deletingMembershipId === targetMembershipId ? "Deleting..." : "Reassign & Delete"}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}

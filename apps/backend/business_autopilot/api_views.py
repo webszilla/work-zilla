@@ -13,6 +13,7 @@ from typing import Optional
 import requests
 
 from django.http import HttpResponse, JsonResponse
+from django.conf import settings
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.db.models import Q, Min, Max
@@ -53,6 +54,7 @@ from .models import (
     Subscription,
     SubscriptionCategory,
     SubscriptionSubCategory,
+    BusinessAutopilotUserCrmReassignmentSnapshot,
 )
 
 
@@ -2676,42 +2678,89 @@ def org_user_detail(request, membership_id: int):
             return JsonResponse({"detail": "invalid_action"}, status=400)
 
     if resolved_method == "DELETE":
-        if _is_org_admin_account_member(org, membership):
+        try:
+            if _is_org_admin_account_member(org, membership):
+                return JsonResponse(
+                    {
+                        "detail": "org_admin_delete_forbidden",
+                        "message": "ORG admin account cannot be deleted from Users.",
+                    },
+                    status=403,
+                )
+            permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+            if request.method == "POST":
+                permanent_raw = str(payload.get("permanent") or "").strip().lower()
+                permanent = permanent or permanent_raw in {"1", "true", "yes"}
+            if membership.is_deleted and not permanent:
+                return JsonResponse({"detail": "user_already_deleted"}, status=400)
+
+            linked_leads = _crm_collect_leads_linked_to_user(org, membership.user_id)
+            linked_deals = _crm_collect_deals_linked_to_user(org, membership.user_id)
+
+            reassign_membership_ids = payload.get("reassign_to_membership_ids") if isinstance(payload, dict) else None
+            target_user_ids = _crm_resolve_target_user_ids(org, reassign_membership_ids, exclude_user_id=membership.user_id)
+            if not target_user_ids:
+                admin_user_id = _crm_resolve_org_admin_user_id(org, fallback_user_id=getattr(request.user, "id", None))
+                target_user_ids = [admin_user_id] if admin_user_id else []
+
+            crm_reassign_result = None
+            if target_user_ids:
+                try:
+                    with transaction.atomic():
+                        crm_reassign_result = _crm_snapshot_and_reassign_user_records(
+                            org,
+                            membership=membership,
+                            target_user_ids=target_user_ids,
+                            performed_by=request.user,
+                        )
+                except Exception:
+                    logger.exception("Failed to reassign CRM records for deleted membership_id=%s", membership_id)
+                    crm_reassign_result = None
+
+            _revoke_business_autopilot_access(membership.user)
+            if permanent:
+                membership.delete()
+                message = "User permanently deleted."
+            else:
+                membership.is_deleted = True
+                membership.is_active = False
+                membership.deleted_at = timezone.now()
+                membership.save(update_fields=["is_deleted", "is_active", "deleted_at", "updated_at"])
+                message = "User moved to deleted items."
+
+            _sync_org_users_to_plan_limit(org, requested_by=request.user)
+            payload = _build_org_users_response_payload(org, can_manage_users, message=message)
+            payload["affected_leads"] = [_serialize_crm_lead(row) for row in linked_leads]
+            payload["affected_deals"] = [_serialize_crm_deal(row) for row in linked_deals]
+            payload["crm_reassignment"] = crm_reassign_result.get("summary") if crm_reassign_result else {}
+
+            reassignment_summary = payload.get("crm_reassignment") or {}
+            target_names = []
+            if crm_reassign_result and isinstance(crm_reassign_result, dict):
+                target_names = [name for name in (crm_reassign_result.get("target_names") or []) if str(name or "").strip()]
+            if not target_names and target_user_ids:
+                target_display = _crm_build_user_display_map(target_user_ids)
+                target_names = [target_display.get(user_id, "") for user_id in target_user_ids if target_display.get(user_id, "")]
+            target_label = ", ".join([name for name in target_names if name]) or "Org Admin"
+            total_linked = sum(int(reassignment_summary.get(key) or 0) for key in ("leads", "deals", "sales_orders", "meetings"))
+            payload["linked_records_message"] = (
+                f"{total_linked} CRM record(s) were reassigned to {target_label}."
+                if total_linked
+                else ""
+            )
+            return JsonResponse(payload)
+        except Exception as exc:
+            logger.exception("Business Autopilot user delete failed membership_id=%s", membership_id)
+            message = "Unable to delete this user right now. Please try again."
+            debug_error = str(exc) if getattr(settings, "DEBUG", False) else ""
             return JsonResponse(
                 {
-                    "detail": "org_admin_delete_forbidden",
-                    "message": "ORG admin account cannot be deleted from Users.",
+                    "detail": "delete_failed",
+                    "message": message,
+                    "debug_error": debug_error,
                 },
-                status=403,
+                status=500,
             )
-        permanent = str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
-        if request.method == "POST":
-            permanent_raw = str(payload.get("permanent") or "").strip().lower()
-            permanent = permanent or permanent_raw in {"1", "true", "yes"}
-        if membership.is_deleted and not permanent:
-            return JsonResponse({"detail": "user_already_deleted"}, status=400)
-        linked_leads = _crm_collect_leads_linked_to_user(org, membership.user_id)
-        linked_deals = _crm_collect_deals_linked_to_user(org, membership.user_id)
-        _revoke_business_autopilot_access(membership.user)
-        if permanent:
-            membership.delete()
-            message = "User permanently deleted."
-        else:
-            membership.is_deleted = True
-            membership.is_active = False
-            membership.deleted_at = timezone.now()
-            membership.save(update_fields=["is_deleted", "is_active", "deleted_at", "updated_at"])
-            message = "User moved to deleted items."
-        _sync_org_users_to_plan_limit(org, requested_by=request.user)
-        payload = _build_org_users_response_payload(org, can_manage_users, message=message)
-        payload["affected_leads"] = [_serialize_crm_lead(row) for row in linked_leads]
-        payload["affected_deals"] = [_serialize_crm_deal(row) for row in linked_deals]
-        payload["linked_records_message"] = (
-            f"{len(linked_leads)} lead(s) and {len(linked_deals)} deal(s) were linked to this user."
-            if linked_leads or linked_deals
-            else ""
-        )
-        return JsonResponse(payload)
 
     if resolved_method == "RESTORE":
         if not membership.is_deleted:
@@ -2727,6 +2776,10 @@ def org_user_detail(request, membership_id: int):
                 },
                 status=403,
             )
+        should_restore_crm = False
+        if isinstance(payload, dict):
+            should_restore_crm = str(payload.get("restore_crm_assignments") or "").strip().lower() in {"1", "true", "yes"}
+
         membership.is_deleted = False
         membership.deleted_at = None
         membership.is_active = True
@@ -2735,7 +2788,15 @@ def org_user_detail(request, membership_id: int):
         membership.refresh_from_db()
         if membership.is_active:
             _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
-        return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User restored successfully."))
+        restore_payload = _build_org_users_response_payload(org, can_manage_users, message="User restored successfully.")
+        if should_restore_crm:
+            try:
+                restore_result = _crm_restore_user_records_from_snapshot(org, membership=membership, performed_by=request.user)
+            except DatabaseError:
+                logger.exception("Failed to restore CRM records from snapshot for membership_id=%s", membership_id)
+                restore_result = None
+            restore_payload["crm_restore"] = restore_result.get("summary") if restore_result else {}
+        return JsonResponse(restore_payload)
 
     if request.method != "POST":
         try:
@@ -5207,6 +5268,9 @@ def _crm_assigned_user_names(primary_user, raw_user_ids):
 def _serialize_crm_lead(row: CrmLead):
     assigned_user_ids = _crm_clean_user_id_list(row.assigned_user_ids)
     assigned_user_names = _crm_assigned_user_names(row.assigned_user, assigned_user_ids)
+    assigned_user_name = ""
+    if row.assigned_user_id and row.assigned_user:
+        assigned_user_name = str(row.assigned_user.get_full_name() or row.assigned_user.email or "").strip()
     return {
         "id": row.id,
         "crm_reference_id": str(row.crm_reference_id or "").strip(),
@@ -5217,7 +5281,7 @@ def _serialize_crm_lead(row: CrmLead):
         "lead_source": row.lead_source,
         "assign_type": row.assign_type,
         "assigned_user_id": row.assigned_user_id,
-        "assigned_user_name": row.assigned_user.get_full_name() or row.assigned_user.email if row.assigned_user_id else "",
+        "assigned_user_name": assigned_user_name,
         "assigned_user_ids": assigned_user_ids,
         "assigned_user_names": assigned_user_names,
         "assigned_team": row.assigned_team,
@@ -5331,8 +5395,9 @@ def _crm_collect_leads_linked_to_user(org: Organization, user_id: int):
     linked = []
     for row in rows:
         assigned_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
-        if row.assigned_user_id_id:
-            assigned_ids.add(int(row.assigned_user_id))
+        assigned_user_id = _coerce_positive_int(getattr(row, "assigned_user_id", None))
+        if assigned_user_id:
+            assigned_ids.add(int(assigned_user_id))
         if safe_user_id in assigned_ids:
             linked.append(row)
     return linked
@@ -5351,11 +5416,316 @@ def _crm_collect_deals_linked_to_user(org: Organization, user_id: int):
     linked = []
     for row in rows:
         assigned_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
-        if row.assigned_user_id_id:
-            assigned_ids.add(int(row.assigned_user_id))
+        assigned_user_id = _coerce_positive_int(getattr(row, "assigned_user_id", None))
+        if assigned_user_id:
+            assigned_ids.add(int(assigned_user_id))
         if safe_user_id in assigned_ids:
             linked.append(row)
     return linked
+
+
+def _crm_resolve_org_admin_user_id(org: Organization, fallback_user_id: int = None) -> int:
+    if getattr(org, "owner_id", None):
+        return int(org.owner_id)
+    admin_membership = (
+        OrganizationUser.objects
+        .filter(organization=org, is_deleted=False, role__iexact="company_admin")
+        .order_by("id")
+        .first()
+    )
+    if admin_membership and admin_membership.user_id:
+        return int(admin_membership.user_id)
+    if fallback_user_id:
+        return int(fallback_user_id)
+    return 0
+
+
+def _crm_resolve_target_user_ids(org: Organization, membership_ids, *, exclude_user_id: int = None) -> list:
+    safe_ids = [
+        _coerce_positive_int(value)
+        for value in (membership_ids or [])
+    ]
+    safe_ids = [value for value in safe_ids if value]
+    if not safe_ids:
+        return []
+    memberships = (
+        OrganizationUser.objects
+        .filter(organization=org, is_deleted=False, id__in=safe_ids)
+        .select_related("user")
+    )
+    resolved = []
+    exclude_id = _coerce_positive_int(exclude_user_id)
+    for membership in memberships:
+        user_id = _coerce_positive_int(membership.user_id)
+        if not user_id or (exclude_id and user_id == exclude_id):
+            continue
+        if membership.user and not membership.user.is_active:
+            continue
+        resolved.append(user_id)
+    # Keep stable ordering + uniqueness.
+    seen = set()
+    ordered = []
+    for user_id in resolved:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        ordered.append(user_id)
+    return ordered
+
+
+def _crm_build_user_display_map(user_ids):
+    ids = [_coerce_positive_int(value) for value in (user_ids or [])]
+    ids = [value for value in ids if value]
+    if not ids:
+        return {}
+    users_by_id = {user.id: user for user in User.objects.filter(id__in=ids)}
+    display = {}
+    for user_id in ids:
+        user = users_by_id.get(user_id)
+        if not user:
+            continue
+        name = str(user.get_full_name() or "").strip()
+        display[user_id] = name or str(user.email or "").strip() or f"User {user_id}"
+    return display
+
+
+def _crm_snapshot_and_reassign_user_records(
+    org: Organization,
+    *,
+    membership: OrganizationUser,
+    target_user_ids,
+    performed_by: User = None,
+):
+    source_user_id = _coerce_positive_int(getattr(membership, "user_id", None))
+    if not source_user_id:
+        return {"snapshot": None, "summary": {"leads": 0, "deals": 0, "sales_orders": 0, "meetings": 0}}
+
+    leads = _crm_collect_leads_linked_to_user(org, source_user_id)
+    deals = _crm_collect_deals_linked_to_user(org, source_user_id)
+    sales_orders = list(
+        CrmSalesOrder.objects
+        .filter(organization=org, is_deleted=False, assigned_user_id=source_user_id)
+        .select_related("assigned_user")
+        .order_by("-created_at", "-id")
+    )
+    meetings = list(
+        CrmMeeting.objects
+        .filter(organization=org, is_deleted=False)
+        .order_by("-created_at", "-id")
+    )
+    linked_meetings = []
+    for meeting in meetings:
+        owner_ids = set(_crm_clean_user_id_list(meeting.owner_user_ids))
+        if source_user_id in owner_ids:
+            linked_meetings.append(meeting)
+
+    target_ids = [int(value) for value in (target_user_ids or []) if _coerce_positive_int(value)]
+    if not target_ids:
+        target_ids = []
+    display_map = _crm_build_user_display_map([source_user_id, *target_ids])
+
+    snapshot_payload = {
+        "source_user_id": source_user_id,
+        "source_user_name": display_map.get(source_user_id, ""),
+        "targets_user_ids": target_ids,
+        "targets_user_names": [display_map.get(user_id, "") for user_id in target_ids],
+        "leads": [
+            {
+                "id": row.id,
+                "assign_type": str(row.assign_type or ""),
+                "assigned_team": str(row.assigned_team or ""),
+                "assigned_user_id": row.assigned_user_id,
+                "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
+            }
+            for row in leads
+        ],
+        "deals": [
+            {
+                "id": row.id,
+                "assigned_team": str(row.assigned_team or ""),
+                "assigned_user_id": row.assigned_user_id,
+                "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
+            }
+            for row in deals
+        ],
+        "sales_orders": [
+            {
+                "id": row.id,
+                "assigned_user_id": row.assigned_user_id,
+            }
+            for row in sales_orders
+        ],
+        "meetings": [
+            {
+                "id": row.id,
+                "owner_user_ids": _crm_clean_user_id_list(row.owner_user_ids),
+                "owner_names": str(row.owner_names or ""),
+            }
+            for row in linked_meetings
+        ],
+    }
+
+    snapshot = None
+    try:
+        snapshot = BusinessAutopilotUserCrmReassignmentSnapshot.objects.create(
+            organization=org,
+            membership=membership,
+            source_user_id=source_user_id,
+            created_by=performed_by if performed_by and getattr(performed_by, "id", None) else None,
+            reassigned_to_user_ids=target_ids,
+            snapshot=snapshot_payload,
+        )
+    except DatabaseError:
+        # Fallback for environments where migrations have not been applied yet.
+        logger.exception("Failed to persist CRM reassignment snapshot for membership_id=%s", getattr(membership, "id", None))
+        snapshot = None
+
+    if not target_ids:
+        return {"snapshot": snapshot, "summary": {"leads": len(leads), "deals": len(deals), "sales_orders": len(sales_orders), "meetings": len(linked_meetings)}}
+
+    target_display_names = [display_map.get(user_id, "") for user_id in target_ids]
+    fallback_user_id = target_ids[0]
+    fallback_user = User.objects.filter(id=fallback_user_id).first()
+
+    def _merge_reassignment(existing_ids: set[int]) -> list[int]:
+        merged = set(int(value) for value in existing_ids if _coerce_positive_int(value))
+        merged.discard(source_user_id)
+        for target_id in target_ids:
+            merged.add(int(target_id))
+        if not merged:
+            merged.update(target_ids)
+        return list(merged)
+
+    # Leads
+    for row in leads:
+        existing_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
+        if row.assigned_user_id:
+            existing_ids.add(int(row.assigned_user_id))
+        if source_user_id not in existing_ids and row.assigned_user_id != source_user_id:
+            continue
+        next_ids = _merge_reassignment(existing_ids)
+        row.assign_type = "Users"
+        row.assigned_team = ""
+        row.assigned_user_ids = next_ids
+        row.assigned_user_id = next_ids[0] if next_ids else None
+        if fallback_user and row.assigned_user_id:
+            row.assigned_user = fallback_user
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assign_type", "assigned_team", "assigned_user_ids", "assigned_user", "updated_by", "updated_at"])
+
+    # Deals
+    for row in deals:
+        existing_ids = set(_crm_clean_user_id_list(row.assigned_user_ids))
+        if row.assigned_user_id:
+            existing_ids.add(int(row.assigned_user_id))
+        if source_user_id not in existing_ids and row.assigned_user_id != source_user_id:
+            continue
+        next_ids = _merge_reassignment(existing_ids)
+        row.assigned_team = ""
+        row.assigned_user_ids = next_ids
+        row.assigned_user_id = next_ids[0] if next_ids else None
+        if fallback_user and row.assigned_user_id:
+            row.assigned_user = fallback_user
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assigned_team", "assigned_user_ids", "assigned_user", "updated_by", "updated_at"])
+
+    # Sales orders
+    for row in sales_orders:
+        row.assigned_user_id = target_ids[0]
+        if fallback_user:
+            row.assigned_user = fallback_user
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assigned_user", "updated_by", "updated_at"])
+
+    # Meetings
+    for row in linked_meetings:
+        existing_ids = set(_crm_clean_user_id_list(row.owner_user_ids))
+        next_ids = _merge_reassignment(existing_ids)
+        row.owner_user_ids = next_ids
+        # Refresh owner names for UI.
+        owners_display = _crm_build_user_display_map(next_ids)
+        row.owner_names = ", ".join([owners_display.get(user_id, "") for user_id in next_ids if owners_display.get(user_id, "")]).strip()
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["owner_user_ids", "owner_names", "updated_by", "updated_at"])
+
+    return {
+        "snapshot": snapshot,
+        "summary": {
+            "leads": len(leads),
+            "deals": len(deals),
+            "sales_orders": len(sales_orders),
+            "meetings": len(linked_meetings),
+        },
+        "target_names": target_display_names,
+        "target_user_ids": target_ids,
+    }
+
+
+def _crm_restore_user_records_from_snapshot(org: Organization, *, membership: OrganizationUser, performed_by: User = None) -> dict:
+    source_user_id = _coerce_positive_int(getattr(membership, "user_id", None))
+    if not source_user_id:
+        return {"restored": False, "summary": {"leads": 0, "deals": 0, "sales_orders": 0, "meetings": 0}}
+    snapshot = (
+        BusinessAutopilotUserCrmReassignmentSnapshot.objects
+        .filter(organization=org, membership=membership, source_user_id=source_user_id, reverted_at__isnull=True)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if not snapshot:
+        return {"restored": False, "summary": {"leads": 0, "deals": 0, "sales_orders": 0, "meetings": 0}}
+
+    payload = snapshot.snapshot or {}
+    restored_counts = {"leads": 0, "deals": 0, "sales_orders": 0, "meetings": 0}
+
+    lead_rows = {row.id: row for row in CrmLead.objects.filter(organization=org, is_deleted=False, id__in=[item.get("id") for item in (payload.get("leads") or [])]).select_related("assigned_user")}
+    for item in payload.get("leads") or []:
+        row = lead_rows.get(item.get("id"))
+        if not row:
+            continue
+        row.assign_type = str(item.get("assign_type") or row.assign_type or "Users")
+        row.assigned_team = str(item.get("assigned_team") or "")
+        row.assigned_user_ids = _crm_clean_user_id_list(item.get("assigned_user_ids"))
+        row.assigned_user_id = _coerce_positive_int(item.get("assigned_user_id")) or None
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assign_type", "assigned_team", "assigned_user_ids", "assigned_user", "updated_by", "updated_at"])
+        restored_counts["leads"] += 1
+
+    deal_rows = {row.id: row for row in CrmDeal.objects.filter(organization=org, is_deleted=False, id__in=[item.get("id") for item in (payload.get("deals") or [])]).select_related("assigned_user")}
+    for item in payload.get("deals") or []:
+        row = deal_rows.get(item.get("id"))
+        if not row:
+            continue
+        row.assigned_team = str(item.get("assigned_team") or "")
+        row.assigned_user_ids = _crm_clean_user_id_list(item.get("assigned_user_ids"))
+        row.assigned_user_id = _coerce_positive_int(item.get("assigned_user_id")) or None
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assigned_team", "assigned_user_ids", "assigned_user", "updated_by", "updated_at"])
+        restored_counts["deals"] += 1
+
+    order_rows = {row.id: row for row in CrmSalesOrder.objects.filter(organization=org, is_deleted=False, id__in=[item.get("id") for item in (payload.get("sales_orders") or [])]).select_related("assigned_user")}
+    for item in payload.get("sales_orders") or []:
+        row = order_rows.get(item.get("id"))
+        if not row:
+            continue
+        row.assigned_user_id = _coerce_positive_int(item.get("assigned_user_id")) or None
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["assigned_user", "updated_by", "updated_at"])
+        restored_counts["sales_orders"] += 1
+
+    meeting_rows = {row.id: row for row in CrmMeeting.objects.filter(organization=org, is_deleted=False, id__in=[item.get("id") for item in (payload.get("meetings") or [])]).select_related("updated_by")}
+    for item in payload.get("meetings") or []:
+        row = meeting_rows.get(item.get("id"))
+        if not row:
+            continue
+        row.owner_user_ids = _crm_clean_user_id_list(item.get("owner_user_ids"))
+        row.owner_names = str(item.get("owner_names") or "")
+        row.updated_by = performed_by if performed_by else row.updated_by
+        row.save(update_fields=["owner_user_ids", "owner_names", "updated_by", "updated_at"])
+        restored_counts["meetings"] += 1
+
+    snapshot.reverted_at = timezone.now()
+    snapshot.save(update_fields=["reverted_at", "updated_at"])
+    return {"restored": True, "summary": restored_counts}
 
 
 def _crm_collect_contacts_linked_to_contact(row: CrmContact):
@@ -5389,6 +5759,9 @@ def _serialize_crm_deal(row: CrmDeal):
     crm_reference_id = str(row.crm_reference_id or "").strip()
     if not crm_reference_id and row.lead_id:
         crm_reference_id = str(getattr(row.lead, "crm_reference_id", "") or "").strip()
+    assigned_user_name = ""
+    if row.assigned_user_id and row.assigned_user:
+        assigned_user_name = str(row.assigned_user.get_full_name() or row.assigned_user.email or "").strip()
     return {
         "id": row.id,
         "crm_reference_id": crm_reference_id,
@@ -5401,7 +5774,7 @@ def _serialize_crm_deal(row: CrmDeal):
         "stage": row.stage,
         "status": row.status,
         "assigned_user_id": row.assigned_user_id,
-        "assigned_user_name": row.assigned_user.get_full_name() or row.assigned_user.email if row.assigned_user_id else "",
+        "assigned_user_name": assigned_user_name,
         "assigned_user_ids": _crm_clean_user_id_list(row.assigned_user_ids),
         "assigned_team": row.assigned_team,
         "is_deleted": bool(row.is_deleted),

@@ -790,3 +790,44 @@ class CrmMeeting(models.Model):
 
     def __str__(self):
         return f"Meeting({self.organization_id} - {self.title})"
+
+
+class BusinessAutopilotUserCrmReassignmentSnapshot(models.Model):
+    """
+    Stores a snapshot of CRM assignments before a Business Autopilot user is deleted.
+    Used to optionally restore the previous CRM assignments when the user is restored.
+    """
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_user_crm_reassignment_snapshots",
+    )
+    membership = models.ForeignKey(
+        "business_autopilot.OrganizationUser",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_reassignment_snapshots",
+    )
+    source_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_reassignment_snapshots_source",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_reassignment_snapshots_created",
+    )
+    reassigned_to_user_ids = models.JSONField(default=list, blank=True)
+    snapshot = models.JSONField(default=dict, blank=True)
+    reverted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"UserCrmSnapshot({self.organization_id} - membership={self.membership_id} - source_user={self.source_user_id})"

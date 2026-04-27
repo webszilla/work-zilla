@@ -204,6 +204,73 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertTrue(membership.is_deleted)
         self.assertFalse(membership.is_active)
 
+    def test_delete_user_with_reassign_handles_multi_user_leads_without_primary_fk(self):
+        source_user = User.objects.create_user(
+            username="source@workzilla.test",
+            email="source@workzilla.test",
+            password="pw123456",
+            first_name="Source",
+            last_name="User",
+        )
+        UserProfile.objects.create(
+            user=source_user,
+            organization=self.org,
+            role="org_user",
+        )
+        source_membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=source_user,
+            role="org_user",
+            is_active=True,
+        )
+
+        target_user = User.objects.create_user(
+            username="target@workzilla.test",
+            email="target@workzilla.test",
+            password="pw123456",
+            first_name="Target",
+            last_name="User",
+        )
+        UserProfile.objects.create(
+            user=target_user,
+            organization=self.org,
+            role="org_user",
+        )
+        target_membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=target_user,
+            role="org_user",
+            is_active=True,
+        )
+
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Multi user lead",
+            company="Acme",
+            assign_type="Users",
+            assigned_user=None,
+            assigned_user_ids=[source_user.id],
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+        self.assertIsNone(lead.assigned_user_id)
+        self.assertEqual(lead.assigned_user_ids, [source_user.id])
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            f"/api/business-autopilot/users/{source_membership.id}",
+            data={
+                "action": "delete",
+                "reassign_to_membership_ids": [target_membership.id],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.assigned_user_id, target_user.id)
+        self.assertEqual(lead.assigned_user_ids, [target_user.id])
+
     def test_org_admin_account_cannot_be_deleted_from_users(self):
         OrganizationUser.objects.create(
             organization=self.org,
