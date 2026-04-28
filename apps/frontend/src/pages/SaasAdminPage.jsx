@@ -707,6 +707,19 @@ export default function SaasAdminPage() {
                         Open
                       </Link>
                   </div>
+
+                  <div className="card p-3 h-100 admin-feature-card">
+                      <div className="stat-icon stat-icon-primary">
+                        <i className="bi bi-chat-left-dots" aria-hidden="true" />
+                      </div>
+                      <h5 className="mb-1">SaaS AI Chat</h5>
+                      <p className="text-secondary mb-3">
+                        SaaS Admin-only AI Architect chat and settings.
+                      </p>
+                      <Link to="/saas-admin/ai-architect-settings" className="btn btn-primary btn-sm">
+                        Open
+                      </Link>
+                  </div>
                 </div>
               </section>
             </div>

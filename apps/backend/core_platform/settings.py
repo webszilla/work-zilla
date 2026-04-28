@@ -96,6 +96,7 @@ INSTALLED_APPS = [
     "apps.backend.business_autopilot.apps.BusinessAutopilotConfig",
     "apps.backend.imposition.apps.ImpositionConfig",
     "apps.backend.modules.whatsapp_automation.apps.WhatsappAutomationConfig",
+    "apps.backend.ai_architect.apps.AiArchitectConfig",
     "core.apps.CoreConfig",
     "dashboard.apps.DashboardConfig",
     "saas_admin.apps.SaasAdminConfig",

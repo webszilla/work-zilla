@@ -56,6 +56,7 @@ import SaasAdminServerMonitoringDetailPage from "./pages/SaasAdminServerMonitori
 import SaasAdminServerMonitoringSettingsPage from "./pages/SaasAdminServerMonitoringSettingsPage.jsx";
 import SaasAdminServerMonitoringAlertsPage from "./pages/SaasAdminServerMonitoringAlertsPage.jsx";
 import SaasAdminSESSettingsPage from "./pages/SaasAdminSESSettingsPage.jsx";
+import SaasAdminAIArchitectSettingsPage from "./pages/SaasAdminAIArchitectSettingsPage.jsx";
 import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
 import OrgMediaLibraryPage from "./pages/OrgMediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
@@ -84,6 +85,7 @@ import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { UploadAlertProvider } from "./components/UploadAlert.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import BusinessAutopilotAssistantWidget from "./components/BusinessAutopilotAssistantWidget.jsx";
+import SaasAdminAIChatWidget from "./components/saasAdmin/SaasAdminAIChatWidget.jsx";
 import { BrandingProvider, useBranding } from "./branding/BrandingContext.jsx";
 import { formatDeviceDate, setOrgTimezone } from "./lib/datetime.js";
 import { getBrowserTimezone } from "./lib/timezones.js";
@@ -451,6 +453,7 @@ const saasAdminPages = [
   { key: "observability", label: "Observability", path: "/saas-admin/observability", icon: "bi-bar-chart" },
   { key: "products", label: "Products", path: "/saas-admin", hash: "#products", icon: "bi-boxes" },
   { key: "organizations", label: "Organizations", path: "/saas-admin/organizations", icon: "bi-building" },
+  { key: "ai-architect", label: "AI Architect", path: "/saas-admin/ai-architect-settings", icon: "bi-chat-left-dots" },
   { key: "ses", label: "Amazon SES", path: "/saas-admin/ses", icon: "bi-envelope-paper" },
   { key: "application-downloads", label: "App Downloads", path: "/saas-admin/application-downloads", icon: "bi-cloud-arrow-down" },
   { key: "server-monitoring", label: "Server Monitoring", path: "/saas-admin/server-monitoring", icon: "bi-cpu" },
@@ -608,6 +611,7 @@ function AppShell({ state, productPrefix, productSlug }) {
   const isApplicationDownloadsSection = location.pathname.startsWith("/saas-admin/application-downloads");
   const isBackupActivitySection = location.pathname.startsWith("/saas-admin/backup-activity");
   const isSESSection = location.pathname.startsWith("/saas-admin/ses");
+  const isAiArchitectSection = location.pathname.startsWith("/saas-admin/ai-architect-settings");
   const isServerMonitoringSection = location.pathname.startsWith("/saas-admin/server-monitoring");
   const isReferralsSection = location.pathname.startsWith("/saas-admin/referrals");
   const isProfileSection = location.pathname.startsWith("/saas-admin/profile");
@@ -1272,6 +1276,8 @@ function AppShell({ state, productPrefix, productSlug }) {
                     isActive = isOrganizationsSection;
                   } else if (item.key === "ses") {
                     isActive = isSESSection;
+                  } else if (item.key === "ai-architect") {
+                    isActive = isAiArchitectSection;
                   } else if (item.key === "server-monitoring") {
                     isActive = isServerMonitoringSection;
                   } else if (item.key === "application-downloads") {
@@ -1969,6 +1975,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={isSaasAdmin ? <SaasAdminSESSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/saas-admin/ai-architect-settings"
+            element={isSaasAdmin ? <SaasAdminAIArchitectSettingsPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/saas-admin/whatsapp-cloud"
             element={isSaasAdmin ? <SaasAdminWhatsAppSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
@@ -2054,6 +2064,7 @@ function AppShell({ state, productPrefix, productSlug }) {
               subscriptions={state.subscriptions}
             />
           ) : null}
+          {isSaasAdminRoute && isSaasAdmin ? <SaasAdminAIChatWidget /> : null}
         </main>
       </div>
 

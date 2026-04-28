@@ -934,6 +934,16 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   gap: 12px;
 }
 
+.saas-admin-assistant {
+  left: auto;
+  right: 28px;
+  align-items: flex-end;
+}
+
+.saas-admin-assistant .ba-assistant__dock {
+  justify-content: flex-end;
+}
+
 .ba-assistant__dock {
   display: flex;
   align-items: center;
@@ -1193,6 +1203,14 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   font-size: 0.92rem;
   color: var(--color-text, #e5e7eb);
   line-height: 1.5;
+}
+
+.saas-admin-assistant .ba-assistant__setup-note {
+  margin: 14px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--wz-border-soft);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.22);
 }
 
 .ba-assistant__setup-link {

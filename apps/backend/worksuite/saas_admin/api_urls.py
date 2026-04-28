@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, include
 
 from . import api_views, backup_manager_api_views
 
@@ -9,6 +9,7 @@ urlpatterns = [
     path("ai-chatbot/usage/trend", api_views.ai_chatbot_usage_trend, name="saas_admin_ai_chatbot_usage_trend"),
     path("ai-chatbot/openai/settings", api_views.ai_chatbot_openai_settings, name="saas_admin_ai_chatbot_openai_settings"),
     path("ai-chatbot/openai/test", api_views.ai_chatbot_openai_test, name="saas_admin_ai_chatbot_openai_test"),
+    path("ai-architect/", include("apps.backend.ai_architect.urls")),
     path("settings/whatsapp-cloud", api_views.whatsapp_cloud_settings, name="saas_admin_whatsapp_cloud_settings"),
     path("settings/ses", api_views.ses_settings, name="saas_admin_ses_settings"),
     path("settings/retention-policy", api_views.retention_policy_settings, name="saas_admin_retention_policy"),
