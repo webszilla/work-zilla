@@ -590,6 +590,11 @@ function AppShell({ state, productPrefix, productSlug }) {
   const currentFreePlanExpiry = currentFreePlanEndValue
     ? formatDeviceDate(currentFreePlanEndValue, "")
     : "";
+  const currentProductHasActiveSubscription = Boolean(
+    currentProductSubscription &&
+    (currentSubscriptionStatus === "active" || currentSubscriptionStatus === "trialing")
+  );
+  const businessAutopilotHasActiveSubscription = !isBusinessAutopilot || currentProductHasActiveSubscription;
   const allowAppUsage = isMonitorProduct
     ? currentProductSubscription?.allow_app_usage !== false
     : state.allowAppUsage !== false;
@@ -1512,6 +1517,23 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? (
                   !autopilotAccessResolved
                     ? <div className="card p-3">Loading access...</div>
+                    : !businessAutopilotHasActiveSubscription
+                    ? (
+                      <div className="card p-4">
+                        <h5 className="mb-2">Plan expired</h5>
+                        <div className="text-secondary">
+                          Your Business Autopilot subscription is not active{currentFreePlanExpiry ? ` (ended on ${currentFreePlanExpiry}).` : "."}
+                        </div>
+                        <div className="d-flex flex-wrap gap-2 mt-3">
+                          <a className="btn btn-primary" href="/my-account/">
+                            Renew / View Plans
+                          </a>
+                          <a className="btn btn-outline-secondary" href="/pricing/">
+                            Pricing
+                          </a>
+                        </div>
+                      </div>
+                    )
                     : hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)
                     ? (
                       <Suspense fallback={<div className="card p-3">Loading modules...</div>}>
@@ -1547,6 +1569,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "crm") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", businessAutopilotIsAdmin),
               }
@@ -1562,6 +1585,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "hrm") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", businessAutopilotIsAdmin),
               }
@@ -1577,6 +1601,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "projects") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", businessAutopilotIsAdmin),
               }
@@ -1592,6 +1617,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "projects") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "projects", businessAutopilotIsAdmin),
               }
@@ -1611,6 +1637,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "subscriptions") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "subscriptions", businessAutopilotIsAdmin),
               }
@@ -1626,6 +1653,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "accounts") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", businessAutopilotIsAdmin),
               }
@@ -1641,6 +1669,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "ticketing") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "ticketing", businessAutopilotIsAdmin),
               }
@@ -1656,6 +1685,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:
                   isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
                   autopilotModules.some((module) => module.slug === "stocks") &&
                   hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "stocks", businessAutopilotIsAdmin),
               }
@@ -1683,6 +1713,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                   (productSlug === "storage" && isAdmin) ||
                   (productSlug === "imposition-software" && isAdmin) ||
                   (isBusinessAutopilot &&
+                    businessAutopilotHasActiveSubscription &&
                     hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "users", businessAutopilotIsAdmin)),
               }
             )}
@@ -1744,6 +1775,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot &&
+                businessAutopilotHasActiveSubscription &&
                 autopilotAccessResolved &&
                 hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", businessAutopilotIsAdmin))
                 ? <BillingPage />
@@ -1757,6 +1789,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot &&
+                businessAutopilotHasActiveSubscription &&
                 autopilotAccessResolved &&
                 hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "plans", businessAutopilotIsAdmin))
                 ? <PlansPage />
@@ -1770,8 +1803,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={
               (isAdmin && !isHrView) ||
               (isBusinessAutopilot
+                && businessAutopilotHasActiveSubscription
                 && hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, state.profile?.role, businessAutopilotIsAdmin)) ||
               (isBusinessAutopilot &&
+                businessAutopilotHasActiveSubscription &&
                 autopilotAccessResolved &&
                 hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "profile", businessAutopilotIsAdmin))
                 ? <ProfilePage />

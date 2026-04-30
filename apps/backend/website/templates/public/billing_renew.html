@@ -43,6 +43,13 @@
           {% endif %}
           <div class="form-grid">
             <div class="form-field">
+              <label>Billing Cycle</label>
+              <select id="renew-billing-cycle" name="billing">
+                <option value="monthly" {% if selected_billing == "monthly" %}selected{% endif %}>Monthly</option>
+                <option value="yearly" {% if selected_billing == "yearly" %}selected{% endif %}>Yearly</option>
+              </select>
+            </div>
+            <div class="form-field">
               <label>Add-on Users</label>
               <input
                 id="renew-addon-count"
@@ -63,7 +70,7 @@
               >
             </div>
             <div class="form-field">
-              <label>Add-on Price (per user)</label>
+              <label>Add-on Price (per user / <span id="renew-addon-suffix">{% if selected_billing == "yearly" %}year{% else %}month{% endif %}</span>)</label>
               <input
                 id="renew-addon-price-display"
                 type="text"
@@ -124,22 +131,42 @@
 <script>
   (function () {
     const addonInput = document.getElementById("renew-addon-count");
+    const billingSelect = document.getElementById("renew-billing-cycle");
+    const baseDisplay = document.getElementById("renew-base-price-display");
+    const addonDisplay = document.getElementById("renew-addon-price-display");
+    const addonSuffix = document.getElementById("renew-addon-suffix");
     const totalDisplay = document.getElementById("renew-total-price-display");
-    if (!addonInput || !totalDisplay) {
+    if (!addonInput || !billingSelect || !baseDisplay || !addonDisplay || !totalDisplay) {
       return;
     }
     const currency = "{{ selected_currency|upper|escapejs }}";
-    const basePrice = Number("{{ base_price|default:0 }}") || 0;
-    const addonPrice = Number("{{ addon_price|default:0 }}") || 0;
+    const prices = {
+      monthly: {
+        base: Number("{{ base_price_monthly|default:0 }}") || 0,
+        addon: Number("{{ addon_price_monthly|default:0 }}") || 0,
+        suffix: "month",
+      },
+      yearly: {
+        base: Number("{{ base_price_yearly|default:0 }}") || 0,
+        addon: Number("{{ addon_price_yearly|default:0 }}") || 0,
+        suffix: "year",
+      },
+    };
 
     const formatAmount = (amount) => `${currency} ${Number(amount).toFixed(2)}`;
     const recalcTotal = () => {
+      const billing = String(billingSelect.value || "monthly");
+      const config = prices[billing] || prices.monthly;
       const addonCount = Math.max(0, parseInt(addonInput.value || "0", 10) || 0);
-      totalDisplay.value = formatAmount(basePrice + addonCount * addonPrice);
+      baseDisplay.value = formatAmount(config.base);
+      addonDisplay.value = formatAmount(config.addon);
+      if (addonSuffix) addonSuffix.textContent = config.suffix;
+      totalDisplay.value = formatAmount(config.base + addonCount * config.addon);
     };
 
     addonInput.addEventListener("input", recalcTotal);
     addonInput.addEventListener("change", recalcTotal);
+    billingSelect.addEventListener("change", recalcTotal);
     recalcTotal();
   })();
 </script>

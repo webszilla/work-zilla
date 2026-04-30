@@ -1,114 +1,367 @@
 {% extends "public/base.html" %}
 {% block meta_title %}Work Zilla | Checkout{% endblock %}
 {% block meta_description %}Confirm your plan and submit payment to activate your subscription.{% endblock %}
+{% block body_class %}checkout-page{% endblock %}
 
 {% block content %}
 <section class="section">
   <div class="site-container">
-    <div class="pricing-header">
-      <div>
-        <h1 class="section-title">Checkout</h1>
-        <p class="section-lead">Confirm your plan details and submit payment for approval.</p>
+    <div class="checkout-hero">
+      <div class="checkout-hero__title">
+        <div class="checkout-hero__icon" aria-hidden="true">
+          <i class="bi bi-bag-check"></i>
+        </div>
+        <div>
+          <h1 class="checkout-hero__heading">Checkout</h1>
+          <p class="checkout-hero__subheading">Confirm your plan details and submit payment for approval.</p>
+        </div>
       </div>
+      <ol class="checkout-steps" aria-label="Checkout progress">
+        <li class="checkout-step is-done">
+          <span class="checkout-step__dot" aria-hidden="true"><i class="bi bi-check"></i></span>
+          <span class="checkout-step__label">Plan</span>
+        </li>
+        <li class="checkout-step is-active" aria-current="step">
+          <span class="checkout-step__dot" aria-hidden="true"><i class="bi bi-credit-card"></i></span>
+          <span class="checkout-step__label">Payment</span>
+        </li>
+        <li class="checkout-step">
+          <span class="checkout-step__dot" aria-hidden="true"><i class="bi bi-flag"></i></span>
+          <span class="checkout-step__label">Complete</span>
+        </li>
+      </ol>
     </div>
 
-    {% if selected_plan %}
-      <div class="card p-4">
-        <div class="checkout-summary">
-          <div>
-            <h2 class="plan-title">{{ selected_plan.name }}</h2>
-            <p class="text-secondary">Product: {{ selected_product_name|default:selected_product_slug|title }}</p>
-            <p class="text-secondary">Billing: {{ selected_billing|title }} · Currency: {{ selected_currency|upper }}</p>
-          </div>
-          <div class="plan-price">
-            <span>
-              {% if selected_currency == "usd" %}
-                USD
-                {% if selected_billing == "monthly" %}
-                  {{ selected_plan.usd_monthly_price|default:"Custom" }}
-                {% else %}
-                  {{ selected_plan.usd_yearly_price|default:"Custom" }}
-                {% endif %}
-              {% else %}
-                INR
-                {% if selected_billing == "monthly" %}
-                  {{ selected_plan.monthly_price|default:"Custom" }}
-                {% else %}
-                  {{ selected_plan.yearly_price|default:"Custom" }}
-                {% endif %}
-              {% endif %}
-            </span>
-            <span class="price-suffix-inline">{{ price_suffix|default:"/user per month" }}</span>
-            {% if selected_plan.allow_addons %}
-              <div class="text-secondary mt-1" style="font-size:14px;">
-                Base: {{ selected_currency|upper }} {{ selected_base_amount }}<br>
-                Add-ons: {{ selected_addon_count|default:0 }} x {{ selected_currency|upper }} {{ selected_addon_price }}<br>
-                <strong>Total: {{ selected_currency|upper }} {{ selected_total_amount }}</strong>
+	    {% if selected_plan %}
+	      <div class="checkout-shell">
+	        <div class="checkout-main">
+	          {% if not billing_profile_complete %}
+	            <div class="card checkout-plan-card">
+	              <div class="checkout-plan-card__top">
+	                <div class="checkout-plan-card__meta">
+	                  <div class="checkout-plan-card__badge">
+	                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+	                    <span>{{ selected_product_name|default:selected_product_slug|title }}</span>
+	                  </div>
+	                  <h2 class="checkout-plan-card__title">{{ selected_plan.name }}</h2>
+	                  <div class="checkout-plan-card__hint">
+	                    <span><i class="bi bi-calendar3" aria-hidden="true"></i> {{ selected_billing|title }}</span>
+	                    <span><i class="bi bi-currency-exchange" aria-hidden="true"></i> {{ selected_currency|upper }}</span>
+	                  </div>
+	                </div>
+	                <div class="checkout-plan-card__price">
+	                  <div class="checkout-plan-card__amount">
+	                    <span class="checkout-plan-card__currency">{{ selected_currency|upper }}</span>
+	                    <span class="checkout-plan-card__value">
+	                      {% if selected_currency == "usd" %}
+	                        {% if selected_billing == "monthly" %}
+	                          {{ selected_plan.usd_monthly_price|default:"Custom" }}
+	                        {% else %}
+	                          {{ selected_plan.usd_yearly_price|default:"Custom" }}
+	                        {% endif %}
+	                      {% else %}
+	                        {% if selected_billing == "monthly" %}
+	                          {{ selected_plan.monthly_price|default:"Custom" }}
+	                        {% else %}
+	                          {{ selected_plan.yearly_price|default:"Custom" }}
+	                        {% endif %}
+	                      {% endif %}
+	                    </span>
+	                  </div>
+	                  <div class="checkout-plan-card__suffix">{{ price_suffix|default:"/user per month" }}</div>
+	                  <div class="checkout-plan-card__total small text-secondary">
+	                    <strong>Total:</strong> {{ selected_currency|upper }} {{ selected_total_amount }}
+	                  </div>
+	                </div>
+	              </div>
+	            </div>
+
+	            <div class="card checkout-card">
+	              <div class="checkout-card__header">
+	                <div class="checkout-card__header-icon" aria-hidden="true"><i class="bi bi-building"></i></div>
+	                <div>
+                  <h3 class="checkout-card__title">Company Billing Details</h3>
+                  <p class="checkout-card__subtitle">Fill billing details to continue with checkout.</p>
+                </div>
               </div>
-            {% endif %}
-          </div>
-        </div>
+	              {% include "public/partials/billing_profile_form.html" with submit_label="Save Billing Details" %}
+	            </div>
+		          {% else %}
+		            <form method="post" action="/checkout/confirm/" class="checkout-form" enctype="multipart/form-data">
+		              {% csrf_token %}
+			              <div class="checkout-top-row">
+			                <div class="card checkout-plan-card {% if selected_plan.allow_addons %}{% else %}checkout-plan-card--full{% endif %}">
+			                  <div class="checkout-plan-card__grid">
+			                    <div class="checkout-plan-card__left">
+			                      <div class="checkout-plan-card__badge">
+			                        <i class="bi bi-box-seam" aria-hidden="true"></i>
+			                        <span>{{ selected_product_name|default:selected_product_slug|title }}</span>
+			                      </div>
+			                      <h2 class="checkout-plan-card__title">{{ selected_plan.name }}</h2>
+			                      <div class="checkout-plan-card__hint">
+			                        <span>
+			                          <i class="bi bi-calendar3" aria-hidden="true"></i>
+			                          <span id="checkoutPlanBillingText">{{ selected_billing|title }}</span>
+			                        </span>
+			                        <span><i class="bi bi-currency-exchange" aria-hidden="true"></i> {{ selected_currency|upper }}</span>
+			                      </div>
+			                    </div>
 
-        {% if not billing_profile_complete %}
-          <div class="card mt-4 p-3">
-            <h3>Company Billing Details</h3>
-            <p class="text-secondary">Fill billing details to continue with checkout.</p>
-            {% include "public/partials/billing_profile_form.html" with submit_label="Save Billing Details" %}
-          </div>
-        {% else %}
-          {% include "public/partials/payment_instructions.html" %}
+			                    <div class="checkout-plan-card__billing">
+			                      <div class="checkout-plan-card__billing-row">
+			                        <label for="checkout-billing-cycle" class="checkout-plan-card__billing-label">Billing Cycle</label>
+			                        <select id="checkout-billing-cycle" name="billing" class="form-control checkout-plan-card__billing-control">
+			                          <option value="monthly" {% if selected_billing == "monthly" %}selected{% endif %}>Monthly</option>
+			                          <option value="yearly" {% if selected_billing == "yearly" %}selected{% endif %}>Yearly</option>
+			                        </select>
+			                      </div>
+			                    </div>
 
-          <form method="post" action="/checkout/confirm/" class="mt-4" enctype="multipart/form-data">
-            {% csrf_token %}
-            {% if selected_plan.allow_addons %}
-              <div class="card mb-3 p-3" style="background:#f8fafc;">
-                <h3 class="section-title mb-2">Add-on Users</h3>
-                <p class="text-secondary mb-2">Available for this plan. Amount will be added to this payment request.</p>
-                <div class="row g-3">
+			                    <div class="checkout-plan-card__price-block">
+			                      <div class="checkout-plan-card__price-line">
+			                        <span class="checkout-plan-card__currency">{{ selected_currency|upper }}</span>
+			                        <span class="checkout-plan-card__value" id="checkoutPlanPriceValue">
+			                          {% if selected_currency == "usd" %}
+			                            {% if selected_billing == "monthly" %}
+			                              {{ selected_plan.usd_monthly_price|default:"Custom" }}
+			                            {% else %}
+			                              {{ selected_plan.usd_yearly_price|default:"Custom" }}
+			                            {% endif %}
+			                          {% else %}
+			                            {% if selected_billing == "monthly" %}
+			                              {{ selected_plan.monthly_price|default:"Custom" }}
+			                            {% else %}
+			                              {{ selected_plan.yearly_price|default:"Custom" }}
+			                            {% endif %}
+			                          {% endif %}
+			                        </span>
+			                        <span class="checkout-plan-card__suffix" id="checkoutPlanPriceSuffix">{{ price_suffix|default:"/user per month" }}</span>
+			                      </div>
+			                      <div class="checkout-plan-card__total small text-secondary">
+			                        <strong>Total:</strong> {{ selected_currency|upper }} <span id="checkoutPlanTotalAmount">{{ selected_total_amount }}</span>
+			                      </div>
+			                    </div>
+			                  </div>
+			                </div>
+
+		                {% if selected_plan.allow_addons %}
+		                  <div class="card checkout-card checkout-card--muted checkout-addon-card">
+		                    <div class="checkout-card__header">
+		                      <div class="checkout-card__header-icon" aria-hidden="true"><i class="bi bi-people"></i></div>
+		                      <div>
+	                        <h3 class="checkout-card__title">Add-on Users</h3>
+	                        <p class="checkout-card__subtitle">Available for this plan. Amount will be added to this payment request.</p>
+	                      </div>
+	                    </div>
+		                    <div class="row g-3">
+		                      <div class="col-12 col-lg-4">
+		                        <div class="form-group mb-0">
+		                          <label>Add-on Users</label>
+		                          <input id="checkoutAddonCountInput" class="form-control" type="number" name="addon_count" min="0" value="{{ selected_addon_count|default:0 }}">
+	                        </div>
+	                      </div>
+		                      <div class="col-12 col-lg-8">
+		                        <div class="form-group mb-0">
+		                          <label>Add-on User Price</label>
+		                          <input
+		                            id="checkoutAddonPriceDisplay"
+		                            class="form-control"
+		                            type="text"
+		                            value="{{ selected_currency|upper }} {{ selected_addon_price }} per user / {% if selected_billing == 'yearly' %}year{% else %}month{% endif %}"
+		                            readonly
+		                          >
+		                        </div>
+		                      </div>
+		                    </div>
+		                  </div>
+	                {% endif %}
+	              </div>
+
+		              <div class="card checkout-card">
+		                <div class="checkout-card__header">
+		                  <div class="checkout-card__header-icon" aria-hidden="true"><i class="bi bi-receipt"></i></div>
+		                  <div>
+                    <h3 class="checkout-card__title">Payment Details</h3>
+                    <p class="checkout-card__subtitle">Enter transfer details and upload proof to submit for approval.</p>
+                  </div>
+                </div>
+
+                <div class="row g-3 mb-3">
                   <div class="col-12 col-lg-4">
                     <div class="form-group mb-0">
-                      <label>Add-on Users</label>
-                      <input class="form-control" type="number" name="addon_count" min="0" value="{{ selected_addon_count|default:0 }}">
+                      <label>UTR / Reference Number</label>
+                      <input class="form-control" type="text" name="utr_number" placeholder="Enter UTR / reference" required>
                     </div>
                   </div>
-                  <div class="col-12 col-lg-8">
+                  <div class="col-12 col-lg-4">
                     <div class="form-group mb-0">
-                      <label>Add-on User Price</label>
-                      <input class="form-control" type="text" value="{{ selected_currency|upper }} {{ selected_addon_price }} per user / {{ selected_billing }}" readonly>
+                      <label>Paid Date</label>
+                      <input class="form-control" type="text" name="paid_on" placeholder="DD-MM-YYYY" inputmode="numeric" pattern="^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-[0-9]{4}$" required>
+                      <div class="form-text">Use DD-MM-YYYY format.</div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-lg-4">
+                    <div class="form-group mb-0">
+                      <label>Bank Transfer Proof (Image)</label>
+                      <input class="form-control" type="file" name="receipt" accept="image/*" required>
+                      <div class="form-text">Upload JPG/PNG/WebP. Max 2MB.</div>
                     </div>
                   </div>
                 </div>
+
+                <div class="form-group mb-3">
+                  <label>Notes (optional)</label>
+                  <textarea class="form-control" name="notes" rows="3" placeholder="Any additional details"></textarea>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2">
+                  <button class="btn btn-primary" type="submit">
+                    <i class="bi bi-shield-check me-1" aria-hidden="true"></i>
+                    Submit payment request
+                  </button>
+                  <a class="btn btn-outline" href="/pricing/">
+                    Change plan
+                  </a>
+                </div>
+              </div>
+            </form>
+          {% endif %}
+        </div>
+
+	        <aside class="checkout-side">
+	          <div
+	            id="checkoutBillingSummary"
+	            class="card p-3 checkout-summary"
+	            data-currency="{{ selected_currency|upper }}"
+	            data-base-amount="{{ selected_base_amount|default:0 }}"
+	            data-base-amount-monthly="{{ selected_base_amount_monthly|default:0 }}"
+	            data-base-amount-yearly="{{ selected_base_amount_yearly|default:0 }}"
+	            data-addon-unit="{{ selected_addon_price|default:0 }}"
+	            data-addon-unit-monthly="{{ selected_addon_price_monthly|default:0 }}"
+	            data-addon-unit-yearly="{{ selected_addon_price_yearly|default:0 }}"
+	            data-addons-enabled="{% if selected_plan.allow_addons %}1{% else %}0{% endif %}"
+	          >
+            <div class="checkout-summary__header">
+              <div class="checkout-summary__icon" aria-hidden="true"><i class="bi bi-receipt-cutoff"></i></div>
+              <div>
+                <h3 class="section-title mb-0">Summary</h3>
+                <div class="small text-secondary">Review before submitting</div>
+              </div>
+            </div>
+
+            {% if billing_profile %}
+              <div class="small text-secondary mt-3">
+                <div><strong>{{ billing_profile.company_name|default:"Company" }}</strong></div>
+                {% if billing_profile.gstin %}<div>GSTIN: {{ billing_profile.gstin }}</div>{% endif %}
+                {% if billing_profile.address_line1 %}<div>{{ billing_profile.address_line1 }}</div>{% endif %}
+                {% if billing_profile.address_line2 %}<div>{{ billing_profile.address_line2 }}</div>{% endif %}
+                {% if billing_profile.city or billing_profile.state %}<div>{{ billing_profile.city }}{% if billing_profile.state %}, {{ billing_profile.state }}{% endif %}{% if billing_profile.pincode %} - {{ billing_profile.pincode }}{% endif %}</div>{% endif %}
+                {% if billing_profile.country %}<div>{{ billing_profile.country }}</div>{% endif %}
+                {% if billing_profile.email %}<div class="mt-1">Email: {{ billing_profile.email }}</div>{% endif %}
+                {% if billing_profile.phone %}<div>Phone: {{ billing_profile.phone }}</div>{% endif %}
               </div>
             {% endif %}
-            <div class="row g-3 mb-3">
-              <div class="col-12 col-lg-4">
-                <div class="form-group mb-0">
-                  <label>UTR / Reference Number</label>
-                  <input class="form-control" type="text" name="utr_number" placeholder="Enter UTR / reference" required>
-                </div>
-              </div>
-              <div class="col-12 col-lg-4">
-                <div class="form-group mb-0">
-                  <label>Paid Date</label>
-                  <input class="form-control" type="text" name="paid_on" placeholder="DD-MM-YYYY" inputmode="numeric" pattern="^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-[0-9]{4}$" required>
-                  <div class="form-text">Use DD-MM-YYYY format.</div>
-                </div>
-              </div>
-              <div class="col-12 col-lg-4">
-                <div class="form-group mb-0">
-                  <label>Bank Transfer Proof (Image)</label>
-                  <input class="form-control" type="file" name="receipt" accept="image/*" required>
-                  <div class="form-text">Upload JPG/PNG/WebP. Max 2MB.</div>
-                </div>
-              </div>
+
+            <hr class="my-3">
+
+            <div class="d-flex justify-content-between">
+              <span class="text-secondary">Base</span>
+              <strong>{{ selected_currency|upper }} <span id="checkoutBaseAmount">{{ selected_base_amount }}</span></strong>
             </div>
-            <div class="form-group mb-3">
-              <label>Notes (optional)</label>
-              <textarea class="form-control" name="notes" rows="3" placeholder="Any additional details"></textarea>
-            </div>
-            <button class="btn btn-primary" type="submit">Submit payment request</button>
-          </form>
-        {% endif %}
+            {% if selected_plan.allow_addons %}
+              <div class="d-flex justify-content-between mt-1">
+                <span class="text-secondary">Add-ons</span>
+                <strong>
+                  <span id="checkoutAddonCount">{{ selected_addon_count|default:0 }}</span>
+                  × {{ selected_currency|upper }} <span id="checkoutAddonUnit">{{ selected_addon_price }}</span>
+                </strong>
+              </div>
+            {% endif %}
+	            <div class="d-flex justify-content-between mt-2">
+	              <span class="text-secondary">Total</span>
+	              <strong>{{ selected_currency|upper }} <span id="checkoutTotalAmount">{{ selected_total_amount }}</span></strong>
+	            </div>
+	            <div class="small text-secondary mt-1">Billing: <span id="checkoutBillingCycleText">{{ selected_billing|title }}</span></div>
+	          </div>
+
+	          {% include "public/partials/payment_instructions.html" %}
+
+	          <script>
+	            (function () {
+	              var summary = document.getElementById("checkoutBillingSummary");
+	              if (!summary) return;
+	              var billingSelect = document.getElementById("checkout-billing-cycle");
+	              var addonInput = document.getElementById("checkoutAddonCountInput");
+	              var addonsEnabled = String(summary.getAttribute("data-addons-enabled") || "0") === "1";
+	              var planSuffix = document.getElementById("checkoutPlanPriceSuffix");
+	              var planTotal = document.getElementById("checkoutPlanTotalAmount");
+	              var planPriceValue = document.getElementById("checkoutPlanPriceValue");
+	              var planBillingText = document.getElementById("checkoutPlanBillingText");
+	              var billingText = document.getElementById("checkoutBillingCycleText");
+	              var addonPriceDisplay = document.getElementById("checkoutAddonPriceDisplay");
+	              if (!billingSelect) return;
+
+	              function num(value) {
+	                var parsed = Number(value);
+	                return Number.isFinite(parsed) ? parsed : 0;
+	              }
+
+              function clampInt(value) {
+                var parsed = parseInt(String(value || "0"), 10);
+                if (!Number.isFinite(parsed) || isNaN(parsed)) return 0;
+                return Math.max(0, parsed);
+              }
+
+	              function formatAmount(value) {
+	                var rounded = Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+	                return String(rounded);
+	              }
+
+	              function updateBillingDerived() {
+	                var billing = String(billingSelect.value || "monthly");
+	                var baseMonthly = num(summary.getAttribute("data-base-amount-monthly"));
+	                var baseYearly = num(summary.getAttribute("data-base-amount-yearly"));
+	                var addonMonthly = num(summary.getAttribute("data-addon-unit-monthly"));
+	                var addonYearly = num(summary.getAttribute("data-addon-unit-yearly"));
+	                var planBase = billing === "yearly" ? baseYearly : baseMonthly;
+	                summary.setAttribute("data-base-amount", String(billing === "yearly" ? baseYearly : baseMonthly));
+	                summary.setAttribute("data-addon-unit", String(billing === "yearly" ? addonYearly : addonMonthly));
+	                if (billingText) billingText.textContent = billing === "yearly" ? "Yearly" : "Monthly";
+	                if (planBillingText) planBillingText.textContent = billing === "yearly" ? "Yearly" : "Monthly";
+	                if (planSuffix) planSuffix.textContent = billing === "yearly" ? "/user per year" : "/user per month";
+	                if (planPriceValue) planPriceValue.textContent = formatAmount(planBase);
+	                if (addonPriceDisplay) {
+	                  var currency = String(summary.getAttribute("data-currency") || "").trim();
+	                  var unit = billing === "yearly" ? addonYearly : addonMonthly;
+	                  addonPriceDisplay.value = currency + " " + formatAmount(unit) + " per user / " + (billing === "yearly" ? "year" : "month");
+	                }
+	              }
+
+	              function updateTotals() {
+	                var addonCount = addonInput ? clampInt(addonInput.value) : 0;
+	                var baseAmount = num(summary.getAttribute("data-base-amount"));
+	                var addonUnit = num(summary.getAttribute("data-addon-unit"));
+	                var total = baseAmount + (addonUnit * addonCount);
+	                var addonCountEl = document.getElementById("checkoutAddonCount");
+	                var totalEl = document.getElementById("checkoutTotalAmount");
+	                if (addonCountEl) addonCountEl.textContent = String(addonCount);
+	                if (totalEl) totalEl.textContent = formatAmount(total);
+	                if (planTotal) planTotal.textContent = formatAmount(total);
+	              }
+
+	              if (addonsEnabled && addonInput) {
+	                addonInput.addEventListener("input", updateTotals);
+	                addonInput.addEventListener("change", updateTotals);
+	              }
+	              billingSelect.addEventListener("change", function () {
+	                updateBillingDerived();
+	                updateTotals();
+	              });
+	              updateBillingDerived();
+	              updateTotals();
+	            })();
+	          </script>
+	        </aside>
       </div>
     {% else %}
       <div class="card p-4">

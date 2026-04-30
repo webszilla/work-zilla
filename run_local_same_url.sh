@@ -18,8 +18,13 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 if [ ! -d "$VENV_DIR" ]; then
-  echo "Missing virtual environment at $VENV_DIR"
-  exit 1
+  # Some setups use ".venv" instead of "env".
+  if [ -d "$SCRIPT_DIR/.venv" ]; then
+    VENV_DIR="$SCRIPT_DIR/.venv"
+  else
+    echo "Missing virtual environment at $SCRIPT_DIR/env (or $SCRIPT_DIR/.venv)"
+    exit 1
+  fi
 fi
 
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -37,7 +42,7 @@ fi
 
 "$SCRIPT_DIR/build_and_copy_frontend.sh"
 
-# Reuse the repo-local virtual environment expected by project_working_details.txt.
+# Reuse the repo-local virtual environment.
 # shellcheck source=/dev/null
 . "$VENV_DIR/bin/activate"
 
@@ -45,5 +50,12 @@ cd "$BACKEND_DIR"
 echo "Applying Django migrations"
 python3 manage.py migrate --noinput
 echo "Starting WorkZilla local app at http://127.0.0.1:$PORT"
-# Use --noreload to avoid double-start + heavy file watching (frontend_dist is large).
+# Autoreload helps templates/CSS update instantly.
+# If you want to avoid file watching (faster/less CPU), run with: DJANGO_RELOAD=0 ./run_local_same_url.sh
+DJANGO_RELOAD="${DJANGO_RELOAD:-1}"
+if [ "$DJANGO_RELOAD" = "1" ]; then
+  echo "Django autoreload: ON (set DJANGO_RELOAD=0 to disable)"
+  exec python3 manage.py runserver 127.0.0.1:"$PORT"
+fi
+echo "Django autoreload: OFF"
 exec python3 manage.py runserver 127.0.0.1:"$PORT" --noreload

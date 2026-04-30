@@ -38,16 +38,16 @@ def health_check(request):
 
 
 def serve_static_asset(request, path):
+    source_path = finders.find(path)
+    if source_path:
+        source = Path(source_path)
+        return static_serve(request, source.name, document_root=str(source.parent))
+
     static_root = Path(settings.STATIC_ROOT)
     if static_root.exists():
         candidate = static_root / path
         if candidate.is_file():
             return static_serve(request, path, document_root=str(static_root))
-
-    source_path = finders.find(path)
-    if source_path:
-        source = Path(source_path)
-        return static_serve(request, source.name, document_root=str(source.parent))
 
     return static_serve(request, path, document_root=str(static_root))
 

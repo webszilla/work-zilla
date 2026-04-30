@@ -1262,8 +1262,14 @@ def checkout_view(request):
             pass
     if not getattr(plan, "allow_addons", False):
         addon_count = 0
-    addon_unit_price = float(_addon_price(plan, currency, billing) or 0) if getattr(plan, "allow_addons", False) else 0.0
-    base_amount = float(_plan_price(plan, currency, billing) or 0) if plan else 0.0
+    base_amount_monthly = float(_plan_price(plan, currency, "monthly") or 0) if plan else 0.0
+    base_amount_yearly = float(_plan_price(plan, currency, "yearly") or 0) if plan else 0.0
+
+    addon_unit_price_monthly = float(_addon_price(plan, currency, "monthly") or 0) if getattr(plan, "allow_addons", False) else 0.0
+    addon_unit_price_yearly = float(_addon_price(plan, currency, "yearly") or 0) if getattr(plan, "allow_addons", False) else 0.0
+
+    base_amount = base_amount_monthly if billing == "monthly" else base_amount_yearly
+    addon_unit_price = addon_unit_price_monthly if billing == "monthly" else addon_unit_price_yearly
     total_amount = base_amount + (addon_unit_price * addon_count)
     org = _resolve_org_for_user(request.user)
     profile = BillingProfile.objects.filter(organization=org).first()
@@ -1295,6 +1301,10 @@ def checkout_view(request):
         "selected_addon_price": addon_unit_price,
         "selected_base_amount": base_amount,
         "selected_total_amount": total_amount,
+        "selected_base_amount_monthly": base_amount_monthly,
+        "selected_base_amount_yearly": base_amount_yearly,
+        "selected_addon_price_monthly": addon_unit_price_monthly,
+        "selected_addon_price_yearly": addon_unit_price_yearly,
         "price_suffix": price_suffix,
         "billing_profile": profile,
         "billing_profile_complete": _billing_profile_complete(profile),
@@ -1716,7 +1726,9 @@ def checkout_confirm(request):
     plan_id = request.session.get("selected_plan_id")
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
-    billing = request.session.get("selected_billing") or "monthly"
+    billing = (request.POST.get("billing") or request.session.get("selected_billing") or "monthly").strip().lower()
+    billing = billing if billing in ("monthly", "yearly") else "monthly"
+    request.session["selected_billing"] = billing
     try:
         addon_count = int(request.POST.get("addon_count") or request.session.get("selected_addon_count") or 0)
     except (TypeError, ValueError):
@@ -1977,8 +1989,13 @@ def billing_renew_view(request):
     request.session["renew_billing"] = billing
     request.session["renew_addon_count"] = int(addon_count)
 
-    base_price = float(_plan_price(plan, currency, billing) or 0)
-    addon_price = float(_addon_price(plan, currency, billing) or 0)
+    base_price_monthly = float(_plan_price(plan, currency, "monthly") or 0)
+    base_price_yearly = float(_plan_price(plan, currency, "yearly") or 0)
+    addon_price_monthly = float(_addon_price(plan, currency, "monthly") or 0)
+    addon_price_yearly = float(_addon_price(plan, currency, "yearly") or 0)
+
+    base_price = base_price_monthly if billing == "monthly" else base_price_yearly
+    addon_price = addon_price_monthly if billing == "monthly" else addon_price_yearly
     total_price = base_price + (addon_price * max(0, addon_count))
 
     context.update({
@@ -1990,6 +2007,10 @@ def billing_renew_view(request):
         "addon_count": addon_count,
         "base_price": base_price,
         "addon_price": addon_price,
+        "base_price_monthly": base_price_monthly,
+        "base_price_yearly": base_price_yearly,
+        "addon_price_monthly": addon_price_monthly,
+        "addon_price_yearly": addon_price_yearly,
         "total_price": total_price,
         "has_pending_renewal": pending_renewal,
         "show_billing_tab": True,
@@ -2007,7 +2028,7 @@ def billing_renew_confirm(request):
     plan_id = request.session.get("renew_plan_id")
     product_slug = _normalize_product_slug(request.session.get("renew_product_slug"))
     currency = request.session.get("renew_currency") or "inr"
-    billing = request.session.get("renew_billing") or "monthly"
+    billing = (request.POST.get("billing") or request.session.get("renew_billing") or "monthly").strip().lower()
 
     plan = Plan.objects.filter(id=plan_id).select_related("product").first() if plan_id else None
     if not plan:
@@ -2021,6 +2042,7 @@ def billing_renew_confirm(request):
 
     currency = currency if currency in ("inr", "usd") else "inr"
     billing = billing if billing in ("monthly", "yearly") else "monthly"
+    request.session["renew_billing"] = billing
 
     try:
         addon_count = int(request.POST.get("addon_count") or 0)
