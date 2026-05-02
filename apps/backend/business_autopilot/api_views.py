@@ -1084,6 +1084,7 @@ def _is_org_admin_account_member(org: Organization, member: OrganizationUser) ->
 def _serialize_org_user_member(org: Organization, member: OrganizationUser):
     profile_role = _normalize_admin_role(getattr(getattr(member.user, "userprofile", None), "role", ""))
     is_org_admin_account = _is_org_admin_account_member(org, member)
+    last_login = getattr(member.user, "last_login", None)
     return {
         "id": member.user_id,
         "membership_id": member.id,
@@ -1105,6 +1106,7 @@ def _serialize_org_user_member(org: Organization, member: OrganizationUser):
         "employee_role": member.employee_role or "",
         "is_active": bool(member.is_active and member.user.is_active),
         "is_deleted": bool(member.is_deleted),
+        "last_login": last_login.isoformat() if last_login else "",
         "created_at": member.created_at.isoformat() if member.created_at else "",
         "deleted_at": member.deleted_at.isoformat() if member.deleted_at else "",
     }

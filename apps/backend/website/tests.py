@@ -2,10 +2,11 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from unittest.mock import patch
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.backend.business_autopilot.models import OrganizationUser
 from apps.backend.products.models import Product
-from core.models import Organization, OrganizationProduct, Plan, Subscription, UserProductAccess, UserProfile
+from core.models import BillingProfile, Organization, OrganizationProduct, PendingTransfer, Plan, Subscription, UserProductAccess, UserProfile
 
 
 User = get_user_model()
@@ -117,6 +118,101 @@ class AccountAccessScopeTests(TestCase):
 
         self.client.force_login(employee)
         response = self.client.get("/my-account/")
+
+
+class CheckoutRenewalSeatGuardTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="billing@workzilla.test",
+            email="billing@workzilla.test",
+            password="pw123456",
+        )
+        self.owner.email_verified = True
+        self.owner.save(update_fields=["email_verified"])
+        self.org = Organization.objects.create(
+            name="Acme Corp",
+            company_key="ACMEKEY2",
+            owner=self.owner,
+        )
+        self.product, _ = Product.objects.get_or_create(
+            slug="business-autopilot-erp",
+            defaults={"name": "Business Autopilot"},
+        )
+        self.plan = Plan.objects.create(
+            name="Pro ERP",
+            product=self.product,
+            monthly_price=1000,
+            yearly_price=12000,
+            addon_monthly_price=200,
+            addon_yearly_price=2400,
+            employee_limit=5,
+            allow_addons=True,
+        )
+        Subscription.objects.create(
+            user=self.owner,
+            organization=self.org,
+            plan=self.plan,
+            status="active",
+            billing_cycle="yearly",
+            addon_count=7,
+            addon_next_cycle_count=7,
+        )
+        BillingProfile.objects.create(
+            organization=self.org,
+            contact_name="Owner",
+            company_name="Acme Corp",
+            email="billing@workzilla.test",
+            phone="+91 9000000000",
+            address_line1="Street 1",
+            city="Chennai",
+            country="India",
+            state="Tamil Nadu",
+            postal_code="600001",
+        )
+
+    def test_checkout_view_enforces_min_addons_from_existing_subscription(self):
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["selected_product_slug"] = "business-autopilot-erp"
+        session["selected_plan_id"] = self.plan.id
+        session["selected_currency"] = "inr"
+        session["selected_billing"] = "yearly"
+        session["selected_addon_count"] = 0
+        session.save()
+
+        response = self.client.get("/checkout/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["existing_total_users"], 12)
+        self.assertEqual(response.context["min_addon_count"], 7)
+        self.assertEqual(response.context["selected_addon_count"], 7)
+
+    def test_checkout_confirm_clamps_addons_to_minimum(self):
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["selected_product_slug"] = "business-autopilot-erp"
+        session["selected_plan_id"] = self.plan.id
+        session["selected_currency"] = "inr"
+        session["selected_billing"] = "yearly"
+        session["selected_addon_count"] = 0
+        session.save()
+
+        receipt = SimpleUploadedFile("receipt.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", content_type="image/png")
+        response = self.client.post(
+            "/checkout/confirm/",
+            data={
+                "billing": "yearly",
+                "addon_count": 0,
+                "utr_number": "UTR123",
+                "paid_on": "02-05-2026",
+                "notes": "",
+                "receipt": receipt,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        pending = PendingTransfer.objects.filter(organization=self.org, request_type="new").order_by("-id").first()
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.addon_count, 7)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(

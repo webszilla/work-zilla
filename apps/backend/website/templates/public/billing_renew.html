@@ -88,6 +88,50 @@
               >
             </div>
           </div>
+          <div class="small text-secondary mt-2">
+            Subtotal: <strong>{{ selected_currency|upper }} {{ subtotal_price|default:total_price|floatformat:2 }}</strong>
+            {% if tax_breakdown.enabled and tax_breakdown.mode == "cgst_sgst" %}
+              &nbsp;|&nbsp;
+              CGST ({{ tax_breakdown.cgst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.cgst_amount|default:0|floatformat:2 }}</strong>
+              &nbsp;|&nbsp;
+              SGST ({{ tax_breakdown.sgst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.sgst_amount|default:0|floatformat:2 }}</strong>
+            {% elif tax_breakdown.enabled and tax_breakdown.mode == "igst" %}
+              &nbsp;|&nbsp;
+              IGST ({{ tax_breakdown.igst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.igst_amount|default:0|floatformat:2 }}</strong>
+            {% else %}
+              &nbsp;|&nbsp;
+              GST: <strong>{{ selected_currency|upper }} {{ gst_amount|default:0|floatformat:2 }}</strong>
+            {% endif %}
+            {% if invoice_sac %}
+              &nbsp;|&nbsp;
+              SAC/HSN: <strong>{{ invoice_sac }}</strong>
+            {% endif %}
+          </div>
+
+          <div
+            id="renewSeatReductionState"
+            data-included-users="{{ included_users|default:'' }}"
+            data-active-users="{{ active_users|default:0 }}"
+            data-seat-reduce-needed="{{ seat_reduce_needed|default:0 }}"
+            data-api-users="/api/business-autopilot/users"
+            data-api-toggle-prefix="/api/business-autopilot/users/"
+          ></div>
+
+          <div id="renewSeatReductionSection" class="card p-3 mt-3 d-none">
+            <div class="d-flex align-items-start justify-content-between gap-3">
+              <div class="d-flex gap-2">
+                <div class="text-warning fs-4 lh-1" aria-hidden="true"><i class="bi bi-exclamation-triangle"></i></div>
+                <div>
+                  <div class="fw-semibold">Reduce Users</div>
+                  <div class="text-secondary small" id="renewSeatReductionMessage"></div>
+                </div>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" id="renewManageUsersBtn">
+                <i class="bi bi-people me-1" aria-hidden="true"></i>
+                Manage Active Users
+              </button>
+            </div>
+          </div>
 
           <h3 class="section-title mt-4">Bank Transfer Details</h3>
           <div class="form-grid">
@@ -120,7 +164,7 @@
               Renewal Submitted
             </button>
           {% else %}
-            <button class="btn btn-outline mt-3" type="submit">
+            <button class="btn btn-outline mt-3" type="submit" id="renewSubmitBtn">
               Submit Renewal Payment
             </button>
           {% endif %}
@@ -128,6 +172,144 @@
       </div>
   </div>
 </section>
+
+<style>
+  .wz-seat-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 1040;
+    display: none;
+    padding: 18px;
+  }
+  .wz-seat-modal {
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 18px 60px rgba(15, 23, 42, 0.35);
+    max-height: calc(100vh - 36px);
+    display: flex;
+    flex-direction: column;
+  }
+  .wz-seat-modal__header {
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .wz-seat-modal__body {
+    padding: 14px 18px 90px;
+    overflow: auto;
+  }
+  .wz-seat-modal__footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .wz-seat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.03);
+    color: #0f172a;
+    white-space: nowrap;
+  }
+  .wz-seat-badge--warn { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.25); color: #92400e; }
+  .wz-seat-badge--info { background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.25); color: #1e40af; }
+  .wz-seat-table { width: 100%; }
+  .wz-seat-table th { font-size: 12px; color: rgba(15, 23, 42, 0.6); font-weight: 600; }
+  .wz-seat-table td { vertical-align: middle; }
+  .wz-seat-table td, .wz-seat-table th { padding: 10px 8px; }
+  .wz-seat-table tr { border-bottom: 1px solid rgba(15, 23, 42, 0.06); }
+  .wz-seat-muted { color: rgba(15, 23, 42, 0.6); }
+  .wz-seat-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  @media (max-width: 720px) {
+    .wz-seat-hide-sm { display: none; }
+    .wz-seat-modal__body { padding-bottom: 120px; }
+    .wz-seat-modal__footer { flex-direction: column; align-items: stretch; }
+    .wz-seat-actions { justify-content: space-between; }
+  }
+</style>
+
+<div class="wz-seat-modal-backdrop" id="wzSeatModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="wzSeatModalTitle">
+  <div class="wz-seat-modal">
+    <div class="wz-seat-modal__header">
+      <div>
+        <div class="fw-semibold" id="wzSeatModalTitle">Manage Active Users</div>
+        <div class="small text-secondary">Deactivate users to match your renewal seats. Historical data stays preserved.</div>
+      </div>
+      <button type="button" class="btn btn-light btn-sm" id="wzSeatModalCloseBtn" aria-label="Close">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="wz-seat-modal__body">
+      <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+        <div class="input-group" style="max-width: 420px;">
+          <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+          <input type="search" class="form-control" id="wzSeatSearchInput" placeholder="Search name, email, department, role...">
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <span class="wz-seat-badge wz-seat-badge--info" id="wzSeatActiveBadge"></span>
+          <span class="wz-seat-badge" id="wzSeatSeatsBadge"></span>
+          <span class="wz-seat-badge wz-seat-badge--warn d-none" id="wzSeatNeedBadge"></span>
+        </div>
+      </div>
+
+      <div class="alert alert-warning py-2 d-none" id="wzSeatConfirmHint">
+        This user will lose login access but historical data will be preserved.
+      </div>
+
+      <div class="table-responsive">
+        <table class="wz-seat-table">
+          <thead>
+            <tr>
+              <th style="width:36px;"></th>
+              <th>Employee Name</th>
+              <th class="wz-seat-hide-sm">Email</th>
+              <th class="wz-seat-hide-sm">Department</th>
+              <th class="wz-seat-hide-sm">Role</th>
+              <th>Last Login</th>
+              <th>Status</th>
+              <th class="text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody id="wzSeatUserTbody">
+            <tr><td colspan="8" class="py-4 text-center text-secondary">Loading users…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="wz-seat-modal__footer">
+      <div class="small">
+        <div><span class="wz-seat-muted">Selected for deactivation:</span> <strong id="wzSeatSelectedCount">0</strong></div>
+        <div><span class="wz-seat-muted">Remaining active users after renewal:</span> <strong id="wzSeatRemainingAfter">-</strong></div>
+      </div>
+      <div class="wz-seat-actions">
+        <button type="button" class="btn btn-light" id="wzSeatCancelBtn">Cancel</button>
+        <button type="button" class="btn btn-primary" id="wzSeatConfirmBtn" disabled>
+          Confirm Deactivation
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (function () {
     const addonInput = document.getElementById("renew-addon-count");
@@ -139,6 +321,12 @@
     if (!addonInput || !billingSelect || !baseDisplay || !addonDisplay || !totalDisplay) {
       return;
     }
+    const seatStateEl = document.getElementById("renewSeatReductionState");
+    const seatSection = document.getElementById("renewSeatReductionSection");
+    const seatMessage = document.getElementById("renewSeatReductionMessage");
+    const manageBtn = document.getElementById("renewManageUsersBtn");
+    const submitBtn = document.getElementById("renewSubmitBtn");
+
     const currency = "{{ selected_currency|upper|escapejs }}";
     const prices = {
       monthly: {
@@ -154,6 +342,83 @@
     };
 
     const formatAmount = (amount) => `${currency} ${Number(amount).toFixed(2)}`;
+
+    function clampInt(value) {
+      const parsed = parseInt(String(value || "0"), 10);
+      if (!Number.isFinite(parsed) || isNaN(parsed)) return 0;
+      return Math.max(0, parsed);
+    }
+
+    function getCookie(name) {
+      const cookies = document.cookie ? document.cookie.split(";") : [];
+      for (const cookie of cookies) {
+        const trimmed = cookie.trim();
+        if (trimmed.startsWith(`${name}=`)) {
+          return decodeURIComponent(trimmed.substring(name.length + 1));
+        }
+      }
+      return "";
+    }
+
+    const seatState = {
+      includedUsers: seatStateEl ? String(seatStateEl.getAttribute("data-included-users") || "") : "",
+      activeUsers: seatStateEl ? clampInt(seatStateEl.getAttribute("data-active-users")) : 0,
+      usersApi: seatStateEl ? String(seatStateEl.getAttribute("data-api-users") || "") : "",
+      togglePrefix: seatStateEl ? String(seatStateEl.getAttribute("data-api-toggle-prefix") || "") : "",
+      usersLoaded: false,
+      users: [],
+      selectedMembershipIds: new Set(),
+      activeUsersLive: null,
+      busy: false,
+    };
+
+    function effectiveIncludedUsers() {
+      if (seatState.includedUsers === "" || seatState.includedUsers === "None") return null;
+      const parsed = clampInt(seatState.includedUsers);
+      return parsed;
+    }
+
+    function renewalTotalSeats() {
+      const base = effectiveIncludedUsers();
+      if (base === null) return null;
+      const addons = clampInt(addonInput.value);
+      return Math.max(0, base) + Math.max(0, addons);
+    }
+
+    function activeUsersCount() {
+      if (typeof seatState.activeUsersLive === "number") return seatState.activeUsersLive;
+      return seatState.activeUsers;
+    }
+
+    function reductionNeeded() {
+      const seats = renewalTotalSeats();
+      if (seats === null) return 0;
+      return Math.max(0, activeUsersCount() - seats);
+    }
+
+    function updateSeatReductionBanner() {
+      if (!seatSection || !seatMessage) return;
+      const seats = renewalTotalSeats();
+      const active = activeUsersCount();
+      const needed = reductionNeeded();
+      if (needed > 0 && seats !== null) {
+        seatSection.classList.remove("d-none");
+        seatMessage.textContent = `You currently have ${active} active users. To renew with ${seats} users, please deactivate ${needed} user(s) before continuing.`;
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.setAttribute("aria-disabled", "true");
+          submitBtn.classList.add("disabled");
+        }
+      } else {
+        seatSection.classList.add("d-none");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.removeAttribute("aria-disabled");
+          submitBtn.classList.remove("disabled");
+        }
+      }
+    }
+
     const recalcTotal = () => {
       const billing = String(billingSelect.value || "monthly");
       const config = prices[billing] || prices.monthly;
@@ -162,12 +427,278 @@
       addonDisplay.value = formatAmount(config.addon);
       if (addonSuffix) addonSuffix.textContent = config.suffix;
       totalDisplay.value = formatAmount(config.base + addonCount * config.addon);
+      updateSeatReductionBanner();
     };
 
     addonInput.addEventListener("input", recalcTotal);
     addonInput.addEventListener("change", recalcTotal);
     billingSelect.addEventListener("change", recalcTotal);
     recalcTotal();
+
+    if (!seatStateEl || !manageBtn) {
+      return;
+    }
+
+    const modalBackdrop = document.getElementById("wzSeatModalBackdrop");
+    const modalClose = document.getElementById("wzSeatModalCloseBtn");
+    const modalCancel = document.getElementById("wzSeatCancelBtn");
+    const searchInput = document.getElementById("wzSeatSearchInput");
+    const tbody = document.getElementById("wzSeatUserTbody");
+    const activeBadge = document.getElementById("wzSeatActiveBadge");
+    const seatsBadge = document.getElementById("wzSeatSeatsBadge");
+    const needBadge = document.getElementById("wzSeatNeedBadge");
+    const selectedCountEl = document.getElementById("wzSeatSelectedCount");
+    const remainingAfterEl = document.getElementById("wzSeatRemainingAfter");
+    const confirmBtn = document.getElementById("wzSeatConfirmBtn");
+    const confirmHint = document.getElementById("wzSeatConfirmHint");
+
+    function openModal() {
+      if (!modalBackdrop) return;
+      modalBackdrop.style.display = "block";
+      document.body.style.overflow = "hidden";
+      if (!seatState.usersLoaded) {
+        loadUsers();
+      } else {
+        renderUsers();
+      }
+      refreshModalSummary();
+      if (searchInput) searchInput.focus();
+    }
+
+    function closeModal() {
+      if (!modalBackdrop) return;
+      modalBackdrop.style.display = "none";
+      document.body.style.overflow = "";
+      seatState.selectedMembershipIds.clear();
+      refreshModalSummary();
+      renderUsers();
+    }
+
+    function daysSince(iso) {
+      if (!iso) return null;
+      const dt = new Date(iso);
+      if (isNaN(dt.getTime())) return null;
+      const now = new Date();
+      const diffMs = now.getTime() - dt.getTime();
+      if (diffMs < 0) return 0;
+      return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    }
+
+    function lastLoginLabel(iso) {
+      if (!iso) return "Never logged in";
+      const days = daysSince(iso);
+      if (days === null) return "-";
+      if (days === 0) return "Today";
+      if (days === 1) return "1 day ago";
+      return `${days} days ago`;
+    }
+
+    function recommendationBadges(user) {
+      const iso = String(user.last_login || "");
+      if (!iso) return [{ label: "Never Logged In", type: "warn" }];
+      const days = daysSince(iso);
+      if (days === null) return [];
+      if (days >= 30) return [{ label: "Inactive for 30+ days", type: "warn" }];
+      if (days >= 15) return [{ label: "Low Activity", type: "info" }];
+      return [];
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function loadUsers() {
+      if (!seatState.usersApi) return;
+      seatState.busy = true;
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-secondary">Loading users…</td></tr>';
+      try {
+        const res = await fetch(seatState.usersApi, { credentials: "same-origin" });
+        const data = await res.json();
+        seatState.users = Array.isArray(data.users) ? data.users : [];
+        seatState.usersLoaded = true;
+        seatState.activeUsersLive = seatState.users.filter((u) => u && u.is_active && !u.is_deleted).length;
+        renderUsers();
+        updateSeatReductionBanner();
+      } catch (err) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-danger">Unable to load users.</td></tr>';
+      } finally {
+        seatState.busy = false;
+        refreshModalSummary();
+      }
+    }
+
+    function filteredUsers() {
+      const q = String(searchInput ? searchInput.value : "").trim().toLowerCase();
+      const rows = seatState.users || [];
+      if (!q) return rows;
+      return rows.filter((u) => {
+        const hay = [
+          u.name,
+          u.email,
+          u.department,
+          u.employee_role,
+          u.role,
+        ].map((v) => String(v || "").toLowerCase()).join(" | ");
+        return hay.includes(q);
+      });
+    }
+
+    function renderUsers() {
+      if (!tbody) return;
+      const rows = filteredUsers();
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-secondary">No users found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((u) => {
+        const isActive = Boolean(u.is_active);
+        const canToggle = Boolean(u.can_toggle_status);
+        const membershipId = u.membership_id;
+        const checked = seatState.selectedMembershipIds.has(String(membershipId)) ? "checked" : "";
+        const disabled = !isActive || !canToggle ? "disabled" : "";
+        const statusBadge = isActive
+          ? '<span class="badge text-bg-success">Active</span>'
+          : '<span class="badge text-bg-secondary">Inactive</span>';
+        const recs = recommendationBadges(u).map((b) => {
+          const cls = b.type === "warn" ? "wz-seat-badge wz-seat-badge--warn" : "wz-seat-badge wz-seat-badge--info";
+          return `<span class="${cls}">${escapeHtml(b.label)}</span>`;
+        }).join(" ");
+        const name = escapeHtml(u.name || "-");
+        const email = escapeHtml(u.email || "-");
+        const dept = escapeHtml(u.department || "-");
+        const role = escapeHtml((u.employee_role || u.role || "-"));
+        const lastLogin = escapeHtml(lastLoginLabel(u.last_login));
+        const action = (!isActive || !canToggle)
+          ? '<span class="text-secondary small">—</span>'
+          : '<button type="button" class="btn btn-light btn-sm wz-seat-deactivate-btn" data-membership-id="' + escapeHtml(membershipId) + '">Deactivate</button>';
+        return (
+          '<tr>' +
+            '<td><input class="form-check-input wz-seat-select" type="checkbox" data-membership-id="' + escapeHtml(membershipId) + '" ' + checked + ' ' + disabled + '></td>' +
+            '<td><div class="fw-semibold">' + name + '</div><div class="small text-secondary">' + recs + '</div></td>' +
+            '<td class="wz-seat-hide-sm"><div class="small">' + email + '</div></td>' +
+            '<td class="wz-seat-hide-sm"><div class="small">' + dept + '</div></td>' +
+            '<td class="wz-seat-hide-sm"><div class="small">' + role + '</div></td>' +
+            '<td><div class="small">' + lastLogin + '</div></td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td class="text-end">' + action + '</td>' +
+          '</tr>'
+        );
+      }).join("");
+      refreshModalSummary();
+    }
+
+    function refreshModalSummary() {
+      const seats = renewalTotalSeats();
+      const active = activeUsersCount();
+      const needed = reductionNeeded();
+      const selected = seatState.selectedMembershipIds.size;
+      const remainingAfter = (typeof active === "number") ? Math.max(0, active - selected) : "-";
+      if (selectedCountEl) selectedCountEl.textContent = String(selected);
+      if (remainingAfterEl) remainingAfterEl.textContent = seats === null ? "-" : String(remainingAfter);
+      if (activeBadge) activeBadge.textContent = `Active users: ${active}`;
+      if (seatsBadge) seatsBadge.textContent = seats === null ? "Seats: Unlimited" : `Renewal seats: ${seats}`;
+      if (needBadge) {
+        if (needed > 0) {
+          needBadge.classList.remove("d-none");
+          needBadge.textContent = `Deactivate required: ${needed}`;
+        } else {
+          needBadge.classList.add("d-none");
+        }
+      }
+      if (confirmBtn) {
+        confirmBtn.disabled = seatState.busy || needed <= 0 ? true : selected < needed;
+      }
+      if (confirmHint) {
+        confirmHint.classList.toggle("d-none", selected <= 0);
+      }
+    }
+
+    async function deactivateSelected() {
+      const needed = reductionNeeded();
+      if (needed <= 0) return closeModal();
+      const selectedIds = Array.from(seatState.selectedMembershipIds);
+      if (selectedIds.length < needed) return;
+      const ok = window.confirm("This user will lose login access but historical data will be preserved. Continue?");
+      if (!ok) return;
+      seatState.busy = true;
+      refreshModalSummary();
+      try {
+        const csrf = getCookie("csrftoken");
+        for (const membershipId of selectedIds) {
+          const url = `${seatState.togglePrefix}${encodeURIComponent(membershipId)}/toggle-status`;
+          const res = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": csrf,
+            },
+            body: JSON.stringify({ enabled: false }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const message = (data && (data.message || data.detail)) ? String(data.message || data.detail) : "Unable to deactivate user.";
+            alert(message);
+            break;
+          }
+          if (Array.isArray(data.users)) {
+            seatState.users = data.users;
+            seatState.activeUsersLive = seatState.users.filter((u) => u && u.is_active && !u.is_deleted).length;
+          } else {
+            // Fallback: refresh from API.
+            await loadUsers();
+          }
+        }
+        seatState.selectedMembershipIds.clear();
+        renderUsers();
+        updateSeatReductionBanner();
+        if (reductionNeeded() <= 0) {
+          closeModal();
+        }
+      } finally {
+        seatState.busy = false;
+        refreshModalSummary();
+      }
+    }
+
+    manageBtn.addEventListener("click", openModal);
+    if (modalClose) modalClose.addEventListener("click", closeModal);
+    if (modalCancel) modalCancel.addEventListener("click", closeModal);
+    if (modalBackdrop) {
+      modalBackdrop.addEventListener("click", function (e) {
+        if (e.target === modalBackdrop) closeModal();
+      });
+    }
+    if (searchInput) {
+      searchInput.addEventListener("input", renderUsers);
+    }
+    if (confirmBtn) confirmBtn.addEventListener("click", deactivateSelected);
+    if (tbody) {
+      tbody.addEventListener("change", function (e) {
+        const target = e.target;
+        if (!(target && target.classList && target.classList.contains("wz-seat-select"))) return;
+        const membershipId = String(target.getAttribute("data-membership-id") || "");
+        if (!membershipId) return;
+        if (target.checked) seatState.selectedMembershipIds.add(membershipId);
+        else seatState.selectedMembershipIds.delete(membershipId);
+        refreshModalSummary();
+      });
+      tbody.addEventListener("click", function (e) {
+        const btn = e.target && e.target.closest ? e.target.closest(".wz-seat-deactivate-btn") : null;
+        if (!btn) return;
+        const membershipId = String(btn.getAttribute("data-membership-id") || "");
+        if (!membershipId) return;
+        seatState.selectedMembershipIds.add(membershipId);
+        renderUsers();
+        refreshModalSummary();
+      });
+    }
+    updateSeatReductionBanner();
   })();
 </script>
 {% endblock %}

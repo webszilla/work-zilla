@@ -2162,6 +2162,20 @@ function ForceHtmlLoginRedirect() {
   );
 }
 
+function ForceMyAccountRedirect({ message = "Redirecting to My Account..." }) {
+  useEffect(() => {
+    window.location.replace("/my-account/");
+  }, []);
+
+  return (
+    <div className="page-center">
+      <div className="panel">
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function GlobalDeleteConfirmBridge() {
   const confirm = useConfirm();
 
@@ -2788,7 +2802,7 @@ export default function App() {
 
       if (status !== "active") {
         if (productSlug === "business-autopilot-erp") {
-          return <AppShell state={state} productPrefix={prefix} productSlug={productSlug} />;
+          return <ForceMyAccountRedirect message="Your plan is not active. Redirecting to My Account..." />;
         }
         if (productSlug === "storage" && (status === "trial_ended" || status === "expired")) {
           return <AppShell state={state} productPrefix={prefix} productSlug={productSlug} />;

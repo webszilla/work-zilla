@@ -157,19 +157,32 @@
 		                      <div class="col-12 col-lg-4">
 		                        <div class="form-group mb-0">
 		                          <label>Add-on Users</label>
-		                          <input id="checkoutAddonCountInput" class="form-control" type="number" name="addon_count" min="0" value="{{ selected_addon_count|default:0 }}">
+		                          <input
+		                            id="checkoutAddonCountInput"
+		                            class="form-control"
+		                            type="number"
+		                            name="addon_count"
+		                            min="{{ min_addon_count|default:0 }}"
+		                            value="{{ selected_addon_count|default:0 }}"
+		                          >
+                              {% if existing_total_users and min_addon_count %}
+                                <div class="form-text">
+                                  Current licensed users: <strong>{{ existing_total_users }}</strong> (includes <strong>{{ existing_addon_count|default:0 }}</strong> add-ons). Renewal minimum add-ons: <strong>{{ min_addon_count }}</strong>.
+                                </div>
+                              {% endif %}
 	                        </div>
 	                      </div>
 		                      <div class="col-12 col-lg-8">
 		                        <div class="form-group mb-0">
 		                          <label>Add-on User Price</label>
-		                          <input
-		                            id="checkoutAddonPriceDisplay"
-		                            class="form-control"
-		                            type="text"
-		                            value="{{ selected_currency|upper }} {{ selected_addon_price }} per user / {% if selected_billing == 'yearly' %}year{% else %}month{% endif %}"
-		                            readonly
-		                          >
+		                          <select id="checkoutAddonPriceSelect" class="form-select">
+                                <option value="monthly">
+                                  {{ selected_currency|upper }} {{ selected_addon_price_monthly|default:selected_addon_price }} per user / month
+                                </option>
+                                <option value="yearly">
+                                  {{ selected_currency|upper }} {{ selected_addon_price_yearly|default:selected_addon_price }} per user / year
+                                </option>
+                              </select>
 		                        </div>
 		                      </div>
 		                    </div>
@@ -239,6 +252,11 @@
 	            data-addon-unit="{{ selected_addon_price|default:0 }}"
 	            data-addon-unit-monthly="{{ selected_addon_price_monthly|default:0 }}"
 	            data-addon-unit-yearly="{{ selected_addon_price_yearly|default:0 }}"
+              data-gst-rate="{{ invoice_tax_rate|default:0 }}"
+              data-tax-mode="{{ tax_breakdown.mode|default:'' }}"
+              data-cgst-rate="{{ tax_breakdown.cgst_rate|default:0 }}"
+              data-sgst-rate="{{ tax_breakdown.sgst_rate|default:0 }}"
+              data-igst-rate="{{ tax_breakdown.igst_rate|default:0 }}"
 	            data-addons-enabled="{% if selected_plan.allow_addons %}1{% else %}0{% endif %}"
 	          >
             <div class="checkout-summary__header">
@@ -264,10 +282,10 @@
 
             <hr class="my-3">
 
-            <div class="d-flex justify-content-between">
-              <span class="text-secondary">Base</span>
+	            <div class="d-flex justify-content-between">
+	              <span class="text-secondary">Base</span>
               <strong>{{ selected_currency|upper }} <span id="checkoutBaseAmount">{{ selected_base_amount }}</span></strong>
-            </div>
+	            </div>
             {% if selected_plan.allow_addons %}
               <div class="d-flex justify-content-between mt-1">
                 <span class="text-secondary">Add-ons</span>
@@ -277,10 +295,29 @@
                 </strong>
               </div>
             {% endif %}
+            <div class="d-flex justify-content-between mt-2">
+              <span class="text-secondary">Subtotal</span>
+              <strong>{{ selected_currency|upper }} <span id="checkoutSubtotalAmount">{{ selected_subtotal_amount|default:selected_total_amount }}</span></strong>
+            </div>
+            <div class="d-flex justify-content-between mt-1" id="checkoutCgstRow">
+              <span class="text-secondary">CGST <span class="small text-secondary">(<span id="checkoutCgstRate">{{ tax_breakdown.cgst_rate|default:0 }}</span>%)</span></span>
+              <strong>{{ selected_currency|upper }} <span id="checkoutCgstAmount">{{ tax_breakdown.cgst_amount|default:0 }}</span></strong>
+            </div>
+            <div class="d-flex justify-content-between mt-1" id="checkoutSgstRow">
+              <span class="text-secondary">SGST <span class="small text-secondary">(<span id="checkoutSgstRate">{{ tax_breakdown.sgst_rate|default:0 }}</span>%)</span></span>
+              <strong>{{ selected_currency|upper }} <span id="checkoutSgstAmount">{{ tax_breakdown.sgst_amount|default:0 }}</span></strong>
+            </div>
+            <div class="d-flex justify-content-between mt-1" id="checkoutIgstRow">
+              <span class="text-secondary">IGST <span class="small text-secondary">(<span id="checkoutIgstRate">{{ tax_breakdown.igst_rate|default:0 }}</span>%)</span></span>
+              <strong>{{ selected_currency|upper }} <span id="checkoutIgstAmount">{{ tax_breakdown.igst_amount|default:0 }}</span></strong>
+            </div>
 	            <div class="d-flex justify-content-between mt-2">
 	              <span class="text-secondary">Total</span>
 	              <strong>{{ selected_currency|upper }} <span id="checkoutTotalAmount">{{ selected_total_amount }}</span></strong>
 	            </div>
+              {% if invoice_sac %}
+                <div class="small text-secondary mt-1">SAC/HSN: {{ invoice_sac }}</div>
+              {% endif %}
 	            <div class="small text-secondary mt-1">Billing: <span id="checkoutBillingCycleText">{{ selected_billing|title }}</span></div>
 	          </div>
 
@@ -298,7 +335,7 @@
 	              var planPriceValue = document.getElementById("checkoutPlanPriceValue");
 	              var planBillingText = document.getElementById("checkoutPlanBillingText");
 	              var billingText = document.getElementById("checkoutBillingCycleText");
-	              var addonPriceDisplay = document.getElementById("checkoutAddonPriceDisplay");
+	              var addonPriceSelect = document.getElementById("checkoutAddonPriceSelect");
 	              if (!billingSelect) return;
 
 	              function num(value) {
@@ -330,21 +367,53 @@
 	                if (planBillingText) planBillingText.textContent = billing === "yearly" ? "Yearly" : "Monthly";
 	                if (planSuffix) planSuffix.textContent = billing === "yearly" ? "/user per year" : "/user per month";
 	                if (planPriceValue) planPriceValue.textContent = formatAmount(planBase);
-	                if (addonPriceDisplay) {
-	                  var currency = String(summary.getAttribute("data-currency") || "").trim();
-	                  var unit = billing === "yearly" ? addonYearly : addonMonthly;
-	                  addonPriceDisplay.value = currency + " " + formatAmount(unit) + " per user / " + (billing === "yearly" ? "year" : "month");
-	                }
+	                if (addonPriceSelect) addonPriceSelect.value = billing === "yearly" ? "yearly" : "monthly";
 	              }
 
 	              function updateTotals() {
-	                var addonCount = addonInput ? clampInt(addonInput.value) : 0;
+	                var addonMin = addonInput ? clampInt(addonInput.getAttribute("min")) : 0;
+	                var addonCount = addonInput ? Math.max(addonMin, clampInt(addonInput.value)) : 0;
+	                if (addonInput && String(addonInput.value || "") !== String(addonCount)) {
+	                  addonInput.value = String(addonCount);
+	                }
 	                var baseAmount = num(summary.getAttribute("data-base-amount"));
 	                var addonUnit = num(summary.getAttribute("data-addon-unit"));
-	                var total = baseAmount + (addonUnit * addonCount);
+	                var subtotal = baseAmount + (addonUnit * addonCount);
+                  var gstRate = num(summary.getAttribute("data-gst-rate"));
+                  var taxMode = String(summary.getAttribute("data-tax-mode") || "");
+                  var cgstRate = num(summary.getAttribute("data-cgst-rate"));
+                  var sgstRate = num(summary.getAttribute("data-sgst-rate"));
+                  var igstRate = num(summary.getAttribute("data-igst-rate"));
+                  var cgstAmount = 0;
+                  var sgstAmount = 0;
+                  var igstAmount = 0;
+                  if (gstRate > 0) {
+                    if (taxMode === "cgst_sgst") {
+                      cgstAmount = subtotal * (cgstRate / 100);
+                      sgstAmount = subtotal * (sgstRate / 100);
+                    } else {
+                      igstAmount = subtotal * (igstRate / 100);
+                    }
+                  }
+                  var gstAmount = cgstAmount + sgstAmount + igstAmount;
+	                var total = subtotal + gstAmount;
 	                var addonCountEl = document.getElementById("checkoutAddonCount");
+                  var subtotalEl = document.getElementById("checkoutSubtotalAmount");
+                  var cgstRow = document.getElementById("checkoutCgstRow");
+                  var sgstRow = document.getElementById("checkoutSgstRow");
+                  var igstRow = document.getElementById("checkoutIgstRow");
+                  var cgstEl = document.getElementById("checkoutCgstAmount");
+                  var sgstEl = document.getElementById("checkoutSgstAmount");
+                  var igstEl = document.getElementById("checkoutIgstAmount");
 	                var totalEl = document.getElementById("checkoutTotalAmount");
 	                if (addonCountEl) addonCountEl.textContent = String(addonCount);
+                  if (subtotalEl) subtotalEl.textContent = formatAmount(subtotal);
+                  if (cgstRow) cgstRow.style.display = taxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (sgstRow) sgstRow.style.display = taxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (igstRow) igstRow.style.display = taxMode !== "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (cgstEl) cgstEl.textContent = formatAmount(cgstAmount);
+                  if (sgstEl) sgstEl.textContent = formatAmount(sgstAmount);
+                  if (igstEl) igstEl.textContent = formatAmount(igstAmount);
 	                if (totalEl) totalEl.textContent = formatAmount(total);
 	                if (planTotal) planTotal.textContent = formatAmount(total);
 	              }
@@ -352,6 +421,14 @@
 	              if (addonsEnabled && addonInput) {
 	                addonInput.addEventListener("input", updateTotals);
 	                addonInput.addEventListener("change", updateTotals);
+	              }
+	              if (addonsEnabled && addonPriceSelect) {
+	                addonPriceSelect.addEventListener("change", function () {
+	                  var value = String(addonPriceSelect.value || "monthly");
+	                  billingSelect.value = value === "yearly" ? "yearly" : "monthly";
+	                  updateBillingDerived();
+	                  updateTotals();
+	                });
 	              }
 	              billingSelect.addEventListener("change", function () {
 	                updateBillingDerived();

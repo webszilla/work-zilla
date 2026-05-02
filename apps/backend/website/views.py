@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.views import redirect_to_login
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -933,6 +934,140 @@ def _format_bank_details(value):
     return "\n".join(lines)
 
 
+def _invoice_tax_rate_percent(currency: str) -> int:
+    currency = str(currency or "").strip().upper()
+    if currency != "INR":
+        return 0
+    try:
+        return max(0, int(getattr(settings, "INVOICE_TAX_RATE", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _gst_state_code_from_gstin(gstin: str) -> str:
+    value = str(gstin or "").strip().upper()
+    if len(value) < 2:
+        return ""
+    code = value[:2]
+    if not code.isdigit():
+        return ""
+    return code
+
+
+def _decimal_money(value) -> Decimal:
+    try:
+        raw = Decimal(str(value if value is not None else "0"))
+    except Exception:
+        raw = Decimal("0")
+    return raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _gst_breakdown(*, subtotal: float, currency: str, buyer_profile=None, seller_profile=None):
+    """
+    Returns GST breakdown for Indian invoices:
+      - same state => CGST + SGST (split equally)
+      - other state => IGST
+    Uses GSTIN state code when available.
+    """
+    rate = _invoice_tax_rate_percent(currency)
+    subtotal_amt = _decimal_money(subtotal)
+    if rate <= 0 or subtotal_amt <= 0 or str(currency or "").upper() != "INR":
+        return {
+            "enabled": False,
+            "mode": "",
+            "rate": 0,
+            "cgst_rate": 0,
+            "sgst_rate": 0,
+            "igst_rate": 0,
+            "cgst_amount": Decimal("0.00"),
+            "sgst_amount": Decimal("0.00"),
+            "igst_amount": Decimal("0.00"),
+            "gst_amount": Decimal("0.00"),
+            "total": subtotal_amt,
+            "subtotal": subtotal_amt,
+            "sac": str(getattr(seller_profile, "sac", "") or "").strip(),
+        }
+    buyer_country = str(getattr(buyer_profile, "country", "") or "India").strip().lower()
+    seller_country = str(getattr(seller_profile, "country", "") or "India").strip().lower()
+    if buyer_country != "india" or seller_country != "india":
+        return {
+            "enabled": False,
+            "mode": "",
+            "rate": 0,
+            "cgst_rate": 0,
+            "sgst_rate": 0,
+            "igst_rate": 0,
+            "cgst_amount": Decimal("0.00"),
+            "sgst_amount": Decimal("0.00"),
+            "igst_amount": Decimal("0.00"),
+            "gst_amount": Decimal("0.00"),
+            "total": subtotal_amt,
+            "subtotal": subtotal_amt,
+            "sac": str(getattr(seller_profile, "sac", "") or "").strip(),
+        }
+
+    buyer_state_code = _gst_state_code_from_gstin(getattr(buyer_profile, "gstin", ""))
+    seller_state_code = _gst_state_code_from_gstin(getattr(seller_profile, "gstin", "")) or str(
+        getattr(seller_profile, "state_code", "") or ""
+    ).strip()
+
+    same_state = bool(buyer_state_code and seller_state_code and buyer_state_code == seller_state_code)
+    gst_rate = Decimal(str(rate)) / Decimal("100")
+    gst_amount = _decimal_money(subtotal_amt * gst_rate)
+    if same_state:
+        half_rate = rate / 2
+        cgst_amount = _decimal_money(gst_amount / Decimal("2"))
+        sgst_amount = _decimal_money(gst_amount - cgst_amount)
+        total = _decimal_money(subtotal_amt + gst_amount)
+        return {
+            "enabled": True,
+            "mode": "cgst_sgst",
+            "rate": rate,
+            "cgst_rate": half_rate,
+            "sgst_rate": half_rate,
+            "igst_rate": 0,
+            "cgst_amount": cgst_amount,
+            "sgst_amount": sgst_amount,
+            "igst_amount": Decimal("0.00"),
+            "gst_amount": gst_amount,
+            "total": total,
+            "subtotal": subtotal_amt,
+            "sac": str(getattr(seller_profile, "sac", "") or "").strip(),
+        }
+    total = _decimal_money(subtotal_amt + gst_amount)
+    return {
+        "enabled": True,
+        "mode": "igst",
+        "rate": rate,
+        "cgst_rate": 0,
+        "sgst_rate": 0,
+        "igst_rate": rate,
+        "cgst_amount": Decimal("0.00"),
+        "sgst_amount": Decimal("0.00"),
+        "igst_amount": gst_amount,
+        "gst_amount": gst_amount,
+        "total": total,
+        "subtotal": subtotal_amt,
+        "sac": str(getattr(seller_profile, "sac", "") or "").strip(),
+    }
+
+
+def _apply_invoice_tax(amount: float, currency: str, *, buyer_profile=None, seller_profile=None):
+    """
+    Returns (subtotal, gst_amount, total, breakdown_dict). GST is applied only for INR.
+    """
+    breakdown = _gst_breakdown(
+        subtotal=amount,
+        currency=currency,
+        buyer_profile=buyer_profile,
+        seller_profile=seller_profile,
+    )
+    subtotal_amt = breakdown["subtotal"]
+    gst_amt = breakdown["gst_amount"]
+    total_amt = breakdown["total"]
+    return float(subtotal_amt), float(gst_amt), float(total_amt), breakdown
+
+
 def _billing_products_for_org(org):
     products_by_slug = {}
 
@@ -1270,13 +1405,59 @@ def checkout_view(request):
 
     base_amount = base_amount_monthly if billing == "monthly" else base_amount_yearly
     addon_unit_price = addon_unit_price_monthly if billing == "monthly" else addon_unit_price_yearly
-    total_amount = base_amount + (addon_unit_price * addon_count)
     org = _resolve_org_for_user(request.user)
+
+    # Renewal-friendly default: if org already has this plan, prefill current scheduled add-ons
+    # when the checkout selection has 0 add-ons. This makes renew checkout reflect existing seats.
+    if plan and getattr(plan, "allow_addons", False) and addon_count <= 0:
+        existing_sub = (
+            Subscription.objects
+            .filter(organization=org, plan_id=plan.id)
+            .select_related("plan", "plan__product")
+            .order_by("-start_date", "-id")
+            .first()
+        )
+        if not existing_sub:
+            existing_hist = (
+                SubscriptionHistory.objects
+                .filter(organization=org, plan_id=plan.id)
+                .select_related("plan", "plan__product")
+                .order_by("-start_date", "-id")
+                .first()
+            )
+            if existing_hist:
+                existing_sub = SimpleNamespace(
+                    plan=existing_hist.plan,
+                    plan_id=existing_hist.plan_id,
+                    billing_cycle=existing_hist.billing_cycle or "monthly",
+                    addon_count=getattr(existing_hist, "addon_count", 0) if hasattr(existing_hist, "addon_count") else 0,
+                    addon_next_cycle_count=getattr(existing_hist, "addon_next_cycle_count", None) if hasattr(existing_hist, "addon_next_cycle_count") else None,
+                )
+        if existing_sub:
+            existing_addons = _subscription_next_cycle_addon_count(existing_sub)
+            if existing_addons > 0:
+                addon_count = int(existing_addons)
+                request.session["selected_addon_count"] = int(addon_count)
+                request.session.modified = True
+
+    renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
+    min_addon_count = int(renewal_guard.get("required_addon_count") or 0)
+    existing_total_users = int(renewal_guard.get("existing_total_users") or 0)
+    existing_addon_count = int(renewal_guard.get("existing_addon_count") or 0)
+    if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
+        addon_count = min_addon_count
     profile = BillingProfile.objects.filter(organization=org).first()
     user_profile = UserProfile.objects.filter(user=request.user).first()
     seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
     bank_account_details = _format_bank_details(seller.bank_account_details if seller else "")
     seller_upi_id = (seller.upi_id or "").strip() if seller else ""
+    subtotal_amount = base_amount + (addon_unit_price * addon_count)
+    subtotal_amount, gst_amount, total_amount, tax_breakdown = _apply_invoice_tax(
+        subtotal_amount,
+        currency.upper(),
+        buyer_profile=profile,
+        seller_profile=seller,
+    )
 
     if request.method == "POST":
         action = (request.POST.get("billing_action") or "").strip()
@@ -1298,6 +1479,9 @@ def checkout_view(request):
         "selected_billing": billing,
         "selected_plan": plan,
         "selected_addon_count": addon_count,
+        "min_addon_count": min_addon_count,
+        "existing_total_users": existing_total_users,
+        "existing_addon_count": existing_addon_count,
         "selected_addon_price": addon_unit_price,
         "selected_base_amount": base_amount,
         "selected_total_amount": total_amount,
@@ -1314,6 +1498,11 @@ def checkout_view(request):
         "billing_phone_number": phone_number,
         "bank_account_details": bank_account_details,
         "seller_upi_id": seller_upi_id,
+        "invoice_tax_rate": _invoice_tax_rate_percent(currency),
+        "selected_subtotal_amount": subtotal_amount,
+        "selected_gst_amount": gst_amount,
+        "tax_breakdown": tax_breakdown,
+        "invoice_sac": tax_breakdown.get("sac", "") if isinstance(tax_breakdown, dict) else "",
     })
     return render(request, "public/checkout.html", context)
 
@@ -1402,6 +1591,100 @@ def _subscription_next_cycle_addon_count(subscription):
         return max(0, int(scheduled or 0))
     except (TypeError, ValueError):
         return max(0, int(subscription.addon_count or 0))
+
+
+def _plan_base_user_limit(plan):
+    """
+    Returns included user/seat/agent limit for the plan.
+    None means "unlimited/unknown/not-applicable".
+    """
+    if not plan:
+        return None
+    product = getattr(plan, "product", None)
+    product_slug = (getattr(product, "slug", "") or "monitor").strip().lower()
+    limits = getattr(plan, "limits", None) or {}
+    try:
+        if product_slug in ("storage", "online-storage"):
+            value = limits.get("max_users", limits.get("user_limit", 0))
+            value_int = int(value or 0)
+            return None if value_int <= 0 else value_int
+        if product_slug == "ai-chatbot":
+            value = limits.get("included_agents", getattr(plan, "included_agents", 0))
+            value_int = int(value or 0)
+            return None if value_int <= 0 else value_int
+        value = limits.get("user_limit", limits.get("included_users", None))
+        if value not in (None, ""):
+            value_int = int(value or 0)
+            return None if value_int <= 0 else value_int
+    except (TypeError, ValueError):
+        pass
+    try:
+        employee_limit = int(getattr(plan, "employee_limit", 0) or 0)
+    except (TypeError, ValueError):
+        employee_limit = 0
+    return None if employee_limit <= 0 else employee_limit
+
+
+def _required_addons_for_renewal(org, product_slug, selected_plan):
+    """
+    Ensures renewal checkout cannot go below the org's currently licensed users.
+    Returns dict with:
+      - required_addon_count: minimum add-ons for selected_plan
+      - existing_total_users: currently licensed total users (base + addons)
+      - existing_addon_count: current scheduled add-ons
+    """
+    if not org or not selected_plan:
+        return {"required_addon_count": 0, "existing_total_users": 0, "existing_addon_count": 0}
+    if not getattr(selected_plan, "allow_addons", False):
+        return {"required_addon_count": 0, "existing_total_users": 0, "existing_addon_count": 0}
+
+    existing_sub = _active_subscription_for_product(org, product_slug) or _latest_subscription_for_product(org, product_slug)
+    if not existing_sub or not getattr(existing_sub, "plan", None):
+        return {"required_addon_count": 0, "existing_total_users": 0, "existing_addon_count": 0}
+
+    existing_addons = _subscription_next_cycle_addon_count(existing_sub)
+    existing_base = _plan_base_user_limit(existing_sub.plan)
+    existing_total = (existing_base or 0) + max(0, int(existing_addons or 0))
+
+    selected_base = _plan_base_user_limit(selected_plan)
+    if selected_base is None:
+        # Unlimited included users; no add-ons required.
+        required_addons = 0
+    else:
+        required_addons = max(0, int(existing_total) - max(0, int(selected_base)))
+    return {
+        "required_addon_count": required_addons,
+        "existing_total_users": existing_total,
+        "existing_addon_count": existing_addons,
+    }
+
+
+def _org_active_user_count(org):
+    if not org:
+        return 0
+    try:
+        from apps.backend.business_autopilot.models import OrganizationUser
+    except Exception:
+        return 0
+    return (
+        OrganizationUser.objects
+        .filter(organization=org, is_deleted=False, is_active=True, user__is_active=True)
+        .count()
+    )
+
+
+def _effective_included_users_for_renewal(plan):
+    base_limit = _plan_base_user_limit(plan)
+    if base_limit is None:
+        return None
+    try:
+        base_limit = int(base_limit or 0)
+    except (TypeError, ValueError):
+        base_limit = 0
+    # For paid plans, minimum 1 user is included by default (matches org-user limit logic).
+    if base_limit <= 0 and plan and not is_free_plan(plan):
+        return 1
+    return max(0, base_limit)
 
 
 def _subscription_temporary_addon_window(subscription, now=None):
@@ -1755,6 +2038,10 @@ def checkout_confirm(request):
         addon_count = 0
 
     org = _resolve_org_for_user(request.user)
+    renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
+    min_addon_count = int(renewal_guard.get("required_addon_count") or 0)
+    if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
+        addon_count = min_addon_count
     plan_product_slug = _normalize_product_slug(plan.product.slug if plan and plan.product else "", default="")
     pending_transfers = PendingTransfer.objects.filter(
         organization=org,
@@ -1823,6 +2110,13 @@ def checkout_confirm(request):
         else:
             amount = _plan_price(plan, currency, billing) or 0
             amount = float(amount or 0) + (float(_addon_price(plan, currency, billing) or 0) * addon_count)
+        seller_profile = InvoiceSellerProfile.objects.order_by("-updated_at").first()
+        _, _, amount, _ = _apply_invoice_tax(
+            amount,
+            currency.upper(),
+            buyer_profile=profile,
+            seller_profile=seller_profile,
+        )
         PendingTransfer.objects.create(
             organization=org,
             user=request.user,
@@ -1975,6 +2269,15 @@ def billing_renew_view(request):
     if not plan.allow_addons:
         addon_count = 0
 
+    included_users = _effective_included_users_for_renewal(plan)
+    active_users = _org_active_user_count(org)
+    if included_users is None:
+        renewal_total_seats = None
+        seat_reduce_needed = 0
+    else:
+        renewal_total_seats = max(0, int(included_users)) + max(0, int(addon_count or 0))
+        seat_reduce_needed = max(0, int(active_users) - int(renewal_total_seats))
+
     pending_renewal = False
     if org:
         pending_renewal = PendingTransfer.objects.filter(
@@ -1996,7 +2299,13 @@ def billing_renew_view(request):
 
     base_price = base_price_monthly if billing == "monthly" else base_price_yearly
     addon_price = addon_price_monthly if billing == "monthly" else addon_price_yearly
-    total_price = base_price + (addon_price * max(0, addon_count))
+    subtotal_price = base_price + (addon_price * max(0, addon_count))
+    subtotal_price, gst_amount, total_price, tax_breakdown = _apply_invoice_tax(
+        subtotal_price,
+        currency.upper(),
+        buyer_profile=BillingProfile.objects.filter(organization=org).first(),
+        seller_profile=InvoiceSellerProfile.objects.order_by("-updated_at").first(),
+    )
 
     context.update({
         "selected_plan": plan,
@@ -2011,10 +2320,19 @@ def billing_renew_view(request):
         "base_price_yearly": base_price_yearly,
         "addon_price_monthly": addon_price_monthly,
         "addon_price_yearly": addon_price_yearly,
+        "subtotal_price": subtotal_price,
+        "gst_amount": gst_amount,
+        "invoice_tax_rate": _invoice_tax_rate_percent(currency),
         "total_price": total_price,
+        "tax_breakdown": tax_breakdown,
+        "invoice_sac": tax_breakdown.get("sac", "") if isinstance(tax_breakdown, dict) else "",
         "has_pending_renewal": pending_renewal,
         "show_billing_tab": True,
         "show_ticketing_tab": _is_org_admin_account(request, org, profile),
+        "included_users": included_users,
+        "active_users": active_users,
+        "renewal_total_seats": renewal_total_seats,
+        "seat_reduce_needed": seat_reduce_needed,
     })
     return render(request, "public/billing_renew.html", context)
 
@@ -2063,6 +2381,16 @@ def billing_renew_confirm(request):
         messages.error(request, "Billing access is available only for organization admins.")
         return redirect("/my-account/")
     if org:
+        included_users = _effective_included_users_for_renewal(plan)
+        if included_users is not None:
+            active_users = _org_active_user_count(org)
+            renewal_total_seats = max(0, int(included_users)) + max(0, int(addon_count or 0))
+            if int(active_users) > int(renewal_total_seats):
+                messages.error(
+                    request,
+                    f"You currently have {active_users} active users. To renew with {renewal_total_seats} seats, please deactivate {int(active_users) - int(renewal_total_seats)} user(s) before continuing.",
+                )
+                return redirect("/my-account/billing/renew/")
         has_pending = PendingTransfer.objects.filter(
             organization=org,
             status__in=["pending", "draft"],
@@ -2109,6 +2437,12 @@ def billing_renew_confirm(request):
     amount = float(_plan_price(plan, currency, billing) or 0)
     addon_price = float(_addon_price(plan, currency, billing) or 0)
     amount = amount + (addon_price * addon_count)
+    _, _, amount, _ = _apply_invoice_tax(
+        amount,
+        currency.upper(),
+        buyer_profile=BillingProfile.objects.filter(organization=org).first(),
+        seller_profile=InvoiceSellerProfile.objects.order_by("-updated_at").first(),
+    )
 
     with transaction.atomic():
         latest = _latest_subscription_for_product(org, product_slug)
