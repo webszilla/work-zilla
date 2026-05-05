@@ -38,7 +38,7 @@ const STOCKS_STORAGE_KEY = "wz_business_autopilot_stocks_module";
 const ACCOUNTS_STORAGE_KEY = "wz_business_autopilot_accounts_module";
 const ACCOUNTS_STORAGE_KEY_PREFIX = "wz_business_autopilot_accounts_module_scope";
 const STOCKS_DEFAULT_BRANCH_ID = "branch_main";
-const DEFAULT_TABLE_PAGE_SIZE = 5;
+const DEFAULT_TABLE_PAGE_SIZE = 10;
 const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   code: String(option?.value || "").trim(),
   label: String(option?.country || option?.label || "").trim(),
@@ -454,7 +454,7 @@ const CRM_SECTION_CONFIG = {
       { key: "assignType", label: "Assign To", type: "select", options: ["Users", "Team"], defaultValue: "Users" },
       { key: "assignedUser", label: "Users", type: "multiselect", options: [], optionSource: "erpUsers", placeholder: "Search users" },
       { key: "assignedTeam", label: "Team", type: "select", options: [], optionSource: "crmTeams", defaultValue: "" },
-      { key: "status", label: "Status", type: "select", options: ["Open", "Closed", "Onhold"], defaultValue: "Open" },
+      { key: "status", label: "Status", type: "select", options: ["Open", "Onhold", "Converted"], defaultValue: "Open" },
       { key: "priority", label: "Priority", type: "select", options: ["High", "Medium", "Low"], defaultValue: "Medium" }
     ]
   },
@@ -544,7 +544,7 @@ const CRM_SECTION_CONFIG = {
     icon: "bi-telephone-forward",
     columns: [
       { key: "crmReferenceId", label: "CRM ID", importOptional: true },
-      { key: "subject", label: "Subject" },
+      { key: "subject", label: "Followup Title" },
       { key: "relatedTo", label: "Related To" },
       { key: "dueDate", label: "Due Date" },
       { key: "owner", label: "Employee" },
@@ -552,32 +552,11 @@ const CRM_SECTION_CONFIG = {
     ],
     fields: [
       { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
-      { key: "subject", label: "Subject", placeholder: "Demo callback / pricing follow-up" },
+      { key: "subject", label: "Followup Title", placeholder: "Demo callback / pricing follow-up" },
       { key: "relatedTo", label: "Related To", placeholder: "Lead / Contact / Deal name" },
       { key: "dueDate", label: "Due Date", type: "date" },
       { key: "owner", label: "Employee", placeholder: "Search employee" },
-      { key: "status", label: "Status", type: "select", options: ["Ongoing", "Pending", "Completed"], defaultValue: "Pending" }
-    ]
-  },
-  activities: {
-    label: "Activities",
-    itemLabel: "Activity",
-    icon: "bi-clock-history",
-    columns: [
-      { key: "crmReferenceId", label: "CRM ID", importOptional: true },
-      { key: "activityType", label: "Activity Type" },
-      { key: "relatedTo", label: "Company / Contacts" },
-      { key: "date", label: "Date" },
-      { key: "owner", label: "Assigned Users" },
-      { key: "notes", label: "Notes" }
-    ],
-    fields: [
-      { key: "crmReferenceId", label: "CRM Reference ID", required: false, readOnly: true },
-      { key: "activityType", label: "Activity Type", placeholder: "Enter activity type" },
-      { key: "relatedTo", label: "Company / Contacts", placeholder: "Search company / contacts" },
-      { key: "date", label: "Date", type: "date" },
-      { key: "owner", label: "Assigned Users", type: "multiselect", defaultValue: [] },
-      { key: "notes", label: "Notes", placeholder: "Short activity notes" }
+      { key: "status", label: "Status", type: "select", options: ["Ongoing", "Pending", "Missed", "Completed"], defaultValue: "Pending" }
     ]
   },
 	  meetings: {
@@ -596,8 +575,8 @@ const CRM_SECTION_CONFIG = {
 	    ],
 	    fields: [
 	      { key: "title", label: "Meeting Title", placeholder: "Client demo / Follow-up call" },
-	      { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
 	      { key: "relatedTo", label: "Select Lead", type: "datalist", datalistSource: "crmLeads", placeholder: "Search lead (optional)", required: false },
+	      { key: "companyOrClientName", label: "Company / Contacts", type: "datalist", datalistSource: "crmContacts", placeholder: "Search company / contacts" },
 	      { key: "meetingDate", label: "Meeting Date", type: "date" },
 	      { key: "meetingTime", label: "Meeting Time", type: "time" },
 	      { key: "owner", label: "Employees", type: "multiselect", defaultValue: [] },
@@ -628,8 +607,6 @@ const LEGACY_DEMO_CRM_IDS = new Set([
   "crm_d2",
   "crm_f1",
   "crm_f2",
-  "crm_a1",
-  "crm_a2",
   "crm_m1",
   "crm_m2",
 ]);
@@ -1234,6 +1211,9 @@ function parseNumber(value) {
 
 function getCurrencyLocale(currencyCode) {
   const code = String(currencyCode || "INR").trim().toUpperCase();
+  if (!code) {
+    return "en-US";
+  }
   if (code === "INR") {
     return "en-IN";
   }
@@ -2409,10 +2389,12 @@ function getCrmMeetingReminderDayOptions(dateValue) {
   const isoDate = normalizeMeetingDateValue(dateValue);
   const isoMatch = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   let target = null;
+  let targetUtcFromIso = null;
   if (isoMatch) {
     const year = Number(isoMatch[1]);
     const month = Number(isoMatch[2]);
     const day = Number(isoMatch[3]);
+    targetUtcFromIso = Date.UTC(year, month - 1, day);
     const parsed = new Date(year, month - 1, day);
     if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
       target = parsed;
@@ -2424,10 +2406,26 @@ function getCrmMeetingReminderDayOptions(dateValue) {
   if (!target) {
     return allOptions.map((option) => ({ ...option, disabled: true }));
   }
-  const now = new Date();
-  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const targetUtc = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
-  const diffDays = Math.floor((targetUtc - todayUtc) / (24 * 60 * 60 * 1000));
+  // Use ISO date for "today" to avoid timezone / locale edge cases.
+  // This fixes Safari + date-input scenarios where the UI shows future dates but options end up disabled.
+  const todayIso = getTodayIsoDate();
+  const todayUtc = Date.UTC(
+    Number(todayIso.slice(0, 4)),
+    Number(todayIso.slice(5, 7)) - 1,
+    Number(todayIso.slice(8, 10)),
+  );
+  const targetUtc = typeof targetUtcFromIso === "number" && Number.isFinite(targetUtcFromIso)
+    ? targetUtcFromIso
+    : Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  let diffDays = Math.floor((targetUtc - todayUtc) / (24 * 60 * 60 * 1000));
+  // Defensive: if parsing/UTC math ever produces an invalid number, keep options enabled rather than disabling all.
+  if (!Number.isFinite(diffDays)) {
+    diffDays = 0;
+  }
+  // Defensive: if ISO date says it's future/today but diffDays is negative (timezone edge), clamp to 0.
+  if (diffDays < 0 && isoDate && todayIso && isoDate >= todayIso) {
+    diffDays = 0;
+  }
   if (diffDays < 0) {
     return allOptions.map((option) => ({ ...option, disabled: true }));
   }
@@ -2472,6 +2470,23 @@ function formatFileSizeLabel(bytes) {
     return `${(size / (1024 * 1024)).toFixed(2)} MB`;
   }
   return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function formatCrmFollowUpLeadNoteText(followUpRow = {}) {
+  const title = String(followUpRow.subject || "").trim() || "-";
+  const employee = String(followUpRow.owner || "").trim() || "-";
+  const status = String(followUpRow.status || "").trim() || "-";
+  return `Followup: ${title} / ${employee} / ${status}`;
+}
+
+function formatCrmMeetingLeadNoteText(meetingRow = {}) {
+  const title = String(meetingRow.title || "").trim() || "-";
+  const employees = Array.isArray(meetingRow.owner)
+    ? meetingRow.owner.map((item) => String(item || "").trim()).filter(Boolean).join(", ")
+    : String(meetingRow.owner || "").trim();
+  const mode = String(meetingRow.meetingMode || "").trim() || "-";
+  const status = String(meetingRow.status || "").trim() || "-";
+  return `Meeting: ${title} / ${employees || "-"} / ${mode} / ${status}`;
 }
 
 const PAYROLL_MANAGEMENT_TABS = new Set(["payroll", "salaryStructures", "payslips", "payrollSettings"]);
@@ -3656,6 +3671,32 @@ function normalizeCrmContactTag(value) {
   return String(value || "").trim();
 }
 
+function normalizeCrmLeadStatusKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized === "on hold" || normalized === "onhold") {
+    return "onhold";
+  }
+  // Backward compatible: treat legacy "Closed" as "Converted".
+  if (normalized === "closed" || normalized === "converted") {
+    return "converted";
+  }
+  if (normalized === "open") {
+    return "open";
+  }
+  return normalized;
+}
+
+function normalizeCrmLeadStatusLabel(value) {
+  const key = normalizeCrmLeadStatusKey(value);
+  if (key === "open") return "Open";
+  if (key === "onhold") return "Onhold";
+  if (key === "converted") return "Converted";
+  return String(value || "").trim();
+}
+
 function normalizeCrmContactRecord(row = {}) {
   const phoneCountryCode = String(row.phoneCountryCode || row.phone_country_code || "+91").trim() || "+91";
   const isDeleted = Boolean(row.isDeleted || row.is_deleted);
@@ -3683,12 +3724,7 @@ function normalizeCrmLeadRecord(row = {}) {
   const leadAmount = row.leadAmount ?? row.lead_amount ?? "";
   const leadSource = String(row.leadSource || row.lead_source || "").trim();
   const priority = String(row.priority || "").trim() || "Medium";
-  const normalizedStatus = String(row.status || "").trim().toLowerCase();
-  const status = normalizedStatus === "converted"
-    ? "Closed"
-    : normalizedStatus === "on hold" || normalizedStatus === "onhold"
-      ? "Onhold"
-      : String(row.status || "").trim();
+  const status = normalizeCrmLeadStatusLabel(row.status);
   const normalizedAssignType = String(row.assignType || row.assign_type || "").trim().toLowerCase();
   const assignType = normalizedAssignType === "team" ? "Team" : "Users";
   const assignedUser = Array.isArray(row.assignedUser)
@@ -3732,6 +3768,9 @@ function normalizeCrmLeadRecord(row = {}) {
     assignedTeam,
     assignedTo: String(row.assignedTo || (assignType.toLowerCase() === "team" ? assignedTeam : assignedUser.join(", "))).trim(),
     createdBy: String(row.createdBy || row.created_by_name || row.owner || "").trim(),
+    finalProposalAmount: String(row.finalProposalAmount ?? row.final_proposal_amount ?? "").trim(),
+    proposalFinalizedAt: String(row.proposalFinalizedAt || row.proposal_finalized_at || "").trim(),
+    proposalFinalizedBy: String(row.proposalFinalizedBy || row.proposal_finalized_by_name || "").trim(),
     leadNotesHistory: notesHistory,
   };
 }
@@ -4089,6 +4128,37 @@ function isBackendRowId(value) {
   return /^\d+$/.test(String(value || "").trim());
 }
 
+function resolveBackendCrmRowId(sectionKey, rowId, rows = []) {
+  const normalizedSection = String(sectionKey || "").trim();
+  const normalizedRowId = String(rowId || "").trim();
+  if (!normalizedSection || !normalizedRowId) {
+    return "";
+  }
+  if (isBackendRowId(normalizedRowId)) {
+    return normalizedRowId;
+  }
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (normalizedSection === "salesOrders") {
+    const match = sourceRows.find((row) => {
+      const normalized = normalizeCrmSalesOrderRecord(row || {});
+      const docNo = String(normalized.docNo || normalized.orderId || normalized.order_id || "").trim();
+      return Boolean(docNo && docNo === normalizedRowId) || String(row?.orderId || row?.order_id || "").trim() === normalizedRowId;
+    });
+    const matchId = String(match?.id || "").trim();
+    return isBackendRowId(matchId) ? matchId : "";
+  }
+  if (normalizedSection === "deals") {
+    const match = sourceRows.find((row) => {
+      const normalized = normalizeCrmDealRecord(row || {});
+      const ref = String(normalized.crmReferenceId || normalized.crm_reference_id || "").trim();
+      return Boolean(ref && ref === normalizedRowId);
+    });
+    const matchId = String(match?.id || "").trim();
+    return isBackendRowId(matchId) ? matchId : "";
+  }
+  return "";
+}
+
 const CRM_COLLECTION_API_CONFIG = {
   leads: { endpoint: "/api/business-autopilot/leads", idKey: "lead_id" },
   contacts: { endpoint: "/api/business-autopilot/contacts", idKey: "contact_id" },
@@ -4235,14 +4305,6 @@ function buildCrmImportDedupKey(sectionKey, row = {}) {
       normalizeDedupToken(row.relatedTo),
       normalizeDedupToken(row.meetingDate),
       normalizeDedupToken(row.meetingTime),
-    ].join("|");
-  }
-  if (key === "activities") {
-    return [
-      normalizeDedupToken(row.activityType),
-      normalizeDedupToken(row.relatedTo),
-      normalizeDedupToken(row.date),
-      normalizeDedupToken(row.owner),
     ].join("|");
   }
   return "";
@@ -8472,7 +8534,7 @@ function BillingDocumentEditor({
 function CrmOnePageModule() {
   const location = useLocation();
   const navigate = useNavigate();
-  const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities", "reports"]
+  const sectionOrder = ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "reports"]
     .filter((key) => Boolean(CRM_SECTION_CONFIG[key]));
   const [moduleData, setModuleData] = useState(() => normalizeCrmData(null));
   const [activeSection, setActiveSection] = useState(() => getStoredCrmActiveSection(sectionOrder));
@@ -8484,6 +8546,21 @@ function CrmOnePageModule() {
   const [meetingPopup, setMeetingPopup] = useState(null);
   const [leadViewPopup, setLeadViewPopup] = useState(null);
   const [leadNotesPopup, setLeadNotesPopup] = useState(null);
+  const [leadDataPopupTab, setLeadDataPopupTab] = useState("notes");
+  const [leadProposals, setLeadProposals] = useState([]);
+  const [leadProposalsLoading, setLeadProposalsLoading] = useState(false);
+  const [leadProposalsError, setLeadProposalsError] = useState("");
+  const [leadProposalBaseChoice, setLeadProposalBaseChoice] = useState("__new__");
+  const [leadProposalName, setLeadProposalName] = useState("");
+  const [leadProposalFile, setLeadProposalFile] = useState(null);
+  const [leadProposalUploading, setLeadProposalUploading] = useState(false);
+  const [leadProposalUploadError, setLeadProposalUploadError] = useState("");
+  const [leadProposalFileInputKey, setLeadProposalFileInputKey] = useState(() => `lead-proposal-file-${Date.now()}`);
+  const [leadFinalProposalAmount, setLeadFinalProposalAmount] = useState("");
+  const [leadFinalProposalStatus, setLeadFinalProposalStatus] = useState("Open");
+  const [leadFinalizeProposalError, setLeadFinalizeProposalError] = useState("");
+  const [leadFinalizeProposalSaving, setLeadFinalizeProposalSaving] = useState(false);
+  const [leadProposalsSubTab, setLeadProposalsSubTab] = useState("list");
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [contactTagTab, setContactTagTab] = useState("all");
   const [dealStatusTab, setDealStatusTab] = useState("all");
@@ -8522,6 +8599,7 @@ function CrmOnePageModule() {
   const crmSectionLinkHydratedRef = useRef("");
   const [selectedTeamDepartments, setSelectedTeamDepartments] = useState([]);
   const [selectedTeamEmployeeRoles, setSelectedTeamEmployeeRoles] = useState([]);
+  const meetingAutoCompanyRef = useRef("");
   const [teamMembersPopup, setTeamMembersPopup] = useState(null);
   const [teamCategorySearch, setTeamCategorySearch] = useState("");
   const [teamCategorySearchOpen, setTeamCategorySearchOpen] = useState(false);
@@ -8532,7 +8610,6 @@ function CrmOnePageModule() {
   const [meetingCompanySearchOpen, setMeetingCompanySearchOpen] = useState(false);
   const [meetingLeadSearchOpen, setMeetingLeadSearchOpen] = useState(false);
   const [dealCompanySearchOpen, setDealCompanySearchOpen] = useState(false);
-  const [activityClientSearchOpen, setActivityClientSearchOpen] = useState(false);
   const [meetingReminderChannelSearch, setMeetingReminderChannelSearch] = useState("");
   const [meetingReminderChannelSearchOpen, setMeetingReminderChannelSearchOpen] = useState(false);
   const [meetingReminderDaySearch, setMeetingReminderDaySearch] = useState("");
@@ -8541,8 +8618,6 @@ function CrmOnePageModule() {
   const [meetingReminderMinuteSearchOpen, setMeetingReminderMinuteSearchOpen] = useState(false);
   const [meetingEmployeeSearch, setMeetingEmployeeSearch] = useState("");
   const [meetingEmployeeSearchOpen, setMeetingEmployeeSearchOpen] = useState(false);
-  const [activityEmployeeSearch, setActivityEmployeeSearch] = useState("");
-  const [activityEmployeeSearchOpen, setActivityEmployeeSearchOpen] = useState(false);
   const [leadCompanySearchOpen, setLeadCompanySearchOpen] = useState(false);
   const [leadPhoneLockedFromClient, setLeadPhoneLockedFromClient] = useState(false);
   const [leadAssignedUserSearch, setLeadAssignedUserSearch] = useState("");
@@ -8842,7 +8917,7 @@ function CrmOnePageModule() {
       }
       return assignedUsers.some((userName) => String(userName || "").trim().toLowerCase() === normalizedCurrentUserName);
     }
-    if (sectionKey === "meetings" || sectionKey === "activities" || sectionKey === "followUps") {
+    if (sectionKey === "meetings" || sectionKey === "followUps") {
       if (normalizedCurrentUserId) {
         const currentUserNumericId = Number.parseInt(normalizedCurrentUserId, 10);
         if (Number.isFinite(currentUserNumericId)) {
@@ -8917,7 +8992,7 @@ function CrmOnePageModule() {
       return (previousState) => {
         const prev = normalizeCrmData(previousState);
         const merged = { ...incoming };
-        ["teams", "followUps", "activities"].forEach((sectionKey) => {
+        ["teams", "followUps"].forEach((sectionKey) => {
           const incomingRows = Array.isArray(incoming[sectionKey]) ? incoming[sectionKey] : [];
           const prevRows = Array.isArray(prev[sectionKey]) ? prev[sectionKey] : [];
           merged[sectionKey] = incomingRows.length ? incomingRows : prevRows;
@@ -9329,7 +9404,7 @@ function CrmOnePageModule() {
     let hasChanges = false;
     const now = Date.now();
     const nextData = { ...moduleData };
-    ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings", "activities"].forEach((sectionKey) => {
+    ["leads", "contacts", "teams", "deals", "salesOrders", "followUps", "meetings"].forEach((sectionKey) => {
       const rows = Array.isArray(moduleData[sectionKey]) ? moduleData[sectionKey] : [];
       const nextRows = rows.filter((row) => {
         const deletedAtRaw = row?.deletedAt;
@@ -9392,14 +9467,6 @@ function CrmOnePageModule() {
   }, [activeSection]);
 
   useEffect(() => {
-    if (activeSection !== "activities") {
-      setActivityClientSearchOpen(false);
-      setActivityEmployeeSearch("");
-      setActivityEmployeeSearchOpen(false);
-    }
-  }, [activeSection]);
-
-  useEffect(() => {
     const reminderDayOptions = getCrmMeetingReminderDayOptions(forms.meetings?.meetingDate);
     const selectedReminderDays = parseCrmMeetingReminderDayValues(forms.meetings?.reminderDays);
     if (!selectedReminderDays.length) {
@@ -9423,14 +9490,16 @@ function CrmOnePageModule() {
 	    const deals = getAccessibleCrmRows("deals", moduleData.deals).filter((row) => !isSoftDeletedCrmRow(row));
 	    const followUps = getAccessibleCrmRows("followUps", moduleData.followUps).filter((row) => !isSoftDeletedCrmRow(row));
 	    const meetings = getAccessibleCrmRows("meetings", moduleData.meetings).filter((row) => !isSoftDeletedCrmRow(row));
-	    const activities = getAccessibleCrmRows("activities", moduleData.activities).filter((row) => !isSoftDeletedCrmRow(row));
 	    const teams = getAccessibleCrmRows("teams", moduleData.teams).filter((row) => !isSoftDeletedCrmRow(row));
-	    const openLeads = leads.filter((row) => !["closed", "onhold"].includes(String(row.status || "").toLowerCase())).length;
+	    const openLeads = leads.filter((row) => {
+	      const statusKey = normalizeCrmLeadStatusKey(row.status);
+	      return statusKey && statusKey !== "converted" && statusKey !== "onhold";
+	    }).length;
 	    // Pipeline value should reflect active opportunities only (open/pending/onhold).
 	    const pipelineValue = leads
 	      .filter((row) => {
-	        const status = String(row.status || "").trim().toLowerCase();
-	        return status && !["closed", "completed", "won", "converted"].includes(status);
+	        const statusKey = normalizeCrmLeadStatusKey(row.status);
+	        return statusKey && statusKey !== "converted";
 	      })
 	      .reduce((sum, row) => sum + parseNumber(row.leadAmount), 0);
 	    const today = new Date().toISOString().slice(0, 10);
@@ -9444,15 +9513,14 @@ function CrmOnePageModule() {
       const status = String(row.status || "").toLowerCase();
       return meetingDate >= today && !["cancelled", "missed", "completed"].includes(status);
     }).length;
-    return [
-      { label: "Open Leads", value: String(openLeads), icon: "bi-person-plus" },
-      { label: "Pipeline Value", value: formatCurrencyAmount(pipelineValue, getOrgCurrency()), icon: "bi-graph-up-arrow" },
-      { label: "Followups Today", value: String(followupsToday), icon: "bi-telephone-forward" },
-      { label: "Upcoming Meetings", value: String(upcomingMeetings), icon: "bi-calendar-event" },
-      { label: "Activities", value: String(activities.length), icon: "bi-activity" },
-      { label: "Teams", value: String(teams.length), icon: "bi-people-fill" },
-    ];
-  }, [hasCrmAllRecordAccess, isCrmAdmin, moduleData, normalizedCurrentUserEmail, normalizedCurrentUserName]);
+	    return [
+	      { label: "Open Leads", value: String(openLeads), icon: "bi-person-plus" },
+	      { label: "Pipeline Value", value: formatCurrencyAmount(pipelineValue, getOrgCurrency()), icon: "bi-graph-up-arrow" },
+	      { label: "Followups Today", value: String(followupsToday), icon: "bi-telephone-forward" },
+	      { label: "Upcoming Meetings", value: String(upcomingMeetings), icon: "bi-calendar-event" },
+	      { label: "Teams", value: String(teams.length), icon: "bi-people-fill" },
+	    ];
+	  }, [hasCrmAllRecordAccess, isCrmAdmin, moduleData, normalizedCurrentUserEmail, normalizedCurrentUserName]);
 
   const crmTeamOptions = useMemo(
     () => Array.from(new Set((moduleData.teams || []).map((row) => String(row?.name || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -9466,11 +9534,12 @@ function CrmOnePageModule() {
     [crmDirectoryOptions]
   );
   const crmDepartmentOptions = useMemo(
-    () => Array.from(new Set([
-      ...(crmDepartmentDirectory || []).map((row) => String(row?.name || "").trim()),
-      ...crmDirectoryOptions.map((row) => row.department),
-    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [crmDepartmentDirectory, crmDirectoryOptions]
+    () => Array.from(new Set(
+      (crmDepartmentDirectory || [])
+        .map((row) => String(row?.name || "").trim())
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b)),
+    [crmDepartmentDirectory]
   );
   const crmEmployeeRoleOptions = useMemo(
     () => Array.from(new Set([
@@ -10264,6 +10333,30 @@ function CrmOnePageModule() {
 	        ...previousSection,
 	        [fieldKey]: normalizedValue,
 	      };
+	      if (sectionKey === "meetings" && fieldKey === "relatedTo") {
+	        const normalizedRelatedTo = String(normalizedValue || "").trim();
+	        if (!normalizedRelatedTo) {
+	          meetingAutoCompanyRef.current = "";
+	        } else {
+	          const normalizedTarget = normalizedRelatedTo.toLowerCase();
+	          const matchedLead = (moduleData.leads || []).find((lead) => {
+	            const leadName = String(lead?.name || lead?.lead_name || "").trim().toLowerCase();
+	            const leadCrmId = String(lead?.crmReferenceId || lead?.crm_reference_id || "").trim().toLowerCase();
+	            return Boolean(
+	              (leadName && leadName === normalizedTarget)
+	              || (leadCrmId && leadCrmId === normalizedTarget)
+	            );
+	          });
+	          const resolvedCompany = String(matchedLead?.company || matchedLead?.company_name || matchedLead?.companyName || "").trim();
+	          const currentCompanyValue = String(nextSection.companyOrClientName || "").trim();
+	          if (resolvedCompany) {
+	            if (!currentCompanyValue || currentCompanyValue === meetingAutoCompanyRef.current) {
+	              nextSection.companyOrClientName = resolvedCompany;
+	            }
+	            meetingAutoCompanyRef.current = resolvedCompany;
+	          }
+	        }
+	      }
 	      if (sectionKey === "meetings" && fieldKey === "meetingDate") {
 	        const allowedDayValues = new Set(
 	          getCrmMeetingReminderDayOptions(nextSection.meetingDate)
@@ -10339,11 +10432,6 @@ function CrmOnePageModule() {
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
     }
-    if (sectionKey === "activities") {
-      setActivityClientSearchOpen(false);
-      setActivityEmployeeSearch("");
-      setActivityEmployeeSearchOpen(false);
-    }
     if (sectionKey === "followUps") {
       setFollowUpRelatedToType(CRM_FOLLOWUP_RELATED_TO_TYPES[0]);
       setFollowUpRelatedToSearch("");
@@ -10398,7 +10486,7 @@ function CrmOnePageModule() {
         nextValues[field.key] = rowValue ?? field.defaultValue ?? "";
       }
     });
-    if ((sectionKey === "followUps" || sectionKey === "activities") && !String(nextValues.crmReferenceId || "").trim()) {
+    if (sectionKey === "followUps" && !String(nextValues.crmReferenceId || "").trim()) {
       nextValues.crmReferenceId = resolveCrmReferenceIdByText(nextValues.relatedTo || "");
     }
     if (sectionKey === "leads" && String(nextValues.assignType || "Users").trim().toLowerCase() !== "team") {
@@ -10456,11 +10544,6 @@ function CrmOnePageModule() {
       setMeetingReminderMinuteSearchOpen(false);
       setMeetingEmployeeSearch("");
       setMeetingEmployeeSearchOpen(false);
-    }
-    if (sectionKey === "activities") {
-      setActivityClientSearchOpen(false);
-      setActivityEmployeeSearch("");
-      setActivityEmployeeSearchOpen(false);
     }
     if (sectionKey === "followUps") {
       const normalizedRelatedTo = String(normalizedRow.relatedTo || "").trim();
@@ -10634,6 +10717,50 @@ function CrmOnePageModule() {
       clearCrmSelection(normalizedSection);
       return;
     }
+    if (["deals", "salesOrders", "meetings"].includes(normalizedSection)) {
+      const resolvedBackendIds = eligibleIds
+        .map((rowId) => resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]) || rowId)
+        .filter((rowId) => isBackendRowId(rowId));
+      const localOnlyIds = eligibleIds.filter((rowId) => {
+        const resolved = resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]);
+        return isTemporaryCrmRowId(normalizedSection, rowId) || !isBackendRowId(resolved || rowId);
+      });
+      if (localOnlyIds.length) {
+        const rowIdSet = new Set(localOnlyIds);
+        const nowIso = new Date().toISOString();
+        setModuleData((prev) => ({
+          ...prev,
+          [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+            rowIdSet.has(String(row.id || "").trim())
+              ? {
+                  ...row,
+                  isDeleted: true,
+                  is_deleted: true,
+                  deletedAt: nowIso,
+                  deleted_at: nowIso,
+                  deletedBy: currentUserName || "Current User",
+                }
+              : row
+          )),
+        }));
+      }
+      if (resolvedBackendIds.length) {
+        try {
+          await Promise.all(resolvedBackendIds.map((backendId) => saveCrmCollectionRecord(normalizedSection, "DELETE", backendId)));
+          await refreshCrmRowsFromBackend();
+        } catch (_error) {
+          setCrmActionPopup({
+            open: true,
+            title: "Delete Failed",
+            message: "Unable to delete the selected rows. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+      }
+      clearCrmSelection(normalizedSection);
+      return;
+    }
     const rowIdSet = new Set(eligibleIds);
     const nowIso = new Date().toISOString();
     setModuleData((prev) => ({
@@ -10708,6 +10835,49 @@ function CrmOnePageModule() {
       clearCrmSelection(normalizedSection);
       return;
     }
+    if (["deals", "salesOrders", "meetings"].includes(normalizedSection)) {
+      const resolvedBackendIds = normalizedIds
+        .map((rowId) => resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]) || rowId)
+        .filter((rowId) => isBackendRowId(rowId));
+      const localOnlyIds = normalizedIds.filter((rowId) => {
+        const resolved = resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]);
+        return isTemporaryCrmRowId(normalizedSection, rowId) || !isBackendRowId(resolved || rowId);
+      });
+      if (localOnlyIds.length) {
+        const rowIdSet = new Set(localOnlyIds);
+        setModuleData((prev) => ({
+          ...prev,
+          [normalizedSection]: (prev[normalizedSection] || []).map((row) => (
+            rowIdSet.has(String(row.id || "").trim())
+              ? {
+                  ...row,
+                  isDeleted: false,
+                  is_deleted: false,
+                  deletedAt: "",
+                  deleted_at: "",
+                  deletedBy: "",
+                }
+              : row
+          )),
+        }));
+      }
+      if (resolvedBackendIds.length) {
+        try {
+          await Promise.all(resolvedBackendIds.map((backendId) => saveCrmCollectionRecord(normalizedSection, "PATCH", backendId, { is_deleted: false })));
+          await refreshCrmRowsFromBackend();
+        } catch (_error) {
+          setCrmActionPopup({
+            open: true,
+            title: "Restore Failed",
+            message: "Unable to restore the selected rows. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+      }
+      clearCrmSelection(normalizedSection);
+      return;
+    }
     const rowIdSet = new Set(normalizedIds);
     setModuleData((prev) => ({
       ...prev,
@@ -10738,20 +10908,28 @@ function CrmOnePageModule() {
     if (!normalizedSection || !normalizedIds.length) {
       return;
     }
-    if (normalizedSection === "leads" || normalizedSection === "contacts") {
+    if (["leads", "contacts", "deals", "salesOrders"].includes(normalizedSection)) {
       const tempIds = normalizedIds.filter((rowId) => isTemporaryCrmRowId(normalizedSection, rowId));
       const backendIds = normalizedIds.filter((rowId) => {
-        return !isTemporaryCrmRowId(normalizedSection, rowId) && isBackendRowId(rowId);
+        if (isTemporaryCrmRowId(normalizedSection, rowId)) {
+          return false;
+        }
+        const resolved = resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]);
+        return isBackendRowId(resolved || rowId);
       });
       if (backendIds.length) {
         try {
-          await Promise.all(backendIds.map((rowId) => saveCrmCollectionRecord(normalizedSection, "DELETE", rowId, {}, "?permanent=1")));
+          await Promise.all(backendIds.map((rowId) => {
+            const resolved = resolveBackendCrmRowId(normalizedSection, rowId, moduleData?.[normalizedSection]);
+            const backendId = resolved || rowId;
+            return saveCrmCollectionRecord(normalizedSection, "DELETE", backendId, {}, "?permanent=1");
+          }));
           await refreshCrmRowsFromBackend();
         } catch (_error) {
           setCrmActionPopup({
             open: true,
             title: "Permanent Delete Failed",
-            message: "Unable to permanently delete the selected leads. Please try again.",
+            message: "Unable to permanently delete the selected rows. Please try again.",
             isError: true,
           });
           return;
@@ -10807,7 +10985,6 @@ function CrmOnePageModule() {
       contacts: "Contact",
       followUps: "Follow-up",
       meetings: "Meeting",
-      activities: "Activity",
       teams: "Team",
     };
     const rowLabel = sectionLabelMap[String(sectionKey || "").trim()] || "CRM Item";
@@ -10842,10 +11019,80 @@ function CrmOnePageModule() {
         return;
       }
     }
-    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+    if (sectionKey === "teams") {
+      const teamName = String(targetRow?.name || "").trim();
+      if (teamName) {
+        const normalizedTeamName = teamName.toLowerCase();
+        const assignedLeads = (Array.isArray(moduleData?.leads) ? moduleData.leads : [])
+          .map((row) => normalizeCrmLeadRecord(row || {}))
+          .filter((row) => {
+            const assignType = String(row.assignType || row.assign_type || "").trim().toLowerCase();
+            const assignedTeam = String(row.assignedTeam || row.assigned_team || "").trim().toLowerCase();
+            return assignType === "team" && assignedTeam && assignedTeam === normalizedTeamName;
+          })
+          .filter((row) => isBackendRowId(row?.id));
+        if (assignedLeads.length) {
+          setCrmActionPopup({
+            open: true,
+            title: "Team Assigned",
+            message: [
+              `This team is assigned to ${assignedLeads.length} lead(s).`,
+              "Do you want to move those leads to Org Admin and delete this team?",
+            ].join("\n"),
+            confirmText: "Yes",
+            cancelText: "Cancel",
+            preserveMessageCase: true,
+            onConfirm: () => {
+              (async () => {
+                const adminUserId = String(currentUserId || "").trim();
+                if (!isBackendRowId(adminUserId)) {
+                  setCrmActionPopup({
+                    open: true,
+                    title: "Unable to Reassign",
+                    message: "Current admin user id not found. Please refresh and try again.",
+                    isError: true,
+                  });
+                  return;
+                }
+                try {
+                  await Promise.all(assignedLeads.map((lead) => saveCrmCollectionRecord(
+                    "leads",
+                    "PATCH",
+                    String(lead.id || "").trim(),
+                    {
+                      assign_type: "Users",
+                      assigned_user_id: adminUserId,
+                      assigned_user_ids: [adminUserId],
+                      assigned_team: "",
+                    },
+                  )));
+                  await refreshCrmRowsFromBackend();
+                  performLocalDelete();
+                  setCrmActionPopup({
+                    open: true,
+                    title: "Successful",
+                    message: `Team deleted. ${assignedLeads.length} lead(s) moved to Org Admin.`,
+                    preserveMessageCase: true,
+                  });
+                } catch (_error) {
+                  setCrmActionPopup({
+                    open: true,
+                    title: "Reassign Failed",
+                    message: "Unable to move leads to Org Admin. Please try again.",
+                    isError: true,
+                  });
+                }
+              })();
+            },
+          });
+          return;
+        }
+      }
+    }
+    if (["leads", "contacts", "meetings", "deals", "salesOrders"].includes(sectionKey)) {
       const collectionRowId = sectionKey === "meetings"
         ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
-        : String(rowId || "").trim();
+        : (resolveBackendCrmRowId(sectionKey, rowId, moduleData?.[sectionKey]) || String(rowId || "").trim());
       if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         performLocalDelete();
         toggleCrmRowSelection(sectionKey, rowId, false);
@@ -10905,7 +11152,6 @@ function CrmOnePageModule() {
       contacts: "Contact",
       followUps: "Follow-up",
       meetings: "Meeting",
-      activities: "Activity",
       teams: "Team",
     };
     const rowLabel = sectionLabelMap[String(sectionKey || "").trim()] || "CRM Item";
@@ -10922,10 +11168,10 @@ function CrmOnePageModule() {
     const details = primaryName
       ? `${rowLabel} restored: ${primaryName}`
       : `${rowLabel} restored (ID: ${rowId})`;
-    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+    if (["leads", "contacts", "meetings", "deals", "salesOrders"].includes(sectionKey)) {
       const collectionRowId = sectionKey === "meetings"
         ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
-        : String(rowId || "").trim();
+        : (resolveBackendCrmRowId(sectionKey, rowId, moduleData?.[sectionKey]) || String(rowId || "").trim());
       if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         performLocalRestore();
         toggleCrmRowSelection(sectionKey, rowId, false);
@@ -10961,10 +11207,10 @@ function CrmOnePageModule() {
       return;
     }
     const targetRow = (moduleData?.[sectionKey] || []).find((row) => String(row?.id) === String(rowId)) || null;
-    if (["leads", "contacts", "meetings"].includes(sectionKey)) {
+    if (["leads", "contacts", "meetings", "deals", "salesOrders"].includes(sectionKey)) {
       const collectionRowId = sectionKey === "meetings"
         ? String(targetRow?.serverMeetingId || targetRow?.id || rowId || "").trim()
-        : String(rowId || "").trim();
+        : (resolveBackendCrmRowId(sectionKey, rowId, moduleData?.[sectionKey]) || String(rowId || "").trim());
       if (isTemporaryCrmRowId(sectionKey, rowId) || !isBackendRowId(collectionRowId)) {
         setModuleData((prev) => ({
           ...prev,
@@ -10980,7 +11226,7 @@ function CrmOnePageModule() {
         setCrmActionPopup({
           open: true,
           title: "Permanent Delete Failed",
-          message: "Unable to permanently delete this lead. Please try again.",
+          message: "Unable to permanently delete this item. Please try again.",
           isError: true,
         });
         return;
@@ -12657,7 +12903,10 @@ function CrmOnePageModule() {
       return !String(effectiveValues[field.key] || "").trim();
     });
     if (sectionKey === "teams" && !selectedTeamDepartments.length && !selectedTeamEmployeeRoles.length) {
-      missingFields.push({ key: "departmentFilters", label: "Select Department or Employee Role" });
+      const selectedMembers = Array.isArray(effectiveValues.members) ? effectiveValues.members.filter(Boolean) : [];
+      if (selectedMembers.length === 0) {
+        missingFields.push({ key: "departmentFilters", label: "Select Department or Employee Role" });
+      }
     }
     if (missingFields.length || invalidEmailFields.length) {
       const missingFieldMap = {};
@@ -13084,20 +13333,6 @@ function CrmOnePageModule() {
         return;
       }
     }
-    if (sectionKey === "activities") {
-      const activityOwnersRaw = Array.isArray(payload.owner)
-        ? payload.owner.map((item) => String(item || "").trim()).filter(Boolean)
-        : String(payload.owner || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-      const activityOwners = resolveAssignedUserNames(activityOwnersRaw);
-      const effectiveActivityOwners = activityOwners.length ? activityOwners : [String(currentUserName || "Current User").trim()];
-      payload.owner = effectiveActivityOwners.join(", ");
-      payload.ownerUserIds = buildMeetingOwnerUserIds(effectiveActivityOwners);
-      payload.crmReferenceId = String(payload.crmReferenceId || resolveCrmReferenceIdByText(payload.relatedTo || "") || "").trim();
-      payload.createdBy = String(currentUserName || "Current User").trim();
-    }
     if (sectionKey === "followUps") {
       const followUpOwners = resolveAssignedUserNames(parseOwnerNames(payload.owner));
       const effectiveFollowUpOwners = followUpOwners.length ? followUpOwners : [String(currentUserName || "Current User").trim()];
@@ -13315,6 +13550,7 @@ function CrmOnePageModule() {
     setModuleData((prev) => {
       const rows = prev[sectionKey] || [];
       if (editingId) {
+        const previousRow = rows.find((row) => String(row.id) === String(editingId)) || null;
         const nextRows = rows.map((row) => (
           String(row.id) === String(editingId)
             ? { ...row, ...payload, createdBy: row.createdBy || payload.createdBy || currentUserName }
@@ -13337,6 +13573,116 @@ function CrmOnePageModule() {
             deals: nextDeals,
           };
         }
+        if (sectionKey === "meetings") {
+          const previousCrmRef = String(
+            previousRow?.crmReferenceId
+            || previousRow?.crm_reference_id
+            || resolveCrmReferenceIdByText(previousRow?.relatedTo || "")
+            || ""
+          ).trim();
+          const nextCrmRef = String(payload.crmReferenceId || resolveCrmReferenceIdByText(payload.relatedTo || "") || "").trim();
+          if (previousCrmRef || nextCrmRef) {
+            const meetingNoteKey = String(previousRow?.serverMeetingId || previousRow?.id || editingId || "").trim() || String(editingId || "").trim();
+            const noteId = `lead_note_meeting_${meetingNoteKey}`;
+            const noteDate = String(payload.meetingDate || previousRow?.meetingDate || "").trim();
+            const noteText = formatCrmMeetingLeadNoteText(payload);
+            const nowIso = new Date().toISOString();
+            const nextLeads = (prev.leads || []).map((row) => {
+              const normalizedLead = normalizeCrmLeadRecord(row);
+              const rowCrmRef = String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim();
+              if (!rowCrmRef) {
+                return row;
+              }
+              if (previousCrmRef && previousCrmRef !== nextCrmRef && rowCrmRef === previousCrmRef) {
+                const history = Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [];
+                return {
+                  ...normalizedLead,
+                  leadNotesHistory: history.filter((entry) => String(entry?.id || "").trim() !== noteId),
+                };
+              }
+              if (nextCrmRef && rowCrmRef === nextCrmRef) {
+                const history = Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [];
+                const existing = history.find((entry) => String(entry?.id || "").trim() === noteId) || null;
+                const nextEntry = {
+                  id: noteId,
+                  meetingId: meetingNoteKey,
+                  noteDate,
+                  noteText,
+                  createdAt: String(existing?.createdAt || nowIso),
+                  updatedAt: nowIso,
+                };
+                const nextHistory = existing
+                  ? history.map((entry) => (String(entry?.id || "").trim() === noteId ? nextEntry : entry))
+                  : [nextEntry, ...history];
+                return {
+                  ...normalizedLead,
+                  leadNotesHistory: nextHistory,
+                };
+              }
+              return row;
+            });
+            return {
+              ...prev,
+              [sectionKey]: nextRows,
+              leads: nextLeads,
+            };
+          }
+        }
+        if (sectionKey === "followUps") {
+          const previousCrmRef = String(
+            previousRow?.crmReferenceId
+            || previousRow?.crm_reference_id
+            || resolveCrmReferenceIdByText(previousRow?.relatedTo || "")
+            || ""
+          ).trim();
+          const nextCrmRef = String(payload.crmReferenceId || resolveCrmReferenceIdByText(payload.relatedTo || "") || "").trim();
+          if (previousCrmRef || nextCrmRef) {
+            const noteId = `lead_note_followup_${String(editingId || "").trim()}`;
+            const noteDate = String(payload.dueDate || previousRow?.dueDate || "").trim();
+            const noteText = formatCrmFollowUpLeadNoteText(payload);
+            const nowIso = new Date().toISOString();
+            const nextLeads = (prev.leads || []).map((row) => {
+              const normalizedLead = normalizeCrmLeadRecord(row);
+              const rowCrmRef = String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim();
+              if (!rowCrmRef) {
+                return row;
+              }
+              // Remove from old lead if follow-up was re-linked.
+              if (previousCrmRef && previousCrmRef !== nextCrmRef && rowCrmRef === previousCrmRef) {
+                const history = Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [];
+                return {
+                  ...normalizedLead,
+                  leadNotesHistory: history.filter((entry) => String(entry?.id || "").trim() !== noteId),
+                };
+              }
+              if (nextCrmRef && rowCrmRef === nextCrmRef) {
+                const history = Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [];
+                const existing = history.find((entry) => String(entry?.id || "").trim() === noteId) || null;
+                const nextEntry = {
+                  id: noteId,
+                  followUpId: String(editingId || "").trim(),
+                  noteDate,
+                  noteText,
+                  createdAt: String(existing?.createdAt || nowIso),
+                  updatedAt: nowIso,
+                };
+                const nextHistory = existing
+                  ? history.map((entry) => (String(entry?.id || "").trim() === noteId ? nextEntry : entry))
+                  : [nextEntry, ...history];
+                return {
+                  ...normalizedLead,
+                  leadNotesHistory: nextHistory,
+                };
+              }
+              return row;
+            });
+            return {
+              ...prev,
+              [sectionKey]: nextRows,
+              leads: nextLeads,
+            };
+          }
+        }
         return {
           ...prev,
           [sectionKey]: nextRows,
@@ -13350,12 +13696,12 @@ function CrmOnePageModule() {
         const noteCrmRef = String(payload.crmReferenceId || "").trim();
         const noteTitle = String(payload.title || "").trim();
         const noteDate = String(payload.meetingDate || "").trim();
-        const noteStatus = String(payload.status || "Scheduled").trim();
         if (noteCrmRef && noteTitle && noteDate) {
           const nextEntry = {
-            id: `lead_note_meeting_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            id: `lead_note_meeting_${String(newRowId || "").trim()}`,
+            meetingId: String(newRowId || "").trim(),
             noteDate,
-            noteText: `Noted: ${noteTitle} (${noteStatus})`,
+            noteText: formatCrmMeetingLeadNoteText(payload),
             createdAt: new Date().toISOString(),
           };
           const nextLeads = (prev.leads || []).map((row) => {
@@ -13367,6 +13713,34 @@ function CrmOnePageModule() {
             return {
               ...normalizedRow,
               leadNotesHistory: [nextEntry, ...(normalizedRow.leadNotesHistory || [])],
+            };
+          });
+          return {
+            ...prev,
+            [sectionKey]: nextRows,
+            leads: nextLeads,
+          };
+        }
+      }
+      if (sectionKey === "followUps") {
+        const noteCrmRef = String(payload.crmReferenceId || "").trim();
+        if (noteCrmRef) {
+          const nextEntry = {
+            id: `lead_note_followup_${String(newRowId || "").trim()}`,
+            followUpId: String(newRowId || "").trim(),
+            noteDate: String(payload.dueDate || "").trim(),
+            noteText: formatCrmFollowUpLeadNoteText(payload),
+            createdAt: new Date().toISOString(),
+          };
+          const nextLeads = (prev.leads || []).map((row) => {
+            const normalizedLead = normalizeCrmLeadRecord(row);
+            const rowCrmRef = String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim();
+            if (!rowCrmRef || rowCrmRef !== noteCrmRef) {
+              return row;
+            }
+            return {
+              ...normalizedLead,
+              leadNotesHistory: [nextEntry, ...(normalizedLead.leadNotesHistory || [])],
             };
           });
           return {
@@ -13519,31 +13893,6 @@ function CrmOnePageModule() {
         ...prev,
         meetings: {
           ...prev.meetings,
-          owner: nextOwners,
-        },
-      };
-    });
-  }
-
-  function toggleActivityEmployee(value) {
-    const normalizedValue = String(value || "").trim();
-    if (!normalizedValue) {
-      return;
-    }
-    setForms((prev) => {
-      const currentOwners = Array.isArray(prev.activities?.owner)
-        ? prev.activities.owner
-        : String(prev.activities?.owner || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-      const nextOwners = currentOwners.includes(normalizedValue)
-        ? currentOwners.filter((item) => item !== normalizedValue)
-        : [...currentOwners, normalizedValue];
-      return {
-        ...prev,
-        activities: {
-          ...prev.activities,
           owner: nextOwners,
         },
       };
@@ -13923,6 +14272,21 @@ function CrmOnePageModule() {
 
   function openLeadNotesPopup(row) {
     const normalizedLead = normalizeCrmLeadRecord(row);
+    setLeadDataPopupTab("notes");
+    setLeadProposals([]);
+    setLeadProposalsError("");
+    setLeadProposalsLoading(true);
+    setLeadProposalBaseChoice("__new__");
+    setLeadProposalName("");
+    setLeadProposalFile(null);
+    setLeadProposalUploading(false);
+    setLeadProposalUploadError("");
+    setLeadProposalFileInputKey(`lead-proposal-file-${Date.now()}`);
+    setLeadFinalProposalAmount(String(normalizedLead.finalProposalAmount || "").trim());
+    setLeadFinalProposalStatus(String(normalizedLead.status || "Open").trim() || "Open");
+    setLeadFinalizeProposalError("");
+    setLeadFinalizeProposalSaving(false);
+    setLeadProposalsSubTab("list");
     setLeadNotesPopup({
       leadId: String(normalizedLead.id || "").trim(),
       leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
@@ -13931,11 +14295,191 @@ function CrmOnePageModule() {
       noteText: "",
       error: "",
       history: Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [],
+      finalProposalAmount: String(normalizedLead.finalProposalAmount || "").trim(),
+      proposalFinalizedAt: String(normalizedLead.proposalFinalizedAt || "").trim(),
     });
+    refreshLeadProposals(normalizedLead.id);
   }
 
   function closeLeadNotesPopup() {
     setLeadNotesPopup(null);
+    setLeadDataPopupTab("notes");
+    setLeadProposals([]);
+    setLeadProposalsError("");
+    setLeadProposalsLoading(false);
+    setLeadProposalBaseChoice("__new__");
+    setLeadProposalName("");
+    setLeadProposalFile(null);
+    setLeadProposalUploading(false);
+    setLeadProposalUploadError("");
+    setLeadProposalFileInputKey(`lead-proposal-file-${Date.now()}`);
+    setLeadFinalProposalAmount("");
+    setLeadFinalProposalStatus("Open");
+    setLeadFinalizeProposalError("");
+    setLeadFinalizeProposalSaving(false);
+    setLeadProposalsSubTab("list");
+  }
+
+  async function refreshLeadProposals(leadId) {
+    const normalizedLeadId = String(leadId || "").trim();
+    if (!normalizedLeadId) {
+      setLeadProposals([]);
+      setLeadProposalsLoading(false);
+      return;
+    }
+    setLeadProposalsLoading(true);
+    setLeadProposalsError("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(normalizedLeadId)}/proposals`);
+      const proposals = Array.isArray(data?.proposals) ? data.proposals : [];
+      setLeadProposals(proposals);
+      setLeadProposalUploadError("");
+      const baseNames = Array.from(new Set(proposals.map((item) => String(item?.base_name || "").trim()).filter(Boolean)));
+      if (baseNames.length && leadProposalBaseChoice === "__new__") {
+        setLeadProposalBaseChoice(baseNames[0]);
+      }
+    } catch (error) {
+      setLeadProposals([]);
+      setLeadProposalsError("Unable to load proposals. Please refresh and try again.");
+    } finally {
+      setLeadProposalsLoading(false);
+    }
+  }
+
+  async function uploadLeadProposal() {
+    if (!leadNotesPopup) return;
+    const leadId = String(leadNotesPopup.leadId || "").trim();
+    if (!leadId) return;
+    const file = leadProposalFile;
+    setLeadProposalUploadError("");
+    if (!file) {
+      setLeadProposalUploadError("Please select a PDF or Word document to upload.");
+      return;
+    }
+    const maxBytes = 2 * 1024 * 1024;
+    if (Number(file.size || 0) > maxBytes) {
+      setLeadProposalUploadError("Maximum file size is 2 MB.");
+      return;
+    }
+    const filename = String(file.name || "").toLowerCase();
+    const isAllowed = filename.endsWith(".pdf") || filename.endsWith(".doc") || filename.endsWith(".docx");
+    if (!isAllowed) {
+      setLeadProposalUploadError("Only PDF, DOC, and DOCX files are allowed.");
+      return;
+    }
+    const isNewProposal = leadProposalBaseChoice === "__new__";
+    const baseName = isNewProposal ? String(leadProposalName || "").trim() : String(leadProposalBaseChoice || "").trim();
+    if (!baseName) {
+      setLeadProposalUploadError("Please enter Proposal Name.");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    if (isNewProposal) {
+      formData.append("proposal_name", baseName);
+    } else {
+      formData.append("base_name", baseName);
+    }
+    setLeadProposalUploading(true);
+    try {
+      await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(leadId)}/proposals`, {
+        method: "POST",
+        body: formData,
+      });
+      setLeadProposalFile(null);
+      setLeadProposalFileInputKey(`lead-proposal-file-${Date.now()}`);
+      setLeadProposalUploadError("");
+      setLeadProposalBaseChoice(baseName);
+      if (isNewProposal) {
+        setLeadProposalName("");
+      }
+      await refreshLeadProposals(leadId);
+    } catch (error) {
+      const detail = String(error?.data?.detail || "").trim();
+      if (detail === "file_too_large") {
+        setLeadProposalUploadError("Maximum file size is 2 MB.");
+      } else if (detail === "invalid_file_type") {
+        setLeadProposalUploadError("Only PDF, DOC, and DOCX files are allowed.");
+      } else if (detail === "proposal_name_required") {
+        setLeadProposalUploadError("Please enter Proposal Name.");
+      } else {
+        setLeadProposalUploadError("Upload failed. Please try again.");
+      }
+    } finally {
+      setLeadProposalUploading(false);
+    }
+  }
+
+	  async function deleteLeadProposal(proposalId) {
+	    if (!leadNotesPopup) return;
+	    const leadId = String(leadNotesPopup.leadId || "").trim();
+	    const normalizedId = String(proposalId || "").trim();
+	    if (!leadId || !normalizedId) return;
+	    try {
+	      await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(leadId)}/proposals/${encodeURIComponent(normalizedId)}`, {
+	        method: "DELETE",
+	      });
+	      await refreshLeadProposals(leadId);
+    } catch (error) {
+      setLeadProposalUploadError("Unable to remove document. Please try again.");
+    }
+  }
+
+  function downloadLeadProposal(proposalId) {
+    if (!leadNotesPopup) return;
+    const leadId = String(leadNotesPopup.leadId || "").trim();
+    const normalizedId = String(proposalId || "").trim();
+    if (!leadId || !normalizedId) return;
+    const url = `/api/business-autopilot/leads/${encodeURIComponent(leadId)}/proposals/${encodeURIComponent(normalizedId)}/download`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  async function finalizeLeadProposalProcess() {
+    if (!leadNotesPopup) return;
+    const leadId = String(leadNotesPopup.leadId || "").trim();
+    if (!leadId) return;
+	    const amount = String(leadFinalProposalAmount || "").trim();
+	    if (!amount || parseNumber(amount) <= 0) {
+	      setLeadFinalizeProposalError("Please enter Final Proposal Amount.");
+	      return;
+	    }
+	    const nextStatus = String(leadFinalProposalStatus || "").trim() || "Open";
+	    setLeadFinalizeProposalSaving(true);
+	    setLeadFinalizeProposalError("");
+	    try {
+	      const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, {
+	        final_proposal_amount: amount,
+	        proposal_finalized: true,
+	        status: nextStatus,
+	      });
+      const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
+      setModuleData((prev) => ({
+        ...prev,
+        leads: (prev.leads || []).map((row) => (
+          String(row?.id || "") === String(leadId)
+            ? { ...normalizeCrmLeadRecord(row), ...(backendLead || {}), finalProposalAmount: amount, proposalFinalizedAt: (backendLead?.proposalFinalizedAt || new Date().toISOString()) }
+            : row
+        )),
+      }));
+      setLeadNotesPopup((prev) => (
+        prev
+          ? {
+              ...prev,
+              finalProposalAmount: backendLead?.finalProposalAmount || amount,
+              proposalFinalizedAt: backendLead?.proposalFinalizedAt || new Date().toISOString(),
+            }
+          : prev
+      ));
+    } catch (error) {
+      const detail = String(error?.data?.detail || "").trim();
+      if (detail === "final_proposal_amount_required") {
+        setLeadFinalizeProposalError("Please enter Final Proposal Amount.");
+      } else {
+        setLeadFinalizeProposalError("Unable to complete proposal process. Please try again.");
+      }
+    } finally {
+      setLeadFinalizeProposalSaving(false);
+    }
   }
 
   function submitLeadNotesPopup(event) {
@@ -14325,7 +14869,13 @@ function CrmOnePageModule() {
       }
     }
 
-  function CrmReportsPanel({ apiFetch: panelApiFetch, crmCurrencyCode: panelCurrencyCode }) {
+  function CrmReportsPanel({
+    apiFetch: panelApiFetch,
+    crmCurrencyCode: panelCurrencyCode,
+    followUpsCount = 0,
+    meetingsCount = 0,
+  }) {
+    const REPORT_TABLE_PAGE_SIZE = 10;
     const [preset, setPreset] = useState("last_30_days");
     const [groupBy, setGroupBy] = useState("user");
     const [fromDate, setFromDate] = useState("");
@@ -14335,6 +14885,11 @@ function CrmOnePageModule() {
     const [hasGenerated, setHasGenerated] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+    const [leadDetailsSearch, setLeadDetailsSearch] = useState("");
+    const [leadDetailsPage, setLeadDetailsPage] = useState(1);
+    const [leadDetailsSort, setLeadDetailsSort] = useState("date_desc");
+    const [groupPerformanceSearch, setGroupPerformanceSearch] = useState("");
+    const [groupPerformancePage, setGroupPerformancePage] = useState(1);
 
     const PRESET_DAYS_MAP = {
       last_7_days: 7,
@@ -14439,6 +14994,181 @@ function CrmOnePageModule() {
     const groupRows = Array.isArray(report?.group_rows) ? report.group_rows : [];
     const leadRows = Array.isArray(report?.lead_details) ? report.lead_details : [];
 
+    const normalizeSearchValue = (value) => String(value ?? "").toLowerCase();
+
+    const paginateRows = (rows, page) => {
+      const safeRows = Array.isArray(rows) ? rows : [];
+      const total = safeRows.length;
+      const totalPages = Math.max(1, Math.ceil(total / REPORT_TABLE_PAGE_SIZE));
+      const clampedPage = Math.min(Math.max(1, Number(page || 1)), totalPages);
+      const startIndex = (clampedPage - 1) * REPORT_TABLE_PAGE_SIZE;
+      const endIndex = startIndex + REPORT_TABLE_PAGE_SIZE;
+      return {
+        total,
+        totalPages,
+        page: clampedPage,
+        startIndex,
+        endIndex,
+        pageRows: safeRows.slice(startIndex, endIndex),
+      };
+    };
+
+    const leadDetailsFilteredRows = useMemo(() => {
+      const q = normalizeSearchValue(leadDetailsSearch).trim();
+      if (!q) return leadRows;
+      return leadRows.filter((row) => {
+        const haystack = [
+          row?.date,
+          row?.crm_reference_id,
+          row?.lead_name,
+          row?.company,
+          row?.status,
+          row?.assigned_to,
+          row?.group_name,
+        ].map(normalizeSearchValue).join(" ");
+        return haystack.includes(q);
+      });
+    }, [leadRows, leadDetailsSearch]);
+
+    const leadDetailsSortedRows = useMemo(() => {
+      const rows = Array.isArray(leadDetailsFilteredRows) ? [...leadDetailsFilteredRows] : [];
+      const statusRank = (value) => {
+        const raw = normalizeSearchValue(value).trim();
+        if (raw === "open") return 1;
+        if (raw === "onhold") return 2;
+        if (raw === "converted") return 3;
+        if (!raw) return 99;
+        return 50;
+      };
+      const compareISODate = (a, b) => {
+        const aIso = String(a || "").trim();
+        const bIso = String(b || "").trim();
+        if (!aIso && !bIso) return 0;
+        if (!aIso) return 1;
+        if (!bIso) return -1;
+        return aIso.localeCompare(bIso);
+      };
+      const compareText = (a, b) => {
+        const aText = normalizeSearchValue(a).trim();
+        const bText = normalizeSearchValue(b).trim();
+        if (!aText && !bText) return 0;
+        if (!aText) return 1;
+        if (!bText) return -1;
+        return aText.localeCompare(bText);
+      };
+
+      const mode = String(leadDetailsSort || "date_desc");
+      if (mode === "status_asc" || mode === "status_desc") {
+        rows.sort((left, right) => {
+          const rankDelta = statusRank(left?.status) - statusRank(right?.status);
+          if (rankDelta !== 0) return mode === "status_desc" ? -rankDelta : rankDelta;
+          const textDelta = compareText(left?.status, right?.status);
+          if (textDelta !== 0) return mode === "status_desc" ? -textDelta : textDelta;
+          const dateDelta = compareISODate(left?.date, right?.date);
+          return mode === "status_desc" ? dateDelta : -dateDelta;
+        });
+        return rows;
+      }
+
+      if (mode === "date_asc" || mode === "date_desc") {
+        rows.sort((left, right) => {
+          const dateDelta = compareISODate(left?.date, right?.date);
+          if (dateDelta !== 0) return mode === "date_desc" ? -dateDelta : dateDelta;
+          return compareText(left?.crm_reference_id || left?.lead_name, right?.crm_reference_id || right?.lead_name);
+        });
+        return rows;
+      }
+
+      return rows;
+    }, [leadDetailsFilteredRows, leadDetailsSort]);
+
+    const groupPerformanceFilteredRows = useMemo(() => {
+      const q = normalizeSearchValue(groupPerformanceSearch).trim();
+      if (!q) return groupRows;
+      return groupRows.filter((row) => normalizeSearchValue(row?.group_name).includes(q));
+    }, [groupRows, groupPerformanceSearch]);
+
+    useEffect(() => {
+      setLeadDetailsPage(1);
+    }, [leadDetailsSearch]);
+
+    useEffect(() => {
+      setLeadDetailsPage(1);
+    }, [leadDetailsSort]);
+
+    useEffect(() => {
+      setGroupPerformancePage(1);
+    }, [groupPerformanceSearch, groupBy]);
+
+    const leadDetailsPagination = useMemo(
+      () => paginateRows(leadDetailsSortedRows, leadDetailsPage),
+      [leadDetailsSortedRows, leadDetailsPage]
+    );
+
+    const groupPerformancePagination = useMemo(
+      () => paginateRows(groupPerformanceFilteredRows, groupPerformancePage),
+      [groupPerformanceFilteredRows, groupPerformancePage]
+    );
+
+    const renderPaginationControls = ({ pagination, onPageChange }) => {
+      if (!pagination || pagination.totalPages <= 1) {
+        return null;
+      }
+      const { page, totalPages } = pagination;
+      return (
+        <div className="d-flex align-items-center justify-content-between gap-2 mt-2">
+          <div className="text-secondary small">
+            Page {page} of {totalPages}
+          </div>
+          <div className="d-flex gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm"
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              disabled={page <= 1}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm"
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    const leadDetailsSortMeta = useMemo(() => {
+      const mode = String(leadDetailsSort || "date_desc");
+      if (mode.startsWith("status_")) {
+        return { key: "status", direction: mode.endsWith("_desc") ? "desc" : "asc" };
+      }
+      if (mode.startsWith("date_")) {
+        return { key: "date", direction: mode.endsWith("_desc") ? "desc" : "asc" };
+      }
+      return { key: "", direction: "" };
+    }, [leadDetailsSort]);
+
+    const getSortIconClass = (columnKey) => {
+      const isSorted = Boolean(columnKey && leadDetailsSortMeta.key === columnKey);
+      if (!isSorted) return "bi-arrow-down-up";
+      return leadDetailsSortMeta.direction === "desc" ? "bi-arrow-down" : "bi-arrow-up";
+    };
+
+    const toggleLeadDetailsSort = (columnKey) => {
+      if (columnKey === "status") {
+        setLeadDetailsSort((prev) => (String(prev).startsWith("status_") && String(prev).endsWith("_asc") ? "status_desc" : "status_asc"));
+        return;
+      }
+      if (columnKey === "date") {
+        setLeadDetailsSort((prev) => (String(prev).startsWith("date_") && String(prev).endsWith("_asc") ? "date_desc" : "date_asc"));
+      }
+    };
+
     const periodLabel = period?.from_date && period?.to_date
       ? `${formatDDMMYYYY(period.from_date)} to ${formatDDMMYYYY(period.to_date)}`
       : "";
@@ -14451,8 +15181,10 @@ function CrmOnePageModule() {
     const statCards = [
       { label: "Total Leads", value: String(Number(summary?.total_leads || 0)), icon: "bi-people" },
       { label: "New Leads", value: String(Number(summary?.new_leads || 0)), icon: "bi-person-plus" },
-      { label: "Pending", value: String(Number(summary?.pending_leads || 0)), icon: "bi-hourglass-split" },
-      { label: "Completed", value: String(Number(summary?.completed_leads || 0)), icon: "bi-check2-circle" },
+      { label: "Pending Leads", value: String(Number(summary?.pending_leads || 0)), icon: "bi-hourglass-split" },
+      { label: "Completed Leads", value: String(Number(summary?.completed_leads || 0)), icon: "bi-check2-circle" },
+      { label: "Follow-ups", value: String(Number(followUpsCount || 0)), icon: "bi-telephone-forward" },
+      { label: "Meetings", value: String(Number(meetingsCount || 0)), icon: "bi-calendar-event" },
       { label: "Sales Orders", value: String(Number(summary?.sales_orders || 0)), icon: "bi-receipt-cutoff" },
       { label: "Estimate Conv.", value: String(Number(summary?.converted_estimates || 0)), icon: "bi-file-earmark-text" },
       { label: "Invoice Conv.", value: String(Number(summary?.converted_invoices || 0)), icon: "bi-receipt" },
@@ -14622,21 +15354,65 @@ function CrmOnePageModule() {
           PDF export includes infographic layout. Excel export contains raw data (Summary, Performance, Lead Details).
         </div>
 
-        <div className="fw-semibold mt-4 mb-2">Lead Details</div>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-4 mb-2">
+          <div className="fw-semibold">Lead Details</div>
+          <div className="d-flex flex-wrap gap-2">
+            <input
+              type="search"
+              className="form-control form-control-sm"
+              style={{ maxWidth: 220 }}
+              value={leadDetailsSearch}
+              placeholder="Search Lead Details"
+              onChange={(event) => setLeadDetailsSearch(event.target.value)}
+            />
+          </div>
+        </div>
         <div className="table-responsive">
           <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table wz-crm-report-table">
             <thead>
               <tr>
-                <th className="fw-semibold" style={{ minWidth: 110 }}>Date</th>
+                <th
+                  className="align-middle wz-sortable-th"
+                  style={{ minWidth: 110, verticalAlign: "middle" }}
+                  aria-sort={leadDetailsSortMeta.key === "date" ? (leadDetailsSortMeta.direction === "desc" ? "descending" : "ascending") : "none"}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-sm p-0 border-0 bg-transparent text-reset fw-semibold shadow-none d-inline-flex align-items-center justify-content-center gap-1 align-middle wz-sortable-th-btn"
+                    onClick={() => toggleLeadDetailsSort("date")}
+                    title="Sort by Date"
+                    aria-label="Sort by Date"
+                    style={{ color: "inherit", textDecoration: "none", verticalAlign: "middle", lineHeight: 1, minHeight: "1.5rem" }}
+                  >
+                    <span>Date</span>
+                    <i className={`bi ${getSortIconClass("date")}`} aria-hidden="true" style={{ fontSize: "0.625rem", lineHeight: 1 }} />
+                  </button>
+                </th>
                 <th className="fw-semibold" style={{ minWidth: 140 }}>CRM ID</th>
                 <th className="fw-semibold" style={{ minWidth: 220 }}>Lead</th>
                 <th className="fw-semibold" style={{ minWidth: 220 }}>Company</th>
-                <th className="fw-semibold" style={{ minWidth: 120 }}>Status</th>
+                <th
+                  className="align-middle wz-sortable-th"
+                  style={{ minWidth: 120, verticalAlign: "middle" }}
+                  aria-sort={leadDetailsSortMeta.key === "status" ? (leadDetailsSortMeta.direction === "desc" ? "descending" : "ascending") : "none"}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-sm p-0 border-0 bg-transparent text-reset fw-semibold shadow-none d-inline-flex align-items-center justify-content-center gap-1 align-middle wz-sortable-th-btn"
+                    onClick={() => toggleLeadDetailsSort("status")}
+                    title="Sort by Status"
+                    aria-label="Sort by Status"
+                    style={{ color: "inherit", textDecoration: "none", verticalAlign: "middle", lineHeight: 1, minHeight: "1.5rem" }}
+                  >
+                    <span>Status</span>
+                    <i className={`bi ${getSortIconClass("status")}`} aria-hidden="true" style={{ fontSize: "0.625rem", lineHeight: 1 }} />
+                  </button>
+                </th>
                 <th className="fw-semibold" style={{ minWidth: 160 }}>Assigned</th>
               </tr>
             </thead>
             <tbody>
-              {leadRows.length ? leadRows.map((row, index) => (
+              {leadDetailsPagination.total ? leadDetailsPagination.pageRows.map((row, index) => (
                 <tr key={`${String(row?.crm_reference_id || row?.lead_name || "row")}-${index}`}>
                   <td>{formatDDMMYYYY(String(row?.date || "")) || "-"}</td>
                   <td className="text-secondary">{String(row?.crm_reference_id || "-")}</td>
@@ -14653,8 +15429,29 @@ function CrmOnePageModule() {
             </tbody>
           </table>
         </div>
+        {leadDetailsPagination.total ? (
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+            <div className="text-secondary small">
+              Showing {leadDetailsPagination.startIndex + 1} to {Math.min(leadDetailsPagination.endIndex, leadDetailsPagination.total)} of {leadDetailsPagination.total} entries
+            </div>
+            {renderPaginationControls({
+              pagination: leadDetailsPagination,
+              onPageChange: setLeadDetailsPage,
+            })}
+          </div>
+        ) : null}
 
-        <div className="fw-semibold mt-4 mb-2">{groupBy === "team" ? "Team Performance" : "User Performance"}</div>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-4 mb-2">
+          <div className="fw-semibold">{groupBy === "team" ? "Team Performance" : "User Performance"}</div>
+          <input
+            type="search"
+            className="form-control form-control-sm"
+            style={{ maxWidth: 220 }}
+            value={groupPerformanceSearch}
+            placeholder={`Search ${groupBy === "team" ? "Teams" : "Users"}`}
+            onChange={(event) => setGroupPerformanceSearch(event.target.value)}
+          />
+        </div>
         <div className="table-responsive">
           <table className="table table-dark table-borderless align-middle mb-0 wz-sortable-table wz-crm-report-table">
             <thead>
@@ -14669,8 +15466,8 @@ function CrmOnePageModule() {
               </tr>
             </thead>
             <tbody>
-              {groupRows.length ? groupRows.map((row) => (
-                <tr key={String(row?.group_name || "")}>
+              {groupPerformancePagination.total ? groupPerformancePagination.pageRows.map((row, index) => (
+                <tr key={`${String(row?.group_name || "")}-${index}`}>
                   <td className="fw-semibold">{String(row?.group_name || "-")}</td>
                   <td>{Number(row?.total_leads || 0)}</td>
                   <td>{Number(row?.pending_leads || 0)}</td>
@@ -14687,6 +15484,17 @@ function CrmOnePageModule() {
             </tbody>
           </table>
         </div>
+        {groupPerformancePagination.total ? (
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+            <div className="text-secondary small">
+              Showing {groupPerformancePagination.startIndex + 1} to {Math.min(groupPerformancePagination.endIndex, groupPerformancePagination.total)} of {groupPerformancePagination.total} entries
+            </div>
+            {renderPaginationControls({
+              pagination: groupPerformancePagination,
+              onPageChange: setGroupPerformancePage,
+            })}
+          </div>
+        ) : null}
 	      </div>
 	    </div>
 	    );
@@ -14738,16 +15546,20 @@ function CrmOnePageModule() {
         </div>
       ) : null}
 
-      {sectionOrder.filter((sectionKey) => sectionKey === activeSection).map((sectionKey) => {
-        if (sectionKey === "reports") {
-          return (
-            <CrmReportsPanel
-              key="crm-reports"
-              apiFetch={apiFetch}
-              crmCurrencyCode={crmCurrencyCode}
-            />
-          );
-        }
+	      {sectionOrder.filter((sectionKey) => sectionKey === activeSection).map((sectionKey) => {
+	        if (sectionKey === "reports") {
+	          const followUpsCount = getAccessibleCrmRows("followUps", moduleData.followUps || []).filter((row) => !isSoftDeletedCrmRow(row)).length;
+	          const meetingsCount = getAccessibleCrmRows("meetings", moduleData.meetings || []).filter((row) => !isSoftDeletedCrmRow(row)).length;
+	          return (
+	            <CrmReportsPanel
+	              key="crm-reports"
+	              apiFetch={apiFetch}
+	              crmCurrencyCode={crmCurrencyCode}
+	              followUpsCount={followUpsCount}
+	              meetingsCount={meetingsCount}
+	            />
+	          );
+	        }
         const config = CRM_SECTION_CONFIG[sectionKey];
         const rows = moduleData[sectionKey] || [];
         const accessibleRows = getAccessibleCrmRows(sectionKey, rows);
@@ -14763,8 +15575,8 @@ function CrmOnePageModule() {
         const leadStatusTabs = [
           { key: "all", label: "All" },
           { key: "open", label: "Open" },
-          { key: "closed", label: "Closed" },
           { key: "onhold", label: "Onhold" },
+          { key: "converted", label: "Converted" },
         ];
         const contactTagTabs = [
           { key: "all", label: "All" },
@@ -14812,7 +15624,7 @@ function CrmOnePageModule() {
               if (isDeletedSectionView || leadStatusTab === "all") {
                 return true;
               }
-              return String(row.status || "").trim().toLowerCase() === leadStatusTab;
+              return normalizeCrmLeadStatusKey(row.status) === leadStatusTab;
             })
           : sectionKey === "contacts"
           ? tableRows.filter((row) => {
@@ -14873,7 +15685,7 @@ function CrmOnePageModule() {
           ? leadStatusTabs.reduce((acc, tab) => {
               acc[tab.key] = tab.key === "all"
                 ? leadTabRowsForCount.length
-                : leadTabRowsForCount.filter((row) => String(row.status || "").trim().toLowerCase() === tab.key).length;
+                : leadTabRowsForCount.filter((row) => normalizeCrmLeadStatusKey(row.status) === tab.key).length;
               return acc;
             }, {})
           : {};
@@ -14989,7 +15801,6 @@ function CrmOnePageModule() {
 	        const dealCompanyQuery = sectionKey === "deals" ? String(formValues.company || "").trim().toLowerCase() : "";
 	        const meetingCompanyQuery = sectionKey === "meetings" ? String(formValues.companyOrClientName || "").trim().toLowerCase() : "";
 	        const meetingLeadQuery = sectionKey === "meetings" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
-	        const activityClientQuery = sectionKey === "activities" ? String(formValues.relatedTo || "").trim().toLowerCase() : "";
         const crmContactMatches = sectionKey === "leads"
           ? activeCrmContacts.filter((contact) => {
               if (!leadCompanyQuery) {
@@ -15098,24 +15909,6 @@ function CrmOnePageModule() {
 	              };
 	            }).filter((lead) => !meetingLeadQuery || lead.haystack.includes(meetingLeadQuery)).slice(0, 6)
 	          : [];
-        const activityContactMatches = sectionKey === "activities"
-          ? (moduleData.contacts || []).filter((contact) => {
-              const haystack = `${contact.name || ""} ${contact.company || ""} ${contact.email || ""}`.toLowerCase();
-              if (!activityClientQuery) {
-                return true;
-              }
-              return haystack.includes(activityClientQuery);
-            }).slice(0, 6)
-          : [];
-        const activityCustomerMatches = sectionKey === "activities"
-          ? sharedCustomerOptions.filter((customer) => {
-              const haystack = `${customer.companyName || ""} ${customer.clientName || ""} ${customer.email || ""}`.toLowerCase();
-              if (!activityClientQuery) {
-                return true;
-              }
-              return haystack.includes(activityClientQuery);
-            }).slice(0, 6)
-          : [];
         const selectedLeadAssignedUsers = sectionKey === "leads"
           ? (
               Array.isArray(formValues.assignedUser)
@@ -15143,22 +15936,6 @@ function CrmOnePageModule() {
         const filteredMeetingEmployees = sectionKey === "meetings"
           ? crmDirectoryOptions.filter((item) => {
               const normalizedSearch = String(meetingEmployeeSearch || "").trim().toLowerCase();
-              if (!normalizedSearch) {
-                return true;
-              }
-              return [item.name, item.department, item.employeeRole, item.email].join(" ").toLowerCase().includes(normalizedSearch);
-            })
-          : [];
-        const selectedActivityEmployees = sectionKey === "activities"
-          ? (
-              Array.isArray(formValues.owner)
-                ? formValues.owner
-                : String(formValues.owner || "").split(",")
-            ).map((item) => String(item || "").trim()).filter(Boolean)
-          : [];
-        const filteredActivityEmployees = sectionKey === "activities"
-          ? crmDirectoryOptions.filter((item) => {
-              const normalizedSearch = String(activityEmployeeSearch || "").trim().toLowerCase();
               if (!normalizedSearch) {
                 return true;
               }
@@ -15976,6 +16753,8 @@ function CrmOnePageModule() {
                             ? null
                             : sectionKey === "leads" && field.key === "crmReferenceId" && !editingId
                             ? null
+                            : sectionKey === "followUps" && field.key === "crmReferenceId"
+                            ? null
                             : sectionKey === "leads" && field.key === "assignedUser" && String(formValues.assignType || "Users").trim().toLowerCase() === "team"
                             ? null
                             : sectionKey === "leads" && field.key === "assignedTeam" && String(formValues.assignType || "Users").trim().toLowerCase() !== "team"
@@ -15983,10 +16762,10 @@ function CrmOnePageModule() {
                             : (
                           <div
                             className={
-                              sectionKey === "leads"
-                                ? (
-                                    field.key === "name" || field.key === "company"
-                                      ? "col-12 col-md-6 col-xl-3"
+                                sectionKey === "leads"
+                                  ? (
+                                      field.key === "name" || field.key === "company"
+                                        ? "col-12 col-md-6 col-xl-3"
                                       : field.key === "crmReferenceId"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "contactPerson"
@@ -16002,25 +16781,9 @@ function CrmOnePageModule() {
                                       : field.key === "assignedUser" || field.key === "assignedTeam"
                                       ? "col-12 col-md-6 col-xl-2"
                                       : field.key === "status" || field.key === "priority"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : "col-12 col-md-6 col-xl-4"
-                                  )
-                                : sectionKey === "activities"
-                                ? (
-                                    field.key === "activityType"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "crmReferenceId"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "relatedTo"
-                                      ? "col-12 col-md-6 col-xl-3"
-                                      : field.key === "date"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : field.key === "owner"
-                                      ? "col-12 col-md-6 col-xl-3"
-                                      : field.key === "notes"
-                                      ? "col-12 col-md-6 col-xl-2"
-                                      : "col-12 col-md-6 col-xl-4"
-                                  )
+                                        ? "col-12 col-md-6 col-xl-2"
+                                        : "col-12 col-md-6 col-xl-4"
+                                    )
                                 : sectionKey === "contacts"
                                 ? (
                                     field.key === "name" || field.key === "company"
@@ -16514,157 +17277,6 @@ function CrmOnePageModule() {
                                   </div>
                                 );
                               }
-                              if (sectionKey === "activities" && field.key === "relatedTo") {
-                                return (
-                                  <div className="crm-inline-suggestions-wrap">
-                                    <input
-                                      type="text"
-                                      className="form-control"
-                                      autoComplete="off"
-                                      placeholder={field.placeholder}
-                                      value={formValues[field.key] || ""}
-                                      required={isCrmFieldRequired(sectionKey, field, formValues)}
-                                      onFocus={() => setActivityClientSearchOpen(true)}
-                                      onClick={() => setActivityClientSearchOpen(true)}
-                                      onBlur={() => window.setTimeout(() => setActivityClientSearchOpen(false), 120)}
-                                      onChange={(event) => {
-                                        setField(sectionKey, field.key, event.target.value);
-                                        setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(event.target.value));
-                                        setActivityClientSearchOpen(true);
-                                      }}
-                                    />
-                                    {activityClientSearchOpen ? (
-                                      (activityContactMatches.length || activityCustomerMatches.length) ? (
-                                        <div className="crm-inline-suggestions">
-                                          {activityContactMatches.length ? (
-                                            <div className="crm-inline-suggestions__group">
-                                              <div className="crm-inline-suggestions__title">Contacts</div>
-                                              {activityContactMatches.map((contact) => (
-                                                <button
-                                                  key={`activity-crm-contact-${contact.id}`}
-                                                  type="button"
-                                                  className="crm-inline-suggestions__item"
-                                                  onMouseDown={(event) => event.preventDefault()}
-                                                  onClick={() => {
-                                                    setField(sectionKey, field.key, String(contact.company || contact.name || "").trim());
-                                                    setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(contact.company || contact.name || ""));
-                                                    setActivityClientSearchOpen(false);
-                                                  }}
-                                                >
-                                                  <span className="crm-inline-suggestions__item-main">{contact.name || "-"}</span>
-                                                  <span className="crm-inline-suggestions__item-sub">{contact.company || "-"}</span>
-                                                </button>
-                                              ))}
-                                            </div>
-                                          ) : null}
-                                          {activityCustomerMatches.length ? (
-                                            <div className="crm-inline-suggestions__group">
-                                              <div className="crm-inline-suggestions__title">Clients</div>
-                                              {activityCustomerMatches.map((customer) => (
-                                                <button
-                                                  key={`activity-customer-${customer.id}`}
-                                                  type="button"
-                                                  className="crm-inline-suggestions__item"
-                                                  onMouseDown={(event) => event.preventDefault()}
-                                                  onClick={() => {
-                                                    setField(sectionKey, field.key, String(customer.companyName || customer.name || customer.clientName || "").trim());
-                                                    setField(sectionKey, "crmReferenceId", resolveCrmReferenceIdByText(customer.companyName || customer.name || customer.clientName || ""));
-                                                    setActivityClientSearchOpen(false);
-                                                  }}
-                                                >
-                                                  <span className="crm-inline-suggestions__item-main">{customer.clientName || customer.companyName || "-"}</span>
-                                                  <span className="crm-inline-suggestions__item-sub">{customer.companyName || "-"}</span>
-                                                </button>
-                                              ))}
-                                            </div>
-                                          ) : null}
-                                        </div>
-                                      ) : (
-                                        <div className="crm-inline-suggestions">
-                                          <div className="crm-inline-suggestions__item">
-                                            <span className="crm-inline-suggestions__item-main">No contact or client results found</span>
-                                          </div>
-                                        </div>
-                                      )
-                                    ) : null}
-                                  </div>
-                                );
-                              }
-                              if (sectionKey === "activities" && field.key === "owner") {
-                                return (
-                                  <div className="d-flex flex-column gap-2">
-                                    <div className="crm-inline-suggestions-wrap">
-                                      <input
-                                        type="search"
-                                        className="form-control"
-                                        autoComplete="off"
-                                        placeholder="Search users"
-                                        value={activityEmployeeSearch}
-                                        onFocus={() => setActivityEmployeeSearchOpen(true)}
-                                        onClick={() => setActivityEmployeeSearchOpen(true)}
-                                        onBlur={() => window.setTimeout(() => setActivityEmployeeSearchOpen(false), 120)}
-                                        onChange={(event) => {
-                                          setActivityEmployeeSearch(event.target.value);
-                                          setActivityEmployeeSearchOpen(true);
-                                        }}
-                                      />
-                                      {activityEmployeeSearchOpen ? (
-                                        <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
-                                          <div className="crm-inline-suggestions__group">
-                                            <div className="crm-inline-suggestions__title">Users</div>
-                                            {filteredActivityEmployees.length ? filteredActivityEmployees.map((employee) => (
-                                              <button
-                                                key={`activity-employee-${employee.id}`}
-                                                type="button"
-                                                className="crm-inline-suggestions__item"
-                                                onMouseDown={(event) => event.preventDefault()}
-                                                onClick={() => toggleActivityEmployee(employee.name)}
-                                              >
-                                                <span className="d-flex align-items-start gap-2">
-                                                  <input
-                                                    type="checkbox"
-                                                    className="form-check-input mt-1"
-                                                    checked={selectedActivityEmployees.includes(employee.name)}
-                                                    readOnly
-                                                  />
-                                                  <span>
-                                                    <span className="crm-inline-suggestions__item-main d-block">{employee.name}</span>
-                                                    <span className="crm-inline-suggestions__item-sub">
-                                                      {[employee.department, employee.employeeRole].filter(Boolean).join(" / ") || employee.email || "-"}
-                                                    </span>
-                                                  </span>
-                                                </span>
-                                              </button>
-                                            )) : (
-                                              <div className="crm-inline-suggestions__item">
-                                                <span className="crm-inline-suggestions__item-main">No users found</span>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                    <div className="d-flex flex-wrap gap-2">
-                                      {selectedActivityEmployees.length ? selectedActivityEmployees.map((employeeName) => (
-                                        <span
-                                          key={`activity-selected-employee-${employeeName}`}
-                                          className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip"
-                                        >
-                                          <button
-                                            type="button"
-                                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
-                                            aria-label={`Remove ${employeeName}`}
-                                            onClick={() => toggleActivityEmployee(employeeName)}
-                                          >
-                                            &times;
-                                          </button>
-                                          <span>{employeeName}</span>
-                                        </span>
-                                      )) : null}
-                                    </div>
-                                  </div>
-                                );
-                              }
                               if (sectionKey === "meetings" && field.key === "companyOrClientName") {
                                 return (
                                   <div className="crm-inline-suggestions-wrap">
@@ -16945,6 +17557,7 @@ function CrmOnePageModule() {
                                 );
                               }
                               if (sectionKey === "meetings" && field.key === "reminderDays") {
+                                const hasMeetingDate = Boolean(normalizeMeetingDateValue(formValues.meetingDate));
                                 return (
                                   <div className="d-flex flex-column gap-2">
                                     <div className="crm-inline-suggestions-wrap">
@@ -16954,6 +17567,7 @@ function CrmOnePageModule() {
                                         autoComplete="off"
                                         placeholder="Remind before days"
                                         value={meetingReminderDaySearch}
+                                        disabled={!hasMeetingDate}
                                         onFocus={() => setMeetingReminderDaySearchOpen(true)}
                                         onClick={() => setMeetingReminderDaySearchOpen(true)}
                                         onBlur={() => window.setTimeout(() => setMeetingReminderDaySearchOpen(false), 120)}
@@ -16963,10 +17577,13 @@ function CrmOnePageModule() {
                                         }}
                                       />
                                       {meetingReminderDaySearchOpen ? (
-                                        <div className="crm-inline-suggestions">
+                                        <div
+                                          className="crm-inline-suggestions"
+                                          key={`meeting-reminder-day-suggestions:${normalizeMeetingDateValue(formValues.meetingDate) || "none"}`}
+                                        >
                                           <div className="crm-inline-suggestions__group">
                                             <div className="crm-inline-suggestions__title">Remind Before Days</div>
-	                                            {filteredMeetingReminderDayOptions.length ? filteredMeetingReminderDayOptions.map((option) => (
+		                                            {filteredMeetingReminderDayOptions.length ? filteredMeetingReminderDayOptions.map((option) => (
 	                                              <button
 	                                                key={`meeting-reminder-day-${option.value}`}
 	                                                type="button"
@@ -17218,6 +17835,7 @@ function CrmOnePageModule() {
                                   : sectionKey === "meetings" && field.key === "meetingTime" && meetingDateValue === getTodayIsoDate()
                                     ? getCurrentTimeHHMM()
                                     : undefined;
+                                const shouldDisable = sectionKey === "meetings" && field.key === "meetingTime" && !meetingDateValue;
                                 return (
                                   <input
                                     type={field.type}
@@ -17225,6 +17843,7 @@ function CrmOnePageModule() {
                                     className={`form-control ${sectionFieldErrors[sectionKey]?.[field.key] ? "is-invalid" : ""}`}
                                     value={formValues[field.key] || ""}
                                     min={minValue}
+                                    disabled={shouldDisable}
                                     required={isCrmFieldRequired(sectionKey, field, formValues)}
                                     onChange={(event) => setField(sectionKey, field.key, event.target.value)}
                                   />
@@ -17255,7 +17874,7 @@ function CrmOnePageModule() {
                             })()}
                           </div>
                           )}
-                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps" || sectionKey === "activities") && (((sectionKey === "leads" && field.key === "priority") || (sectionKey !== "leads" && field.key === "status")) || (sectionKey === "activities" && field.key === "notes")) ? (
+                          {(sectionKey === "leads" || sectionKey === "deals" || sectionKey === "followUps") && ((sectionKey === "leads" && field.key === "priority") || (sectionKey !== "leads" && field.key === "status")) ? (
                             <div
                               className={
                                 sectionKey === "leads"
@@ -17264,16 +17883,14 @@ function CrmOnePageModule() {
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-end"
                                   : sectionKey === "followUps"
                                   ? "col-12 col-md-6 col-xl-1 d-flex align-items-start crm-submit-align-with-input"
-                                  : sectionKey === "activities"
-                                  ? "col-12 col-md-6 col-xl-2 ms-xl-auto d-flex align-items-start justify-content-end crm-submit-align-with-input"
                                   : "col-12 col-md-6 col-xl-4 d-flex align-items-end"
                               }
                             >
-                              <div className={["leads", "activities"].includes(sectionKey) ? "d-flex gap-2 align-items-center justify-content-end w-100" : "d-flex gap-2 flex-wrap w-100"}>
+                              <div className={sectionKey === "leads" ? "d-flex gap-2 align-items-center justify-content-end w-100" : "d-flex gap-2 flex-wrap w-100"}>
                                 <button
                                   type="submit"
                                   className={`btn btn-success btn-sm ${
-                                    ["leads", "contacts", "deals", "followUps", "meetings", "activities"].includes(sectionKey)
+                                    ["leads", "contacts", "deals", "followUps", "meetings"].includes(sectionKey)
                                       ? (sectionKey === "leads" ? "" : "single-row-form-submit-btn")
                                       : ""
                                   }`}
@@ -17316,7 +17933,7 @@ function CrmOnePageModule() {
                         ) : null}
                       </div>
                     ) : null}
-                    {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" && sectionKey !== "activities" ? (
+                    {sectionKey !== "leads" && sectionKey !== "contacts" && sectionKey !== "deals" && sectionKey !== "followUps" && sectionKey !== "meetings" ? (
                       <div className="d-flex gap-2">
                         <button type="submit" className="btn btn-success btn-sm" disabled={!canSubmitSectionForm}>
                           {editingId ? "Update" : "Create"}
@@ -17348,8 +17965,8 @@ function CrmOnePageModule() {
               withoutOuterCard={sectionKey !== "teams"}
               searchPlaceholder={`Search ${config.label.toLowerCase()}`}
               noRowsText={isDeletedSectionView ? `No deleted ${config.label.toLowerCase()} items.` : `No ${config.label.toLowerCase()} yet.`}
-              enableExport={sectionKey !== "meetings"}
-              enableImport={sectionKey !== "meetings"}
+              enableExport={sectionKey !== "meetings" && sectionKey !== "teams"}
+              enableImport={sectionKey !== "meetings" && sectionKey !== "teams"}
               exportFileName={`crm-${config.label.toLowerCase().replace(/\s+/g, "-")}`}
               onImportRows={(importedRows) => importRows(sectionKey, importedRows)}
               headerBottom={sectionKey === "leads" ? (
@@ -17546,7 +18163,7 @@ function CrmOnePageModule() {
                 return row[column.key] || "";
               }).join(" ")}
               initialSearchTerm={sectionSearchPrefill[sectionKey] || ""}
-              pageSize={sectionKey === "leads" ? 15 : DEFAULT_TABLE_PAGE_SIZE}
+              pageSize={DEFAULT_TABLE_PAGE_SIZE}
               exportCellValue={(row, column) => {
                 if (column.key === "crmReferenceId") {
                   return String(
@@ -18111,17 +18728,22 @@ function CrmOnePageModule() {
 		                },
 	              ];
 	              const pipelineStageIndex = Math.max(0, pipelineSteps.reduce((acc, step, idx) => (step.isDone ? idx : acc), 0));
+	              const finalProposalAmount = parseNumber(leadViewPopup.finalProposalAmount || leadViewPopup.final_proposal_amount || "");
+	              const finalProposalAmountDisplay = finalProposalAmount
+	                ? formatCurrencyAmount(finalProposalAmount, crmCurrencyCode)
+	                : "-";
 	              const details = [
-	                { label: "Company", value: leadViewPopup.company || "-" },
-	                { label: "Contact Person", value: leadViewPopup.contactPerson || "-" },
-	                { label: "Phone", value: phoneDisplay },
-                { label: "Amount", value: amountDisplay },
-                { label: "Lead Source", value: leadViewPopup.leadSource || "-" },
-                { label: "Priority", value: leadViewPopup.priority || "-" },
-                { label: "Status", value: leadViewPopup.status || "-" },
-                { label: "Created By", value: leadViewPopup.createdBy || "-" },
-                { label: "Assigned To", value: assignedToDisplay },
-              ];
+		                { label: "Company", value: leadViewPopup.company || "-" },
+		                { label: "Contact Person", value: leadViewPopup.contactPerson || "-" },
+		                { label: "Phone", value: phoneDisplay },
+	                { label: "Amount", value: amountDisplay },
+	                { label: "Final Proposal Amount", value: finalProposalAmountDisplay },
+	                { label: "Lead Source", value: leadViewPopup.leadSource || "-" },
+	                { label: "Priority", value: leadViewPopup.priority || "-" },
+	                { label: "Status", value: leadViewPopup.status || "-" },
+	                { label: "Created By", value: leadViewPopup.createdBy || "-" },
+	                { label: "Assigned To", value: assignedToDisplay },
+	              ];
               return (
                 <>
                   <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -18279,66 +18901,334 @@ function CrmOnePageModule() {
             className="card p-3 wz-crm-popup"
             style={{ width: "min(760px, 96vw)" }}
             onClick={(event) => event.stopPropagation()}
-          >
-            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
-              <div>
-                <h5 className="mb-1">Lead Notes</h5>
-                <div className="small text-secondary">{[leadNotesPopup.leadName, leadNotesPopup.crmReferenceId].filter(Boolean).join(" • ") || "-"}</div>
-              </div>
-              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadNotesPopup}>
-                <i className="bi bi-x-lg" aria-hidden="true" />
-              </button>
-            </div>
-            <form className="row g-3 mb-3 align-items-end" onSubmit={submitLeadNotesPopup}>
-              {leadNotesPopup.error ? (
-                <div className="col-12">
-                  <div className="alert alert-danger py-2 mb-0">{leadNotesPopup.error}</div>
-                </div>
-              ) : null}
-              <div className="col-12 col-md-3">
-                <label className="form-label small text-secondary mb-1">Date</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={leadNotesPopup.noteDate || ""}
-                  onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteDate: event.target.value, error: "" } : prev))}
-                />
-              </div>
-              <div className="col-12 col-md-7">
-                <label className="form-label small text-secondary mb-1">Notes</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Enter lead follow-up update"
-                  value={leadNotesPopup.noteText || ""}
-                  onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteText: event.target.value, error: "" } : prev))}
-                />
-              </div>
-              <div className="col-12 col-md-2 d-flex flex-column">
-                <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
-                <button type="submit" className="btn btn-success w-100">Submit</button>
-              </div>
-            </form>
-            <SearchablePaginatedTableCard
-              title="Updates"
-              rows={leadNotesPopup.history || []}
-              columns={[
-                { key: "noteDate", label: "Date", thStyle: { width: "25%" }, tdStyle: { width: "25%", whiteSpace: "nowrap" } },
-                { key: "noteText", label: "Notes", thStyle: { width: "75%" }, tdStyle: { width: "75%" } },
-              ]}
-              pageSize={5}
-              withoutOuterCard
-              searchPlaceholder="Search updates"
-              noRowsText="No lead updates yet."
-              searchBy={(row) => [row.noteDate, row.noteText].join(" ")}
-              renderCells={(row) => [
-                formatDateLikeCellValue("noteDate", row.noteDate, "-"),
-                row.noteText || "-",
-              ]}
-            />
-          </div>
-        </div>
-      ) : null}
+	          >
+	            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+	              <div>
+	                <h5 className="mb-1">Lead Data</h5>
+	                <div className="small text-secondary">{[leadNotesPopup.leadName, leadNotesPopup.crmReferenceId].filter(Boolean).join(" • ") || "-"}</div>
+	              </div>
+	              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadNotesPopup}>
+	                <i className="bi bi-x-lg" aria-hidden="true" />
+	              </button>
+	            </div>
+		            <div className="d-flex align-items-center justify-content-between gap-3 mb-3 flex-wrap">
+		              <div className="d-flex flex-wrap gap-2">
+		                <button
+		                  type="button"
+		                  className={`btn btn-sm ${leadDataPopupTab === "notes" ? "btn-success" : "btn-outline-light"}`}
+		                  onClick={() => setLeadDataPopupTab("notes")}
+		                >
+		                  Lead Notes
+		                </button>
+		                <button
+		                  type="button"
+		                  className={`btn btn-sm ${leadDataPopupTab === "proposals" ? "btn-success" : "btn-outline-light"}`}
+		                  onClick={() => setLeadDataPopupTab("proposals")}
+		                >
+		                  Proposals
+		                </button>
+		              </div>
+		              <div className="d-flex align-items-center gap-2 small">
+		                {leadNotesPopup?.proposalFinalizedAt ? (
+		                  <>
+		                    <span className="badge text-bg-success">Proposal Completed</span>
+		                    {parseNumber(leadNotesPopup?.finalProposalAmount || "") > 0 ? (
+		                      <span className="text-secondary">{`Final: ${formatCurrencyAmount(parseNumber(leadNotesPopup.finalProposalAmount), crmCurrencyCode)}`}</span>
+		                    ) : null}
+		                  </>
+		                ) : (
+		                  <span className="badge text-bg-secondary">Proposal Pending</span>
+		                )}
+		              </div>
+		            </div>
+		            <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
+		            {leadDataPopupTab === "notes" ? (
+	              <>
+	                <div className="mb-2">
+	                  <h6 className="mb-0">Lead Notes</h6>
+	                </div>
+	                <form className="row g-3 mb-3 align-items-end" onSubmit={submitLeadNotesPopup}>
+	                  {leadNotesPopup.error ? (
+	                    <div className="col-12">
+	                      <div className="alert alert-danger py-2 mb-0">{leadNotesPopup.error}</div>
+	                    </div>
+	                  ) : null}
+	                  <div className="col-12 col-md-3">
+	                    <label className="form-label small text-secondary mb-1">Date</label>
+	                    <input
+	                      type="date"
+	                      className="form-control"
+	                      value={leadNotesPopup.noteDate || ""}
+	                      onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteDate: event.target.value, error: "" } : prev))}
+	                    />
+	                  </div>
+	                  <div className="col-12 col-md-7">
+	                    <label className="form-label small text-secondary mb-1">Notes</label>
+	                    <input
+	                      type="text"
+	                      className="form-control"
+	                      placeholder="Enter lead follow-up update"
+	                      value={leadNotesPopup.noteText || ""}
+	                      onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteText: event.target.value, error: "" } : prev))}
+	                    />
+	                  </div>
+	                  <div className="col-12 col-md-2 d-flex flex-column">
+	                    <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
+	                    <button type="submit" className="btn btn-success w-100">Submit</button>
+		                  </div>
+		                </form>
+		                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
+		                <SearchablePaginatedTableCard
+		                  title="Updates"
+		                  rows={leadNotesPopup.history || []}
+	                  columns={[
+	                    { key: "noteDate", label: "Date", thStyle: { width: "25%" }, tdStyle: { width: "25%", whiteSpace: "nowrap" } },
+	                    { key: "noteText", label: "Notes", thStyle: { width: "75%" }, tdStyle: { width: "75%" } },
+	                  ]}
+	                  pageSize={DEFAULT_TABLE_PAGE_SIZE}
+	                  withoutOuterCard
+	                  searchPlaceholder="Search updates"
+	                  noRowsText="No lead updates yet."
+	                  searchBy={(row) => [row.noteDate, row.noteText].join(" ")}
+	                  renderCells={(row) => [
+	                    formatDateLikeCellValue("noteDate", row.noteDate, "-"),
+	                    row.noteText || "-",
+	                  ]}
+		                />
+		              </>
+		            ) : (
+			              <>
+				                <div className="mb-2">
+				                  <h6 className="mb-0">Proposals</h6>
+				                </div>
+				                {leadProposalsError ? (
+				                  <div className="alert alert-danger py-2">{leadProposalsError}</div>
+				                ) : null}
+				                {leadProposalUploadError ? (
+				                  <div className="alert alert-danger py-2">{leadProposalUploadError}</div>
+				                ) : null}
+				                {leadFinalizeProposalError ? (
+				                  <div className="alert alert-danger py-2">{leadFinalizeProposalError}</div>
+				                ) : null}
+				                {(() => {
+				                  const baseNames = Array.from(
+				                    new Set((leadProposals || []).map((item) => String(item?.base_name || "").trim()).filter(Boolean))
+				                  );
+				                  const isNewProposal = leadProposalBaseChoice === "__new__" || baseNames.length === 0;
+				                  return (
+				                    <>
+			                      {baseNames.length && isNewProposal ? (
+			                        <div className="row g-3 mb-3">
+			                          <div className="col-12">
+			                            <label className="form-label small text-secondary mb-1">Select Proposal</label>
+			                            <select
+			                              className="form-select"
+			                              value={leadProposalBaseChoice}
+			                              onChange={(event) => {
+			                                const value = event.target.value;
+			                                setLeadProposalBaseChoice(value);
+			                                setLeadProposalUploadError("");
+			                                if (value !== "__new__") {
+			                                  setLeadProposalName("");
+			                                }
+			                              }}
+			                            >
+			                              {baseNames.map((name) => (
+			                                <option key={`proposal-base-${name}`} value={name}>{name}</option>
+			                              ))}
+			                              <option value="__new__">+ New Proposal</option>
+			                            </select>
+			                          </div>
+			                        </div>
+			                      ) : null}
+
+			                      <div className="row g-3 align-items-end mb-3">
+			                        {baseNames.length && !isNewProposal ? (
+			                          <div className="col-12 col-md-4">
+			                            <label className="form-label small text-secondary mb-1">Select Proposal</label>
+			                            <select
+			                              className="form-select"
+			                              value={leadProposalBaseChoice}
+			                              onChange={(event) => {
+			                                const value = event.target.value;
+			                                setLeadProposalBaseChoice(value);
+			                                setLeadProposalUploadError("");
+			                                if (value !== "__new__") {
+			                                  setLeadProposalName("");
+			                                }
+			                              }}
+			                            >
+			                              {baseNames.map((name) => (
+			                                <option key={`proposal-base-${name}`} value={name}>{name}</option>
+			                              ))}
+			                              <option value="__new__">+ New Proposal</option>
+			                            </select>
+			                          </div>
+			                        ) : null}
+
+			                        {isNewProposal ? (
+			                          <div className="col-12 col-md-4">
+			                            <label className="form-label small text-secondary mb-1">Document Name *</label>
+			                            <input
+			                              type="text"
+			                              className="form-control"
+			                              placeholder="Enter Proposal Document Name"
+			                              value={leadProposalName}
+			                              onChange={(event) => {
+			                                setLeadProposalName(event.target.value);
+			                                setLeadProposalUploadError("");
+			                              }}
+			                            />
+			                          </div>
+			                        ) : null}
+
+			                        <div className="col-12 col-md-6">
+			                          <label className="form-label small text-secondary mb-1">Upload Document (PDF/DOC/DOCX, max 2 MB)</label>
+			                          <input
+			                            key={leadProposalFileInputKey}
+			                            type="file"
+			                            className="form-control"
+			                            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+			                            onChange={(event) => {
+			                              const file = event.target.files && event.target.files.length ? event.target.files[0] : null;
+			                              setLeadProposalFile(file);
+			                              setLeadProposalUploadError("");
+			                            }}
+			                          />
+			                        </div>
+
+			                        <div className="col-12 col-md-2 d-flex justify-content-md-end">
+			                          <button
+			                            type="button"
+			                            className="btn btn-success w-100"
+			                            disabled={leadProposalUploading}
+			                            onClick={uploadLeadProposal}
+			                          >
+			                            {leadProposalUploading ? "Uploading..." : "Upload"}
+			                          </button>
+			                        </div>
+				                      </div>
+				                    </>
+				                  );
+				                })()}
+					                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
+					                <div className="d-flex flex-wrap gap-2 mb-2">
+					                  <button
+					                    type="button"
+					                    className={`btn btn-sm ${leadProposalsSubTab === "list" ? "btn-success" : "btn-outline-light"}`}
+					                    onClick={() => setLeadProposalsSubTab("list")}
+					                  >
+				                    Proposal List
+				                  </button>
+				                  <button
+				                    type="button"
+				                    className={`btn btn-sm ${leadProposalsSubTab === "status" ? "btn-success" : "btn-outline-light"}`}
+				                    onClick={() => setLeadProposalsSubTab("status")}
+				                  >
+					                    Status
+					                  </button>
+					                </div>
+					                {leadProposalsSubTab === "status" ? (
+				                  <div className="mb-3">
+				                    <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+				                      <h6 className="mb-0">Complete Proposal Process</h6>
+				                      {leadNotesPopup?.proposalFinalizedAt ? (
+				                        <span className="badge text-bg-success">Completed</span>
+				                      ) : (
+				                        <span className="badge text-bg-secondary">Pending</span>
+				                      )}
+				                    </div>
+				                    <div className="row g-3 align-items-end">
+				                      <div className="col-12 col-md-6">
+				                      <label className="form-label small text-secondary mb-1">Final Proposal Amount *</label>
+				                      <input
+				                        type="text"
+				                        inputMode="decimal"
+				                        className="form-control"
+				                        placeholder={`Enter amount in ${crmCurrencyCode}`}
+				                        value={leadFinalProposalAmount}
+				                        onChange={(event) => {
+				                          setLeadFinalProposalAmount(formatCurrencyNumberInput(sanitizeCurrencyInput(event.target.value), crmCurrencyCode));
+				                          setLeadFinalizeProposalError("");
+				                        }}
+				                      />
+				                    </div>
+				                    <div className="col-12 col-md-3">
+				                      <label className="form-label small text-secondary mb-1">Lead Status</label>
+				                      <select
+				                        className="form-select"
+				                        value={leadFinalProposalStatus}
+				                        onChange={(event) => setLeadFinalProposalStatus(event.target.value)}
+				                      >
+				                        {["Open", "Onhold", "Converted"].map((option) => (
+				                          <option key={`lead-final-status-${option}`} value={option}>{option}</option>
+				                        ))}
+				                      </select>
+				                    </div>
+				                    <div className="col-12 col-md-3 d-flex justify-content-md-end">
+				                      <button
+				                        type="button"
+				                        className="btn btn-success w-100"
+				                          disabled={leadFinalizeProposalSaving}
+				                          onClick={finalizeLeadProposalProcess}
+				                        >
+				                          {leadFinalizeProposalSaving ? "Saving..." : "Mark as Completed"}
+				                        </button>
+				                      </div>
+				                    </div>
+				                  </div>
+				                ) : (
+				                  <SearchablePaginatedTableCard
+				                    title="Documents"
+				                    subtitle={leadProposalsLoading ? "Loading..." : ""}
+				                    rows={Array.isArray(leadProposals) ? leadProposals : []}
+				                    columns={[
+				                      { key: "display_name", label: "Proposal", thStyle: { width: "35%" }, tdStyle: { width: "35%" } },
+				                      { key: "created_at", label: "Uploaded", thStyle: { width: "20%" }, tdStyle: { width: "20%", whiteSpace: "nowrap" } },
+				                      { key: "file_type", label: "Type", thStyle: { width: "15%" }, tdStyle: { width: "15%" } },
+				                      { key: "file_size", label: "Size", thStyle: { width: "10%" }, tdStyle: { width: "10%", whiteSpace: "nowrap" } },
+				                      { key: "uploaded_by", label: "By", thStyle: { width: "12%" }, tdStyle: { width: "12%" } },
+				                      { key: "__actions", label: "Action", thStyle: { width: "8%" }, tdStyle: { width: "8%", whiteSpace: "nowrap" } },
+				                    ]}
+				                    pageSize={DEFAULT_TABLE_PAGE_SIZE}
+				                    withoutOuterCard
+				                    searchPlaceholder="Search documents"
+				                    noRowsText="No proposal documents yet."
+				                    searchBy={(row) => [row.display_name, row.original_filename, row.uploaded_by].join(" ")}
+				                    renderCells={(row) => [
+				                      String(row.display_name || row.base_name || "-"),
+				                      String(row.created_at ? new Date(row.created_at).toLocaleString() : "-"),
+				                      String(row.file_type || "-"),
+				                      formatFileSizeLabel(row.file_size) || "-",
+				                      String(row.uploaded_by || "-"),
+				                      (
+				                        <div className="d-flex gap-2 justify-content-end">
+				                          <button
+				                            type="button"
+				                            className="btn btn-sm btn-outline-light"
+				                            title="Download"
+				                            onClick={() => downloadLeadProposal(row.id)}
+				                          >
+				                            <i className="bi bi-download" aria-hidden="true" />
+				                          </button>
+				                          <button
+				                            type="button"
+				                            className="btn btn-sm btn-outline-danger"
+				                            title="Remove"
+				                            onClick={() => deleteLeadProposal(row.id)}
+				                          >
+				                            <i className="bi bi-trash" aria-hidden="true" />
+				                          </button>
+				                        </div>
+				                      ),
+				                    ]}
+				                  />
+				                )}
+				              </>
+			            )}
+		          </div>
+		        </div>
+		      ) : null}
       {dealQuickEditPopup ? (
         <div
           role="dialog"

@@ -2,7 +2,15 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 import json
 
-from apps.backend.business_autopilot.models import AccountsWorkspace, CrmContact, CrmDeal, CrmLead, OrganizationDepartment, OrganizationUser
+from apps.backend.business_autopilot.models import (
+    AccountsWorkspace,
+    CrmContact,
+    CrmDeal,
+    CrmLead,
+    CrmSalesOrder,
+    OrganizationDepartment,
+    OrganizationUser,
+)
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, OrganizationSettings, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -365,6 +373,112 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(payload["deal"]["deal_value"], 7500.0)
         deal.refresh_from_db()
         self.assertEqual(float(deal.deal_value), 7500.0)
+
+    def test_crm_deal_delete_restore_and_permanent_delete_persist(self):
+        sales_rep = User.objects.create_user(
+            username="sales.rep.delete@workzilla.test",
+            email="sales.rep.delete@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=sales_rep,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=sales_rep,
+            role="org_user",
+            is_active=True,
+        )
+        deal = CrmDeal.objects.create(
+            organization=self.org,
+            deal_name="Delete Deal",
+            company="Acme",
+            phone="9999999999",
+            deal_value="5000",
+            stage="Qualified",
+            status="Open",
+            created_by=sales_rep,
+            updated_by=sales_rep,
+        )
+
+        self.client.force_login(self.admin)
+        delete_response = self.client.post(
+            "/api/business-autopilot/deals",
+            data=json.dumps({"__crm_action": "delete", "deal_id": deal.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        deal.refresh_from_db()
+        self.assertTrue(deal.is_deleted)
+
+        list_response = self.client.get("/api/business-autopilot/deals")
+        self.assertEqual(list_response.status_code, 200)
+        rows = list_response.json().get("deals") or []
+        self.assertTrue(any(int(row.get("id")) == deal.id and bool(row.get("is_deleted")) for row in rows))
+
+        restore_response = self.client.post(
+            "/api/business-autopilot/deals",
+            data=json.dumps({"__crm_action": "patch", "deal_id": deal.id, "is_deleted": False}),
+            content_type="application/json",
+        )
+        self.assertEqual(restore_response.status_code, 200)
+        deal.refresh_from_db()
+        self.assertFalse(deal.is_deleted)
+
+        permanent_response = self.client.post(
+            "/api/business-autopilot/deals?permanent=1",
+            data=json.dumps({"__crm_action": "delete", "deal_id": deal.id, "__crm_permanent": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(permanent_response.status_code, 200)
+        self.assertFalse(CrmDeal.objects.filter(id=deal.id).exists())
+
+    def test_crm_sales_order_delete_restore_and_permanent_delete_persist(self):
+        order = CrmSalesOrder.objects.create(
+            organization=self.org,
+            order_id="SO-001",
+            customer_name="Customer",
+            company="Acme",
+            phone="9999999999",
+            amount="1000",
+            total_amount="1180",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        delete_response = self.client.post(
+            "/api/business-autopilot/sales-orders",
+            data=json.dumps({"__crm_action": "delete", "sales_order_id": order.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        order.refresh_from_db()
+        self.assertTrue(order.is_deleted)
+
+        list_response = self.client.get("/api/business-autopilot/sales-orders")
+        self.assertEqual(list_response.status_code, 200)
+        rows = list_response.json().get("sales_orders") or []
+        self.assertTrue(any(int(row.get("id")) == order.id and bool(row.get("is_deleted")) for row in rows))
+
+        restore_response = self.client.post(
+            "/api/business-autopilot/sales-orders",
+            data=json.dumps({"__crm_action": "patch", "sales_order_id": order.id, "is_deleted": False}),
+            content_type="application/json",
+        )
+        self.assertEqual(restore_response.status_code, 200)
+        order.refresh_from_db()
+        self.assertFalse(order.is_deleted)
+
+        permanent_response = self.client.post(
+            "/api/business-autopilot/sales-orders?permanent=1",
+            data=json.dumps({"__crm_action": "delete", "sales_order_id": order.id, "__crm_permanent": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(permanent_response.status_code, 200)
+        self.assertFalse(CrmSalesOrder.objects.filter(id=order.id).exists())
 
     def test_crm_lead_get_detail_allows_company_admin_role_alias(self):
         self.admin.userprofile.role = "Company Admin"

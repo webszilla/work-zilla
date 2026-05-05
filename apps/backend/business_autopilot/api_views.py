@@ -12,7 +12,7 @@ from io import BytesIO
 from typing import Optional
 import requests
 
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
@@ -43,6 +43,7 @@ from .models import (
     CrmContact,
     CrmDeal,
     CrmLead,
+    CrmLeadProposalDocument,
     CrmMeeting,
     CrmSalesOrder,
     AccountsWorkspace,
@@ -2396,6 +2397,12 @@ def org_users(request):
         department_id = payload.get("department_id")
         if role not in ERP_EMPLOYEE_ROLES:
             role = "org_user"
+        if not phone_number:
+            return JsonResponse({"detail": "phone_required"}, status=400)
+        if not (department_id not in (None, "") or department):
+            return JsonResponse({"detail": "department_required"}, status=400)
+        if not (employee_role_id not in (None, "") or employee_role):
+            return JsonResponse({"detail": "employee_role_required"}, status=400)
         if department_id not in (None, ""):
             try:
                 department_id = int(department_id)
@@ -5292,6 +5299,10 @@ def _serialize_crm_lead(row: CrmLead):
         "status": row.status,
         "is_deleted": bool(row.is_deleted),
         "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+        "final_proposal_amount": float(getattr(row, "final_proposal_amount", 0) or 0),
+        "proposal_finalized_at": row.proposal_finalized_at.isoformat() if getattr(row, "proposal_finalized_at", None) else None,
+        "proposal_finalized_by_id": row.proposal_finalized_by_id if hasattr(row, "proposal_finalized_by_id") else None,
+        "proposal_finalized_by_name": _get_org_user_display_name(row.proposal_finalized_by) if getattr(row, "proposal_finalized_by_id", None) else "",
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
         "updated_by_id": row.updated_by_id,
@@ -7036,6 +7047,22 @@ def crm_leads(request, lead_id: int = None):
         if "status" in payload:
             row.status = str(payload.get("status") or "Open").strip()[:30] or "Open"
             update_fields.append("status")
+        if "final_proposal_amount" in payload or "finalProposalAmount" in payload:
+            row.final_proposal_amount = _crm_to_decimal(
+                payload.get("final_proposal_amount") if "final_proposal_amount" in payload else payload.get("finalProposalAmount")
+            )
+            update_fields.append("final_proposal_amount")
+        if "proposal_finalized" in payload or "proposalFinalized" in payload:
+            should_finalize = bool(payload.get("proposal_finalized") if "proposal_finalized" in payload else payload.get("proposalFinalized"))
+            if should_finalize:
+                if _crm_to_decimal(getattr(row, "final_proposal_amount", 0) or 0) <= 0:
+                    return JsonResponse({"detail": "final_proposal_amount_required"}, status=400)
+                row.proposal_finalized_at = timezone.now()
+                row.proposal_finalized_by = request.user
+            else:
+                row.proposal_finalized_at = None
+                row.proposal_finalized_by = None
+            update_fields.extend(["proposal_finalized_at", "proposal_finalized_by"])
         if "is_deleted" in payload:
             is_deleted = bool(payload.get("is_deleted"))
             row.is_deleted = is_deleted
@@ -7090,6 +7117,159 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"deleted": True})
 
     return JsonResponse({"detail": "invalid_method"}, status=405)
+
+
+def _crm_sanitize_proposal_base_name(value):
+    raw_value = str(value or "").strip()
+    raw_value = re.sub(r"\s+", " ", raw_value)
+    safe_value = re.sub(r"[^\w\s\-.()]+", "", raw_value).strip()
+    return safe_value[:180]
+
+
+def _crm_proposal_display_name(base_name: str, existing_count: int):
+    normalized = str(base_name or "").strip()
+    if not normalized:
+        return ""
+    if existing_count <= 0:
+        return normalized[:220]
+    letter_index = existing_count - 1
+    if 0 <= letter_index < 26:
+        suffix = chr(ord("A") + letter_index)
+    else:
+        suffix = str(existing_count)
+    return f"{normalized}-{suffix}"[:220]
+
+
+def _serialize_crm_lead_proposal_document(doc: CrmLeadProposalDocument):
+    if not doc:
+        return {}
+    uploaded_by = "-"
+    if doc.uploaded_by_id:
+        first = str(getattr(doc.uploaded_by, "first_name", "") or "").strip()
+        last = str(getattr(doc.uploaded_by, "last_name", "") or "").strip()
+        full = " ".join([part for part in [first, last] if part])
+        uploaded_by = full or str(getattr(doc.uploaded_by, "username", "") or "").strip() or uploaded_by
+    return {
+        "id": doc.id,
+        "lead_id": doc.lead_id,
+        "base_name": doc.base_name,
+        "version_index": doc.version_index,
+        "display_name": doc.display_name,
+        "original_filename": doc.original_filename,
+        "file_type": doc.file_type,
+        "file_size": doc.file_size,
+        "uploaded_by": uploaded_by,
+        "created_at": timezone.localtime(doc.created_at).isoformat() if doc.created_at else "",
+    }
+
+
+@require_http_methods(["GET", "POST"])
+def crm_lead_proposals(request, lead_id: int, proposal_id: int = None):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    lead = CrmLead.objects.filter(organization=org, id=lead_id).first()
+    if not lead:
+        return JsonResponse({"detail": "lead_not_found"}, status=404)
+
+    if request.method == "GET":
+        rows = list(
+            CrmLeadProposalDocument.objects.filter(organization=org, lead=lead)
+            .select_related("uploaded_by")
+            .order_by("-created_at", "-id")
+        )
+        return JsonResponse({"proposals": [_serialize_crm_lead_proposal_document(row) for row in rows]})
+
+    override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+    if override_method == "DELETE":
+        if not proposal_id:
+            return JsonResponse({"detail": "proposal_id_required"}, status=400)
+        doc = CrmLeadProposalDocument.objects.filter(organization=org, lead=lead, id=proposal_id).first()
+        if not doc:
+            return JsonResponse({"detail": "proposal_not_found"}, status=404)
+        try:
+            if doc.file:
+                doc.file.delete(save=False)
+        except Exception:
+            pass
+        doc.delete()
+        return JsonResponse({"deleted": True})
+
+    uploaded_file = request.FILES.get("file") or request.FILES.get("document")
+    if not uploaded_file:
+        return JsonResponse({"detail": "file_required"}, status=400)
+    file_size = int(getattr(uploaded_file, "size", 0) or 0)
+    if file_size <= 0:
+        return JsonResponse({"detail": "file_empty"}, status=400)
+    max_bytes = 2 * 1024 * 1024
+    if file_size > max_bytes:
+        return JsonResponse({"detail": "file_too_large", "max_bytes": max_bytes}, status=400)
+
+    filename = str(getattr(uploaded_file, "name", "") or "").strip()
+    ext = ""
+    if filename and "." in filename:
+        ext = "." + filename.split(".")[-1].lower()
+    allowed_exts = {".pdf", ".doc", ".docx"}
+    if ext not in allowed_exts:
+        return JsonResponse({"detail": "invalid_file_type", "allowed": sorted(list(allowed_exts))}, status=400)
+
+    base_name = _crm_sanitize_proposal_base_name(request.POST.get("proposal_name") or request.POST.get("base_name"))
+    if not base_name:
+        return JsonResponse({"detail": "proposal_name_required"}, status=400)
+
+    existing_count = CrmLeadProposalDocument.objects.filter(organization=org, lead=lead, base_name=base_name).count()
+    display_name = _crm_proposal_display_name(base_name, existing_count)
+    doc = CrmLeadProposalDocument.objects.create(
+        organization=org,
+        lead=lead,
+        base_name=base_name,
+        version_index=existing_count,
+        display_name=display_name,
+        original_filename=filename[:255],
+        file=uploaded_file,
+        file_type=str(getattr(uploaded_file, "content_type", "") or "")[:80],
+        file_size=file_size,
+        uploaded_by=request.user,
+    )
+    doc = CrmLeadProposalDocument.objects.filter(id=doc.id).select_related("uploaded_by").first()
+    return JsonResponse({"proposal": _serialize_crm_lead_proposal_document(doc)})
+
+
+@require_http_methods(["GET"])
+def crm_lead_proposal_download(request, lead_id: int, proposal_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    lead = CrmLead.objects.filter(organization=org, id=lead_id).first()
+    if not lead:
+        return JsonResponse({"detail": "lead_not_found"}, status=404)
+    doc = (
+        CrmLeadProposalDocument.objects
+        .filter(organization=org, lead=lead, id=proposal_id)
+        .first()
+    )
+    if not doc or not doc.file:
+        return JsonResponse({"detail": "proposal_not_found"}, status=404)
+
+    # Keep filename safe & readable; avoid regex ranges by placing '-' at the end.
+    safe_display = re.sub(r"[^a-zA-Z0-9 _().-]+", "", str(doc.display_name or "proposal")).strip() or "proposal"
+    original = str(doc.original_filename or "").strip()
+    ext = ""
+    if original and "." in original:
+        ext = "." + original.split(".")[-1].lower()
+    if ext not in {".pdf", ".doc", ".docx"}:
+        ext = ""
+    filename = f"{safe_display}{ext}"
+    response = FileResponse(doc.file.open("rb"), as_attachment=True, filename=filename)
+    if doc.file_type:
+        response["Content-Type"] = doc.file_type
+    return response
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
@@ -7370,10 +7550,14 @@ def crm_deals(request, deal_id: int = None):
 
     if resolved_method == "GET" and not deal_id:
         rows = [
-        row
-        for row in CrmDeal.objects.filter(organization=org).select_related("assigned_user", "lead", "created_by", "updated_by").order_by("-created_at")
-        if _crm_can_view_row(request.user, org, row)
-    ]
+            row
+            for row in (
+                CrmDeal.objects.filter(organization=org)
+                .select_related("assigned_user", "lead", "created_by", "updated_by")
+                .order_by("-created_at")
+            )
+            if _crm_can_view_row(request.user, org, row)
+        ]
         pipeline_value = sum((_crm_to_decimal(row.deal_value) for row in rows if not row.is_deleted), Decimal("0"))
         return JsonResponse({"deals": [_serialize_crm_deal(row) for row in rows], "pipeline_value": float(pipeline_value)})
 
@@ -7429,33 +7613,53 @@ def crm_deals(request, deal_id: int = None):
                 payload = json.loads(request.body.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
+        update_fields = []
+        if "is_deleted" in payload:
+            if not _crm_is_admin(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
+            is_deleted = bool(payload.get("is_deleted"))
+            row.is_deleted = is_deleted
+            row.deleted_at = timezone.now() if is_deleted else None
+            row.deleted_by = request.user if is_deleted else None
+            update_fields.extend(["is_deleted", "deleted_at", "deleted_by"])
         if "stage" in payload:
             stage = str(payload.get("stage") or "").strip()
             if stage in {"Qualified", "Proposal", "Won", "Lost"}:
                 row.stage = stage
+                update_fields.append("stage")
         if "status" in payload:
             status = str(payload.get("status") or "").strip()
             if status in {"Open", "Won", "Lost"}:
                 row.status = status
+                update_fields.append("status")
         if "deal_value" in payload:
             row.deal_value = _crm_to_decimal(payload.get("deal_value"))
+            update_fields.append("deal_value")
         if "won_amount_final" in payload or "wonAmountFinal" in payload:
             row.won_amount_final = _crm_to_decimal(
                 payload.get("won_amount_final") if "won_amount_final" in payload else payload.get("wonAmountFinal")
             )
-        update_fields = ["stage", "status", "deal_value", "won_amount_final", "updated_by", "updated_at"]
+            update_fields.append("won_amount_final")
         if not row.crm_reference_id and row.lead_id:
             lead_ref = str(getattr(row.lead, "crm_reference_id", "") or "").strip()
             if lead_ref:
                 row.crm_reference_id = lead_ref
                 update_fields.append("crm_reference_id")
         row.updated_by = request.user
-        row.save(update_fields=update_fields)
+        update_fields.extend(["updated_by", "updated_at"])
+        row.save(update_fields=list(dict.fromkeys(update_fields)))
         return JsonResponse({"deal": _serialize_crm_deal(row)})
 
     if resolved_method == "DELETE":
         if not _crm_is_admin(request.user, org):
             return JsonResponse({"detail": "forbidden"}, status=403)
+        permanent = (
+            str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
+            or bool((payload or {}).get("__crm_permanent"))
+        )
+        if permanent:
+            row.delete()
+            return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True
         row.deleted_at = timezone.now()
         row.deleted_by = request.user
@@ -7689,6 +7893,18 @@ def crm_sales_orders(request, order_id: int = None):
             payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    if resolved_method == "PATCH" and "is_deleted" in payload:
+        if not _crm_is_admin(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
+        is_deleted = bool(payload.get("is_deleted"))
+        row.is_deleted = is_deleted
+        row.deleted_at = timezone.now() if is_deleted else None
+        row.deleted_by = request.user if is_deleted else None
+        row.updated_by = request.user
+        row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
+        return JsonResponse({"sales_order": _serialize_crm_sales_order(row)})
+
     customer_name = str(payload.get("customer_name") or "").strip()
     if not customer_name:
         return JsonResponse({"detail": "customer_name_required"}, status=400)

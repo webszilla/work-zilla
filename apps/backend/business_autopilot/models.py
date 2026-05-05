@@ -420,6 +420,7 @@ class CrmLead(models.Model):
     )
     STATUS_CHOICES = (
         ("Open", "Open"),
+        ("Onhold", "Onhold"),
         ("Closed", "Closed"),
         ("Converted", "Converted"),
     )
@@ -478,6 +479,15 @@ class CrmLead(models.Model):
         blank=True,
         related_name="business_autopilot_crm_deleted_leads",
     )
+    final_proposal_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    proposal_finalized_at = models.DateTimeField(null=True, blank=True)
+    proposal_finalized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_proposal_finalized_leads",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -522,6 +532,51 @@ class CrmLead(models.Model):
 
     def __str__(self):
         return f"Lead({self.organization_id} - {self.lead_name})"
+
+
+def _crm_lead_proposal_upload_to(instance, filename: str):
+    lead_id = getattr(instance, "lead_id", None) or "unknown"
+    org_id = getattr(instance, "organization_id", None) or "unknown"
+    timestamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(filename or "proposal"))
+    return f"business_autopilot/crm/leads/{org_id}/{lead_id}/proposals/{timestamp}_{safe_name}"
+
+
+class CrmLeadProposalDocument(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_lead_proposals",
+    )
+    lead = models.ForeignKey(
+        CrmLead,
+        on_delete=models.CASCADE,
+        related_name="proposal_documents",
+    )
+    base_name = models.CharField(max_length=180)
+    version_index = models.PositiveIntegerField(default=0)
+    display_name = models.CharField(max_length=220)
+    original_filename = models.CharField(max_length=255, blank=True, default="")
+    file = models.FileField(upload_to=_crm_lead_proposal_upload_to)
+    file_type = models.CharField(max_length=80, blank=True, default="")
+    file_size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_uploaded_crm_lead_proposals",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "lead", "base_name", "version_index"]),
+        ]
+
+    def __str__(self):
+        return f"LeadProposal(org={self.organization_id}, lead={self.lead_id}, name={self.display_name})"
 
 
 class CrmContact(models.Model):

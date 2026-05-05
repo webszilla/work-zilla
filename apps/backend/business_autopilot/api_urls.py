@@ -14,6 +14,17 @@ urlpatterns = [
     path("contacts/<int:contact_id>", api_views.crm_contacts, name="business_autopilot_crm_contact_detail"),
     path("leads", api_views.crm_leads, name="business_autopilot_crm_leads"),
     path("leads/<int:lead_id>", api_views.crm_leads, name="business_autopilot_crm_lead_detail"),
+    path("leads/<int:lead_id>/proposals", api_views.crm_lead_proposals, name="business_autopilot_crm_lead_proposals"),
+    path(
+        "leads/<int:lead_id>/proposals/<int:proposal_id>",
+        api_views.crm_lead_proposals,
+        name="business_autopilot_crm_lead_proposal_detail",
+    ),
+    path(
+        "leads/<int:lead_id>/proposals/<int:proposal_id>/download",
+        api_views.crm_lead_proposal_download,
+        name="business_autopilot_crm_lead_proposal_download",
+    ),
     path("convert-to-deal/<int:lead_id>", api_views.crm_convert_to_deal, name="business_autopilot_crm_convert_to_deal"),
     path("deals", api_views.crm_deals, name="business_autopilot_crm_deals"),
     path("deals/<int:deal_id>", api_views.crm_deals, name="business_autopilot_crm_deal_detail"),

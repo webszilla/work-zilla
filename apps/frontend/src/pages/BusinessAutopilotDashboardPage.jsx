@@ -169,7 +169,7 @@ function MonthlyComparisonChartCard({
         </div>
         <div className="text-end">
           <div className="small text-secondary">Current Year Total</div>
-          <div className="fw-semibold">{yPrefix}{Math.round(currentTotal).toLocaleString("en-IN")}</div>
+          <div className="fw-semibold">{yPrefix}{Math.round(currentTotal).toLocaleString("en-US")}</div>
         </div>
       </div>
 

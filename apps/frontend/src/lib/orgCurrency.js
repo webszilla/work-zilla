@@ -68,7 +68,7 @@ export function getOrgCurrency() {
   return setOrgCurrency(stored || FALLBACK_CURRENCY);
 }
 
-export function formatCurrencyAmount(amount, currency = FALLBACK_CURRENCY, locale = "en-IN") {
+export function formatCurrencyAmount(amount, currency = FALLBACK_CURRENCY, locale = "en-US") {
   const numericValue = Number(amount || 0);
   const safeValue = Number.isFinite(numericValue) ? numericValue : 0;
   const normalizedCurrency = normalizeCurrency(currency || FALLBACK_CURRENCY);

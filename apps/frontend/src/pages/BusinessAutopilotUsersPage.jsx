@@ -85,9 +85,8 @@ const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   label: option.label,
   flag: option.flag,
 }));
-const SYSTEM_ROLE_OPTIONS = [
+const BASE_SYSTEM_ROLE_OPTIONS = [
   { key: "system:org_user", label: "Org User" },
-  { key: "system:hr_view", label: "HR View" },
 ];
 const ROLE_ACCESS_SECTIONS = [
   { key: "dashboard", label: "Dashboard" },
@@ -1281,7 +1280,7 @@ export default function BusinessAutopilotUsersPage() {
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
   const [currentUserMembershipRole, setCurrentUserMembershipRole] = useState("");
-  const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState(SYSTEM_ROLE_OPTIONS[0].key);
+  const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState("system:org_user");
   const [roleAccessSaving, setRoleAccessSaving] = useState(false);
   const [roleAccessDirty, setRoleAccessDirty] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
@@ -2138,8 +2137,17 @@ export default function BusinessAutopilotUsersPage() {
       await showAddonRequiredPopup();
       return;
     }
+    const missing = [];
+    if (!String(form.first_name || "").trim()) missing.push("First Name");
+    if (!String(form.last_name || "").trim()) missing.push("Last Name");
+    if (!String(form.email || "").trim()) missing.push("Official Email");
+    if (!String(form.department_id || "").trim()) missing.push("Department");
+    if (!String(form.employee_role_id || "").trim()) missing.push("Employee Role");
     if (!String(form.phone_number_input || "").trim()) {
-      setNotice("Phone number is required.");
+      missing.push("Phone Number");
+    }
+    if (missing.length) {
+      setNotice(`Please fill all mandatory fields: ${missing.join(", ")}.`);
       return;
     }
     if (createEmailCheck.checking) {
@@ -2152,6 +2160,10 @@ export default function BusinessAutopilotUsersPage() {
     }
     if (createEmailCheck.belongsToAnotherOrganization) {
       setNotice(createEmailCheck.message || "This email is already assigned to another organization.");
+      return;
+    }
+    if (createEmailCheck.passwordRequired && !String(form.password || "").trim()) {
+      setNotice("Password is required.");
       return;
     }
     if (!createEmailCheck.passwordRequired) {
@@ -2635,19 +2647,25 @@ export default function BusinessAutopilotUsersPage() {
   const paginatedDepartments = filteredDepartments.slice((normalizedDepartmentPage - 1) * pageSize, normalizedDepartmentPage * pageSize);
   const departmentStartIndex = filteredDepartments.length ? (normalizedDepartmentPage - 1) * pageSize + 1 : 0;
   const departmentEndIndex = Math.min(normalizedDepartmentPage * pageSize, filteredDepartments.length);
+  const systemRoleOptions = useMemo(() => {
+    const hasHrDepartment = departments.some((row) => String(row?.name || "").trim().toLowerCase() === "hr");
+    return hasHrDepartment
+      ? [...BASE_SYSTEM_ROLE_OPTIONS, { key: "system:hr_view", label: "HR View" }]
+      : [...BASE_SYSTEM_ROLE_OPTIONS];
+  }, [departments]);
   const roleAccessRoleOptions = useMemo(() => {
     const employeeRoleOptions = employeeRoles.map((role) => ({
       key: `employee_role:${String(role.name || "").trim()}`,
       label: `Employee Role: ${role.name}`,
     })).filter((item) => item.key !== "employee_role:");
     const unique = new Map();
-    [...SYSTEM_ROLE_OPTIONS, ...employeeRoleOptions].forEach((item) => {
+    [...systemRoleOptions, ...employeeRoleOptions].forEach((item) => {
       if (!unique.has(item.key)) {
         unique.set(item.key, item);
       }
     });
     return Array.from(unique.values());
-  }, [employeeRoles]);
+  }, [employeeRoles, systemRoleOptions]);
   const visibleRoleAccessSections = useMemo(() => {
     if (!hasResolvedEnabledModules) {
       return ROLE_ACCESS_SECTIONS.filter((section) => section.key !== "users");
@@ -2742,7 +2760,7 @@ export default function BusinessAutopilotUsersPage() {
     if (roleAccessRoleOptions.some((item) => item.key === selectedRoleAccessKey)) {
       return;
     }
-    setSelectedRoleAccessKey(roleAccessRoleOptions[0]?.key || SYSTEM_ROLE_OPTIONS[0].key);
+    setSelectedRoleAccessKey(roleAccessRoleOptions[0]?.key || "system:org_user");
   }, [roleAccessRoleOptions, selectedRoleAccessKey]);
 
   useEffect(() => {
@@ -4412,6 +4430,7 @@ export default function BusinessAutopilotUsersPage() {
                           }
                           setForm((prev) => ({ ...prev, last_name: value }));
                         }}
+                        required
                       />
                     </div>
                     <div className="col-12 col-md-6 col-xl-4">
@@ -4451,6 +4470,7 @@ export default function BusinessAutopilotUsersPage() {
                           }
                           setForm((prev) => ({ ...prev, department_id: value }));
                         }}
+                        required
                       >
                         <option value="">Department</option>
                         {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -4468,6 +4488,7 @@ export default function BusinessAutopilotUsersPage() {
                           }
                           setForm((prev) => ({ ...prev, employee_role_id: value }));
                         }}
+                        required
                       >
                         <option value="">Employee Role</option>
                         {employeeRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
