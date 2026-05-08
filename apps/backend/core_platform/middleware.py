@@ -281,4 +281,10 @@ class ProductAuthorizationMiddleware:
             payload["permission"] = decision.permission
         if path.startswith("/api/"):
             return JsonResponse(payload, status=403)
+        if decision.detail == "product_not_subscribed" and path.startswith("/app/"):
+            response = redirect("/my-account/")
+            response["X-WZ-Redirect-Reason"] = "product_not_subscribed"
+            response["X-WZ-Redirect-From"] = path
+            response["X-WZ-Product"] = decision.product_slug
+            return response
         return HttpResponseForbidden(json.dumps(payload), content_type="application/json")

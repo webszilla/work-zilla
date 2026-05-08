@@ -25,8 +25,9 @@ from core.subscription_utils import (
     normalize_subscription_end_date,
 )
 from apps.backend.retention.models import RetentionStatus
-from apps.backend.retention.utils.retention import evaluate_tenant_status, get_tenant_status
+from apps.backend.retention.models import RetentionStatus, TenantRetentionStatus
 from core.access_control import check_product_access, get_access_role, get_user_organization, iter_accessible_product_slugs
+from core.access_control import normalize_product_slug
 
 User = get_user_model()
 
@@ -594,16 +595,25 @@ def auth_me(request):
     if sidebar_menu_style not in {"default", "compact"}:
         sidebar_menu_style = "default"
     session_timeout_minutes = get_org_session_timeout_minutes(org)
+    # NOTE: This endpoint is called on every app load and should stay fast.
+    # Avoid heavy retention evaluation here; rely on retention middleware / periodic jobs
+    # to compute the status. If no record exists yet, treat it as ACTIVE.
     retention_status = None
     grace_until = None
     archive_until = None
     if org:
-        retention = get_tenant_status(org)
-        if retention.last_evaluated_at is None:
-            retention = evaluate_tenant_status(org)
-        retention_status = retention.status
-        grace_until = retention.grace_until
-        archive_until = retention.archive_until
+        retention = (
+            TenantRetentionStatus.objects
+            .filter(organization=org)
+            .only("status", "grace_until", "archive_until")
+            .first()
+        )
+        if retention:
+            retention_status = retention.status
+            grace_until = retention.grace_until
+            archive_until = retention.archive_until
+        else:
+            retention_status = RetentionStatus.ACTIVE
     read_only = bool(profile and profile.role == "hr_view") or retention_status == RetentionStatus.GRACE_READONLY
     archived = retention_status in (
         RetentionStatus.ARCHIVED,
@@ -695,7 +705,7 @@ def auth_subscriptions(request):
     best_by_slug = {}
     for sub in subs:
         product = sub.plan.product if sub.plan else None
-        slug = product.slug if product else "monitor"
+        slug = normalize_product_slug(product.slug if product else "monitor")
         rank = _status_rank(sub.status)
         current = best_by_slug.get(slug)
         if not current:
@@ -745,7 +755,7 @@ def auth_subscriptions(request):
     latest_by_slug = {}
     for row in history_rows:
         product = row.plan.product if row.plan else None
-        slug = product.slug if product else "monitor"
+        slug = normalize_product_slug(product.slug if product else "monitor")
         if slug in seen_slugs or slug in latest_by_slug:
             continue
         latest_by_slug[slug] = row
@@ -786,7 +796,7 @@ def auth_subscriptions(request):
     for transfer in approved_transfers:
         plan = transfer.plan
         product = plan.product if plan else None
-        slug = product.slug if product else "monitor"
+        slug = normalize_product_slug(product.slug if product else "monitor")
         if slug in seen_slugs or slug in latest_by_slug or slug in latest_transfer_by_slug:
             continue
         latest_transfer_by_slug[slug] = transfer

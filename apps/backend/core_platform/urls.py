@@ -83,6 +83,8 @@ urlpatterns = [
     path("api/public/plans", monitor_public_views.public_plans),
     path("api/public/branding/", brand_views.public_branding),
     path("api/subscription/start", website_views.subscription_start),
+    path("api/subscription/status", website_views.subscription_status),
+    path("api/subscription/schedule-change", website_views.subscription_schedule_change),
     path("api/employee/register", monitor_core_views.register_employee),
     path("api/org/register", monitor_core_views.register_org),
     path("api/auth/csrf", common_auth_api_views.csrf_token),

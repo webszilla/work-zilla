@@ -954,6 +954,146 @@ def _gst_state_code_from_gstin(gstin: str) -> str:
     return code
 
 
+def _normalize_gst_state_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace("&", "and")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+GST_STATE_NAME_TO_CODE = {
+    # Common states / UTs (GST state code list)
+    "andaman and nicobar islands": "35",
+    "andhra pradesh": "37",
+    "arunachal pradesh": "12",
+    "assam": "18",
+    "bihar": "10",
+    "chandigarh": "04",
+    "chhattisgarh": "22",
+    "dadra and nagar haveli and daman and diu": "26",
+    "daman and diu": "25",
+    "dadra and nagar haveli": "26",
+    "delhi": "07",
+    "new delhi": "07",
+    "goa": "30",
+    "gujarat": "24",
+    "haryana": "06",
+    "himachal pradesh": "02",
+    "jammu and kashmir": "01",
+    "jharkhand": "20",
+    "karnataka": "29",
+    "kerala": "32",
+    "ladakh": "38",
+    "lakshadweep": "31",
+    "madhya pradesh": "23",
+    "maharashtra": "27",
+    "manipur": "14",
+    "meghalaya": "17",
+    "mizoram": "15",
+    "nagaland": "13",
+    "odisha": "21",
+    "orissa": "21",
+    "puducherry": "34",
+    "pondicherry": "34",
+    "punjab": "03",
+    "rajasthan": "08",
+    "sikkim": "11",
+    "tamil nadu": "33",
+    # Common concatenated spellings (no spaces)
+    "tamilnadu": "33",
+    "telangana": "36",
+    "tripura": "16",
+    "uttar pradesh": "09",
+    "uttarpradesh": "09",
+    "uttarakhand": "05",
+    "west bengal": "19",
+    "westbengal": "19",
+}
+
+
+# Common 2-letter state/UT abbreviations used in billing/admin UIs.
+# (Not an official GST list format, but seen in manual data entry.)
+GST_STATE_ABBR_TO_CODE = {
+    "AN": "35",  # Andaman & Nicobar Islands
+    "AP": "37",  # Andhra Pradesh
+    "AR": "12",  # Arunachal Pradesh
+    "AS": "18",  # Assam
+    "BR": "10",  # Bihar
+    "CH": "04",  # Chandigarh
+    "CT": "22",  # Chhattisgarh
+    "DD": "26",  # Dadra & Nagar Haveli and Daman & Diu
+    "DL": "07",  # Delhi
+    "GA": "30",  # Goa
+    "GJ": "24",  # Gujarat
+    "HR": "06",  # Haryana
+    "HP": "02",  # Himachal Pradesh
+    "JK": "01",  # Jammu & Kashmir
+    "JH": "20",  # Jharkhand
+    "KA": "29",  # Karnataka
+    "KL": "32",  # Kerala
+    "LA": "38",  # Ladakh
+    "LD": "31",  # Lakshadweep
+    "MP": "23",  # Madhya Pradesh
+    "MH": "27",  # Maharashtra
+    "MN": "14",  # Manipur
+    "ML": "17",  # Meghalaya
+    "MZ": "15",  # Mizoram
+    "NL": "13",  # Nagaland
+    "OR": "21",  # Odisha
+    "PB": "03",  # Punjab
+    "PY": "34",  # Puducherry
+    "RJ": "08",  # Rajasthan
+    "SK": "11",  # Sikkim
+    "TG": "36",  # Telangana
+    "TN": "33",  # Tamil Nadu
+    "TR": "16",  # Tripura
+    "UP": "09",  # Uttar Pradesh
+    "UT": "05",  # Uttarakhand
+    "WB": "19",  # West Bengal
+}
+
+
+def _gst_state_code_from_code_name_or_abbr(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    # If it's already a 2-digit GST state code.
+    code = _gst_state_code_from_gstin(raw)
+    if code:
+        return code
+    # If it's a 2-letter abbreviation (TN/KA/etc).
+    if len(raw) == 2 and raw.isalpha():
+        return GST_STATE_ABBR_TO_CODE.get(raw.upper(), "")
+    # Otherwise treat it as a state name.
+    return _gst_state_code_from_state_name(raw)
+
+
+def _gst_state_code_from_state_name(state_name: str) -> str:
+    """
+    Best-effort GST state code resolution from a free-text state field.
+
+    Data entry is inconsistent in real-world org billing profiles: users sometimes
+    paste "City, State" (eg: "Chennai, Tamil Nadu") into the state field.
+    This helper first tries an exact match, then falls back to a substring match
+    against known state names (preferring the longest match).
+    """
+    normalized = _normalize_gst_state_name(state_name)
+    if not normalized:
+        return ""
+    code = GST_STATE_NAME_TO_CODE.get(normalized, "")
+    if code:
+        return code
+    # Fallback: try to detect a known state name within the free-text string.
+    # Prefer the longest match to avoid partial overlaps.
+    best_key = ""
+    for key in GST_STATE_NAME_TO_CODE.keys():
+        if key and key in normalized and len(key) > len(best_key):
+            best_key = key
+    return GST_STATE_NAME_TO_CODE.get(best_key, "") if best_key else ""
+
+
 def _decimal_money(value) -> Decimal:
     try:
         raw = Decimal(str(value if value is not None else "0"))
@@ -1007,11 +1147,31 @@ def _gst_breakdown(*, subtotal: float, currency: str, buyer_profile=None, seller
         }
 
     buyer_state_code = _gst_state_code_from_gstin(getattr(buyer_profile, "gstin", ""))
-    seller_state_code = _gst_state_code_from_gstin(getattr(seller_profile, "gstin", "")) or str(
-        getattr(seller_profile, "state_code", "") or ""
-    ).strip()
+    if not buyer_state_code:
+        buyer_state_code = _gst_state_code_from_code_name_or_abbr(getattr(buyer_profile, "state", ""))
 
-    same_state = bool(buyer_state_code and seller_state_code and buyer_state_code == seller_state_code)
+    seller_state_code = _gst_state_code_from_gstin(getattr(seller_profile, "gstin", ""))
+    if not seller_state_code:
+        seller_state_code = _gst_state_code_from_code_name_or_abbr(getattr(seller_profile, "state_code", ""))
+    if not seller_state_code:
+        seller_state_code = _gst_state_code_from_code_name_or_abbr(getattr(seller_profile, "state", ""))
+
+    buyer_state_name = _normalize_gst_state_name(getattr(buyer_profile, "state", ""))
+    seller_state_name = _normalize_gst_state_name(getattr(seller_profile, "state", ""))
+
+    # Local/dev DBs can miss InvoiceSellerProfile GST/state configuration.
+    # Fall back to a configured seller state so GST mode can be computed.
+    if not seller_state_code and not seller_state_name:
+        default_seller_state = str(getattr(settings, "INVOICE_SELLER_STATE", "") or "").strip()
+        if not default_seller_state:
+            default_seller_state = "Tamil Nadu"
+        seller_state_name = _normalize_gst_state_name(default_seller_state)
+        seller_state_code = _gst_state_code_from_state_name(default_seller_state)
+
+    same_state = bool(
+        (buyer_state_code and seller_state_code and buyer_state_code == seller_state_code)
+        or (buyer_state_name and seller_state_name and buyer_state_name == seller_state_name)
+    )
     gst_rate = Decimal(str(rate)) / Decimal("100")
     gst_amount = _decimal_money(subtotal_amt * gst_rate)
     if same_state:
@@ -1350,6 +1510,29 @@ def checkout_select(request):
 
     if not request.user.is_authenticated:
         return redirect("/auth/signup/?next=/checkout/")
+
+    org = _resolve_org_for_user(request.user)
+    try:
+        selected_plan_id = int(plan_id or 0)
+    except (TypeError, ValueError):
+        selected_plan_id = 0
+    if org and selected_plan_id > 0 and product_slug:
+        product_filter = Q(plan__product__slug=product_slug)
+        if product_slug == "monitor":
+            product_filter |= Q(plan__product__isnull=True)
+        elif _is_business_autopilot_alias(product_slug):
+            product_filter = Q(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
+
+        active_sub = (
+            Subscription.objects
+            .filter(organization=org, status__in=["active", "trialing"])
+            .filter(product_filter)
+            .order_by("-start_date", "-id")
+            .first()
+        )
+        if active_sub and active_sub.plan_id == selected_plan_id:
+            messages.info(request, "You already have this plan active. Please choose a different plan.")
+            return redirect(f"/pricing/?product={product_slug}")
     return redirect("/checkout/")
 
 
@@ -1406,6 +1589,28 @@ def checkout_view(request):
     base_amount = base_amount_monthly if billing == "monthly" else base_amount_yearly
     addon_unit_price = addon_unit_price_monthly if billing == "monthly" else addon_unit_price_yearly
     org = _resolve_org_for_user(request.user)
+
+    # Backend validation: prevent purchasing same active plan again.
+    try:
+        selected_plan_id = int(plan_id or 0)
+    except (TypeError, ValueError):
+        selected_plan_id = 0
+    if org and selected_plan_id > 0 and product_slug and product_slug not in ("storage", "online-storage"):
+        product_filter = Q(plan__product__slug=product_slug)
+        if product_slug == "monitor":
+            product_filter |= Q(plan__product__isnull=True)
+        elif _is_business_autopilot_alias(product_slug):
+            product_filter = Q(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
+        active_sub = (
+            Subscription.objects
+            .filter(organization=org, status__in=["active", "trialing"])
+            .filter(product_filter)
+            .order_by("-start_date", "-id")
+            .first()
+        )
+        if active_sub and active_sub.plan_id == selected_plan_id:
+            messages.info(request, "You already have this plan active. Please choose a different plan.")
+            return redirect(f"/pricing/?product={product_slug}")
 
     # Renewal-friendly default: if org already has this plan, prefill current scheduled add-ons
     # when the checkout selection has 0 add-ons. This makes renew checkout reflect existing seats.
@@ -1990,6 +2195,137 @@ def subscription_start(request):
             })
 
     return _trial_block_response("trial_not_available")
+
+
+@require_http_methods(["GET"])
+def subscription_status(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "authentication_required"}, status=401)
+    org = _resolve_org_for_user(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=403)
+
+    active_plans = {}
+    scheduled_changes = {}
+
+    subs = (
+        Subscription.objects
+        .filter(organization=org, status__in=["active", "trialing"])
+        .select_related("plan", "plan__product", "scheduled_plan", "scheduled_plan__product")
+        .order_by("-start_date", "-id")
+    )
+    for sub in subs:
+        if not sub.plan_id:
+            continue
+        product_slug = _normalize_product_slug(sub.plan.product.slug if sub.plan.product_id else "monitor")
+        if product_slug not in active_plans:
+            plan_price = float(sub.plan.monthly_price or sub.plan.price or 0)
+            active_plans[product_slug] = {
+                "plan_id": sub.plan_id,
+                "plan_name": sub.plan.name,
+                "status": sub.status,
+                "billing_cycle": sub.billing_cycle,
+                "price_inr_month": plan_price,
+                "end_date": sub.end_date.isoformat() if sub.end_date else None,
+            }
+        if sub.scheduled_plan_id and product_slug not in scheduled_changes:
+            scheduled_changes[product_slug] = {
+                "plan_id": sub.scheduled_plan_id,
+                "plan_name": sub.scheduled_plan.name if sub.scheduled_plan_id else "",
+                "change_at": sub.scheduled_change_at.isoformat() if sub.scheduled_change_at else None,
+            }
+
+    try:
+        from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
+        storage_sub = (
+            StorageOrgSubscription.objects
+            .filter(organization=org, status__in=["active", "trialing"])
+            .select_related("plan")
+            .order_by("-updated_at")
+            .first()
+        )
+        if storage_sub and "storage" not in active_plans:
+            active_plans["storage"] = {
+                "plan_id": storage_sub.plan_id,
+                "plan_name": storage_sub.plan.name if storage_sub.plan_id else "",
+                "status": storage_sub.status,
+                "billing_cycle": getattr(storage_sub, "billing_cycle", "") or "",
+                "price_inr_month": float(storage_sub.plan.monthly_price_inr or 0) if storage_sub.plan_id else 0,
+                "end_date": storage_sub.end_date.isoformat() if getattr(storage_sub, "end_date", None) else None,
+            }
+    except Exception:
+        pass
+
+    return JsonResponse({"active_plans": active_plans, "scheduled_changes": scheduled_changes})
+
+
+@require_http_methods(["POST"])
+def subscription_schedule_change(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "authentication_required"}, status=401)
+    org = _resolve_org_for_user(request.user)
+    if not org:
+        return JsonResponse({"detail": "organization_required"}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    product_slug = _normalize_product_slug(payload.get("product"))
+    target_plan_id = payload.get("plan_id")
+    if not product_slug or not target_plan_id:
+        return JsonResponse({"detail": "invalid_payload"}, status=400)
+    try:
+        target_plan_id = int(target_plan_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "invalid_plan_id"}, status=400)
+
+    if product_slug in ("storage", "online-storage"):
+        return JsonResponse({"detail": "unsupported_product"}, status=400)
+
+    target_plan = Plan.objects.filter(id=target_plan_id).select_related("product").first()
+    if not target_plan:
+        return JsonResponse({"detail": "plan_not_found"}, status=404)
+    target_product_slug = _normalize_product_slug(target_plan.product.slug if target_plan.product_id else "monitor")
+    if target_product_slug != product_slug and not (
+        _is_business_autopilot_alias(target_product_slug) and _is_business_autopilot_alias(product_slug)
+    ):
+        return JsonResponse({"detail": "product_mismatch"}, status=400)
+
+    product_filter = Q(plan__product__slug=product_slug)
+    if product_slug == "monitor":
+        product_filter |= Q(plan__product__isnull=True)
+    elif _is_business_autopilot_alias(product_slug):
+        product_filter = Q(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
+
+    active_sub = (
+        Subscription.objects
+        .filter(organization=org, status__in=["active", "trialing"])
+        .filter(product_filter)
+        .select_related("plan", "plan__product")
+        .order_by("-start_date", "-id")
+        .first()
+    )
+    if not active_sub:
+        return JsonResponse({"detail": "no_active_subscription"}, status=409)
+    if active_sub.plan_id == target_plan_id:
+        return JsonResponse({"detail": "same_plan_not_allowed"}, status=409)
+
+    current_price = float(active_sub.plan.monthly_price or active_sub.plan.price or 0)
+    target_price = float(target_plan.monthly_price or target_plan.price or 0)
+    if target_price > current_price:
+        return JsonResponse({"detail": "not_a_downgrade"}, status=409)
+
+    scheduled_at = active_sub.end_date or timezone.now()
+    active_sub.scheduled_plan = target_plan
+    active_sub.scheduled_change_at = scheduled_at
+    active_sub.save(update_fields=["scheduled_plan", "scheduled_change_at"])
+    return JsonResponse({
+        "ok": True,
+        "scheduled_plan_id": target_plan_id,
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+    })
 
 
 @require_POST
@@ -2662,6 +2998,10 @@ def account_view(request):
         )
         return render(request, "public/account_verification_required.html", context)
     org = _resolve_org_for_user(request.user)
+    # Keep SPA and backend middleware aligned on the active organization.
+    # Some flows (HTML login -> My Account -> Dashboard) may not have this set.
+    if org:
+        request.session["active_org_id"] = org.id
     profile = UserProfile.objects.filter(user=request.user).first()
     show_ticketing_tab = _is_org_admin_account(request, org, profile)
     can_view_billing = _has_account_billing_access(request.user, org, profile)

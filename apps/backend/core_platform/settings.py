@@ -174,7 +174,10 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASSWORD", ""),
         "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
         "PORT": os.environ.get("DB_PORT", "5432"),
-        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+        # In local dev, the Django dev server can open many threads quickly (SPA + API calls),
+        # and persistent connections can exhaust Postgres `max_connections`.
+        # Default to non-persistent connections in DEBUG unless explicitly overridden.
+        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0" if DEBUG else "60")),
         "OPTIONS": {
             "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
         },
@@ -218,6 +221,10 @@ CSRF_FAILURE_VIEW = "apps.backend.common_auth.views.csrf_failure_view"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", REPO_ROOT / "env" / "media"))
+
+# Billing / invoicing (India GST)
+INVOICE_TAX_RATE = int(os.environ.get("INVOICE_TAX_RATE", "18") or "18")
+INVOICE_SELLER_STATE = os.environ.get("INVOICE_SELLER_STATE", "Tamil Nadu").strip() or "Tamil Nadu"
 
 # Backblaze B2 (S3-compatible) defaults (used by DynamicMediaStorage if enabled).
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")

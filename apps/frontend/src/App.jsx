@@ -113,7 +113,8 @@ const emptyState = {
   onboarding: { enabled: false, state: "active" },
   readOnly: false,
   sessionTimeoutMinutes: 30,
-  subscriptions: []
+  subscriptions: [],
+  subscriptionsLoaded: false
 };
 
 const THEME_OVERRIDE_KEY = "wz_brand_theme_override";
@@ -2149,7 +2150,9 @@ function ForceHtmlLoginRedirect() {
   const location = useLocation();
 
   useEffect(() => {
-    const target = `/auth/login/?next=${encodeURIComponent(`/app${location.pathname}${location.search}${location.hash}`)}`;
+    const basePath = String(location.pathname || "");
+    const normalizedPath = basePath.startsWith("/app/") ? basePath : `/app${basePath}`;
+    const target = `/auth/login/?next=${encodeURIComponent(`${normalizedPath}${location.search}${location.hash}`)}`;
     window.location.replace(target);
   }, [location.pathname, location.search, location.hash]);
 
@@ -2293,7 +2296,8 @@ export default function App() {
       window.__WZ_ARCHIVED__ = Boolean(data.archived);
     }
     setOrgTimezone(data.org_timezone || "UTC");
-    setState({
+    setState((prev) => ({
+      ...prev,
       loading: false,
       authenticated: Boolean(data.authenticated),
       user: data.user || null,
@@ -2311,26 +2315,46 @@ export default function App() {
       onboarding: data.onboarding || { enabled: false, state: "active" },
       readOnly: Boolean(data.read_only),
       sessionTimeoutMinutes: Number.parseInt(data.session_timeout_minutes, 10) || 30,
-      subscriptions: []
-    });
+      // Keep the previous subscription snapshot until the next load completes,
+      // otherwise route guards briefly see "none" and show incorrect "not active" UI.
+      subscriptions: Array.isArray(prev.subscriptions) ? prev.subscriptions : [],
+      subscriptionsLoaded: Boolean(prev.subscriptionsLoaded)
+    }));
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
-    const response = await fetch("/api/auth/subscriptions", {
-      credentials: "include"
-    });
-    if (!response.ok) {
-      setState((prev) => ({ ...prev, subscriptions: [] }));
-      return;
+    try {
+      const response = await fetch("/api/auth/subscriptions", {
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
+      if (response.status === 401) {
+        setState({ ...emptyState, loading: false, subscriptionsLoaded: true });
+        return;
+      }
+      if (!response.ok) {
+        setState((prev) => ({ ...prev, subscriptions: [], subscriptionsLoaded: true }));
+        return;
+      }
+      const contentType = String(response.headers.get("content-type") || "");
+      if (!contentType.includes("application/json")) {
+        // If the server returned an HTML login page (redirect-followed), treat it as logged out.
+        setState({ ...emptyState, loading: false, subscriptionsLoaded: true });
+        return;
+      }
+      const data = await response.json();
+      setState((prev) => ({ ...prev, subscriptions: data.subscriptions || [], subscriptionsLoaded: true }));
+    } catch (_error) {
+      setState((prev) => ({ ...prev, subscriptions: [], subscriptionsLoaded: true }));
     }
-    const data = await response.json();
-    setState((prev) => ({ ...prev, subscriptions: data.subscriptions || [] }));
   }, []);
 
   const loadProfile = useCallback(async () => {
     const browserTimezone = getBrowserTimezone();
     const response = await fetch("/api/auth/me", {
       credentials: "include",
+      cache: "no-store",
       headers: browserTimezone ? { "X-Browser-Timezone": browserTimezone } : {}
     });
     if (response.status === 401) {
@@ -2338,6 +2362,11 @@ export default function App() {
       return;
     }
     if (!response.ok) {
+      setState({ ...emptyState, loading: false });
+      return;
+    }
+    const contentType = String(response.headers.get("content-type") || "");
+    if (!contentType.includes("application/json")) {
       setState({ ...emptyState, loading: false });
       return;
     }
@@ -2561,6 +2590,9 @@ export default function App() {
       try {
         await loadProfile();
       } catch (error) {
+        if (error && String(error.name || "") === "AbortError") {
+          return;
+        }
         if (active) {
           setState({ ...emptyState, loading: false });
         }
@@ -2740,6 +2772,90 @@ export default function App() {
     );
   }
 
+  function SubscriptionBlockedPopup({ label, status, productSlug, planIsFree, billingCycle, expiryDate }) {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [open, setOpen] = useState(true);
+    const normalizedProduct = productSlug === "worksuite" ? "worksuite" : (productSlug || "worksuite");
+    const safeLabel = String(label || "Work Suite");
+    const closeAndGo = (target) => {
+      setOpen(false);
+      if (target) {
+        window.location.href = target;
+        return;
+      }
+      navigate("/my-account/", { replace: true });
+    };
+
+    if (!open) {
+      return null;
+    }
+
+    const expiryText = expiryDate ? formatDeviceDate(expiryDate, "") : "";
+    const billingText = String(billingCycle || "").trim().toLowerCase() === "yearly" ? "yearly" : "monthly";
+    const normalizedStatus = String(status || "none").toLowerCase();
+    const title = normalizedStatus === "pending"
+      ? "Awaiting Admin Approval"
+      : normalizedStatus === "rejected"
+      ? "Subscription Rejected"
+      : normalizedStatus === "trial_ended"
+      ? "Trial Ended"
+      : normalizedStatus === "expired"
+      ? "Subscription Expired"
+      : "Subscription Not Active";
+    const message = normalizedStatus === "pending"
+      ? `Your ${safeLabel} payment is under review. You will get access once approved.`
+      : normalizedStatus === "rejected"
+      ? `Your ${safeLabel} payment was rejected. Please renew to activate access.`
+      : normalizedStatus === "trial_ended"
+      ? `Your ${safeLabel} trial has ended. Please upgrade your plan to continue.`
+      : normalizedStatus === "expired"
+      ? (
+          expiryText
+            ? `Your ${safeLabel} ${billingText} plan expired on ${expiryText}. Please renew to continue.`
+            : `Your ${safeLabel} plan has expired. Please renew to continue.`
+        )
+      : `Your ${safeLabel} plan is not active. Please check My Account or choose a plan.`;
+
+    // Prefer My Account for renew/upgrade entry points.
+    const plansHref = `/app/plans/?product=${encodeURIComponent(normalizedProduct)}`;
+    const myAccountHref = "/my-account/";
+
+    return (
+      <div className="page-center">
+        <div className="panel" style={{ maxWidth: 520 }}>
+          <div className="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <h1 className="mb-1">{safeLabel} Dashboard</h1>
+              <p className="mb-2">{title}</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => closeAndGo(myAccountHref)}
+              aria-label="Close"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="text-secondary mb-3">{message}</div>
+          <div className="d-flex flex-wrap gap-2 justify-content-end">
+            <a className="app-btn app-btn-secondary" href={myAccountHref}>
+              My Account
+            </a>
+            <a className="app-btn app-btn-primary" href={plansHref}>
+              View Plans
+            </a>
+          </div>
+          <div className="text-secondary mt-2" style={{ fontSize: 12 }}>
+            If you believe this is a mistake, refresh and try again.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function ProductShell() {
     const { branding } = useBranding();
     const monitorLabel =
@@ -2800,15 +2916,23 @@ export default function App() {
       const entry = getSubscriptionEntry(productSlug);
       const status = getSubscriptionStatus(productSlug);
 
+      if (!state.subscriptionsLoaded) {
+        return (
+          <div className="page-center">
+            <div className="panel">
+              <div className="spinner" />
+              <p>Checking subscription...</p>
+            </div>
+          </div>
+        );
+      }
+
       if (status !== "active") {
-        if (productSlug === "business-autopilot-erp") {
-          return <ForceMyAccountRedirect message="Your plan is not active. Redirecting to My Account..." />;
-        }
         if (productSlug === "storage" && (status === "trial_ended" || status === "expired")) {
           return <AppShell state={state} productPrefix={prefix} productSlug={productSlug} />;
         }
         return (
-          <AccessDenied
+          <SubscriptionBlockedPopup
             label={productSlug === "worksuite" ? monitorLabel : match?.label || "Work Suite"}
             status={status}
             productSlug={productSlug}

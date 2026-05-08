@@ -28,6 +28,7 @@ ARCHIVED_ALLOWED_PREFIXES = (
     "/app/billing",
     "/app/plans",
     "/app/bank-transfer",
+    "/my-account/",
     "/my-account/bank-transfer",
     "/my-account/bank-transfer/",
     "/my-account/billing/",

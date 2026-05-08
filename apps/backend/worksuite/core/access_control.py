@@ -11,6 +11,7 @@ from apps.backend.imposition.models import ImpositionOrgSubscription
 from apps.backend.products.models import Product
 from apps.backend.storage.models import OrgSubscription as StorageOrgSubscription
 from core.models import Organization, OrganizationProduct, Subscription, UserProductAccess, UserProfile
+from core.subscription_utils import is_subscription_active, maybe_expire_subscription, normalize_subscription_end_date
 
 
 User = get_user_model()
@@ -40,7 +41,6 @@ API_PRODUCT_PREFIXES = {
 }
 
 EXEMPT_PREFIXES = (
-    "/app/",
     "/app/plans",
     "/app/billing",
     "/app/bank-transfer",
@@ -84,6 +84,8 @@ def normalize_product_slug(product_slug: str | None) -> str:
     slug = str(product_slug or "").strip().lower()
     if slug in {"work-suite", "worksuite"}:
         return "monitor"
+    if slug == "business-autopilot":
+        return "business-autopilot-erp"
     return slug
 
 
@@ -162,11 +164,21 @@ def org_has_product_subscription(org: Optional[Organization], product_slug: str 
     ).filter(org_product_filter).exists():
         return True
 
-    if Subscription.objects.filter(
-        organization_id=org_id,
-        status__in=("active", "trialing"),
-    ).filter(subscription_filter).exists():
-        return True
+    sub = (
+        Subscription.objects
+        .filter(
+            organization_id=org_id,
+            status__in=("active", "trialing"),
+        )
+        .filter(subscription_filter)
+        .order_by("-start_date")
+        .first()
+    )
+    if sub:
+        normalize_subscription_end_date(sub)
+        if is_subscription_active(sub):
+            return True
+        maybe_expire_subscription(sub)
 
     if slug == "storage":
         return StorageOrgSubscription.objects.filter(

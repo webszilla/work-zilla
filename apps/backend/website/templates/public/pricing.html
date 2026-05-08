@@ -123,7 +123,9 @@
 {% block extra_js %}
 <script>
     const pricingState = { currency: "inr", billing: "monthly", product: "monitor" };
-    const activePlans = {{ active_plans_json|default:"{}"|safe }};
+    let activePlans = {{ active_plans_json|default:"{}"|safe }};
+    let scheduledChanges = {};
+    const subscriptionState = { loading: false, error: "" };
     const pricingCache = {};
     const isLoggedIn = {{ is_logged_in|yesno:"true,false" }};
     const csrfToken = document.getElementById("pricing-csrf-token")?.value || "";
@@ -149,6 +151,23 @@
     function isBusinessAutopilotSlug(slug) {
       const normalized = String(slug || "").trim().toLowerCase();
       return normalized === "business-autopilot-erp" || normalized === "business-autopilot";
+    }
+
+    function normalizeProductSlug(slug) {
+      const normalized = String(slug || "").trim().toLowerCase();
+      if (normalized === "worksuite" || normalized === "work-suite") return "monitor";
+      if (normalized === "online-storage") return "storage";
+      if (normalized === "business-autopilot") return "business-autopilot";
+      return normalized || "monitor";
+    }
+
+    function activePlanIdForProduct(publicSlug) {
+      const slug = normalizeProductSlug(publicSlug);
+      if (!activePlans) return null;
+      if (slug === "business-autopilot") {
+        return activePlans["business-autopilot-erp"]?.plan_id ?? activePlans["business-autopilot"]?.plan_id ?? null;
+      }
+      return activePlans[slug]?.plan_id ?? null;
     }
 
     function updatePrices() {
@@ -201,6 +220,117 @@
       const div = document.createElement("div");
       div.textContent = String(value || "");
       return div.innerHTML;
+    }
+
+    function ensureDowngradeModal() {
+      if (document.getElementById("wz-downgrade-modal")) return;
+      const modal = document.createElement("div");
+      modal.id = "wz-downgrade-modal";
+      modal.style.cssText = "position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,6,23,0.65); z-index:9999; padding:16px;";
+      modal.innerHTML = `
+        <div style="width:100%; max-width:520px; background:#0b1220; border:1px solid rgba(148,163,184,0.25); border-radius:16px; padding:18px; box-shadow:0 18px 70px rgba(0,0,0,0.45);">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+            <div>
+              <div style="font-size:16px; font-weight:700; color:#e2e8f0;">Confirm downgrade</div>
+              <div id="wz-downgrade-modal-subtitle" style="margin-top:6px; font-size:13px; color:#94a3b8;"></div>
+            </div>
+            <button type="button" id="wz-downgrade-close" class="btn btn-outline" style="padding:6px 10px;">Close</button>
+          </div>
+          <div id="wz-downgrade-modal-body" style="margin-top:14px; font-size:14px; color:#cbd5e1; line-height:1.5;"></div>
+          <div id="wz-downgrade-modal-error" style="margin-top:12px; color:#fca5a5; font-size:13px; display:none;"></div>
+          <div style="margin-top:16px; display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+            <a class="btn btn-outline" href="/my-account/" id="wz-downgrade-myaccount">My Account</a>
+            <button type="button" class="btn btn-primary" id="wz-downgrade-confirm">Confirm Downgrade</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) hideDowngradeModal();
+      });
+      modal.querySelector("#wz-downgrade-close")?.addEventListener("click", hideDowngradeModal);
+    }
+
+    function showDowngradeModal({ planName, planId, productSlug, warningText }) {
+      ensureDowngradeModal();
+      const modal = document.getElementById("wz-downgrade-modal");
+      const subtitle = document.getElementById("wz-downgrade-modal-subtitle");
+      const body = document.getElementById("wz-downgrade-modal-body");
+      const error = document.getElementById("wz-downgrade-modal-error");
+      const confirmBtn = document.getElementById("wz-downgrade-confirm");
+      if (!modal || !confirmBtn || !body) return;
+      if (error) error.style.display = "none";
+      if (subtitle) subtitle.textContent = planName ? `Switch to ${planName}` : "Switch plan";
+      body.textContent = warningText || "Downgrade will apply from your next billing cycle. Some features may be unavailable after downgrade.";
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Confirm Downgrade";
+      confirmBtn.onclick = () => {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Scheduling…";
+        fetch("/api/subscription/schedule-change", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+          },
+          body: JSON.stringify({ product: productSlug, plan_id: planId }),
+        })
+          .then(async (response) => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const msg = String(data.message || data.detail || "Unable to schedule downgrade.").trim();
+              throw new Error(msg);
+            }
+            return data;
+          })
+          .then(() => {
+            hideDowngradeModal();
+            window.alert("Downgrade scheduled. It will apply from your next billing cycle.");
+          })
+          .catch((err) => {
+            if (error) {
+              error.textContent = err?.message || "Unable to schedule downgrade.";
+              error.style.display = "";
+            } else {
+              window.alert(err?.message || "Unable to schedule downgrade.");
+            }
+          })
+          .finally(() => {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Confirm Downgrade";
+          });
+      };
+      modal.style.display = "flex";
+    }
+
+    function hideDowngradeModal() {
+      const modal = document.getElementById("wz-downgrade-modal");
+      if (modal) modal.style.display = "none";
+    }
+
+    function fetchSubscriptionStatus() {
+      if (!isLoggedIn) return Promise.resolve();
+      subscriptionState.loading = true;
+      subscriptionState.error = "";
+      return fetch("/api/subscription/status", { headers: { "Accept": "application/json" } })
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const detail = String(data.detail || data.error || `Request failed (${response.status})`).trim();
+            throw new Error(detail);
+          }
+          return data;
+        })
+        .then((data) => {
+          activePlans = data.active_plans || {};
+          scheduledChanges = data.scheduled_changes || {};
+        })
+        .catch((err) => {
+          subscriptionState.error = err?.message || "Unable to load subscription status.";
+        })
+        .finally(() => {
+          subscriptionState.loading = false;
+        });
     }
 
     function formatPlanTitle(value) {
@@ -754,6 +884,13 @@
         return;
       }
       const freeEligible = data.free_eligible !== false;
+      if (isLoggedIn && subscriptionState.error) {
+        const warn = document.createElement("div");
+        warn.className = "card p-4";
+        warn.style.gridColumn = "1 / -1";
+        warn.innerHTML = `<h3>Unable to load subscription status</h3><p class="text-secondary">${escapeHtml(subscriptionState.error)}</p>`;
+        container.appendChild(warn);
+      }
       const isStorageProduct = data.product.slug === "storage" || data.product.slug === "online-storage";
       const normalizedSlug = isStorageProduct ? "storage" : data.product.slug;
       const isImpositionProduct = normalizedSlug === "imposition-software";
@@ -875,15 +1012,25 @@
         const daFeatureFlags = isDigitalAutomation
           ? buildDigitalAutomationPricingFeatures(plan)
           : [];
-        const activePlanId = activePlans[data.product.slug]?.plan_id || null;
+        const isSubLoading = isLoggedIn && subscriptionState.loading;
+        const activePlanId = data.product ? activePlanIdForProduct(data.product.slug) : null;
         const isCurrentPlan = activePlanId === plan.id;
         const activePlan = data.plans.find((item) => item.id === activePlanId) || null;
-        const activePlanIsFree = activePlan
-          ? String(activePlan.name || "").toLowerCase() === "free"
-          : false;
+        const activePlanPrice = activePlan ? Number(activePlan.price_inr_month || 0) : 0;
+        const cardPlanPrice = Number(plan.price_inr_month || 0);
+        const hasActiveSubscription = isLoggedIn && activePlanId !== null;
+        const isDefaultFreeCurrent = isLoggedIn && !hasActiveSubscription && isFreePlan;
+        const isEffectiveCurrentPlan = isCurrentPlan || isDefaultFreeCurrent;
+        const baselinePlanPrice = hasActiveSubscription ? activePlanPrice : 0;
+        const isPaidUser = hasActiveSubscription && baselinePlanPrice > 0;
         const trialLikePlan = isFreePlan || isGenericFreeTrial || isTrialPlan || storageTrialOnly;
         const trialLocked = isLoggedIn && !freeEligible && trialLikePlan;
-        const actionLabel = !isLoggedIn
+        const downgradeToFree = isLoggedIn && isPaidUser && isFreePlan && !isEffectiveCurrentPlan;
+        const isDowngrade = isLoggedIn && isPaidUser && !isEffectiveCurrentPlan && cardPlanPrice < baselinePlanPrice && !isFreePlan;
+        const isUpgrade = isLoggedIn && !isEffectiveCurrentPlan && cardPlanPrice > baselinePlanPrice;
+        const actionLabel = isSubLoading
+          ? "Loading…"
+          : !isLoggedIn
           ? (isStorage || isImposition
             ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
             : trialLikePlan
@@ -893,13 +1040,19 @@
           ? "Trial Not Configured"
           : trialLocked
           ? "Trial Unavailable"
-        : isCurrentPlan
-          ? "Current Plan"
-          : isStorage || isImposition
-          ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
-          : trialLikePlan
-          ? "Take a Free Trial"
-          : "Process to Pay";
+          : isEffectiveCurrentPlan
+            ? "Current Plan"
+            : downgradeToFree
+              ? "Downgrade to Free"
+              : isDowngrade
+                ? "Downgrade"
+                : isUpgrade
+                  ? "Upgrade"
+                  : isStorage || isImposition
+                    ? ((storageTrialOnly || isTrialPlan) ? "Start Free Trial" : "Process to Pay")
+                    : trialLikePlan
+                      ? "Take a Free Trial"
+                      : "Process to Pay";
         const card = document.createElement("div");
         card.className = "plan-card card";
         card.setAttribute("data-plan-card", "1");
@@ -908,8 +1061,14 @@
         const trialSuffix = trialLikePlan
           ? `${trialDays} days free trial`
           : null;
+        const planBadge = isEffectiveCurrentPlan && isLoggedIn
+          ? `<span style="display:inline-flex; align-items:center; gap:6px; margin-left:10px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; color:#052e16; background:#86efac;">Your Plan</span>`
+          : "";
+        if (isEffectiveCurrentPlan && isLoggedIn) {
+          card.style.border = "2px solid #22c55e";
+        }
         card.innerHTML = `
-          <h2 class="plan-title">${escapeHtml(isImposition && isTrialPlan ? "Free" : formatProductPlanTitle(plan.name, normalizedSlug))}</h2>
+          <h2 class="plan-title">${escapeHtml(isImposition && isTrialPlan ? "Free" : formatProductPlanTitle(plan.name, normalizedSlug))}${planBadge}</h2>
           <p>${isMonitor
             ? escapeHtml(monitorPlanDescription(plan.name))
             : normalizedSlug === "ai-chatbot"
@@ -979,7 +1138,7 @@
           <button class="btn btn-outline" data-plan-action>${escapeHtml(actionLabel)}</button>
         `;
         const actionBtn = card.querySelector("[data-plan-action]");
-        if (isCurrentPlan || trialLocked) {
+        if (isSubLoading || isEffectiveCurrentPlan || trialLocked) {
           actionBtn.disabled = true;
           actionBtn.style.opacity = "0.6";
           actionBtn.style.cursor = "not-allowed";
@@ -992,7 +1151,7 @@
           actionBtn.style.pointerEvents = "none";
         }
         actionBtn.addEventListener("click", () => {
-          if (isCurrentPlan || trialLocked) {
+          if (isSubLoading || isEffectiveCurrentPlan || trialLocked) {
             return;
           }
           if (trialNotConfigured) {
@@ -1000,6 +1159,24 @@
           }
           if (!isLoggedIn) {
             submitCheckout(plan.id, data.product.slug);
+            return;
+          }
+          if (downgradeToFree) {
+            showDowngradeModal({
+              planName: "Free",
+              planId: plan.id,
+              productSlug: data.product.slug,
+              warningText: "Free plan will apply from next billing cycle. Paid features may be disabled.",
+            });
+            return;
+          }
+          if (isDowngrade) {
+            showDowngradeModal({
+              planName: formatProductPlanTitle(plan.name, normalizedSlug),
+              planId: plan.id,
+              productSlug: data.product.slug,
+              warningText: "Downgrade will apply from your next billing cycle. Some features may be unavailable after downgrade.",
+            });
             return;
           }
           if (trialLikePlan) {
@@ -1401,7 +1578,9 @@
           const preferred = getInitialProductSlug(products);
           pricingState.product = preferred || (monitor ? monitor.slug : (products[0]?.slug || "monitor"));
           renderProductTabs(products);
-          loadPlans(pricingState.product);
+          fetchSubscriptionStatus().finally(() => {
+            loadPlans(pricingState.product);
+          });
           syncEnquiryDropdown();
         })
         .catch(() => {

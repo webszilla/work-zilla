@@ -20,9 +20,9 @@ EXEMPT_URLS = [
     "/dashboard/subscribe/",
     "/dashboard/bank-transfer/",
     "/dashboard/billing/",
-    "/app/",
     "/app/plans",
     "/app/bank-transfer",
+    "/my-account/",
     "/my-account/bank-transfer",
     "/my-account/bank-transfer/",
     "/my-account/billing/",
@@ -168,6 +168,12 @@ class OrganizationRequiredMiddleware:
         if not request.user.is_authenticated:
             return self.get_response(request)
 
+        # Allow the SPA shell route itself without triggering subscription redirects.
+        # Important: do not exempt all `/app/*` routes, otherwise product dashboards
+        # become accessible even when the subscription is expired.
+        if request.path in ("/app", "/app/"):
+            return self.get_response(request)
+
         profile = UserProfile.objects.filter(user=request.user).first()
         if profile and profile.role == "ai_chatbot_agent":
             path = request.path
@@ -208,10 +214,12 @@ class OrganizationRequiredMiddleware:
 
         if org:
             if org.is_deleted:
-                if request.user == org.owner:
-                    logout(request)
-                messages.warning(request, "Organization is deleted. Contact SaaS Admin to restore access.")
-                return redirect("/accounts/login/")
+                # Keep the user logged in so they can renew/see account state.
+                messages.warning(request, "Account archived. Renew to restore access.")
+                response = redirect("/my-account/")
+                response["X-WZ-Redirect-Reason"] = "org_deleted"
+                response["X-WZ-Redirect-From"] = request.path
+                return response
 
             latest_sub = (
                 Subscription.objects.filter(organization=org)
@@ -222,19 +230,16 @@ class OrganizationRequiredMiddleware:
                 effective_end = get_effective_end_date(latest_sub)
                 cutoff = timezone.now() - timedelta(days=15)
                 if effective_end and effective_end < cutoff:
-                    owner = org.owner
-                    if not org.is_deleted:
-                        org.is_deleted = True
-                        org.deleted_at = timezone.now()
-                        org.deleted_reason = "This account not renewed after expired."
-                        org.save(update_fields=["is_deleted", "deleted_at", "deleted_reason"])
-                    if owner and owner.is_active:
-                        owner.is_active = False
-                        owner.save(update_fields=["is_active"])
-                    if owner and owner == request.user:
-                        logout(request)
-                    messages.warning(request, "Account archived due to plan expiry. Contact SaaS Admin to restore.")
-                    return redirect("/accounts/login/")
+                    # IMPORTANT:
+                    # Do not deactivate the owner or hard-delete the org in request middleware.
+                    # That creates confusing login/logout loops (especially for SPA navigation)
+                    # and can lock customers out while they are trying to renew.
+                    # Archival enforcement is handled by RetentionEnforcementMiddleware.
+                    messages.warning(request, "Account archived due to plan expiry. Renew to restore access.")
+                    response = redirect("/my-account/")
+                    response["X-WZ-Redirect-Reason"] = "plan_expired_archive_cutoff"
+                    response["X-WZ-Redirect-From"] = request.path
+                    return response
 
             sub = (
                 Subscription.objects.filter(organization=org, status="active")
@@ -258,6 +263,13 @@ class OrganizationRequiredMiddleware:
                         else:
                             messages.warning(request, "Please select a plan to continue.")
                         request.session["plan_warning_shown"] = True
+                    # When a user hits any product dashboard without an active plan,
+                    # send them back to My Account (renew/upgrade options are shown there).
+                    if request.path.startswith("/app/"):
+                        response = redirect("/my-account/")
+                        response["X-WZ-Redirect-Reason"] = "no_active_plan"
+                        response["X-WZ-Redirect-From"] = request.path
+                        return response
                     return redirect("/app/plans/")
 
         return self.get_response(request)

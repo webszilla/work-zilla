@@ -18681,6 +18681,12 @@ function CrmOnePageModule() {
 		                window.open(`/app/business-autopilot/crm?${query.toString()}`, "_blank", "noopener,noreferrer");
 		              };
 
+	              const finalProposalAmount = parseNumber(leadViewPopup.finalProposalAmount || leadViewPopup.final_proposal_amount || "");
+	              const finalProposalAmountDisplay = finalProposalAmount
+	                ? formatCurrencyAmount(finalProposalAmount, crmCurrencyCode)
+	                : "-";
+	              const normalizedLeadStatus = String(leadViewPopup.status || "").trim().toLowerCase();
+	              const proposalConverted = normalizedLeadStatus === "converted";
 	              const pipelineSteps = [
 	                {
 	                  key: "lead",
@@ -18688,8 +18694,20 @@ function CrmOnePageModule() {
 	                  icon: "bi-person",
 	                  isDone: true,
 	                  detail: leadCrmReferenceId || "-",
-	                  statusLabel: "Created",
+	                  statusLabel: proposalConverted ? "Converted" : "Created",
 	                },
+	                ...(proposalConverted
+	                  ? [
+	                      {
+	                        key: "proposal",
+	                        label: "Proposal",
+	                        icon: "bi-file-earmark-check",
+	                        isDone: true,
+	                        detail: finalProposalAmountDisplay,
+	                        statusLabel: "Completed",
+	                      },
+	                    ]
+	                  : []),
 		                {
 		                  key: "deal",
 		                  label: "Deal",
@@ -18728,10 +18746,6 @@ function CrmOnePageModule() {
 		                },
 	              ];
 	              const pipelineStageIndex = Math.max(0, pipelineSteps.reduce((acc, step, idx) => (step.isDone ? idx : acc), 0));
-	              const finalProposalAmount = parseNumber(leadViewPopup.finalProposalAmount || leadViewPopup.final_proposal_amount || "");
-	              const finalProposalAmountDisplay = finalProposalAmount
-	                ? formatCurrencyAmount(finalProposalAmount, crmCurrencyCode)
-	                : "-";
 	              const details = [
 		                { label: "Company", value: leadViewPopup.company || "-" },
 		                { label: "Contact Person", value: leadViewPopup.contactPerson || "-" },

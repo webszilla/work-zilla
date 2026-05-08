@@ -1040,6 +1040,13 @@ class Subscription(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE)
+    scheduled_plan = models.ForeignKey(
+        Plan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scheduled_subscriptions",
+    )
 
     razorpay_order_id = models.CharField(max_length=255, null=True, blank=True)
     razorpay_payment_id = models.CharField(max_length=255, null=True, blank=True)
@@ -1068,6 +1075,7 @@ class Subscription(models.Model):
         ),
         default="monthly"
     )
+    scheduled_change_at = models.DateTimeField(null=True, blank=True)
     retention_months = models.PositiveSmallIntegerField(default=1)
     retention_days = models.PositiveSmallIntegerField(default=30)
     addon_count = models.PositiveSmallIntegerField(default=0)

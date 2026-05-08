@@ -16,6 +16,7 @@ def _disable_cache_headers(response):
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    response["ETag"] = ""
     response["CDN-Cache-Control"] = "no-store"
     response["Surrogate-Control"] = "no-store"
     return response
@@ -63,6 +64,14 @@ def _open_dist_file(path):
 
 @ensure_csrf_cookie
 def spa_serve(request, path=""):
+    # Normalize SPA route URLs to always include a trailing slash.
+    # This avoids separate cache entries for `/app/foo` vs `/app/foo/` and prevents
+    # some browsers from reusing stale bundles during navigation.
+    if path and not path.endswith("/") and "assets/" not in path:
+        file_response = _open_dist_file(path)
+        if file_response is None:
+            return redirect(f"/app/{path}/")
+
     if path and not path.endswith("/"):
         file_response = _open_dist_file(path)
         if file_response is not None:
@@ -85,4 +94,5 @@ def spa_serve(request, path=""):
     if not index_file.exists():
         raise Http404(f"Missing SPA build: {index_file}")
     response = FileResponse(open(index_file, "rb"), content_type="text/html")
-    return _disable_cache_headers(response)
+    response = _disable_cache_headers(response)
+    return response

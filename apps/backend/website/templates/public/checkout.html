@@ -273,7 +273,7 @@
                 {% if billing_profile.gstin %}<div>GSTIN: {{ billing_profile.gstin }}</div>{% endif %}
                 {% if billing_profile.address_line1 %}<div>{{ billing_profile.address_line1 }}</div>{% endif %}
                 {% if billing_profile.address_line2 %}<div>{{ billing_profile.address_line2 }}</div>{% endif %}
-                {% if billing_profile.city or billing_profile.state %}<div>{{ billing_profile.city }}{% if billing_profile.state %}, {{ billing_profile.state }}{% endif %}{% if billing_profile.pincode %} - {{ billing_profile.pincode }}{% endif %}</div>{% endif %}
+                {% if billing_profile.city or billing_profile.state %}<div>{{ billing_profile.city }}{% if billing_profile.state %}, {{ billing_profile.state }}{% endif %}{% if billing_profile.postal_code %} - {{ billing_profile.postal_code }}{% endif %}</div>{% endif %}
                 {% if billing_profile.country %}<div>{{ billing_profile.country }}</div>{% endif %}
                 {% if billing_profile.email %}<div class="mt-1">Email: {{ billing_profile.email }}</div>{% endif %}
                 {% if billing_profile.phone %}<div>Phone: {{ billing_profile.phone }}</div>{% endif %}
