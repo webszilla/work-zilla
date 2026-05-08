@@ -9495,6 +9495,7 @@ function CrmOnePageModule() {
 	      const statusKey = normalizeCrmLeadStatusKey(row.status);
 	      return statusKey && statusKey !== "converted" && statusKey !== "onhold";
 	    }).length;
+	    const convertedLeads = leads.filter((row) => normalizeCrmLeadStatusKey(row.status) === "converted").length;
 	    // Pipeline value should reflect active opportunities only (open/pending/onhold).
 	    const pipelineValue = leads
 	      .filter((row) => {
@@ -9512,9 +9513,10 @@ function CrmOnePageModule() {
       const meetingDate = String(row.meetingDate || "");
       const status = String(row.status || "").toLowerCase();
       return meetingDate >= today && !["cancelled", "missed", "completed"].includes(status);
-    }).length;
+	    }).length;
 	    return [
 	      { label: "Open Leads", value: String(openLeads), icon: "bi-person-plus" },
+	      { label: "Converted Leads", value: String(convertedLeads), icon: "bi-person-check" },
 	      { label: "Pipeline Value", value: formatCurrencyAmount(pipelineValue, getOrgCurrency()), icon: "bi-graph-up-arrow" },
 	      { label: "Followups Today", value: String(followupsToday), icon: "bi-telephone-forward" },
 	      { label: "Upcoming Meetings", value: String(upcomingMeetings), icon: "bi-calendar-event" },
