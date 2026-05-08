@@ -229,6 +229,31 @@ DEPLOY WORKFLOW (GITHUB + SERVER)
 - git commit -m "<message>"
 - git push origin main
 
+1.5) Server GitHub link (ONE-TIME SETUP DONE - 2026-05-08)
+- Live server path now HAS `.git` and is linked to GitHub repo:
+  - Server project path: `/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
+  - GitHub repo: `git@github.com:webszilla/work-zilla.git`
+  - Default branch: `main` tracking `origin/main`
+- GitHub access method (server -> GitHub):
+  - Repo Deploy Key name: `workzilla-server`
+  - Server key files:
+    - Private: `/root/.ssh/workzilla_github`
+    - Public: `/root/.ssh/workzilla_github.pub`
+  - SSH config pinned on server:
+    - `/root/.ssh/config` includes:
+      - `Host github.com`
+      - `IdentityFile /root/.ssh/workzilla_github`
+      - `IdentitiesOnly yes`
+- If `.git` goes missing again, re-bootstrap (do NOT touch `apps/backend/.env`):
+  - `cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
+  - `git init`
+  - `git remote add origin git@github.com:webszilla/work-zilla.git`
+  - `git fetch origin main`
+  - If checkout fails with "untracked working tree files would be overwritten":
+    - use safe clean that preserves venv + env + production secrets:
+      - `git clean -fdx -e venv/ -e .venv/ -e env/ -e apps/backend/.env -e logs/ -e staticfiles/`
+  - `git checkout -B main origin/main`
+
 2) Server pull
 - ssh root@89.167.16.104
 - cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
@@ -414,6 +439,22 @@ ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
   - Notes / rollback point:
 
 - Latest publish record:
+  - Published at (UTC): 2026-05-08 (time not recorded)
+  - Local commit SHA: fb1f1d4
+  - GitHub main SHA: fb1f1d4
+  - Server live SHA (git metadata): fb1f1d4
+  - Deploy method: git-bootstrap (init+fetch+checkout) + migrate + collectstatic + gunicorn restart
+  - Gunicorn status: yes (listening on :8000)
+  - Verified URLs:
+    - / (200)
+    - /downloads/bootstrap-products.json (200)
+    - /downloads/windows-agent/ (404 - needs Backblaze mapping check)
+    - /downloads/mac-agent/ (404 - needs Backblaze mapping check)
+  - Notes / rollback point:
+    - One-time change: linked live server folder to GitHub using repo Deploy Key `workzilla-server`
+    - DB safety: did not overwrite `apps/backend/.env` and did not sync any `*.sqlite3*` files
+
+- Previous publish record:
   - Published at (UTC): 2026-03-07 11:26:17 UTC
   - Local commit SHA: 2602f4a
   - GitHub main SHA: 2602f4a
