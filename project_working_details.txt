@@ -1,528 +1,135 @@
-PROJECT: WorkZilla
-REPO PATH (LOCAL): ~/Desktop/webszilla/saas/work-zilla
-LOCAL USERNAME NOTE (MULTI-DEVICE):
-- Office Mac mini username: `guru` -> /Users/guru/Desktop/webszilla/saas/work-zilla
-- Home MacBook Pro username: `apple` -> /Users/apple/Desktop/webszilla/saas/work-zilla
-- Prefer `~/Desktop/webszilla/saas/work-zilla` in local commands so same workflow works on both devices.
-OFFICE QUICK PATH (MAC MINI):
-- `cd /Users/guru/Desktop/webszilla/saas/work-zilla`
-- (portable) `cd ~/Desktop/webszilla/saas/work-zilla`
-HOME QUICK PATH (MACBOOK PRO):
-- `cd /Users/apple/Desktop/webszilla/saas/work-zilla`
-- (portable) `cd ~/Desktop/webszilla/saas/work-zilla`
-SERVER: Hetzner (89.167.16.104)
-SERVER PROJECT PATH: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
+PROJECT: WorkZilla (monorepo: Django + React + desktop/installer)
 
-OBJECTIVE
-- Maintain clean, production-safe monorepo workflow.
-- Execute end-to-end whenever requested: code fix + build + deploy + verify.
-- Keep structure strict: no duplicate concepts, no legacy popup behavior, no outside-project staging folders.
+PATHS
+- Local repo (portable): `~/Desktop/webszilla/saas/work-zilla`
+- Office Mac mini user: `guru` -> `/Users/guru/Desktop/webszilla/saas/work-zilla`
+- Home MacBook Pro user: `apple` -> `/Users/apple/Desktop/webszilla/saas/work-zilla`
+- Server: Hetzner `89.167.16.104`
+- Server project path: `/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
 
-COMMUNICATION MODE
-- Single concise update only: one short status per major step.
-- Keep replies practical and short.
+HARD RULES (DO NOT BREAK)
+- Work only inside repo folder (no outside staging folders).
+- Preserve folders:
+  - `apps/backend`, `apps/frontend`, `apps/desktop_app`, `apps/bootstrap_installer`
+- Do NOT reintroduce legacy “Work Zilla Monitor” popup/process behavior.
+- Installer binaries:
+  - Do NOT commit/publish binaries inside repo static.
+  - Publish installers to Backblaze `application-downloads/`.
+  - `/downloads/...` routes must resolve from Backblaze.
+- Security:
+  - Do not store plaintext passwords/keys in this repo file.
 
-HARD RULES
-1) Work only inside project folder.
-   - Do NOT create/use outside folders (example: no Desktop installer staging folders).
-2) Preserve required source folders:
-   - apps/desktop_app
-   - apps/bootstrap_installer
-   - apps/backend
-   - apps/frontend
-3) Remove only unnecessary/generated artifacts when asked:
-   - node_modules, dist, .build caches, temporary archives, duplicate installers.
-4) Installer binaries must not be kept as repo/static deploy artifacts.
-   - Publish generated installers to Backblaze object storage folder: `application-downloads/`
-   - Public website routes under `/downloads/...` must resolve from Backblaze
-5) When a new installer is uploaded for the same product/platform/arch family, remove the old Backblaze file.
-6) Never reintroduce legacy “Work Zilla Monitor” popup/process behavior.
-7) Product install behavior must be product-specific:
-   - Work Suite click => only Work Suite install.
-   - Online Storage click => only Online Storage install.
-   - No auto-install/auto-mark both products.
-8) If deploy needed, do not stop at plan; execute and verify endpoints.
-9) If server git pull fails (keys/permissions), use direct upload fallback and continue.
-10) Always report exact files changed and verification result.
-11) Production DB safety (critical):
-   - Never overwrite server database files from local during deploy.
-   - Never upload/sync `*.sqlite3`, `*.sqlite3-journal`, `*.sqlite3-wal`, `*.sqlite3-shm`.
-   - Never run `--delete` deploy without DB excludes.
-   - For normal SaaS code deploys, do NOT create/replace server DB backup files unless explicitly requested for a DB task.
-12) Keep production data separate from code deploy:
-   - Do NOT use SQLite for SaaS runtime.
-   - Code deploy must not change DB contents unless explicit migration/data task is requested.
-   - PostgreSQL is the only supported runtime database for local and production.
+DATABASE SAFETY (CRITICAL)
+- Runtime DB is PostgreSQL only (local + production). SQLite runtime is disabled.
+- Never sync/copy DB files to server:
+  - `*.sqlite3`, `*.sqlite3-journal`, `*.sqlite3-wal`, `*.sqlite3-shm`
+- Never overwrite production `apps/backend/.env` from local.
+- Code deploy must not change DB unless explicitly asked (migration/data task).
 
-CURRENT DATABASE MODE (IMPORTANT)
-- Current active DB in project: `PostgreSQL`
-- Local and production must both run with:
-  - `DB_ENGINE=postgresql`
-  - `DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT`
-- SQLite runtime is disabled in `apps/backend/core_platform/settings.py`.
-- `apps/backend/db.sqlite3` must not exist as active runtime DB.
-- First-time production cutover rule:
-  - Export local PostgreSQL data.
-  - Import into production PostgreSQL.
-  - Switch production `.env` to PostgreSQL before restart.
-- Ongoing deploy rule:
-  - Deploy code only; never sync DB files.
-  - Run migrations on production PostgreSQL only.
+INSTALLERS (WHEN CHANGED)
+- Before build: `./scripts/prepare_installer_build.sh`
+- After build: `./scripts/upload_installers.sh` (uploads to Backblaze + deletes local binaries)
 
-PRODUCTION DB RUNTIME NOTES (2026-03-30)
-- Live PostgreSQL runtime currently maps to:
-  - `DB_NAME=webszilla_db`
-  - `DB_USER=webszilla_admin2026`
-  - `DB_HOST=127.0.0.1`
-  - `DB_PORT=5432`
-- Canonical production `.env` DB block (must remain aligned):
-  - `DB_ENGINE=postgresql`
-  - `DB_NAME=webszilla_db`
-  - `DB_USER=webszilla_admin2026`
-  - `DB_HOST=127.0.0.1`
-  - `DB_PORT=5432`
-- If `apps/backend/.env` contains old values (`webszilla_saas` / `webszilla_saas_admin`), migrations fail with auth errors.
-- Validate DB auth before migrate:
-  - `set -a && source apps/backend/.env && set +a`
-  - `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
-- If auth check fails:
-  - First correct `apps/backend/.env` DB_NAME/DB_USER to canonical production values above.
-  - Then rerun auth check and only after success run `migrate`.
-- If password mismatch, reset role password (no data move):
-  - `sudo -u postgres psql -d postgres -c "ALTER ROLE <db_user> WITH PASSWORD '<new_password>';"`
+PRODUCTION POSTGRES (CANONICAL, 2026-03-30)
+- `DB_ENGINE=postgresql`
+- `DB_NAME=webszilla_db`
+- `DB_USER=webszilla_admin2026`
+- `DB_HOST=127.0.0.1`
+- `DB_PORT=5432`
 
-LIVE CRM 403 NOTE (2026-04-14)
-- Repeated live-only CRM `403` on edit/delete was not a Django permission bug and not a DB issue.
-- Root cause: public traffic goes through Cloudflare, and Cloudflare was blocking these request styles before Django saw them:
-  - native `PATCH`
-  - native `DELETE`
-  - `POST` with `X-HTTP-Method-Override: PATCH/DELETE`
-- Symptom pattern:
-  - local works
-  - Django shell/server-side smoke may work
-  - live browser gets empty `403` from Cloudflare on CRM edit/delete
-- Required fix pattern for Business Autopilot CRM live writes:
-  - use plain `POST` to collection endpoints
-  - include row id in JSON body (`lead_id`, `contact_id`, `deal_id`, `meeting_id`, `sales_order_id`)
-  - include `__crm_action` in body for non-create operations:
-    - `patch`
-    - `delete`
-- Backend collection endpoints must support body-driven actions on:
+DB AUTH CHECK (BEFORE RUNNING MIGRATIONS ON SERVER)
+- `set -a && source apps/backend/.env && set +a`
+- `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
+
+LOCAL DEV
+A) Backend only
+- `cd ~/Desktop/webszilla/saas/work-zilla`
+- `source .venv/bin/activate`
+- `cd apps/backend`
+- `python manage.py runserver`
+
+B) Single URL (recommended): Django + built React on same URL
+- `cd ~/Desktop/webszilla/saas/work-zilla`
+- `./build_and_copy_frontend.sh`
+- `source .venv/bin/activate`
+- `cd apps/backend`
+- `python manage.py runserver 127.0.0.1:8000 --noreload`
+- Open: `http://127.0.0.1:8000` (SPA routes under `/app/...`)
+
+LOCAL MIGRATIONS (WHEN SCHEMA CHANGES)
+- `cd apps/backend`
+- `python manage.py makemigrations`
+- `python manage.py migrate`
+
+DB TASK STANDARD (WHEN DB CHANGE IS REQUESTED)
+- Local: code + `makemigrations` + `migrate`
+- Push GitHub immediately (same task window)
+- Server: run DB auth check, then:
+  - `source venv/bin/activate`
+  - `venv/bin/python apps/backend/manage.py migrate --skip-checks`
+  - `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
+  - restart gunicorn
+
+LIVE CRM 403 (CLOUDFLARE) NOTE (2026-04-14)
+- Cloudflare blocks `PATCH/DELETE` / method-override for some CRM routes on live.
+- Live-safe pattern: use `POST` to collection endpoints + include row id in JSON + `__crm_action: patch|delete`.
+- Affected collections:
   - `/api/business-autopilot/leads`
   - `/api/business-autopilot/contacts`
   - `/api/business-autopilot/deals`
   - `/api/business-autopilot/meetings`
   - `/api/business-autopilot/sales-orders`
-- Do not reintroduce frontend writes that call item-detail URLs for these CRM edit/delete flows on live.
 
-DB-RELATED TASK EXECUTION STANDARD (MANDATORY)
-- Goal:
-  - `DB file move/copy` செய்யக்கூடாது.
-  - ஆனால் `DB-related feature/bug fixes` code + migration மூலமாக local, GitHub, live server எல்லாம் same state-ல் இருக்க வேண்டும்.
-- For any DB-related task (model/field/default/constraint/serializer/query fix):
-  1) Local code change complete.
-  2) Create migration when schema change exists:
-     - `cd apps/backend`
-     - `python3 manage.py makemigrations`
-     - `python3 manage.py migrate`
-  3) Verify local API/UI behavior.
-  4) Commit + push to GitHub immediately (same task window; do not postpone).
-  5) Deploy same commit to live server immediately.
-  6) On live server run:
-     - `venv/bin/python apps/backend/manage.py migrate --skip-checks`
-     - `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
-     - restart gunicorn.
-  7) Confirm live endpoint/UI after deploy and note result.
-- Never do these in DB tasks:
-  - Do not rsync/copy `*.sqlite3`, `*.sql`, `*.dump`, `*.bak` to server.
-  - Do not replace production DB from local backup.
-- If Git pull is unavailable on server:
-  - Use rsync code deploy fallback with DB excludes.
-  - Still run live migration + collectstatic + restart in same execution.
-  - Mandatory order after rsync fallback:
-    1) DB auth check from `.env`
-    2) `venv/bin/python apps/backend/manage.py migrate --skip-checks`
-    3) `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
-    4) gunicorn restart
-- Completion rule:
-  - A DB-related task is considered incomplete unless:
-    - GitHub updated
-    - Live migration executed
-    - Live verification done
+DEPLOY (GITHUB -> SERVER)
+1) Local (any machine) push to GitHub
+- `git status`
+- `git add .`
+- `git commit -m "<message>"`
+- `git push origin main`
 
-CURRENT CLEAN STRUCTURE EXPECTATION
-- No external installer staging folders outside repo.
-- Do not commit installer binaries into `apps/backend/static/downloads`.
-- Local build outputs can exist temporarily under app dist folders, but published downloads live in Backblaze `application-downloads/`.
-- Ignore heavy generated files/caches in Git (dist/node_modules/mac_helper build caches).
+2) Server pull (code only)
+- `ssh root@89.167.16.104`
+- `cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
+- `git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
+- `git pull origin main`
 
-LOCAL DEVELOPMENT WORKFLOW
-A) Backend run (mac/local)
-- cd ~/Desktop/webszilla/saas/work-zilla
-- source env/bin/activate
-- cd apps/backend
-- python3 manage.py runserver
+3) After every code deploy
+- Static refresh:
+  - `source venv/bin/activate`
+  - `venv/bin/python apps/backend/manage.py collectstatic --noinput --skip-checks`
+- Restart gunicorn (reliable):
+  1) `pkill -f "core_platform.wsgi:application" || true`
+  2) `nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >/tmp/workzilla_gunicorn.log 2>&1 </dev/null &`
+  3) `pgrep -af "core_platform.wsgi:application"`
 
-B) Local Single-URL Run (Recommended, 2026-04-23)
-- Goal: Django + React (built) same URL `http://127.0.0.1:8000`
-- Steps:
-  1) `cd ~/Desktop/webszilla/saas/work-zilla`
-  2) `./build_and_copy_frontend.sh`
-  3) `source env/bin/activate`
-  4) `cd apps/backend`
-  5) `python3 manage.py runserver 127.0.0.1:8000 --noreload`
-- Note:
-  - Use full URL with protocol: `http://127.0.0.1:8000/...`
-  - Do NOT open `/accounts?...` directly (Django will 404). SPA base path is under `/app/...`.
+SERVER GITHUB LINK (ONE-TIME SETUP DONE - 2026-05-08)
+- Server folder now has `.git` linked to: `git@github.com:webszilla/work-zilla.git`
+- Branch: `main` tracks `origin/main`
+- Server pulls from GitHub using repo Deploy Key `workzilla-server`:
+  - Private: `/root/.ssh/workzilla_github`
+  - Public: `/root/.ssh/workzilla_github.pub`
+  - SSH config: `/root/.ssh/config` pins `IdentityFile /root/.ssh/workzilla_github`
+- If checkout fails due to untracked files, use safe clean (preserve secrets/venv):
+  - `git clean -fdx -e venv/ -e .venv/ -e env/ -e apps/backend/.env -e logs/ -e staticfiles/`
 
-B) Django migrations
-- cd apps/backend
-- python3 manage.py makemigrations
-- python3 manage.py migrate
+FALLBACK DEPLOY (ONLY IF SERVER GIT PULL FAILS)
+- Use rsync and ALWAYS exclude DB files + `.env`:
+  - `rsync -az --exclude='.git/' --exclude='env/' --exclude='.venv/' --exclude='venv/' --exclude='apps/backend/.env' --exclude='**/node_modules/' --exclude='**/__pycache__/' --exclude='*.sqlite3' --exclude='*.sqlite3-journal' --exclude='*.sqlite3-wal' --exclude='*.sqlite3-shm' <local_project>/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/`
 
-B.1) SQLite -> PostgreSQL local migration (when requested)
-- Ensure local PostgreSQL + `psql` available first.
-- Set env:
-  - `export DB_ENGINE=postgresql`
-  - `export DB_NAME=workzilla`
-  - `export DB_USER=workzilla`
-  - `export DB_PASSWORD=<password>`
-  - `export DB_HOST=127.0.0.1`
-  - `export DB_PORT=5432`
-- Run:
-  - `./scripts/migrate_sqlite_to_postgres_local.sh`
-- Verify:
-  - check `migration_summary.json` under backup folder
-  - mismatch count must be reviewed before production cutover
+VERIFY (AFTER DEPLOY)
+- `curl -I https://getworkzilla.com/` (expect 200)
+- `ss -ltnp | grep :8000`
+- `pgrep -af "core_platform.wsgi:application"`
 
-C) Frontend build helpers
-- ./build_and_copy_frontend.sh
-- build_and_copy_frontend.bat
-- Local run (single URL only - preferred):
-  - Run `./build_and_copy_frontend.sh`
-  - Start Django backend
-  - Open http://127.0.0.1:8000 (frontend + backend on same URL; frontend served from `apps/backend/frontend_dist`)
-- Use Vite `5173` only when explicitly needed for frontend-only development/debugging.
-
-BUSINESS AUTOPILOT ACCOUNTS EDIT NOTE (2026-04-23)
-- Symptom: Invoice/Estimate Edit click goes to wrong URL (ex: `/accounts?...`) causing 404 or falls back to Overview (no edit load).
-- Fix direction:
-  - Keep SPA routing under `/app/business-autopilot/accounts`.
-  - Edit click should set query `tab=invoices|estimates` + `edit-invoice|edit-estimate=<id>` and then hydrate/open document.
-
-D) Desktop app build (mac)
-- cd apps/desktop_app
-- npm run build
-- npx electron-builder --mac --arm64
-- For universal builds, include both arch targets when required.
-
-E) Windows monitor binary build (Windows)
-- cd apps/desktop_app/windows_agent
-- dotnet build -c Release
-- .\build_windows_agent.ps1
-
-DEPLOY WORKFLOW (GITHUB + SERVER)
-1) Local push
-- cd ~/Desktop/webszilla/saas/work-zilla
-- git status
-- git add .
-- git commit -m "<message>"
-- git push origin main
-
-1.5) Server GitHub link (ONE-TIME SETUP DONE - 2026-05-08)
-- Live server path now HAS `.git` and is linked to GitHub repo:
-  - Server project path: `/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
-  - GitHub repo: `git@github.com:webszilla/work-zilla.git`
-  - Default branch: `main` tracking `origin/main`
-- GitHub access method (server -> GitHub):
-  - Repo Deploy Key name: `workzilla-server`
-  - Server key files:
-    - Private: `/root/.ssh/workzilla_github`
-    - Public: `/root/.ssh/workzilla_github.pub`
-  - SSH config pinned on server:
-    - `/root/.ssh/config` includes:
-      - `Host github.com`
-      - `IdentityFile /root/.ssh/workzilla_github`
-      - `IdentitiesOnly yes`
-- If `.git` goes missing again, re-bootstrap (do NOT touch `apps/backend/.env`):
-  - `cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com`
-  - `git init`
-  - `git remote add origin git@github.com:webszilla/work-zilla.git`
-  - `git fetch origin main`
-  - If checkout fails with "untracked working tree files would be overwritten":
-    - use safe clean that preserves venv + env + production secrets:
-      - `git clean -fdx -e venv/ -e .venv/ -e env/ -e apps/backend/.env -e logs/ -e staticfiles/`
-  - `git checkout -B main origin/main`
-
-2) Server pull
-- ssh root@89.167.16.104
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- git config --global --add safe.directory /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- git pull origin main
-
-2B) If server path has no `.git` (important fallback)
-- If `git pull` shows `fatal: not a git repository`, use rsync code fallback immediately:
-  - Office Mac mini example: `rsync -az --exclude='.git/' --exclude='env/' --exclude='.venv/' --exclude='venv/' --exclude='apps/backend/.env' --exclude='**/node_modules/' --exclude='**/__pycache__/' --exclude='*.sqlite3' --exclude='*.sqlite3-journal' --exclude='*.sqlite3-wal' --exclude='*.sqlite3-shm' <local_project>/ -e "ssh -i ~/.ssh/id_rsa" root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/`
-  - Home MacBook Pro example: use the laptop-specific SSH key there instead of the office key.
-- After rsync fallback, continue normal steps:
-  - `migrate` -> `collectstatic` -> gunicorn restart -> live verify.
-- Critical:
-  - Never overwrite production `apps/backend/.env` from local machine.
-  - Production `.env` contains live PostgreSQL credentials and environment flags.
-  - If this file is replaced by local values, live site can fail with `500` due to PostgreSQL auth errors.
-  - Before live `migrate`, always run:
-    - `set -a && source apps/backend/.env && set +a`
-    - `PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -c "SELECT current_user, current_database();"`
-  - Only if auth check passes, continue with `migrate` and restart.
-
-2A) SSH KEY (DEVICE-SPECIFIC)
-- Office Mac mini (current machine):
-  - Private key: `~/.ssh/id_rsa`
-  - Public key: `~/.ssh/id_rsa.pub`
-  - Use this key for deploy/sync commands from the office Mac mini.
-- Home MacBook Pro:
-  - Private key: `~/.ssh/workzilla_root`
-  - Public key: `~/.ssh/workzilla_root.pub`
-  - Keep this separate on the laptop; do not assume the office key exists there.
-- One-time load in terminal session:
-  - `eval "$(ssh-agent -s)"`
-  - `ssh-add <active-machine-key>`
-- Test connection:
-  - `ssh -i <active-machine-key> root@89.167.16.104`
-- Use the active machine key explicitly for deploy/sync commands:
-  - `rsync ... -e "ssh -i <active-machine-key>" ...`
-  - `ssh -i <active-machine-key> root@89.167.16.104 "<command>"`
-- Note:
-  - Do not mix the Mac mini key and the MacBook Pro key in the same deploy instructions.
-
-2.5) Static refresh after every code deploy (mandatory)
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- source venv/bin/activate
-- venv/bin/python apps/backend/manage.py collectstatic --noinput
-- Reason: public/global CSS and JS under `/static/...` break if code is updated without refreshing `apps/backend/staticfiles`
-
-2.6) Application download publish rule (mandatory when installers change)
-- BEFORE every new installer build, clear old local installer binaries:
-  - `./scripts/prepare_installer_build.sh`
-- Generate installers in app build output folders only.
-- AFTER build completes, publish + auto-clean local installers:
-  - `./scripts/upload_installers.sh`
-  - This runs `sync_application_downloads.py --delete-local`
-- If troubleshooting requires keeping local artifacts:
-  - `python3 scripts/sync_application_downloads.py --keep-local`
-- Reason: `/downloads/...` must resolve from Backblaze `application-downloads/`, not from server/static local binaries.
-
-2.7) Installer retention and cleanup policy (mandatory local + server)
-- Local:
-  - Never keep old installer binaries after successful upload.
-  - Keep only generated installers temporarily during build/publish window.
-- Server:
-
-CRM CONVERSION FLOW NOTES (LOCAL IMPLEMENTATION - 2026-03-30)
-- New Business Autopilot CRM backend models added:
-  - `CrmLead`
-  - `CrmDeal`
-  - `CrmSalesOrder`
-- Migration:
-  - `apps/backend/business_autopilot/migrations/0016_crmlead_crmdeal_crmsalesorder.py`
-- New API endpoints under `/api/business-autopilot/`:
-  - `GET/POST leads`
-  - `POST convert-to-deal/<lead_id>`
-  - `GET/POST deals`
-  - `PATCH/DELETE deals/<deal_id>`
-  - `POST convert-to-sales-order/<deal_id>`
-  - `GET/POST sales-orders`
-  - `DELETE sales-orders/<order_id>`
-- Core logic:
-  - Lead can be converted to Deal.
-  - Only won deal (stage/status = Won) can be converted to Sales Order.
-  - Sales order auto-populates from deal/lead (customer/company/phone/amount/assigned user).
-  - Soft-delete fields included in all three CRM models.
-- Permission baseline:
-  - Assigned user / creator visibility for CRM rows.
-  - Admin can delete.
-  - Non-admin cannot delete deals/orders.
-  - Installer binaries must not remain in:
-    - `apps/bootstrap_installer/dist`
-    - `apps/desktop_app/dist`
-    - `apps/backend/static/downloads` (except lightweight metadata files)
-  - Deploy script must auto-prune these binaries after deploy/migrate.
-- Website download links must always resolve via Backblaze signed/object links.
-
-3) Restart backend (important)
-Preferred manual gunicorn flow:
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- source venv/bin/activate
-- pkill -f gunicorn
-- venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000
-
-Ultra-short restart:
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com && source venv/bin/activate && pkill -f gunicorn && venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000
-
-Alternative stack restart (if infra requires):
-- docker restart openpanel
-
-3A) Gunicorn restart reliability note
-- In some SSH sessions, `pkill -f ...` may return SSH exit `255` even when service is still running.
-- If one-line restart is unstable, do step-by-step:
-  1. `pkill -f "core_platform.wsgi:application" || true`
-  2. `nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 900 --graceful-timeout 60 >/tmp/workzilla_gunicorn.log 2>&1 </dev/null &`
-  3. `pgrep -af "core_platform.wsgi:application"`
-  4. `curl -I https://getworkzilla.com/` (expect HTTP 200)
-
-SERVER DEPLOY EXECUTION RULE (WHEN ASKED)
-- ssh root@89.167.16.104
-- project path: /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- git pull (or upload fallback)
-- upload required binaries if changed
-- restart gunicorn on :8000
-- verify download/API endpoints
-
-VERIFY CHECKLIST (MANDATORY)
-- Build success logs for modified components.
-- Endpoint/header check for installer URLs.
-- Runtime process sanity (no duplicate installer background processes).
-- Product-specific install behavior validated.
-- Screenshot/monitor flow validated when relevant.
-
-IMPORTANT SECURITY NOTE
-- Do not store plaintext admin/server passwords in repository prompt files.
-- Keep secrets in secure vault/environment variables.
-- OpenAdmin URL noted for ops context: http://89.167.16.104:2087/
-
-SES CREDENTIALS (SECURE NOTES)
-- Do not paste AWS/SES access keys in `project_working_details.txt` or any repo file.
-- Save the values in local environment variables / secrets manager only.
-- For Django, export before run (example):
-  - `export AWS_ACCESS_KEY_ID=<access_key>`
-  - `export AWS_SECRET_ACCESS_KEY=<secret_key>`
-  - `export SES_REGION=us-east-1`
-- Then load SES keys in app settings from env (or platform secrets) and save via:
-  - Amazon SES page in SaaS Admin -> /saas-admin/ses
-- SES credentials rule:
-  - For SMTP mode use **SES SMTP Username + SES SMTP Password** (not IAM secret key directly).
-  - For API mode use **AWS Access Key ID + AWS Secret Access Key**.
-  - Keep sender identity/domain verified in SES.
-- Live mode rule:
-  - Production server must use `ENVIRONMENT=production` and `DJANGO_DEBUG=0`.
-  - Do not keep production in local/debug mode for email flows.
-- Verification status update:
-  - Test mail delivery confirmed to `saicreatives123@gmail.com` (WorkZilla Test Email) on 2026-03-27.
-
-EMAIL AUTO-RESOLVE RULE (LOCAL + LIVE)
-- Email sending is now auto-resolved in code; no code change required when moving local to server.
-- Transport priority:
-  1) SaaS Admin Amazon SES config (DB, when active)
-  2) Environment SES SMTP (`SES_SMTP_USERNAME` + `SES_SMTP_PASSWORD`)
-  3) Environment generic SMTP (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`)
-  4) Environment SES API (`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`)
-  5) Django configured fallback backend
-- Keep same env variable names on local and production so deploys stay zero-change.
-- Minimum recommended env for stable SES in both local/live:
-  - `SES_REGION`
-  - `SES_SENDER_EMAIL`
-  - `SES_SMTP_USERNAME`
-  - `SES_SMTP_PASSWORD`
-
-ONLINE PUBLISH CRITICAL DATA (ALWAYS UPDATE)
-- Maintain below block on each production publish:
-  - Published at (UTC):
-  - Local commit SHA:
-  - GitHub main SHA:
-  - Server live SHA:
-  - Deploy method: git-pull / rsync-fallback
-  - Gunicorn status: running on 0.0.0.0:8000 (yes/no)
-  - Verified URLs:
-    - /downloads/windows-agent/
-    - /downloads/mac-agent/
-    - /downloads/bootstrap-products.json
-  - Notes / rollback point:
-
-- Latest publish record:
-  - Published at (UTC): 2026-05-08 (time not recorded)
-  - Local commit SHA: fb1f1d4
-  - GitHub main SHA: fb1f1d4
-  - Server live SHA (git metadata): fb1f1d4
-  - Deploy method: git-bootstrap (init+fetch+checkout) + migrate + collectstatic + gunicorn restart
-  - Gunicorn status: yes (listening on :8000)
-  - Verified URLs:
-    - / (200)
-    - /downloads/bootstrap-products.json (200)
-    - /downloads/windows-agent/ (404 - needs Backblaze mapping check)
-    - /downloads/mac-agent/ (404 - needs Backblaze mapping check)
-  - Notes / rollback point:
-    - One-time change: linked live server folder to GitHub using repo Deploy Key `workzilla-server`
-    - DB safety: did not overwrite `apps/backend/.env` and did not sync any `*.sqlite3*` files
-
-- Previous publish record:
-  - Published at (UTC): 2026-03-07 11:26:17 UTC
-  - Local commit SHA: 2602f4a
-  - GitHub main SHA: 2602f4a
-  - Server live SHA (git metadata): 2602f4a
-  - Deploy method: git-pull
-  - Gunicorn status: yes (listening on :8000)
-  - Verified URLs:
-    - /downloads/windows-agent/ (302 -> Backblaze signed URL)
-    - /downloads/mac-agent/ (302 -> Backblaze signed URL)
-    - /downloads/bootstrap-products.json (200)
-    - /static/public/css/site.css (200)
-    - /static/common/css/public.css (200)
-  - Notes / rollback point:
-    - Purpose: Deployed WhatsApp automation updates (campaigns module, HTML editor code-view fix, pagination/search UI and related backend/API/migration changes).
-    - Live migrations applied: whatsapp_automation.0016_marketing_campaign_and_contacts
-    - Database safety: no local database files were uploaded or synced
-    - Rollback to previous GitHub main: 5544281
-
-FAST SERVER CHECK COMMANDS
-- ssh root@89.167.16.104
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- git rev-parse --short HEAD
-- ss -ltnp | grep :8000
-- pgrep -af "gunicorn apps.backend.core_platform.wsgi:application"
-
-FALLBACK DEPLOY (IF SERVER GIT KEY FAILS)
-- First run dry-run:
-  - rsync -azn --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
-- Then actual sync:
-  - rsync -az --delete --exclude '.git/' --exclude 'venv/' --exclude '.venv/' --exclude 'env/' --exclude '*.sqlite3' --exclude '*.sqlite3-journal' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' ~/Desktop/webszilla/saas/work-zilla/ root@89.167.16.104:/home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com/
-- PostgreSQL mode note:
-  - PostgreSQL is mandatory; keep sqlite exclude rules permanently to avoid accidental test DB upload.
-- Immediately after fallback sync, always run:
-  - source venv/bin/activate
-  - venv/bin/python apps/backend/manage.py collectstatic --noinput
-- cd /home/workzilla/docker-data/volumes/workzilla_html_data/_data/getworkzilla.com
-- pkill -f "gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000" || true
-- nohup venv/bin/gunicorn apps.backend.core_platform.wsgi:application --bind 0.0.0.0:8000 >/tmp/workzilla-gunicorn.out 2>&1 &
-
-RECOMMENDED ONE-COMMAND SERVER DEPLOY
-- Local helper:
-  - cd ~/Desktop/webszilla/saas/work-zilla
-  - ./scripts/deploy_server_code.sh
-- This helper runs:
-  - git pull
-  - collectstatic
-  - gunicorn restart
-  - live URL verification
-
-CODEX SHORT INSTRUCTION
-- Before any local-to-online move, commit and push local fixes first when possible.
-- Prefer `./scripts/deploy_server_code.sh` for live deploys.
-- If fallback sync is used, always run `collectstatic` before restarting gunicorn.
-- After deploy, verify `/static/public/css/site.css`, `/static/common/css/public.css`, and `/downloads/bootstrap-products.json`.
-- Screenshot/media fix rule: keep screenshot API path same, but when object storage/B2 is enabled let the authenticated endpoint redirect to the storage URL instead of streaming large image bytes through Django.
-- Application download fix rule: manage installers from Backblaze `application-downloads/`, expose them in SaaS Admin, and never depend on server-local installer mirrors.
-
-INCIDENT NOTE (2026-02-19)
-- Cause found: rsync fallback used without sqlite excludes, so server `apps/backend/db.sqlite3` was overwritten by local test DB.
-- Preventive rule: all future fallback deploys must include sqlite exclude patterns above.
-
-TASK TEMPLATE (USE FOR EACH ISSUE)
-Current issue:
-[PASTE ISSUE HERE]
-Expected result:
-[PASTE EXPECTED RESULT HERE]
-
-Execution rule:
-- Do end-to-end directly.
-- Give one concise line per major step.
-- Do not stop at plan.
+ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
+- Published at (UTC):
+- Local SHA:
+- GitHub main SHA:
+- Server SHA:
+- Deploy method: `git-pull` / `rsync-fallback`
+- Gunicorn: listening on `:8000` (yes/no)
+- Verified URLs (at least):
+  - `/`
+  - `/downloads/bootstrap-products.json`
+  - `/downloads/windows-agent/`
+  - `/downloads/mac-agent/`
