@@ -7,6 +7,8 @@ from django.db import models
 class AiArchitectSettings(models.Model):
     provider = models.CharField(max_length=40, default="openai")
     enabled = models.BooleanField(default=False)
+    openai_organization_id = models.CharField(max_length=120, blank=True, default="")
+    openai_project_id = models.CharField(max_length=120, blank=True, default="")
     response_mode = models.CharField(max_length=40, default="standard")
     model_name = models.CharField(max_length=120, default="gpt-4o-mini")
     max_tokens = models.PositiveIntegerField(default=900)

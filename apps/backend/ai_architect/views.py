@@ -125,6 +125,8 @@ def ai_status(request):
             "response_mode": obj.response_mode,
             "model_name": obj.model_name,
             "max_tokens": obj.max_tokens,
+            "openai_organization_id": obj.openai_organization_id,
+            "openai_project_id": obj.openai_project_id,
             "monthly_budget_inr": obj.monthly_budget_inr,
             "warning_threshold_percent": obj.warning_threshold_percent,
             "hard_stop_enabled": bool(obj.hard_stop_enabled),
@@ -148,6 +150,8 @@ def ai_settings(request):
                 "response_mode": obj.response_mode,
                 "model_name": obj.model_name,
                 "max_tokens": obj.max_tokens,
+                "openai_organization_id": obj.openai_organization_id,
+                "openai_project_id": obj.openai_project_id,
                 "monthly_budget_inr": obj.monthly_budget_inr,
                 "warning_threshold_percent": obj.warning_threshold_percent,
                 "hard_stop_enabled": bool(obj.hard_stop_enabled),
@@ -163,6 +167,8 @@ def ai_settings(request):
     obj.enabled = bool(payload.get("enabled"))
     obj.response_mode = _normalize_response_mode(payload.get("response_mode") or obj.response_mode)
     obj.model_name = str(payload.get("model_name") or obj.model_name or "gpt-4o-mini").strip()
+    obj.openai_organization_id = str(payload.get("openai_organization_id") or obj.openai_organization_id or "").strip()
+    obj.openai_project_id = str(payload.get("openai_project_id") or obj.openai_project_id or "").strip()
     max_tokens_raw = payload.get("max_tokens")
     if max_tokens_raw in (None, ""):
         max_tokens_raw = RESPONSE_MODE_TOKENS.get(obj.response_mode, DEFAULT_MAX_TOKENS)
@@ -204,7 +210,12 @@ def ai_test(request):
     api_key = _normalize_api_key(payload.get("api_key") or api_key_plain or "")
     if not api_key:
         return JsonResponse({"ok": False, "error": "missing_api_key"}, status=400)
-    client = OpenAIClient(api_key=api_key, model=obj.model_name)
+    client = OpenAIClient(
+        api_key=api_key,
+        model=obj.model_name,
+        organization_id=obj.openai_organization_id,
+        project_id=obj.openai_project_id,
+    )
     result = client.test_connection()
     if result.get("ok"):
         return JsonResponse(result, status=200)
@@ -346,7 +357,12 @@ def ai_chat(request):
         session_id=session_uuid, user=request.user, role="user", content=user_message
     )
 
-    client = OpenAIClient(api_key=api_key, model=obj.model_name)
+    client = OpenAIClient(
+        api_key=api_key,
+        model=obj.model_name,
+        organization_id=obj.openai_organization_id,
+        project_id=obj.openai_project_id,
+    )
     result = client.chat(messages=messages, max_tokens=_clamp_max_tokens(obj.max_tokens or DEFAULT_MAX_TOKENS))
     if not result.get("ok"):
         return JsonResponse({"ok": False, "error": "openai_error", "details": result.get("error", "")}, status=502)

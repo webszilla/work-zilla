@@ -39,6 +39,8 @@ const emptyState = {
     enabled: false,
     response_mode: "standard",
     api_key: "",
+    openai_organization_id: "",
+    openai_project_id: "",
     model_name: "gpt-4o-mini",
     max_tokens: DEFAULT_TOKENS,
     monthly_budget_inr: 5000,
@@ -100,6 +102,8 @@ export default function SaasAdminAIArchitectSettingsPage() {
             enabled: Boolean(data?.enabled),
             response_mode: data?.response_mode || "standard",
             api_key: "",
+            openai_organization_id: data?.openai_organization_id || "",
+            openai_project_id: data?.openai_project_id || "",
             model_name: data?.model_name || "gpt-4o-mini",
             max_tokens: Number(data?.max_tokens || DEFAULT_TOKENS),
             monthly_budget_inr: Number(data?.monthly_budget_inr || 5000),
@@ -232,6 +236,8 @@ export default function SaasAdminAIArchitectSettingsPage() {
         enabled: Boolean(state.form.enabled),
         response_mode: String(state.form.response_mode || "standard"),
         api_key: apiKeyValue,
+        openai_organization_id: String(state.form.openai_organization_id || "").trim(),
+        openai_project_id: String(state.form.openai_project_id || "").trim(),
         model_name: String(state.form.model_name || "gpt-4o-mini").trim(),
         max_tokens: maxTokensValue,
         monthly_budget_inr: Number(state.form.monthly_budget_inr || 5000),
@@ -388,6 +394,36 @@ export default function SaasAdminAIArchitectSettingsPage() {
               placeholder="gpt-4o-mini"
               autoComplete="off"
             />
+          </div>
+
+          <div className="col-12 col-md-6">
+            <label className="form-label">OpenAI Organization ID (optional)</label>
+            <input
+              type="text"
+              className="form-control"
+              value={state.form.openai_organization_id}
+              onChange={onChange("openai_organization_id")}
+              placeholder="org_..."
+              autoComplete="off"
+            />
+            <div className="form-text text-secondary">
+              Only required if this API key belongs to a different OpenAI organization than the default.
+            </div>
+          </div>
+
+          <div className="col-12 col-md-6">
+            <label className="form-label">OpenAI Project ID (optional)</label>
+            <input
+              type="text"
+              className="form-control"
+              value={state.form.openai_project_id}
+              onChange={onChange("openai_project_id")}
+              placeholder="proj_..."
+              autoComplete="off"
+            />
+            <div className="form-text text-secondary">
+              If you are using a project-scoped key (`sk-proj-...`) and authentication fails, set the project id here.
+            </div>
           </div>
 
           <div className="col-12 col-md-6">

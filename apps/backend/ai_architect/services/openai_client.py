@@ -6,15 +6,34 @@ import requests
 
 
 class OpenAIClient:
-    def __init__(self, api_key: str, model: str, timeout_seconds: int = 25):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timeout_seconds: int = 25,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+    ):
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.organization_id = organization_id or ""
+        self.project_id = project_id or ""
+
+    def _headers(self) -> dict:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        # Optional headers for accounts with multiple orgs/projects.
+        # These are safe to omit when not configured.
+        if self.organization_id:
+            headers["OpenAI-Organization"] = self.organization_id
+        if self.project_id:
+            headers["OpenAI-Project"] = self.project_id
+        return headers
 
     def test_connection(self) -> dict:
         resp = requests.get(
             "https://api.openai.com/v1/models",
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers=self._headers(),
             timeout=self.timeout_seconds,
         )
         ok = resp.status_code == 200
@@ -30,7 +49,7 @@ class OpenAIClient:
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
             json=payload,
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers=self._headers(),
             timeout=self.timeout_seconds,
         )
         if resp.status_code != 200:
