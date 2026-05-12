@@ -1226,6 +1226,52 @@ html[data-theme="light"] .ba-assistant__panel {
   background: #ffffff;
 }
 
+html[data-theme="light"] .ba-assistant__header {
+  background: #ffffff;
+}
+
+html[data-theme="light"] .ba-assistant__title {
+  color: #0f172a;
+}
+
+html[data-theme="light"] .ba-assistant__subtitle {
+  color: #475569;
+}
+
+html[data-theme="light"] .ba-assistant__setup-note {
+  color: #0f172a;
+}
+
+html[data-theme="light"] .saas-admin-assistant .ba-assistant__setup-note {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+html[data-theme="light"] .ba-assistant__bubble--assistant {
+  background: rgba(var(--color-primary-rgb, 29, 78, 216), 0.10);
+  color: #0f172a;
+}
+
+html[data-theme="light"] .ba-assistant__bubble .btn-outline-light {
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+html[data-theme="light"] .ba-assistant__bubble .btn-outline-light:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(15, 23, 42, 0.28);
+}
+
+html[data-theme="light"] .ba-assistant__composer .form-control {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+html[data-theme="light"] .ba-assistant__composer .form-control::placeholder {
+  color: #64748b;
+}
+
 html[data-theme="light"] .ba-assistant__chip {
   color: #0f172a;
   background: rgba(var(--color-primary-rgb, 29, 78, 216), 0.08);
