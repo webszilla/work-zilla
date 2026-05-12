@@ -25,6 +25,8 @@ RESPONSE_MODE_TOKENS = {
 
 _ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\uFEFF]")
 _WHITESPACE_RE = re.compile(r"\s+")
+_OPENAI_ORG_RE = re.compile(r"^org_[A-Za-z0-9_-]{6,}$")
+_OPENAI_PROJECT_RE = re.compile(r"^proj_[A-Za-z0-9_-]{6,}$")
 
 
 def _get_settings() -> AiArchitectSettings:
@@ -104,6 +106,33 @@ def _normalize_api_key(raw: str) -> str:
     value = _WHITESPACE_RE.sub("", value)
     return value.strip()
 
+def _normalize_openai_id(raw: str) -> str:
+    value = str(raw or "")
+    value = _ZERO_WIDTH_RE.sub("", value)
+    value = _WHITESPACE_RE.sub("", value)
+    value = value.strip()
+    # Treat placeholder-like values as empty.
+    if not value:
+        return ""
+    lowered = value.lower()
+    if lowered in {"org_...", "proj_...", "org...", "proj..."} or lowered.endswith("..."):
+        return ""
+    return value
+
+def _validate_openai_headers(obj: AiArchitectSettings, api_key: str) -> tuple[bool, str]:
+    """
+    Returns (ok, message). Does not log secrets.
+    """
+    org_id = _normalize_openai_id(getattr(obj, "openai_organization_id", ""))
+    proj_id = _normalize_openai_id(getattr(obj, "openai_project_id", ""))
+    if org_id and not _OPENAI_ORG_RE.match(org_id):
+        return False, "Invalid OpenAI Organization ID. Expected format like org_XXXXXXXX."
+    if proj_id and not _OPENAI_PROJECT_RE.match(proj_id):
+        return False, "Invalid OpenAI Project ID. Expected format like proj_XXXXXXXX."
+    if str(api_key or "").startswith("sk-proj-") and not proj_id:
+        return False, "Project-scoped keys (sk-proj-...) require OpenAI Project ID (proj_...). Paste your project id and try again."
+    return True, ""
+
 
 @login_required
 @require_saas_admin
@@ -167,8 +196,8 @@ def ai_settings(request):
     obj.enabled = bool(payload.get("enabled"))
     obj.response_mode = _normalize_response_mode(payload.get("response_mode") or obj.response_mode)
     obj.model_name = str(payload.get("model_name") or obj.model_name or "gpt-4o-mini").strip()
-    obj.openai_organization_id = str(payload.get("openai_organization_id") or obj.openai_organization_id or "").strip()
-    obj.openai_project_id = str(payload.get("openai_project_id") or obj.openai_project_id or "").strip()
+    obj.openai_organization_id = _normalize_openai_id(payload.get("openai_organization_id") or obj.openai_organization_id or "")
+    obj.openai_project_id = _normalize_openai_id(payload.get("openai_project_id") or obj.openai_project_id or "")
     max_tokens_raw = payload.get("max_tokens")
     if max_tokens_raw in (None, ""):
         max_tokens_raw = RESPONSE_MODE_TOKENS.get(obj.response_mode, DEFAULT_MAX_TOKENS)
@@ -210,6 +239,9 @@ def ai_test(request):
     api_key = _normalize_api_key(payload.get("api_key") or api_key_plain or "")
     if not api_key:
         return JsonResponse({"ok": False, "error": "missing_api_key"}, status=400)
+    ok, message = _validate_openai_headers(obj, api_key)
+    if not ok:
+        return JsonResponse({"ok": False, "error": "invalid_openai_headers", "message": message}, status=400)
     client = OpenAIClient(
         api_key=api_key,
         model=obj.model_name,
@@ -297,6 +329,9 @@ def ai_chat(request):
     api_key = _normalize_api_key(decrypt_text(obj.encrypted_api_key))
     if not api_key:
         return JsonResponse({"ok": False, "error": "missing_api_key"}, status=400)
+    ok, message = _validate_openai_headers(obj, api_key)
+    if not ok:
+        return JsonResponse({"ok": False, "error": "invalid_openai_headers", "message": message}, status=400)
 
     usage = get_usage_summary(
         request.user,

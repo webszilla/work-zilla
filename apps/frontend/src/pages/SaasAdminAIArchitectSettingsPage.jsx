@@ -81,6 +81,11 @@ export default function SaasAdminAIArchitectSettingsPage() {
     return raw.startsWith("********") || raw.startsWith("sk-****");
   }, [state.form.api_key]);
 
+  const isProjectScopedKey = useMemo(() => {
+    const raw = String(state.form.api_key || "").trim();
+    return raw.startsWith("sk-proj-");
+  }, [state.form.api_key]);
+
   useEffect(() => {
     let active = true;
     const load = async () => {
@@ -424,6 +429,11 @@ export default function SaasAdminAIArchitectSettingsPage() {
             <div className="form-text text-secondary">
               If you are using a project-scoped key (`sk-proj-...`) and authentication fails, set the project id here.
             </div>
+            {isProjectScopedKey && !String(state.form.openai_project_id || "").trim() ? (
+              <div className="form-text text-danger">
+                This looks like a project-scoped key (`sk-proj-...`). Paste your Project ID (`proj_...`) to avoid 401 errors.
+              </div>
+            ) : null}
           </div>
 
           <div className="col-12 col-md-6">
