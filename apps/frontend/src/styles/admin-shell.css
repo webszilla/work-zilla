@@ -1044,6 +1044,19 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   justify-content: center;
 }
 
+.ba-assistant__icon-link {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--wz-border-soft);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text, #e5e7eb);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .ba-assistant__history-picker-wrap {
   position: relative;
 }
@@ -1110,6 +1123,11 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   flex-direction: column;
   gap: 10px;
   padding: 14px 18px;
+}
+
+.ba-assistant__messages--full {
+  max-height: none;
+  min-height: 0;
 }
 
 .ba-assistant__message {
@@ -1278,6 +1296,10 @@ html[data-theme="light"] .ba-assistant__chip {
 }
 
 html[data-theme="light"] .ba-assistant__close {
+  color: #0f172a;
+}
+
+html[data-theme="light"] .ba-assistant__icon-link {
   color: #0f172a;
 }
 

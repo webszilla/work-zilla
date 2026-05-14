@@ -1,15 +1,18 @@
 import json
 import uuid
 import re
+import hashlib
 
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
+from django.db.models import Max
 
 from .models import AiArchitectSettings, AiArchitectChatMessage, AiArchitectUsageEvent
 from .permissions import require_saas_admin
 from .services.crypto import decrypt_text, encrypt_text, mask_api_key
 from .services.openai_client import OpenAIClient
+from .services.business_reader import build_direct_business_answer
 from .services.prompt_builder import build_ai_context
 from .services.usage import estimate_cost_inr_from_tokens, get_usage_summary
 
@@ -47,6 +50,7 @@ def _get_settings() -> AiArchitectSettings:
                 "django_models_read": True,
                 "database_schema_read": True,
                 "error_logs_read": False,
+                "business_metrics_read": True,
             },
         )
     if not obj.allowed_scopes:
@@ -55,6 +59,7 @@ def _get_settings() -> AiArchitectSettings:
             "django_models_read": True,
             "database_schema_read": True,
             "error_logs_read": False,
+            "business_metrics_read": True,
         }
         obj.save(update_fields=["allowed_scopes"])
     return obj
@@ -106,6 +111,14 @@ def _normalize_api_key(raw: str) -> str:
     value = _WHITESPACE_RE.sub("", value)
     return value.strip()
 
+
+def _validate_api_key_length(api_key: str) -> tuple[bool, str]:
+    # Safety guard: avoid storing extremely large pasted blobs.
+    # 180 chosen to match the SaaS Admin UI input limit.
+    if len(api_key or "") > 180:
+        return False, "API key is too long. Please paste only the secret key (no extra text)."
+    return True, ""
+
 def _normalize_openai_id(raw: str) -> str:
     value = str(raw or "")
     value = _ZERO_WIDTH_RE.sub("", value)
@@ -129,8 +142,12 @@ def _validate_openai_headers(obj: AiArchitectSettings, api_key: str) -> tuple[bo
         return False, "Invalid OpenAI Organization ID. Expected format like org_XXXXXXXX."
     if proj_id and not _OPENAI_PROJECT_RE.match(proj_id):
         return False, "Invalid OpenAI Project ID. Expected format like proj_XXXXXXXX."
-    if str(api_key or "").startswith("sk-proj-") and not proj_id:
-        return False, "Project-scoped keys (sk-proj-...) require OpenAI Project ID (proj_...). Paste your project id and try again."
+    key_prefix = str(api_key or "")
+    if (key_prefix.startswith("sk-proj-") or key_prefix.startswith("sk-svcacct-")) and not proj_id:
+        return (
+            False,
+            "This API key is project-scoped. Set OpenAI Project ID (proj_...) and try again.",
+        )
     return True, ""
 
 
@@ -148,6 +165,7 @@ def ai_status(request):
     )
     return JsonResponse(
         {
+            "backend_build": "ai_architect_v2026-05-12_2",
             "enabled": bool(obj.enabled),
             "configured": has_key,
             "provider": obj.provider,
@@ -172,6 +190,17 @@ def ai_settings(request):
     obj = _get_settings()
     if request.method == "GET":
         api_key_plain = decrypt_text(obj.encrypted_api_key)
+        key_kind = ""
+        key_prefix = str(api_key_plain or "")
+        if key_prefix.startswith("sk-proj-") or key_prefix.startswith("sk-svcacct-"):
+            key_kind = "project_scoped"
+        elif key_prefix.startswith("sk-"):
+            key_kind = "standard"
+        api_key_len = len(api_key_plain or "")
+        api_key_fingerprint = ""
+        if api_key_plain:
+            # Non-reversible fingerprint to confirm which key is saved (never show the key itself).
+            api_key_fingerprint = hashlib.sha256(api_key_plain.encode("utf-8")).hexdigest()[:12]
         return JsonResponse(
             {
                 "provider": obj.provider,
@@ -188,6 +217,9 @@ def ai_settings(request):
                 "allowed_scopes": obj.allowed_scopes,
                 "api_key_masked": mask_api_key(api_key_plain),
                 "has_api_key": bool(api_key_plain),
+                "api_key_kind": key_kind,
+                "api_key_len": api_key_len,
+                "api_key_fingerprint": api_key_fingerprint,
             }
         )
 
@@ -216,6 +248,7 @@ def ai_settings(request):
             "django_models_read": scopes.get("django_models_read", True) is not False,
             "database_schema_read": scopes.get("database_schema_read", True) is not False,
             "error_logs_read": bool(scopes.get("error_logs_read", False)),
+            "business_metrics_read": bool(scopes.get("business_metrics_read", True)),
         }
         if not obj.allow_error_logs_read:
             cleaned["error_logs_read"] = False
@@ -224,6 +257,9 @@ def ai_settings(request):
     if api_key:
         if api_key.startswith("*") or api_key.startswith("sk-****"):
             return JsonResponse({"ok": False, "error": "invalid_api_key"}, status=400)
+        ok_len, msg_len = _validate_api_key_length(api_key)
+        if not ok_len:
+            return JsonResponse({"ok": False, "error": "invalid_api_key", "message": msg_len}, status=400)
         obj.encrypted_api_key = encrypt_text(api_key)
     obj.save()
     return JsonResponse({"ok": True})
@@ -251,15 +287,19 @@ def ai_test(request):
     result = client.test_connection()
     if result.get("ok"):
         return JsonResponse(result, status=200)
-    error_text = str(result.get("error") or "")
+    error_text = str(result.get("error") or "").strip()
+    status_code = int(result.get("status_code") or 400)
     lowered = error_text.lower()
-    if "incorrect api key" in lowered or "invalid api key" in lowered or "api key provided" in lowered:
+    # Prefer showing the real OpenAI error message (masked by _safe_error_text)
+    # so SaaS admins can correct org/project/quota issues without guesswork.
+    if status_code in (401, 403) and ("api key" in lowered or "authentication" in lowered or "unauthorized" in lowered):
         return JsonResponse(
             {
                 "ok": False,
                 "error": "invalid_api_key",
-                "message": "OpenAI rejected this API key. Ensure you pasted the full key (no spaces/newlines). If the key was shared publicly, rotate it and try again.",
-                "status_code": result.get("status_code", 400),
+                "message": error_text
+                or "OpenAI rejected this API key. Ensure you pasted the full key (no spaces/newlines). If the key was shared publicly, rotate it and try again.",
+                "status_code": status_code,
             },
             status=400,
         )
@@ -267,8 +307,8 @@ def ai_test(request):
         {
             "ok": False,
             "error": "openai_error",
-            "message": error_text or "OpenAI request failed.",
-            "status_code": result.get("status_code", 400),
+            "message": error_text or f"OpenAI request failed (status {status_code}).",
+            "status_code": status_code,
         },
         status=400,
     )
@@ -318,6 +358,58 @@ def ai_history(request):
     )
 
 
+def _session_title_from_messages(messages: list[AiArchitectChatMessage]) -> str:
+    for row in messages:
+        if row.role == "user" and str(row.content or "").strip():
+            text = re.sub(r"\s+", " ", str(row.content or "").strip())
+            return text[:60]
+    for row in messages:
+        if str(row.content or "").strip():
+            text = re.sub(r"\s+", " ", str(row.content or "").strip())
+            return text[:60]
+    return "New chat"
+
+
+@login_required
+@require_saas_admin
+@require_http_methods(["GET"])
+def ai_sessions(request):
+    """
+    Returns recent chat sessions for the current user.
+    """
+    # Get recent sessions based on latest message timestamp.
+    rows = (
+        AiArchitectChatMessage.objects.filter(user=request.user)
+        .values("session_id")
+        .annotate(last_created_at=Max("created_at"))
+        .order_by("-last_created_at")[:40]
+    )
+    session_ids = [r["session_id"] for r in rows]
+    # Load a small window per session to derive a title.
+    sessions = []
+    for sid in session_ids:
+        msgs = list(
+            AiArchitectChatMessage.objects.filter(user=request.user, session_id=sid)
+            .order_by("created_at")[:6]
+        )
+        sessions.append(
+            {
+                "session_id": str(sid),
+                "title": _session_title_from_messages(msgs),
+            }
+        )
+    return JsonResponse({"sessions": sessions})
+
+
+@login_required
+@require_saas_admin
+@require_http_methods(["DELETE"])
+def ai_session_delete(request, session_id):
+    AiArchitectChatMessage.objects.filter(user=request.user, session_id=session_id).delete()
+    AiArchitectUsageEvent.objects.filter(user=request.user, session_id=session_id).delete()
+    return JsonResponse({"ok": True})
+
+
 @login_required
 @require_saas_admin
 @require_http_methods(["POST"])
@@ -360,13 +452,26 @@ def ai_chat(request):
     if not obj.allow_error_logs_read:
         scopes["error_logs_read"] = False
     context = build_ai_context(user_message, allowed_scopes=scopes)
+    direct_answer = build_direct_business_answer(user_message, context)
 
     system_message = {
         "role": "system",
         "content": (
-            "You are the SaaS Admin AI Architect assistant. Follow the safety rules strictly.\n"
-            "Return answers in this structure:\n"
-            "1) Summary\n2) Affected files\n3) Affected DB tables\n4) Risk level\n5) Suggested plan\n6) Codex prompt\n7) Warnings\n\n"
+            "You are the WorkZilla SaaS Admin AI Architect assistant.\n"
+            "Follow the safety rules strictly.\n\n"
+            "Language:\n"
+            "- Reply in the user's language. If the user writes in Tamil (or Tanglish), reply in Tamil.\n\n"
+            "What you can answer:\n"
+            "- You MAY answer general product questions about WorkZilla and this AI Architect feature (e.g., chat memory, what is stored, budgets, scopes).\n"
+            "- If the context includes `saas_admin_metrics`, use it to answer business questions like \"this month sales\".\n"
+            "- If the context includes `saas_admin_business_lookup`, use it to answer user/account questions for emails mentioned in the query.\n"
+            "- You MAY answer technical/architecture questions about the Django + React codebase (read-only).\n"
+            "- Do NOT refuse a question just because it is not code-related.\n\n"
+            "Response format:\n"
+            "- If the user asks for code/architecture changes, return answers in this structure:\n"
+            "  1) Summary\n  2) Affected files\n  3) Affected DB tables\n  4) Risk level\n  5) Suggested plan\n  6) Codex prompt\n  7) Warnings\n"
+            "- If the user asks a general or business question, answer directly and briefly.\n"
+            "- Do not produce SQL examples when the answer is already available in the provided context.\n\n"
             f"Safety rules:\n- " + "\n- ".join(context.get("safety_rules", []))
         ),
     }
@@ -391,6 +496,25 @@ def ai_chat(request):
     AiArchitectChatMessage.objects.create(
         session_id=session_uuid, user=request.user, role="user", content=user_message
     )
+
+    if direct_answer:
+        assistant_text = str(direct_answer).strip()
+        AiArchitectChatMessage.objects.create(
+            session_id=session_uuid,
+            user=request.user,
+            role="assistant",
+            content=assistant_text,
+            meta={"source": "local_business_context"},
+        )
+        return JsonResponse(
+            {
+                "ok": True,
+                "text": assistant_text,
+                "model": "local-business-context",
+                "usage": get_monthly_usage_snapshot(),
+                "session_id": str(session_uuid),
+            }
+        )
 
     client = OpenAIClient(
         api_key=api_key,

@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Sum, Count
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
@@ -4956,6 +4956,88 @@ def observability_summary(request):
         product_slug=product,
     )
     return JsonResponse(payload)
+
+
+@login_required
+@require_http_methods(["GET"])
+def metrics_summary(request):
+    """
+    Lightweight SaaS Admin business metrics for AI/overview.
+    Returns only aggregates (no PII).
+    """
+    forbidden = _require_saas_admin(request)
+    if forbidden:
+        return forbidden
+
+    now = timezone.localtime(timezone.now())
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Compute next month safely.
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow_start = today_start + timedelta(days=1)
+
+    # Use paid_on when present; it represents the user's declared payment date.
+    month_qs = PendingTransfer.objects.filter(
+        status="approved",
+        paid_on__gte=month_start.date(),
+        paid_on__lt=month_end.date(),
+    )
+    today_qs = PendingTransfer.objects.filter(
+        status="approved",
+        paid_on__gte=today_start.date(),
+        paid_on__lt=tomorrow_start.date(),
+    )
+
+    month_by_currency = list(
+        month_qs.values("currency")
+        .annotate(total_amount=Sum("amount"), count=Count("id"))
+        .order_by("currency")
+    )
+    today_by_currency = list(
+        today_qs.values("currency")
+        .annotate(total_amount=Sum("amount"), count=Count("id"))
+        .order_by("currency")
+    )
+
+    def _as_float(value):
+        try:
+            return float(value or 0)
+        except Exception:
+            return 0.0
+
+    month_payload = [
+        {
+            "currency": str(row.get("currency") or "INR"),
+            "total_amount": round(_as_float(row.get("total_amount")), 2),
+            "count": int(row.get("count") or 0),
+        }
+        for row in month_by_currency
+    ]
+    today_payload = [
+        {
+            "currency": str(row.get("currency") or "INR"),
+            "total_amount": round(_as_float(row.get("total_amount")), 2),
+            "count": int(row.get("count") or 0),
+        }
+        for row in today_by_currency
+    ]
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "range": {
+                "month_start": month_start.date().isoformat(),
+                "month_end": (month_end.date() - timedelta(days=1)).isoformat(),
+                "today": today_start.date().isoformat(),
+            },
+            "this_month_sales": month_payload,
+            "today_sales": today_payload,
+        }
+    )
 
 
 @login_required

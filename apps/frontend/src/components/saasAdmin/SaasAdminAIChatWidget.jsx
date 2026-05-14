@@ -186,6 +186,15 @@ export default function SaasAdminAIChatWidget() {
               </div>
             </div>
             <div className="ba-assistant__header-actions">
+              <Link
+                className="ba-assistant__icon-link"
+                to="/saas-admin/ai-architect-chat"
+                aria-label="Open full view"
+                title="Full view"
+                onClick={() => setOpen(false)}
+              >
+                <i className="bi bi-arrows-fullscreen" aria-hidden="true" />
+              </Link>
               <button
                 type="button"
                 className="ba-assistant__close"
@@ -250,15 +259,19 @@ export default function SaasAdminAIChatWidget() {
                             type="button"
                             className="btn btn-outline-light btn-sm"
                             onClick={() => copyText(extractCodexPrompt(msg.content))}
+                            title="Copy Codex Prompt"
+                            aria-label="Copy Codex Prompt"
                           >
-                            Copy Codex Prompt
+                            <i className="bi bi-braces" aria-hidden="true" />
                           </button>
                           <button
                             type="button"
                             className="btn btn-outline-light btn-sm"
                             onClick={() => copyText(msg.content)}
+                            title="Copy Full Analysis"
+                            aria-label="Copy Full Analysis"
                           >
-                            Copy Full Analysis
+                            <i className="bi bi-clipboard" aria-hidden="true" />
                           </button>
                         </div>
                       ) : null}

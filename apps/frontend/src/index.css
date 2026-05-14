@@ -86,6 +86,21 @@ a{
   margin-top:20px;
   flex-wrap:wrap;
 }
+
+.subscription-blocked__header{
+  position: relative;
+  padding-right: 44px;
+}
+
+.subscription-blocked__title{
+  text-align: center;
+}
+
+.subscription-blocked__close{
+  position: absolute;
+  top: 0;
+  right: 0;
+}
 .app-btn{
   padding:10px 18px;
   border-radius:999px;

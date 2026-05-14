@@ -57,6 +57,7 @@ import SaasAdminServerMonitoringSettingsPage from "./pages/SaasAdminServerMonito
 import SaasAdminServerMonitoringAlertsPage from "./pages/SaasAdminServerMonitoringAlertsPage.jsx";
 import SaasAdminSESSettingsPage from "./pages/SaasAdminSESSettingsPage.jsx";
 import SaasAdminAIArchitectSettingsPage from "./pages/SaasAdminAIArchitectSettingsPage.jsx";
+import SaasAdminAIArchitectChatPage from "./pages/SaasAdminAIArchitectChatPage.jsx";
 import MediaLibraryPage from "./pages/MediaLibraryPage.jsx";
 import OrgMediaLibraryPage from "./pages/OrgMediaLibraryPage.jsx";
 import StorageExplorerPage from "./pages/StorageExplorerPage.jsx";
@@ -2015,6 +2016,10 @@ function AppShell({ state, productPrefix, productSlug }) {
             element={isSaasAdmin ? <SaasAdminAIArchitectSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
+            path="/saas-admin/ai-architect-chat"
+            element={isSaasAdmin ? <SaasAdminAIArchitectChatPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
             path="/saas-admin/whatsapp-cloud"
             element={isSaasAdmin ? <SaasAdminWhatsAppSettingsPage /> : <Navigate to={withBase("/")} replace />}
           />
@@ -2824,14 +2829,14 @@ export default function App() {
     return (
       <div className="page-center">
         <div className="panel" style={{ maxWidth: 520 }}>
-          <div className="d-flex justify-content-between align-items-start gap-2">
-            <div>
+          <div className="subscription-blocked__header">
+            <div className="subscription-blocked__title">
               <h1 className="mb-1">{safeLabel} Dashboard</h1>
               <p className="mb-2">{title}</p>
             </div>
             <button
               type="button"
-              className="btn btn-outline-secondary btn-sm"
+              className="btn btn-outline-secondary btn-sm subscription-blocked__close"
               onClick={() => closeAndGo(myAccountHref)}
               aria-label="Close"
               title="Close"
@@ -2840,7 +2845,7 @@ export default function App() {
             </button>
           </div>
           <div className="text-secondary mb-3">{message}</div>
-          <div className="d-flex flex-wrap gap-2 justify-content-end">
+          <div className="d-flex flex-wrap gap-2 justify-content-center">
             <a className="app-btn app-btn-secondary" href={myAccountHref}>
               My Account
             </a>

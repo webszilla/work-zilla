@@ -15,7 +15,8 @@ const defaultScopes = {
   code_structure_read: true,
   django_models_read: true,
   database_schema_read: true,
-  error_logs_read: false
+  error_logs_read: false,
+  business_metrics_read: true
 };
 
 const responseModes = [
@@ -59,7 +60,8 @@ function normalizeScopes(scopes) {
     code_structure_read: scopes.code_structure_read !== false,
     django_models_read: scopes.django_models_read !== false,
     database_schema_read: scopes.database_schema_read !== false,
-    error_logs_read: Boolean(scopes.error_logs_read)
+    error_logs_read: Boolean(scopes.error_logs_read),
+    business_metrics_read: scopes.business_metrics_read !== false
   };
 }
 
@@ -69,6 +71,10 @@ export default function SaasAdminAIArchitectSettingsPage() {
 
   const maskedKey = useMemo(() => String(state.data?.api_key_masked || "").trim(), [state.data]);
   const hasSavedKey = useMemo(() => Boolean(state.data?.has_api_key), [state.data]);
+  const backendBuild = useMemo(() => String(state.data?.backend_build || "").trim(), [state.data]);
+  const savedKeyKind = useMemo(() => String(state.data?.api_key_kind || "").trim(), [state.data]);
+  const savedKeyFingerprint = useMemo(() => String(state.data?.api_key_fingerprint || "").trim(), [state.data]);
+  const savedKeyLen = useMemo(() => Number(state.data?.api_key_len || 0), [state.data]);
   const maskedKeyDisplay = useMemo(() => {
     if (!maskedKey) return "";
     const tail = maskedKey.startsWith("sk-****") ? maskedKey.slice("sk-****".length) : maskedKey.slice(-4);
@@ -83,8 +89,10 @@ export default function SaasAdminAIArchitectSettingsPage() {
 
   const isProjectScopedKey = useMemo(() => {
     const raw = String(state.form.api_key || "").trim();
-    return raw.startsWith("sk-proj-");
+    return raw.startsWith("sk-proj-") || raw.startsWith("sk-svcacct-");
   }, [state.form.api_key]);
+
+  const isProjectScopedEffective = isProjectScopedKey || savedKeyKind === "project_scoped";
 
   useEffect(() => {
     let active = true;
@@ -358,6 +366,14 @@ export default function SaasAdminAIArchitectSettingsPage() {
             ) : (
               <div className="text-secondary small mt-2">Saved API key: Not configured</div>
             )}
+            {backendBuild ? (
+              <div className="text-secondary small mt-1">Backend build: {backendBuild}</div>
+            ) : null}
+            {hasSavedKey && savedKeyFingerprint ? (
+              <div className="text-secondary small mt-1">
+                Saved key fingerprint: {savedKeyFingerprint} ({savedKeyLen} chars)
+              </div>
+            ) : null}
           </div>
           <Link to="/saas-admin" className="btn btn-outline-light btn-sm">
             Back to Overview
@@ -369,7 +385,7 @@ export default function SaasAdminAIArchitectSettingsPage() {
         {state.testResult ? <div className="alert alert-info mt-3 mb-0">{state.testResult}</div> : null}
 
         <div className="row g-3 mt-2">
-          <div className="col-12 col-md-4">
+          <div className="col-12 col-md-2">
             <label className="form-label">Enable AI Architect</label>
             <div className="form-check form-switch mt-2">
               <input
@@ -384,12 +400,12 @@ export default function SaasAdminAIArchitectSettingsPage() {
             </div>
           </div>
 
-          <div className="col-12 col-md-4">
+          <div className="col-12 col-md-2">
             <label className="form-label">Provider</label>
             <input type="text" className="form-control" value="OpenAI" disabled />
           </div>
 
-          <div className="col-12 col-md-4">
+          <div className="col-12 col-md-2">
             <label className="form-label">Model Name</label>
             <input
               type="text"
@@ -401,7 +417,7 @@ export default function SaasAdminAIArchitectSettingsPage() {
             />
           </div>
 
-          <div className="col-12 col-md-6">
+          <div className="col-12 col-md-3">
             <label className="form-label">OpenAI Organization ID (optional)</label>
             <input
               type="text"
@@ -416,7 +432,7 @@ export default function SaasAdminAIArchitectSettingsPage() {
             </div>
           </div>
 
-          <div className="col-12 col-md-6">
+          <div className="col-12 col-md-3">
             <label className="form-label">OpenAI Project ID (optional)</label>
             <input
               type="text"
@@ -427,58 +443,16 @@ export default function SaasAdminAIArchitectSettingsPage() {
               autoComplete="off"
             />
             <div className="form-text text-secondary">
-              If you are using a project-scoped key (`sk-proj-...`) and authentication fails, set the project id here.
+              If you are using a project-scoped key (`sk-proj-...` / `sk-svcacct-...`) and authentication fails, set the project id here.
             </div>
-            {isProjectScopedKey && !String(state.form.openai_project_id || "").trim() ? (
+            {isProjectScopedEffective && !String(state.form.openai_project_id || "").trim() ? (
               <div className="form-text text-danger">
-                This looks like a project-scoped key (`sk-proj-...`). Paste your Project ID (`proj_...`) to avoid 401 errors.
+                This looks like a project-scoped key. Paste your Project ID (`proj_...`) to avoid 401 errors.
               </div>
             ) : null}
           </div>
 
-          <div className="col-12 col-md-6">
-            <div className="d-flex align-items-center justify-content-between gap-2">
-              <label className="form-label mb-0">API Key</label>
-              {hasSavedKey && showMaskedKeyInInput ? (
-                <button
-                  type="button"
-                  className="btn btn-outline-light btn-sm"
-                  onClick={() =>
-                    setState((prev) => ({
-                      ...prev,
-                      editingApiKey: true,
-                      form: { ...prev.form, api_key: "" }
-                    }))
-                  }
-                >
-                  Change
-                </button>
-              ) : null}
-            </div>
-            <input
-              type="password"
-              className="form-control"
-              value={showMaskedKeyInInput ? maskedKeyDisplay : state.form.api_key}
-              onChange={onChange("api_key")}
-              disabled={showMaskedKeyInInput}
-              placeholder={maskedKey ? "Paste new key to replace saved key" : "sk-..."}
-              autoComplete="new-password"
-              ref={apiKeyRef}
-            />
-            <div className="form-text text-secondary">
-              API key is encrypted in DB and never returned to the frontend after saving.
-            </div>
-            {!showMaskedKeyInInput && String(state.form.api_key || "").trim() ? (
-              <div className="form-text text-secondary">
-                Entered key length: {String(state.form.api_key || "").trim().length}
-              </div>
-            ) : null}
-            {hasSavedKey && showMaskedKeyInInput ? (
-              <div className="form-text text-secondary">Saved key will be used for Test/Chat. Click Change to replace.</div>
-            ) : null}
-          </div>
-
-          <div className="col-12 col-md-6">
+          <div className="col-12 col-md-3">
             <label className="form-label">Response Mode</label>
             <select className="form-select" value={state.form.response_mode} onChange={onResponseModeChange}>
               {responseModes.map((mode) => (
@@ -487,6 +461,53 @@ export default function SaasAdminAIArchitectSettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="col-12 col-md-9">
+            <label className="form-label mb-2">API Key</label>
+            <div className="d-flex gap-2 align-items-start">
+              <div className="flex-grow-1">
+                <input
+                  type="password"
+                  className="form-control"
+                  value={showMaskedKeyInInput ? maskedKeyDisplay : state.form.api_key}
+                  onChange={onChange("api_key")}
+                  disabled={showMaskedKeyInInput}
+                  placeholder={maskedKey ? "Paste new key to replace saved key" : "sk-..."}
+                  autoComplete="new-password"
+                  ref={apiKeyRef}
+                  maxLength={180}
+                />
+                <div className="form-text text-secondary">
+                  API key is encrypted in DB and never returned to the frontend after saving.
+                </div>
+                {!showMaskedKeyInInput && String(state.form.api_key || "").trim() ? (
+                  <div className="form-text text-secondary">
+                    Entered key length: {String(state.form.api_key || "").trim().length}
+                  </div>
+                ) : null}
+                {hasSavedKey && showMaskedKeyInInput ? (
+                  <div className="form-text text-secondary">Saved key will be used for Test/Chat. Click Change to replace.</div>
+                ) : null}
+              </div>
+              <div className="d-flex flex-column align-items-end justify-content-start">
+                {hasSavedKey && showMaskedKeyInInput ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() =>
+                      setState((prev) => ({
+                        ...prev,
+                        editingApiKey: true,
+                        form: { ...prev.form, api_key: "" }
+                      }))
+                    }
+                  >
+                    Change
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="col-12 col-md-3">
@@ -505,73 +526,102 @@ export default function SaasAdminAIArchitectSettingsPage() {
             </div>
           </div>
 
-          <div className="col-12 col-md-3">
+          <div className="col-12 col-md-9">
             <label className="form-label">Allowed Analysis Scope</label>
             <div className="border rounded p-2">
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  checked={Boolean(state.form.allowed_scopes.code_structure_read)}
-                  onChange={onScopeToggle("code_structure_read")}
-                  id="ai-scope-code"
-                />
-                <label className="form-check-label" htmlFor="ai-scope-code">
-                  Code structure read
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  checked={Boolean(state.form.allowed_scopes.django_models_read)}
-                  onChange={onScopeToggle("django_models_read")}
-                  id="ai-scope-models"
-                />
-                <label className="form-check-label" htmlFor="ai-scope-models">
-                  Django models read
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  checked={Boolean(state.form.allowed_scopes.database_schema_read)}
-                  onChange={onScopeToggle("database_schema_read")}
-                  id="ai-scope-schema"
-                />
-                <label className="form-check-label" htmlFor="ai-scope-schema">
-                  Database schema read
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  checked={Boolean(state.form.allow_error_logs_read)}
-                  onChange={onAllowErrorLogsToggle}
-                  id="ai-allow-logs"
-                />
-                <label className="form-check-label" htmlFor="ai-allow-logs">
-                  Error logs read
-                </label>
-                <div className="small text-secondary mt-1">
-                  Error logs may contain sensitive data. Logs will be masked and limited before AI analysis.
-                </div>
-                {state.form.allow_error_logs_read ? (
-                  <div className="form-check mt-2">
+              <div className="row g-2">
+                <div className="col-12 col-md-3">
+                  <div className="form-check">
                     <input
                       className="form-check-input"
                       type="checkbox"
-                      checked={Boolean(state.form.allowed_scopes.error_logs_read)}
-                      onChange={onScopeToggle("error_logs_read")}
-                      id="ai-scope-logs"
+                      checked={Boolean(state.form.allowed_scopes.code_structure_read)}
+                      onChange={onScopeToggle("code_structure_read")}
+                      id="ai-scope-code"
                     />
-                    <label className="form-check-label" htmlFor="ai-scope-logs">
-                      Include masked log tail in AI context
+                    <label className="form-check-label" htmlFor="ai-scope-code">
+                      Code structure read
                     </label>
                   </div>
-                ) : null}
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={Boolean(state.form.allowed_scopes.django_models_read)}
+                      onChange={onScopeToggle("django_models_read")}
+                      id="ai-scope-models"
+                    />
+                    <label className="form-check-label" htmlFor="ai-scope-models">
+                      Django models read
+                    </label>
+                  </div>
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={Boolean(state.form.allowed_scopes.database_schema_read)}
+                      onChange={onScopeToggle("database_schema_read")}
+                      id="ai-scope-schema"
+                    />
+                    <label className="form-check-label" htmlFor="ai-scope-schema">
+                      Database schema read
+                    </label>
+                  </div>
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={Boolean(state.form.allow_error_logs_read)}
+                      onChange={onAllowErrorLogsToggle}
+                      id="ai-allow-logs"
+                    />
+                    <label className="form-check-label" htmlFor="ai-allow-logs">
+                      Error logs read
+                    </label>
+                  </div>
+                </div>
+                <div className="col-12">
+                  <div className="form-check mt-1">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={Boolean(state.form.allowed_scopes.business_metrics_read)}
+                      onChange={onScopeToggle("business_metrics_read")}
+                      id="ai-scope-metrics"
+                    />
+                    <label className="form-check-label" htmlFor="ai-scope-metrics">
+                      Business metrics read (SaaS totals only)
+                    </label>
+                  </div>
+                  <div className="small text-secondary">
+                    Allows the assistant to answer questions like “this month sales” using aggregated totals (no PII).
+                  </div>
+                </div>
+                <div className="col-12">
+                  <div className="small text-secondary">
+                    Error logs may contain sensitive data. Logs will be masked and limited before AI analysis.
+                  </div>
+                  {state.form.allow_error_logs_read ? (
+                    <div className="form-check mt-2">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={Boolean(state.form.allowed_scopes.error_logs_read)}
+                        onChange={onScopeToggle("error_logs_read")}
+                        id="ai-scope-logs"
+                      />
+                      <label className="form-check-label" htmlFor="ai-scope-logs">
+                        Include masked log tail in AI context
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -580,8 +630,8 @@ export default function SaasAdminAIArchitectSettingsPage() {
         <hr className="my-4" />
 
         <h5 className="mb-2">Monthly AI Budget</h5>
-        <div className="row g-3">
-          <div className="col-12 col-md-4">
+        <div className="row g-3 align-items-end">
+          <div className="col-12 col-md-3">
             <label className="form-label">Monthly Budget Limit (INR)</label>
             <input
               type="number"
@@ -591,7 +641,7 @@ export default function SaasAdminAIArchitectSettingsPage() {
               min={0}
             />
           </div>
-          <div className="col-12 col-md-4">
+          <div className="col-12 col-md-2">
             <label className="form-label">Warning Threshold %</label>
             <input
               type="number"
@@ -602,7 +652,7 @@ export default function SaasAdminAIArchitectSettingsPage() {
               max={100}
             />
           </div>
-          <div className="col-12 col-md-4">
+          <div className="col-12 col-md-2">
             <label className="form-label">Hard Stop</label>
             <div className="form-check form-switch mt-2">
               <input
@@ -621,31 +671,34 @@ export default function SaasAdminAIArchitectSettingsPage() {
               </label>
             </div>
           </div>
-        </div>
-
-        <div className="mt-3 border rounded p-3">
-          <div className="d-flex flex-wrap gap-3">
-            <div>
-              <div className="text-secondary small">Today Usage</div>
-              <div className="fw-bold">₹{Number(usage?.today_cost_inr || 0).toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-secondary small">This Month Usage</div>
-              <div className="fw-bold">
-                ₹{monthCost.toFixed(2)} / ₹{monthBudget.toFixed(0)}
+          <div className="col-12 col-md-5">
+            <label className="form-label">Usage Summary</label>
+            <div className="border rounded p-2">
+              <div className="row g-2">
+                <div className="col-12 col-md-3">
+                  <div className="text-secondary small">Today Usage</div>
+                  <div className="fw-bold">₹{Number(usage?.today_cost_inr || 0).toFixed(2)}</div>
+                  <div className="text-secondary small">Resets daily</div>
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="text-secondary small">This Month Usage</div>
+                  <div className="fw-bold">
+                    ₹{monthCost.toFixed(2)} / ₹{monthBudget.toFixed(0)}
+                  </div>
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="text-secondary small">Remaining Budget</div>
+                  <div className="fw-bold">₹{remaining.toFixed(2)}</div>
+                </div>
+                <div className="col-12 col-md-3">
+                  <div className="text-secondary small">Billing Cycle Reset</div>
+                  <div className="fw-bold">{resetDate || "—"}</div>
+                </div>
+              </div>
+              <div className="small text-secondary mt-2">
+                Usage values may show ₹0 until pricing configuration is enabled on the server.
               </div>
             </div>
-            <div>
-              <div className="text-secondary small">Remaining Budget</div>
-              <div className="fw-bold">₹{remaining.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-secondary small">Billing Cycle Reset Date</div>
-              <div className="fw-bold">{resetDate || "—"}</div>
-            </div>
-          </div>
-          <div className="small text-secondary mt-2">
-            Usage values may show ₹0 until pricing configuration is enabled on the server.
           </div>
         </div>
 

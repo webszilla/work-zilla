@@ -37,3 +37,13 @@ export function fetchAiArchitectHistory(sessionId = "") {
 export function fetchAiArchitectUsage() {
   return apiFetch("/api/saas-admin/ai-architect/usage");
 }
+
+export function fetchAiArchitectSessions() {
+  return apiFetch("/api/saas-admin/ai-architect/sessions");
+}
+
+export function deleteAiArchitectSession(sessionId) {
+  return apiFetch(`/api/saas-admin/ai-architect/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE"
+  });
+}

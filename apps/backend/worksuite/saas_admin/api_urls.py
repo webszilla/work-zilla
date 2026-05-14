@@ -4,6 +4,7 @@ from . import api_views, backup_manager_api_views
 
 urlpatterns = [
     path("overview", api_views.overview, name="saas_admin_overview"),
+    path("metrics/summary", api_views.metrics_summary, name="saas_admin_metrics_summary"),
     path("observability/summary", api_views.observability_summary, name="saas_admin_observability_summary"),
     path("ai-chatbot/usage/summary", api_views.ai_chatbot_usage_summary, name="saas_admin_ai_chatbot_usage_summary"),
     path("ai-chatbot/usage/trend", api_views.ai_chatbot_usage_trend, name="saas_admin_ai_chatbot_usage_trend"),

@@ -209,7 +209,7 @@
                   <div class="col-12 col-lg-4">
                     <div class="form-group mb-0">
                       <label>Paid Date</label>
-                      <input class="form-control" type="text" name="paid_on" placeholder="DD-MM-YYYY" inputmode="numeric" pattern="^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-[0-9]{4}$" required>
+                      <input id="checkoutPaidOnInput" class="form-control" type="text" name="paid_on" placeholder="DD-MM-YYYY" inputmode="numeric" pattern="^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-[0-9]{4}$" required>
                       <div class="form-text">Use DD-MM-YYYY format.</div>
                     </div>
                   </div>
@@ -325,6 +325,18 @@
 
 	          <script>
 	            (function () {
+                // Paid date picker (Flatpickr) - loaded globally in base template.
+                try {
+                  var paidOnInput = document.getElementById("checkoutPaidOnInput");
+                  if (paidOnInput && window.flatpickr) {
+                    window.flatpickr(paidOnInput, {
+                      dateFormat: "d-m-Y",
+                      allowInput: true,
+                      disableMobile: true
+                    });
+                  }
+                } catch (e) {}
+
 	              var summary = document.getElementById("checkoutBillingSummary");
 	              if (!summary) return;
 	              var billingSelect = document.getElementById("checkout-billing-cycle");
@@ -384,14 +396,26 @@
                   var cgstRate = num(summary.getAttribute("data-cgst-rate"));
                   var sgstRate = num(summary.getAttribute("data-sgst-rate"));
                   var igstRate = num(summary.getAttribute("data-igst-rate"));
+                  // Some old records may not send `data-tax-mode` consistently.
+                  // Infer the effective mode from rates so IGST never shows when CGST/SGST is used.
+                  var effectiveTaxMode = taxMode;
+                  if (effectiveTaxMode !== "cgst_sgst" && effectiveTaxMode !== "igst") {
+                    if (cgstRate > 0 || sgstRate > 0) {
+                      effectiveTaxMode = "cgst_sgst";
+                    } else if (igstRate > 0) {
+                      effectiveTaxMode = "igst";
+                    } else {
+                      effectiveTaxMode = "";
+                    }
+                  }
                   var cgstAmount = 0;
                   var sgstAmount = 0;
                   var igstAmount = 0;
                   if (gstRate > 0) {
-                    if (taxMode === "cgst_sgst") {
+                    if (effectiveTaxMode === "cgst_sgst") {
                       cgstAmount = subtotal * (cgstRate / 100);
                       sgstAmount = subtotal * (sgstRate / 100);
-                    } else {
+                    } else if (effectiveTaxMode === "igst") {
                       igstAmount = subtotal * (igstRate / 100);
                     }
                   }
@@ -408,9 +432,9 @@
 	                var totalEl = document.getElementById("checkoutTotalAmount");
 	                if (addonCountEl) addonCountEl.textContent = String(addonCount);
                   if (subtotalEl) subtotalEl.textContent = formatAmount(subtotal);
-                  if (cgstRow) cgstRow.style.display = taxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
-                  if (sgstRow) sgstRow.style.display = taxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
-                  if (igstRow) igstRow.style.display = taxMode !== "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (cgstRow) cgstRow.style.display = effectiveTaxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (sgstRow) sgstRow.style.display = effectiveTaxMode === "cgst_sgst" && gstRate > 0 ? "" : "none";
+                  if (igstRow) igstRow.style.display = effectiveTaxMode === "igst" && gstRate > 0 ? "" : "none";
                   if (cgstEl) cgstEl.textContent = formatAmount(cgstAmount);
                   if (sgstEl) sgstEl.textContent = formatAmount(sgstAmount);
                   if (igstEl) igstEl.textContent = formatAmount(igstAmount);

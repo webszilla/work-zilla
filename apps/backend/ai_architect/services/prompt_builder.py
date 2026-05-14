@@ -5,7 +5,9 @@ import re
 from django.conf import settings
 
 from .code_reader import safe_read_files
+from .business_reader import get_business_lookup_for_emails
 from .log_reader import read_sanitized_error_logs
+from .metrics_reader import get_saas_admin_metrics_summary
 from .schema_reader import summarize_models, summarize_db_tables
 
 
@@ -40,6 +42,7 @@ def build_ai_context(user_message: str, allowed_scopes: dict | None = None) -> d
     models_scope = bool(scopes.get("django_models_read", True))
     schema_scope = bool(scopes.get("database_schema_read", True))
     logs_scope = bool(scopes.get("error_logs_read", False))
+    metrics_scope = bool(scopes.get("business_metrics_read", True))
 
     context = {
         "project": {
@@ -64,5 +67,9 @@ def build_ai_context(user_message: str, allowed_scopes: dict | None = None) -> d
 
     if logs_scope:
         context["error_logs_tail"] = read_sanitized_error_logs()
+
+    if metrics_scope:
+        context["saas_admin_metrics"] = get_saas_admin_metrics_summary()
+        context["saas_admin_business_lookup"] = get_business_lookup_for_emails(user_message)
 
     return context

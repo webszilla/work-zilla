@@ -10,4 +10,6 @@ urlpatterns = [
     path("usage", views.ai_usage, name="ai_architect_usage"),
     path("chat", views.ai_chat, name="ai_architect_chat"),
     path("history", views.ai_history, name="ai_architect_history"),
+    path("sessions", views.ai_sessions, name="ai_architect_sessions"),
+    path("sessions/<uuid:session_id>", views.ai_session_delete, name="ai_architect_session_delete"),
 ]
