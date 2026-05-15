@@ -488,6 +488,17 @@ class CrmLead(models.Model):
         blank=True,
         related_name="business_autopilot_crm_proposal_finalized_leads",
     )
+    completed_by_type = models.CharField(max_length=20, choices=ASSIGN_TYPE_CHOICES, blank=True, default="")
+    completed_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_completed_leads",
+    )
+    completed_by_team = models.CharField(max_length=180, blank=True, default="")
+    completed_by_user_ids = models.JSONField(default=list, blank=True)
+    completed_by_team_names = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

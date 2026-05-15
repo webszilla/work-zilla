@@ -14,6 +14,13 @@ import {
   validateBusinessAutopilotImageOrPdf,
   validateBusinessAutopilotPdf,
 } from "../lib/businessAutopilotFormRules.js";
+import {
+  EMAIL_ADDRESS_RE,
+  getAccountsTaxUiConfig,
+  getCurrencyDisplayLabel,
+  normalizeCountryName,
+  normalizeTableActionNode,
+} from "./businessAutopilot/moduleUiHelpers.jsx";
 
 const STORAGE_KEY = "wz_business_autopilot_projects_module";
 const CRM_STORAGE_KEY = "wz_business_autopilot_crm_module";
@@ -44,221 +51,6 @@ const DIAL_COUNTRY_PICKER_OPTIONS = DIAL_CODE_LABEL_OPTIONS.map((option) => ({
   label: String(option?.country || option?.label || "").trim(),
   flag: String(option?.flag || "🌐"),
 }));
-
-function normalizeCountryName(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function getNodePlainText(node) {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map((item) => getNodePlainText(item)).join("");
-  }
-  if (isValidElement(node)) {
-    return getNodePlainText(node.props?.children);
-  }
-  return "";
-}
-
-function hasBootstrapIconChild(node) {
-  if (!isValidElement(node)) {
-    if (Array.isArray(node)) {
-      return node.some((item) => hasBootstrapIconChild(item));
-    }
-    return false;
-  }
-  if (String(node.type || "").toLowerCase() === "i") {
-    const className = String(node.props?.className || "");
-    if (/\bbi\b/.test(className)) {
-      return true;
-    }
-  }
-  return hasBootstrapIconChild(node.props?.children);
-}
-
-const ACTION_ICON_RULES = [
-  { test: /^(edit|update)\b/i, icon: "bi bi-pencil-square", label: "Edit" },
-  { test: /^(delete|remove)\b/i, icon: "bi bi-trash3", label: "Delete" },
-  { test: /^(view|preview|open)\b/i, icon: "bi bi-eye", label: "View" },
-  { test: /^(history|log|timeline)\b/i, icon: "bi bi-clock-history", label: "History" },
-  { test: /^(details?)\b/i, icon: "bi bi-info-circle", label: "Details" },
-  { test: /^(convert(ed)?|migrate)\b/i, icon: "bi bi-arrow-left-right", label: "Convert" },
-  { test: /^(restore)\b/i, icon: "bi bi-arrow-counterclockwise", label: "Restore" },
-  { test: /^(verify|approve)\b/i, icon: "bi bi-patch-check", label: "Verify" },
-  { test: /^(reject)\b/i, icon: "bi bi-x-lg", label: "Reject" },
-  { test: /^(pdf|download)\b/i, icon: "bi bi-file-earmark-pdf", label: "Download PDF" },
-  { test: /^(email|mail|send)\b/i, icon: "bi bi-envelope-paper", label: "Send Email" },
-];
-
-function resolveActionIconMeta(actionText, explicitLabel) {
-  const candidate = String(explicitLabel || actionText || "").trim();
-  if (!candidate) {
-    return null;
-  }
-  const normalized = candidate.toLowerCase();
-  for (const rule of ACTION_ICON_RULES) {
-    if (rule.test.test(normalized)) {
-      return {
-        icon: rule.icon,
-        label: rule.label,
-      };
-    }
-  }
-  return null;
-}
-
-function normalizeTableActionNode(node) {
-  if (!isValidElement(node)) {
-    if (Array.isArray(node)) {
-      return node.map((item) => normalizeTableActionNode(item));
-    }
-    return node;
-  }
-
-  const normalizedChildren = Children.map(node.props?.children, (child) => normalizeTableActionNode(child));
-  const nodeType = String(node.type || "").toLowerCase();
-  if (nodeType !== "button" && nodeType !== "a") {
-    return cloneElement(node, undefined, normalizedChildren);
-  }
-
-  const actionText = getNodePlainText(node.props?.children).trim();
-  const existingTitle = String(node.props?.title || node.props?.["data-tooltip"] || node.props?.["data-wz-tooltip"] || "").trim();
-  const existingAria = String(node.props?.["aria-label"] || "").trim();
-  const explicitLabel = existingAria || existingTitle;
-  const iconMeta = resolveActionIconMeta(actionText, explicitLabel);
-  const hasIcon = hasBootstrapIconChild(node.props?.children);
-  const shouldConvertToIcon = Boolean(iconMeta && !hasIcon);
-  const label = explicitLabel || iconMeta?.label || actionText;
-  const isIconOnly = Boolean(shouldConvertToIcon || (hasIcon && !actionText));
-
-  if (!isIconOnly && !label) {
-    return cloneElement(node, undefined, normalizedChildren);
-  }
-
-  const mergedClassName = [
-    node.props?.className || "",
-    "d-inline-flex",
-    "align-items-center",
-    "justify-content-center",
-    isIconOnly ? "saas-org-icon-btn wz-table-action-btn" : "",
-  ].filter(Boolean).join(" ");
-
-  return cloneElement(
-    node,
-    {
-      ...node.props,
-      className: mergedClassName,
-      title: node.props?.title || label || undefined,
-      "aria-label": node.props?.["aria-label"] || label || undefined,
-      style: isIconOnly
-        ? {
-          minWidth: 34,
-          width: 34,
-          height: 30,
-          padding: 0,
-          ...(node.props?.style || {}),
-        }
-        : (node.props?.style || undefined),
-    },
-    shouldConvertToIcon ? <i className={iconMeta.icon} aria-hidden="true" /> : normalizedChildren
-  );
-}
-
-function getCurrencyDisplayLabel(currencyCode) {
-  const code = String(currencyCode || "").trim().toUpperCase();
-  if (!code) {
-    return "";
-  }
-  try {
-    const parts = new Intl.NumberFormat("en", {
-      style: "currency",
-      currency: code,
-      currencyDisplay: "narrowSymbol",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).formatToParts(0);
-    const symbol = parts.find((part) => part.type === "currency")?.value || code;
-    return `${symbol} ${code}`;
-  } catch (_error) {
-    return code;
-  }
-}
-
-const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function getAccountsTaxUiConfig(countryValue) {
-  const country = String(countryValue || "India").trim() || "India";
-  const normalized = normalizeCountryName(country);
-  if (normalized === "india") {
-    return {
-      country,
-      mode: "gst",
-      templatesLabel: "GST Templates",
-      templateSingular: "GST Template",
-      templateListTitle: "GST Template List",
-      createTitle: "Create GST Template",
-      editTitle: "Edit GST Template",
-      createActionLabel: "Create GST Template",
-      editActionLabel: "Update GST Template",
-      scopeLabel: "Scope",
-      defaultScope: "Intra State",
-      scopeOptions: ["Intra State", "Inter State", "Export"],
-      namePlaceholder: "India GST 18%",
-      notesPlaceholder: "Template notes",
-      cgstLabel: "CGST %",
-      sgstLabel: "SGST %",
-      igstLabel: "IGST %",
-      cessLabel: "CESS %",
-      helperText: "India billing profile detected. GST rule template defaults are enabled."
-    };
-  }
-  if (normalized === "united states" || normalized === "usa" || normalized === "us") {
-    return {
-      country,
-      mode: "us_sales_tax",
-      templatesLabel: "Tax Templates",
-      templateSingular: "Tax Template",
-      templateListTitle: "Tax Template List",
-      createTitle: "Create Tax Template",
-      editTitle: "Edit Tax Template",
-      createActionLabel: "Create Tax Template",
-      editActionLabel: "Update Tax Template",
-      scopeLabel: "Jurisdiction",
-      defaultScope: "Same State",
-      scopeOptions: ["Same State", "Out of State", "International"],
-      namePlaceholder: "US Sales Tax",
-      notesPlaceholder: "Tax rule notes",
-      cgstLabel: "State Tax %",
-      sgstLabel: "County/Local Tax %",
-      igstLabel: "Combined Sales Tax %",
-      cessLabel: "Extra Tax %",
-      helperText: "US billing profile detected. Sales-tax style rule labels are shown."
-    };
-  }
-  return {
-    country,
-    mode: "vat",
-    templatesLabel: "Tax Templates",
-    templateSingular: "Tax Template",
-    templateListTitle: "Tax Template List",
-    createTitle: "Create Tax Template",
-    editTitle: "Edit Tax Template",
-    createActionLabel: "Create Tax Template",
-    editActionLabel: "Update Tax Template",
-    scopeLabel: "Scope",
-    defaultScope: "Domestic",
-    scopeOptions: ["Domestic", "Cross Border", "Export"],
-    namePlaceholder: `${country} VAT`,
-    notesPlaceholder: "VAT / tax rule notes",
-    cgstLabel: "Regional Tax %",
-    sgstLabel: "Local Tax %",
-    igstLabel: "VAT / Main Tax %",
-    cessLabel: "Additional Tax %",
-    helperText: `${country} billing profile detected. VAT/Tax rule labels are shown.`
-  };
-}
 
 const MODULE_CONTENT = {
   crm: {
@@ -3771,6 +3563,14 @@ function normalizeCrmLeadRecord(row = {}) {
     finalProposalAmount: String(row.finalProposalAmount ?? row.final_proposal_amount ?? "").trim(),
     proposalFinalizedAt: String(row.proposalFinalizedAt || row.proposal_finalized_at || "").trim(),
     proposalFinalizedBy: String(row.proposalFinalizedBy || row.proposal_finalized_by_name || "").trim(),
+    completedByType: String(row.completedByType || row.completed_by_type || "").trim(),
+    completedByUserId: String(row.completedByUserId || row.completed_by_user_id || "").trim(),
+    completedByUserName: String(row.completedByUserName || row.completed_by_user_name || "").trim(),
+    completedByTeam: String(row.completedByTeam || row.completed_by_team || "").trim(),
+    completedByUserIds: Array.isArray(row.completedByUserIds || row.completed_by_user_ids) ? (row.completedByUserIds || row.completed_by_user_ids) : [],
+    completedByUserNames: Array.isArray(row.completedByUserNames || row.completed_by_user_names) ? (row.completedByUserNames || row.completed_by_user_names) : [],
+    completedByTeamNames: Array.isArray(row.completedByTeamNames || row.completed_by_team_names) ? (row.completedByTeamNames || row.completed_by_team_names) : [],
+    completedByName: String(row.completedByName || row.completed_by_name || row.completed_by || "").trim(),
     leadNotesHistory: notesHistory,
   };
 }
@@ -8560,6 +8360,9 @@ function CrmOnePageModule() {
   const [leadFinalProposalStatus, setLeadFinalProposalStatus] = useState("Open");
   const [leadFinalizeProposalError, setLeadFinalizeProposalError] = useState("");
   const [leadFinalizeProposalSaving, setLeadFinalizeProposalSaving] = useState(false);
+  const [leadFinalizeCompletedByPopup, setLeadFinalizeCompletedByPopup] = useState(null);
+  const [leadReopenProposalPopup, setLeadReopenProposalPopup] = useState(null);
+  const [leadEditProposalCompletionPopup, setLeadEditProposalCompletionPopup] = useState(null);
   const [leadProposalsSubTab, setLeadProposalsSubTab] = useState("list");
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [contactTagTab, setContactTagTab] = useState("all");
@@ -14293,6 +14096,7 @@ function CrmOnePageModule() {
       leadId: String(normalizedLead.id || "").trim(),
       leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
       crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
+      status: String(normalizedLead.status || "Open").trim() || "Open",
       noteDate: new Date().toISOString().slice(0, 10),
       noteText: "",
       error: "",
@@ -14436,24 +14240,289 @@ function CrmOnePageModule() {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  async function finalizeLeadProposalProcess() {
+  async function finalizeLeadProposalProcess({ amount: amountOverride = "", nextStatus: nextStatusOverride = "" } = {}) {
     if (!leadNotesPopup) return;
     const leadId = String(leadNotesPopup.leadId || "").trim();
     if (!leadId) return;
-	    const amount = String(leadFinalProposalAmount || "").trim();
+	    const amount = String(amountOverride || leadFinalProposalAmount || "").trim();
 	    if (!amount || parseNumber(amount) <= 0) {
 	      setLeadFinalizeProposalError("Please enter Final Proposal Amount.");
 	      return;
 	    }
-	    const nextStatus = String(leadFinalProposalStatus || "").trim() || "Open";
-	    setLeadFinalizeProposalSaving(true);
-	    setLeadFinalizeProposalError("");
-	    try {
-	      const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, {
-	        final_proposal_amount: amount,
-	        proposal_finalized: true,
-	        status: nextStatus,
-	      });
+	    const nextStatus = String(nextStatusOverride || leadFinalProposalStatus || "").trim() || "Open";
+
+      // If proposal was already completed and user is reopening (status != Converted),
+      // do not show "Assign who completed..." again. Instead ask to clear previous assignment.
+      const wasFinalized = Boolean(String(leadNotesPopup?.proposalFinalizedAt || "").trim());
+      const isReopening = String(nextStatus || "").trim().toLowerCase() !== "converted";
+      if (wasFinalized && isReopening) {
+        const leadRow = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === String(leadId)) || null;
+        const normalizedLead = leadRow ? normalizeCrmLeadRecord(leadRow) : null;
+        const hasCompletedBy = Boolean(
+          String(normalizedLead?.completedByUserId || "").trim()
+          || String(normalizedLead?.completedByUserName || "").trim()
+          || String(normalizedLead?.completedByTeam || "").trim()
+          || String(normalizedLead?.completedByName || "").trim()
+        );
+        if (hasCompletedBy) {
+          setLeadReopenProposalPopup({
+            leadId,
+            nextStatus,
+            amount,
+            completedByName: normalizedLead?.completedByName || normalizedLead?.completedByUserName || normalizedLead?.completedByTeam || "",
+            error: "",
+          });
+          return;
+        }
+        // No assignment exists; just reopen (clear finalize state so user can complete again later).
+        setLeadFinalizeProposalSaving(true);
+        setLeadFinalizeProposalError("");
+        try {
+          const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, {
+            status: nextStatus,
+            final_proposal_amount: amount,
+            proposal_finalized: false,
+          });
+          const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
+          setModuleData((prev) => ({
+            ...prev,
+            leads: (prev.leads || []).map((row) => (
+              String(row?.id || "") === String(leadId)
+                ? { ...normalizeCrmLeadRecord(row), ...(backendLead || {}) }
+                : row
+            )),
+          }));
+          setLeadViewPopup((prev) => (
+            prev && String(prev?.id || "") === String(leadId) ? { ...normalizeCrmLeadRecord(prev), ...(backendLead || {}) } : prev
+          ));
+          setLeadNotesPopup((prev) => (
+            prev ? { ...prev, status: nextStatus, proposalFinalizedAt: "", finalProposalAmount: backendLead?.finalProposalAmount || amount } : prev
+          ));
+        } catch (error) {
+          setLeadFinalizeProposalError("Unable to reopen lead. Please try again.");
+        } finally {
+          setLeadFinalizeProposalSaving(false);
+        }
+        return;
+      }
+
+      // First ask if user wants to assign who completed this conversion.
+      setLeadFinalizeCompletedByPopup((prev) => (
+        prev && String(prev.leadId || "") === String(leadId)
+          ? prev
+          : {
+              leadId,
+              amount,
+              nextStatus,
+              step: "ask",
+              assignEnabled: false,
+              employeeQuery: "",
+              teamQuery: "",
+              selectedEmployeeId: "",
+              selectedEmployeeName: "",
+              selectedTeamName: "",
+              error: "",
+            }
+      ));
+      return;
+  }
+
+  function closeLeadReopenProposalPopup() {
+    setLeadReopenProposalPopup(null);
+  }
+
+  async function confirmReopenLeadAndClearCompletedBy() {
+    if (!leadReopenProposalPopup) return;
+    const leadId = String(leadReopenProposalPopup.leadId || "").trim();
+    if (!leadId) return;
+    const nextStatus = String(leadReopenProposalPopup.nextStatus || "").trim() || "Open";
+    const amount = String(leadReopenProposalPopup.amount || "").trim();
+    setLeadFinalizeProposalSaving(true);
+    setLeadFinalizeProposalError("");
+    try {
+      const payload = {
+        status: nextStatus,
+        final_proposal_amount: amount,
+        proposal_finalized: false,
+      };
+      const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, payload);
+      const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
+      setModuleData((prev) => ({
+        ...prev,
+        leads: (prev.leads || []).map((row) => (
+          String(row?.id || "") === String(leadId)
+            ? { ...normalizeCrmLeadRecord(row), ...(backendLead || {}) }
+            : row
+        )),
+      }));
+      setLeadViewPopup((prev) => (
+        prev && String(prev?.id || "") === String(leadId) ? { ...normalizeCrmLeadRecord(prev), ...(backendLead || {}) } : prev
+      ));
+      setLeadNotesPopup((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          status: nextStatus,
+          proposalFinalizedAt: "",
+          finalProposalAmount: backendLead?.finalProposalAmount || amount,
+        };
+      });
+      setLeadReopenProposalPopup(null);
+    } catch (error) {
+      setLeadFinalizeProposalError("Unable to reopen lead. Please try again.");
+    } finally {
+      setLeadFinalizeProposalSaving(false);
+    }
+  }
+
+  function openLeadEditProposalCompletionPopup(leadId) {
+    const normalizedLeadId = String(leadId || "").trim();
+    if (!normalizedLeadId) return;
+    const leadRow = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === normalizedLeadId) || null;
+    const normalizedLead = leadRow ? normalizeCrmLeadRecord(leadRow) : null;
+    if (!normalizedLead) return;
+    setLeadEditProposalCompletionPopup({
+      leadId: normalizedLeadId,
+      amount: String(normalizedLead.finalProposalAmount || "").trim(),
+      employeeQuery: "",
+      teamQuery: "",
+      employeeOpen: false,
+      teamOpen: false,
+      selectedEmployeeIds: (
+        Array.isArray(normalizedLead.completedByUserIds) && normalizedLead.completedByUserIds.length
+          ? normalizedLead.completedByUserIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : (String(normalizedLead.completedByUserId || "").trim() ? [String(normalizedLead.completedByUserId || "").trim()] : [])
+      ),
+      selectedEmployeeNames: (
+        Array.isArray(normalizedLead.completedByUserNames) && normalizedLead.completedByUserNames.length
+          ? normalizedLead.completedByUserNames.map((name) => String(name || "").trim()).filter(Boolean)
+          : (String(normalizedLead.completedByUserName || "").trim() ? [String(normalizedLead.completedByUserName || "").trim()] : [])
+      ),
+      selectedTeamNames: (
+        Array.isArray(normalizedLead.completedByTeamNames) && normalizedLead.completedByTeamNames.length
+          ? normalizedLead.completedByTeamNames.map((name) => String(name || "").trim()).filter(Boolean)
+          : (String(normalizedLead.completedByTeam || "").trim() ? [String(normalizedLead.completedByTeam || "").trim()] : [])
+      ),
+      error: "",
+    });
+  }
+
+  function closeLeadEditProposalCompletionPopup() {
+    setLeadEditProposalCompletionPopup(null);
+  }
+
+  async function saveLeadEditProposalCompletionPopup() {
+    if (!leadEditProposalCompletionPopup) return;
+    const leadId = String(leadEditProposalCompletionPopup.leadId || "").trim();
+    if (!leadId) return;
+    const amount = String(leadEditProposalCompletionPopup.amount || "").trim();
+    if (!amount || parseNumber(amount) <= 0) {
+      setLeadEditProposalCompletionPopup((prev) => (prev ? { ...prev, error: "Please enter Final Proposal Amount." } : prev));
+      return;
+    }
+    const selectedEmployeeIds = Array.isArray(leadEditProposalCompletionPopup.selectedEmployeeIds)
+      ? leadEditProposalCompletionPopup.selectedEmployeeIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    const selectedTeamNames = Array.isArray(leadEditProposalCompletionPopup.selectedTeamNames)
+      ? leadEditProposalCompletionPopup.selectedTeamNames.map((name) => String(name || "").trim()).filter(Boolean)
+      : [];
+    setLeadFinalizeProposalSaving(true);
+    setLeadFinalizeProposalError("");
+    try {
+      const payload = {
+        final_proposal_amount: amount,
+        completed_by_user_ids: selectedEmployeeIds,
+        completed_by_teams: selectedTeamNames,
+      };
+      const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, payload);
+      const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
+      setModuleData((prev) => ({
+        ...prev,
+        leads: (prev.leads || []).map((row) => (
+          String(row?.id || "") === String(leadId) ? { ...normalizeCrmLeadRecord(row), ...(backendLead || {}) } : row
+        )),
+      }));
+      setLeadViewPopup((prev) => (
+        prev && String(prev?.id || "") === String(leadId) ? { ...normalizeCrmLeadRecord(prev), ...(backendLead || {}) } : prev
+      ));
+      setLeadNotesPopup((prev) => (
+        prev
+          ? {
+              ...prev,
+              finalProposalAmount: backendLead?.finalProposalAmount || amount,
+              proposalFinalizedAt: backendLead?.proposalFinalizedAt || prev.proposalFinalizedAt,
+            }
+          : prev
+      ));
+      setLeadEditProposalCompletionPopup(null);
+    } catch (error) {
+      setLeadEditProposalCompletionPopup((prev) => (prev ? { ...prev, error: "Unable to update proposal completion. Please try again." } : prev));
+    } finally {
+      setLeadFinalizeProposalSaving(false);
+    }
+  }
+
+  function closeLeadFinalizeCompletedByPopup() {
+    setLeadFinalizeCompletedByPopup(null);
+  }
+
+  function openLeadFinalizeAssignStep() {
+    if (!leadFinalizeCompletedByPopup) return;
+    const leadId = String(leadFinalizeCompletedByPopup.leadId || "").trim();
+    const leadRow = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === leadId) || null;
+    const normalizedLead = leadRow ? normalizeCrmLeadRecord(leadRow) : null;
+    const defaultEmployeeIdRaw = String(currentUserDirectoryEntry?.id || "").trim();
+    const defaultEmployeeId = Number.isFinite(parseInt(defaultEmployeeIdRaw, 10)) ? String(parseInt(defaultEmployeeIdRaw, 10)) : "";
+    const defaultEmployeeName = String(currentUserDirectoryEntry?.name || "").trim();
+    const defaultTeamName = String(normalizedLead?.assignedTeam || "").trim();
+    setLeadFinalizeCompletedByPopup((prev) => (
+      prev
+        ? {
+            ...prev,
+            step: "assign",
+            assignEnabled: true,
+            selectedEmployeeIds: defaultEmployeeId ? [defaultEmployeeId] : [],
+            selectedEmployeeNames: defaultEmployeeName ? [defaultEmployeeName] : [],
+            selectedTeamNames: defaultTeamName ? [defaultTeamName] : [],
+            employeeQuery: "",
+            teamQuery: "",
+            employeeOpen: false,
+            teamOpen: false,
+            error: "",
+          }
+        : prev
+    ));
+  }
+
+  async function confirmFinalizeLeadProposalProcess({ completedByUserIds = [], completedByTeams = [], completedByUserId = "", completedByTeam = "" } = {}) {
+    if (!leadFinalizeCompletedByPopup) return;
+    const leadId = String(leadFinalizeCompletedByPopup.leadId || "").trim();
+    if (!leadId) return;
+    const amount = String(leadFinalizeCompletedByPopup.amount || "").trim();
+    const nextStatus = String(leadFinalizeCompletedByPopup.nextStatus || "").trim() || "Open";
+    const normalizedUserIds = [
+      ...(Array.isArray(completedByUserIds) ? completedByUserIds : []),
+      completedByUserId,
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    const normalizedTeams = [
+      ...(Array.isArray(completedByTeams) ? completedByTeams : []),
+      completedByTeam,
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    setLeadFinalizeProposalSaving(true);
+    setLeadFinalizeProposalError("");
+    try {
+      const payload = {
+        final_proposal_amount: amount,
+        proposal_finalized: true,
+        status: nextStatus,
+      };
+      if (normalizedUserIds.length) {
+        payload.completed_by_user_ids = Array.from(new Set(normalizedUserIds));
+      }
+      if (normalizedTeams.length) {
+        payload.completed_by_teams = Array.from(new Set(normalizedTeams));
+      }
+      const response = await saveCrmCollectionRecord("leads", "PATCH", leadId, payload);
       const backendLead = response?.lead ? normalizeCrmLeadRecord(response.lead) : null;
       setModuleData((prev) => ({
         ...prev,
@@ -14463,19 +14532,30 @@ function CrmOnePageModule() {
             : row
         )),
       }));
+      setLeadViewPopup((prev) => (
+        prev && String(prev?.id || "") === String(leadId)
+          ? { ...normalizeCrmLeadRecord(prev), ...(backendLead || {}), finalProposalAmount: amount, proposalFinalizedAt: (backendLead?.proposalFinalizedAt || new Date().toISOString()) }
+          : prev
+      ));
       setLeadNotesPopup((prev) => (
         prev
           ? {
               ...prev,
               finalProposalAmount: backendLead?.finalProposalAmount || amount,
               proposalFinalizedAt: backendLead?.proposalFinalizedAt || new Date().toISOString(),
+              status: nextStatus,
             }
           : prev
       ));
+      setLeadFinalizeCompletedByPopup(null);
     } catch (error) {
       const detail = String(error?.data?.detail || "").trim();
       if (detail === "final_proposal_amount_required") {
         setLeadFinalizeProposalError("Please enter Final Proposal Amount.");
+      } else if (detail === "completed_by_ambiguous") {
+        setLeadFinalizeProposalError("Select one or more Employees or Teams.");
+      } else if (detail === "completed_by_user_invalid") {
+        setLeadFinalizeProposalError("Selected Employee is not valid for this organization.");
       } else {
         setLeadFinalizeProposalError("Unable to complete proposal process. Please try again.");
       }
@@ -16133,7 +16213,7 @@ function CrmOnePageModule() {
                       inventoryItems={crmSalesOrderInventoryItems}
                       inventoryBranches={crmSalesOrderInventoryBranches}
                       itemMasterOptions={crmSalesOrderItemMasterOptions}
-                      enableItemPicker={false}
+                      enableItemPicker={true}
                       addDocLine={() => addCrmSalesOrderLine()}
                       updateDocLineDescription={(_kind, lineId, value) => updateCrmSalesOrderLineDescription(lineId, value)}
                       applyInventoryItemToLine={(_kind, lineId, itemId) => applyCrmSalesOrderInventoryItemToLine(lineId, itemId)}
@@ -18759,6 +18839,7 @@ function CrmOnePageModule() {
 	                { label: "Status", value: leadViewPopup.status || "-" },
 	                { label: "Created By", value: leadViewPopup.createdBy || "-" },
 	                { label: "Assigned To", value: assignedToDisplay },
+	                { label: "Lead Completed By", value: leadViewPopup.completedByName || leadViewPopup.completedByUserName || leadViewPopup.completedByTeam || "-" },
 	              ];
               return (
                 <>
@@ -18779,18 +18860,6 @@ function CrmOnePageModule() {
                       </div>
                     ))}
                   </div>
-                  {assignedUsersList.length ? (
-                    <div className="mt-3">
-                      <div className="small text-secondary mb-2">Assigned Users</div>
-                      <div className="d-flex flex-wrap gap-2">
-                        {assignedUsersList.map((userName) => (
-                          <span key={`lead-assigned-user-${userName}`} className="badge text-bg-light border">
-                            {userName}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
 	                  <div className="mt-4">
 	                    <div className="d-flex align-items-center justify-content-between gap-3 mb-2">
 	                      <div className="fw-semibold">
@@ -18959,40 +19028,42 @@ function CrmOnePageModule() {
 		            </div>
 		            <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
 		            {leadDataPopupTab === "notes" ? (
-	              <>
-	                <div className="mb-2">
-	                  <h6 className="mb-0">Lead Notes</h6>
-	                </div>
-	                <form className="row g-3 mb-3 align-items-end" onSubmit={submitLeadNotesPopup}>
-	                  {leadNotesPopup.error ? (
-	                    <div className="col-12">
-	                      <div className="alert alert-danger py-2 mb-0">{leadNotesPopup.error}</div>
-	                    </div>
-	                  ) : null}
-	                  <div className="col-12 col-md-3">
-	                    <label className="form-label small text-secondary mb-1">Date</label>
-	                    <input
-	                      type="date"
-	                      className="form-control"
-	                      value={leadNotesPopup.noteDate || ""}
-	                      onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteDate: event.target.value, error: "" } : prev))}
-	                    />
-	                  </div>
-	                  <div className="col-12 col-md-7">
-	                    <label className="form-label small text-secondary mb-1">Notes</label>
-	                    <input
-	                      type="text"
-	                      className="form-control"
-	                      placeholder="Enter lead follow-up update"
-	                      value={leadNotesPopup.noteText || ""}
-	                      onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteText: event.target.value, error: "" } : prev))}
-	                    />
-	                  </div>
-	                  <div className="col-12 col-md-2 d-flex flex-column">
-	                    <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
-	                    <button type="submit" className="btn btn-success w-100">Submit</button>
-		                  </div>
-		                </form>
+		              <>
+		                <div className="mb-2">
+		                  <h6 className="mb-0">Lead Notes</h6>
+		                </div>
+                {!(leadNotesPopup?.proposalFinalizedAt && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted") ? (
+                  <form className="row g-3 mb-3 align-items-end" onSubmit={submitLeadNotesPopup}>
+                    {leadNotesPopup.error ? (
+                      <div className="col-12">
+                        <div className="alert alert-danger py-2 mb-0">{leadNotesPopup.error}</div>
+                      </div>
+                    ) : null}
+                    <div className="col-12 col-md-3">
+                      <label className="form-label small text-secondary mb-1">Date</label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={leadNotesPopup.noteDate || ""}
+                        onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteDate: event.target.value, error: "" } : prev))}
+                      />
+                    </div>
+                    <div className="col-12 col-md-7">
+                      <label className="form-label small text-secondary mb-1">Notes</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Enter lead follow-up update"
+                        value={leadNotesPopup.noteText || ""}
+                        onChange={(event) => setLeadNotesPopup((prev) => (prev ? { ...prev, noteText: event.target.value, error: "" } : prev))}
+                      />
+                    </div>
+                    <div className="col-12 col-md-2 d-flex flex-column">
+                      <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
+                      <button type="submit" className="btn btn-success w-100">Submit</button>
+                    </div>
+                  </form>
+                ) : null}
 		                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
 		                <SearchablePaginatedTableCard
 		                  title="Updates"
@@ -19026,16 +19097,18 @@ function CrmOnePageModule() {
 				                {leadFinalizeProposalError ? (
 				                  <div className="alert alert-danger py-2">{leadFinalizeProposalError}</div>
 				                ) : null}
-				                {(() => {
-				                  const baseNames = Array.from(
-				                    new Set((leadProposals || []).map((item) => String(item?.base_name || "").trim()).filter(Boolean))
-				                  );
-				                  const isNewProposal = leadProposalBaseChoice === "__new__" || baseNames.length === 0;
-				                  return (
-				                    <>
-			                      {baseNames.length && isNewProposal ? (
-			                        <div className="row g-3 mb-3">
-			                          <div className="col-12">
+					                {(() => {
+					                  const baseNames = Array.from(
+					                    new Set((leadProposals || []).map((item) => String(item?.base_name || "").trim()).filter(Boolean))
+					                  );
+					                  const isNewProposal = leadProposalBaseChoice === "__new__" || baseNames.length === 0;
+                            const isProposalLockedForLead = Boolean(leadNotesPopup?.proposalFinalizedAt)
+                              && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted";
+					                  return isProposalLockedForLead ? null : (
+					                    <>
+				                      {baseNames.length && isNewProposal ? (
+				                        <div className="row g-3 mb-3">
+				                          <div className="col-12">
 			                            <label className="form-label small text-secondary mb-1">Select Proposal</label>
 			                            <select
 			                              className="form-select"
@@ -19150,15 +19223,16 @@ function CrmOnePageModule() {
 				                      <h6 className="mb-0">Complete Proposal Process</h6>
 				                      {leadNotesPopup?.proposalFinalizedAt ? (
 				                        <span className="badge text-bg-success">Completed</span>
-				                      ) : (
-				                        <span className="badge text-bg-secondary">Pending</span>
-				                      )}
-				                    </div>
-				                    <div className="row g-3 align-items-end">
-				                      <div className="col-12 col-md-6">
-				                      <label className="form-label small text-secondary mb-1">Final Proposal Amount *</label>
-				                      <input
-				                        type="text"
+					                      ) : (
+					                        <span className="badge text-bg-secondary">Pending</span>
+					                      )}
+					                    </div>
+                              {!(leadNotesPopup?.proposalFinalizedAt && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted") ? (
+					                    <div className="row g-3 align-items-end">
+					                      <div className="col-12 col-md-6">
+					                      <label className="form-label small text-secondary mb-1">Final Proposal Amount *</label>
+					                      <input
+					                        type="text"
 				                        inputMode="decimal"
 				                        className="form-control"
 				                        placeholder={`Enter amount in ${crmCurrencyCode}`}
@@ -19189,11 +19263,78 @@ function CrmOnePageModule() {
 				                          onClick={finalizeLeadProposalProcess}
 				                        >
 				                          {leadFinalizeProposalSaving ? "Saving..." : "Mark as Completed"}
-				                        </button>
-				                      </div>
-				                    </div>
-				                  </div>
-				                ) : (
+					                        </button>
+					                      </div>
+					                    </div>
+                              ) : (
+                                (() => {
+                                  const leadId = String(leadNotesPopup?.leadId || "").trim();
+                                  const leadRow = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === leadId) || null;
+                                  const normalizedLead = leadRow ? normalizeCrmLeadRecord(leadRow) : null;
+                                  const completedAt = normalizedLead?.proposalFinalizedAt || leadNotesPopup?.proposalFinalizedAt || "";
+                                  const completedBy = normalizedLead?.completedByName || normalizedLead?.completedByUserName || normalizedLead?.completedByTeam || "-";
+                                  const finalizedBy = normalizedLead?.proposalFinalizedBy || "-";
+                                  const finalAmount = parseNumber(normalizedLead?.finalProposalAmount || leadNotesPopup?.finalProposalAmount || "");
+                                  const finalAmountDisplay = finalAmount ? formatCurrencyAmount(finalAmount, crmCurrencyCode) : "-";
+                                  return (
+                                    <>
+                                      <SearchablePaginatedTableCard
+                                        title="Completion Record"
+                                        subtitle=""
+                                        rows={normalizedLead ? [normalizedLead] : []}
+                                        columns={[
+                                          { key: "proposalFinalizedAt", label: "Completed At", thStyle: { width: "26%" }, tdStyle: { width: "26%", whiteSpace: "nowrap" } },
+                                          { key: "finalProposalAmount", label: "Final Amount", thStyle: { width: "18%" }, tdStyle: { width: "18%", whiteSpace: "nowrap" } },
+                                          { key: "completedByName", label: "Completed By", thStyle: { width: "26%" }, tdStyle: { width: "26%" } },
+                                          { key: "proposalFinalizedBy", label: "Finalized By", thStyle: { width: "20%" }, tdStyle: { width: "20%" } },
+                                          { key: "__actions", label: "Action", thStyle: { width: "10%" }, tdStyle: { width: "10%", whiteSpace: "nowrap" } },
+                                        ]}
+                                        pageSize={5}
+                                        withoutOuterCard
+                                        searchPlaceholder="Search"
+                                        noRowsText="No completion record yet."
+                                        searchBy={() => ""}
+                                        renderCells={() => [
+                                          completedAt ? new Date(completedAt).toLocaleString() : "-",
+                                          finalAmountDisplay,
+                                          completedBy,
+                                          finalizedBy,
+                                          (
+                                            <div className="d-flex gap-2 justify-content-end">
+                                              <button
+                                                type="button"
+                                                className="btn btn-sm btn-outline-light"
+                                                title="Edit completion"
+                                                onClick={() => openLeadEditProposalCompletionPopup(leadId)}
+                                              >
+                                                <i className="bi bi-pencil" aria-hidden="true" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="btn btn-sm btn-outline-danger"
+                                                title="Reopen"
+                                                onClick={() => {
+                                                  finalizeLeadProposalProcess({
+                                                    amount: String(normalizedLead?.finalProposalAmount || leadNotesPopup?.finalProposalAmount || "").trim(),
+                                                    nextStatus: "Open",
+                                                  });
+                                                }}
+                                              >
+                                                <i className="bi bi-arrow-counterclockwise" aria-hidden="true" />
+                                              </button>
+                                            </div>
+                                          ),
+                                        ]}
+                                      />
+                                      <div className="small text-secondary mt-2">
+                                        Proposal is completed. Use the reopen action to enable notes and proposal submission forms.
+                                      </div>
+                                    </>
+                                  );
+                                })()
+                              )}
+					                  </div>
+					                ) : (
 				                  <SearchablePaginatedTableCard
 				                    title="Documents"
 				                    subtitle={leadProposalsLoading ? "Loading..." : ""}
@@ -19245,6 +19386,664 @@ function CrmOnePageModule() {
 		          </div>
 		        </div>
 		      ) : null}
+      {leadFinalizeCompletedByPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadFinalizeCompletedByPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(860px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Complete Proposal</h5>
+                <div className="small text-secondary">Assign who completed this conversion (optional).</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadFinalizeCompletedByPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+
+            {leadFinalizeCompletedByPopup.error ? (
+              <div className="alert alert-danger py-2 mb-3">{leadFinalizeCompletedByPopup.error}</div>
+            ) : null}
+
+            {leadFinalizeCompletedByPopup.step === "ask" ? (
+              <div className="d-flex flex-column gap-3">
+                <div className="text-secondary">
+                  Do you want to assign who completed this conversion? (Lead completed by)
+                </div>
+                <div className="d-flex justify-content-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-light"
+                    disabled={leadFinalizeProposalSaving}
+                    onClick={() => confirmFinalizeLeadProposalProcess({})}
+                  >
+                    No, Complete
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    disabled={leadFinalizeProposalSaving}
+                    onClick={openLeadFinalizeAssignStep}
+                  >
+                    Yes, Assign
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row g-3">
+                <div className="col-12 col-lg-6">
+                  <label className="form-label small text-secondary mb-1">Employee (left)</label>
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="search"
+                      className="form-control"
+                      autoComplete="off"
+                      placeholder="Search employee name / email"
+                      value={leadFinalizeCompletedByPopup.employeeQuery || ""}
+                      onChange={(e) => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, employeeQuery: e.target.value, employeeOpen: true, error: "" } : prev
+                      ))}
+                      onFocus={() => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, employeeOpen: true, error: "" } : prev
+                      ))}
+                      onClick={() => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, employeeOpen: true, error: "" } : prev
+                      ))}
+                      onBlur={() => window.setTimeout(() => {
+                        setLeadFinalizeCompletedByPopup((prev) => (prev ? { ...prev, employeeOpen: false } : prev));
+                      }, 120)}
+                    />
+                    {leadFinalizeCompletedByPopup.employeeOpen ? (
+                      <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Employee List</div>
+                          {crmDirectoryOptions
+                            .filter((row) => {
+                              const q = String(leadFinalizeCompletedByPopup.employeeQuery || "").trim().toLowerCase();
+                              if (!q) return true;
+                              const name = String(row?.name || "").toLowerCase();
+                              const email = String(row?.email || "").toLowerCase();
+                              return q && (name.includes(q) || email.includes(q));
+                            })
+                            .slice(0, 12)
+                            .map((row) => {
+                              const rawId = String(row?.id || "").trim();
+                              const numericId = Number.isFinite(parseInt(rawId, 10)) ? String(parseInt(rawId, 10)) : "";
+                              const selectedIds = Array.isArray(leadFinalizeCompletedByPopup.selectedEmployeeIds)
+                                ? leadFinalizeCompletedByPopup.selectedEmployeeIds.map((id) => String(id || "").trim())
+                                : [];
+                              const checked = !!numericId && selectedIds.includes(numericId);
+                              return (
+                                <button
+                                  key={`lead-completed-emp-${row.name}-${row.email || row.id}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  disabled={!numericId}
+                                  title={!numericId ? "Not a selectable org user" : ""}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => setLeadFinalizeCompletedByPopup((prev) => {
+                                    if (!prev) return prev;
+                                    const nextIds = Array.isArray(prev.selectedEmployeeIds)
+                                      ? prev.selectedEmployeeIds.map((id) => String(id || "").trim()).filter(Boolean)
+                                      : [];
+                                    const nextNames = Array.isArray(prev.selectedEmployeeNames)
+                                      ? prev.selectedEmployeeNames.map((name) => String(name || "").trim()).filter(Boolean)
+                                      : [];
+                                    const idx = nextIds.indexOf(numericId);
+                                    if (idx >= 0) {
+                                      nextIds.splice(idx, 1);
+                                      if (idx < nextNames.length) nextNames.splice(idx, 1);
+                                    } else {
+                                      nextIds.push(numericId);
+                                      nextNames.push(String(row.name || "").trim());
+                                    }
+                                    return { ...prev, selectedEmployeeIds: nextIds, selectedEmployeeNames: nextNames, error: "" };
+                                  })}
+                                >
+                                  <span className="d-flex align-items-start gap-2">
+                                    <input type="checkbox" className="form-check-input mt-1" checked={checked} readOnly />
+                                    <span>
+                                      <span className="crm-inline-suggestions__item-main d-block">{row.name}</span>
+                                      <span className="crm-inline-suggestions__item-sub">{row.email || "-"}</span>
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          {crmDirectoryOptions.length === 0 ? (
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No employees found</span>
+                              <span className="crm-inline-suggestions__item-sub">Try another search.</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  {Array.isArray(leadFinalizeCompletedByPopup.selectedEmployeeIds) && leadFinalizeCompletedByPopup.selectedEmployeeIds.length ? (
+                    <div className="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                      {leadFinalizeCompletedByPopup.selectedEmployeeIds.map((id, index) => {
+                        const name = (Array.isArray(leadFinalizeCompletedByPopup.selectedEmployeeNames) ? leadFinalizeCompletedByPopup.selectedEmployeeNames[index] : "") || id;
+                        return (
+                          <span key={`lead-completed-emp-chip-${id}-${index}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                            <button
+                              type="button"
+                              className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                              aria-label={`Remove ${name}`}
+                              onClick={() => setLeadFinalizeCompletedByPopup((prev) => {
+                                if (!prev) return prev;
+                                const nextIds = Array.isArray(prev.selectedEmployeeIds) ? [...prev.selectedEmployeeIds] : [];
+                                const nextNames = Array.isArray(prev.selectedEmployeeNames) ? [...prev.selectedEmployeeNames] : [];
+                                const idx = nextIds.indexOf(id);
+                                if (idx >= 0) {
+                                  nextIds.splice(idx, 1);
+                                  if (idx < nextNames.length) nextNames.splice(idx, 1);
+                                }
+                                return { ...prev, selectedEmployeeIds: nextIds, selectedEmployeeNames: nextNames, error: "" };
+                              })}
+                            >
+                              &times;
+                            </button>
+                            <span className="fw-semibold">{name}</span>
+                          </span>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => setLeadFinalizeCompletedByPopup((prev) => (
+                          prev ? { ...prev, selectedEmployeeIds: [], selectedEmployeeNames: [], error: "" } : prev
+                        ))}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="small text-secondary mt-2">Tip: Select one or more employees and/or teams.</div>
+                </div>
+
+                <div className="col-12 col-lg-6">
+                  <label className="form-label small text-secondary mb-1">Team (right)</label>
+                  <div className="crm-inline-suggestions-wrap">
+                    <input
+                      type="search"
+                      className="form-control"
+                      autoComplete="off"
+                      placeholder="Search team name"
+                      value={leadFinalizeCompletedByPopup.teamQuery || ""}
+                      onChange={(e) => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, teamQuery: e.target.value, teamOpen: true, error: "" } : prev
+                      ))}
+                      onFocus={() => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, teamOpen: true, error: "" } : prev
+                      ))}
+                      onClick={() => setLeadFinalizeCompletedByPopup((prev) => (
+                        prev ? { ...prev, teamOpen: true, error: "" } : prev
+                      ))}
+                      onBlur={() => window.setTimeout(() => {
+                        setLeadFinalizeCompletedByPopup((prev) => (prev ? { ...prev, teamOpen: false } : prev));
+                      }, 120)}
+                    />
+                    {leadFinalizeCompletedByPopup.teamOpen ? (
+                      <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                        <div className="crm-inline-suggestions__group">
+                          <div className="crm-inline-suggestions__title">Team List</div>
+                          {crmTeamOptions
+                            .filter((name) => {
+                              const q = String(leadFinalizeCompletedByPopup.teamQuery || "").trim().toLowerCase();
+                              if (!q) return true;
+                              return String(name || "").toLowerCase().includes(q);
+                            })
+                            .slice(0, 12)
+                            .map((name) => {
+                              const normalizedName = String(name || "").trim();
+                              const selectedTeams = Array.isArray(leadFinalizeCompletedByPopup.selectedTeamNames)
+                                ? leadFinalizeCompletedByPopup.selectedTeamNames.map((value) => String(value || "").trim())
+                                : [];
+                              const checked = normalizedName && selectedTeams.includes(normalizedName);
+                              return (
+                                <button
+                                  key={`lead-completed-team-${name}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => setLeadFinalizeCompletedByPopup((prev) => {
+                                    if (!prev) return prev;
+                                    const nextTeams = Array.isArray(prev.selectedTeamNames)
+                                      ? prev.selectedTeamNames.map((value) => String(value || "").trim()).filter(Boolean)
+                                      : [];
+                                    const idx = nextTeams.indexOf(normalizedName);
+                                    if (idx >= 0) nextTeams.splice(idx, 1);
+                                    else nextTeams.push(normalizedName);
+                                    return { ...prev, selectedTeamNames: nextTeams, error: "" };
+                                  })}
+                                >
+                                  <span className="d-flex align-items-start gap-2">
+                                    <input type="checkbox" className="form-check-input mt-1" checked={checked} readOnly />
+                                    <span>
+                                      <span className="crm-inline-suggestions__item-main d-block">{name}</span>
+                                      <span className="crm-inline-suggestions__item-sub">Team</span>
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          {crmTeamOptions.length === 0 ? (
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No teams found</span>
+                              <span className="crm-inline-suggestions__item-sub">Try another search.</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  {Array.isArray(leadFinalizeCompletedByPopup.selectedTeamNames) && leadFinalizeCompletedByPopup.selectedTeamNames.length ? (
+                    <div className="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                      {leadFinalizeCompletedByPopup.selectedTeamNames.map((team) => (
+                        <span key={`lead-completed-team-chip-${team}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+                          <button
+                            type="button"
+                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+                            aria-label={`Remove team ${team}`}
+                            onClick={() => setLeadFinalizeCompletedByPopup((prev) => {
+                              if (!prev) return prev;
+                              const nextTeams = Array.isArray(prev.selectedTeamNames) ? prev.selectedTeamNames.filter((value) => String(value || "").trim() !== String(team || "").trim()) : [];
+                              return { ...prev, selectedTeamNames: nextTeams, error: "" };
+                            })}
+                          >
+                            &times;
+                          </button>
+                          <span className="fw-semibold">{team}</span>
+                        </span>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => setLeadFinalizeCompletedByPopup((prev) => (
+                          prev ? { ...prev, selectedTeamNames: [], error: "" } : prev
+                        ))}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="col-12 d-flex justify-content-end gap-2 mt-1">
+                  <button type="button" className="btn btn-outline-light" onClick={closeLeadFinalizeCompletedByPopup} disabled={leadFinalizeProposalSaving}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    disabled={leadFinalizeProposalSaving}
+                    onClick={() => {
+                      const selectedEmployeeIds = Array.isArray(leadFinalizeCompletedByPopup.selectedEmployeeIds)
+                        ? leadFinalizeCompletedByPopup.selectedEmployeeIds.map((value) => String(value || "").trim()).filter(Boolean)
+                        : [];
+                      const selectedTeamNames = Array.isArray(leadFinalizeCompletedByPopup.selectedTeamNames)
+                        ? leadFinalizeCompletedByPopup.selectedTeamNames.map((value) => String(value || "").trim()).filter(Boolean)
+                        : [];
+                      if (!selectedEmployeeIds.length && !selectedTeamNames.length) {
+                        setLeadFinalizeCompletedByPopup((prev) => (prev ? { ...prev, error: "Select at least one Employee or Team." } : prev));
+                        return;
+                      }
+                      confirmFinalizeLeadProposalProcess({
+                        completedByUserIds: selectedEmployeeIds,
+                        completedByTeams: selectedTeamNames,
+                      });
+                    }}
+                  >
+                    Complete
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {leadReopenProposalPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadReopenProposalPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(760px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Reopen Lead</h5>
+                <div className="small text-secondary">
+                  This proposal was already completed{leadReopenProposalPopup.completedByName ? ` by ${leadReopenProposalPopup.completedByName}` : ""}.
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadReopenProposalPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="text-secondary mb-3">
+              Reopening will remove the saved completion assignment and clear the proposal completion record. The next conversion will start fresh.
+            </div>
+
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-light"
+                disabled={leadFinalizeProposalSaving}
+                onClick={closeLeadReopenProposalPopup}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={leadFinalizeProposalSaving}
+                onClick={confirmReopenLeadAndClearCompletedBy}
+              >
+                Yes, Reopen
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {leadEditProposalCompletionPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadEditProposalCompletionPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(860px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Edit Proposal Completion</h5>
+                <div className="small text-secondary">Update final amount and completed by (optional).</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadEditProposalCompletionPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+
+            {leadEditProposalCompletionPopup.error ? (
+              <div className="alert alert-danger py-2 mb-3">{leadEditProposalCompletionPopup.error}</div>
+            ) : null}
+
+            <div className="row g-3">
+              <div className="col-12">
+                <label className="form-label small text-secondary mb-1">Final Proposal Amount *</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="form-control"
+                  placeholder={`Enter amount in ${crmCurrencyCode}`}
+                  value={leadEditProposalCompletionPopup.amount || ""}
+                  onChange={(event) => setLeadEditProposalCompletionPopup((prev) => (
+                    prev ? { ...prev, amount: formatCurrencyNumberInput(sanitizeCurrencyInput(event.target.value), crmCurrencyCode), error: "" } : prev
+                  ))}
+                />
+              </div>
+
+              <div className="col-12 col-lg-6">
+                <label className="form-label small text-secondary mb-1">Employee (left)</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    type="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search employee name / email"
+                    value={leadEditProposalCompletionPopup.employeeQuery || ""}
+                    onChange={(e) => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, employeeQuery: e.target.value, employeeOpen: true, teamOpen: false, error: "" } : prev
+                    ))}
+                    onFocus={() => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, employeeOpen: true, teamOpen: false, error: "" } : prev
+                    ))}
+                    onClick={() => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, employeeOpen: true, teamOpen: false, error: "" } : prev
+                    ))}
+                    onBlur={() => window.setTimeout(() => {
+                      setLeadEditProposalCompletionPopup((prev) => (prev ? { ...prev, employeeOpen: false } : prev));
+                    }, 120)}
+                  />
+                  {leadEditProposalCompletionPopup.employeeOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Employee List</div>
+                        {crmDirectoryOptions
+                          .filter((row) => {
+                            const q = String(leadEditProposalCompletionPopup.employeeQuery || "").trim().toLowerCase();
+                            if (!q) return true;
+                            const name = String(row?.name || "").toLowerCase();
+                            const email = String(row?.email || "").toLowerCase();
+                            return q && (name.includes(q) || email.includes(q));
+                          })
+                          .slice(0, 12)
+	                          .map((row) => {
+	                            const rawId = String(row?.id || "").trim();
+	                            const numericId = Number.isFinite(parseInt(rawId, 10)) ? String(parseInt(rawId, 10)) : "";
+	                            const selectedIds = Array.isArray(leadEditProposalCompletionPopup.selectedEmployeeIds)
+	                              ? leadEditProposalCompletionPopup.selectedEmployeeIds.map((id) => String(id || "").trim())
+	                              : [];
+	                            const checked = !!numericId && selectedIds.includes(numericId);
+	                            return (
+	                              <button
+	                                key={`lead-completed-edit-emp-${row.name}-${row.email || row.id}`}
+                                type="button"
+                                className="crm-inline-suggestions__item"
+	                                disabled={!numericId}
+	                                title={!numericId ? "Not a selectable org user" : ""}
+	                                onMouseDown={(event) => event.preventDefault()}
+	                                onClick={() => setLeadEditProposalCompletionPopup((prev) => {
+	                                  if (!prev) return prev;
+	                                  const nextIds = Array.isArray(prev.selectedEmployeeIds)
+	                                    ? prev.selectedEmployeeIds.map((id) => String(id || "").trim()).filter(Boolean)
+	                                    : [];
+	                                  const nextNames = Array.isArray(prev.selectedEmployeeNames)
+	                                    ? prev.selectedEmployeeNames.map((name) => String(name || "").trim()).filter(Boolean)
+	                                    : [];
+	                                  const idx = nextIds.indexOf(numericId);
+	                                  if (idx >= 0) {
+	                                    nextIds.splice(idx, 1);
+	                                    if (idx < nextNames.length) nextNames.splice(idx, 1);
+	                                  } else {
+	                                    nextIds.push(numericId);
+	                                    nextNames.push(String(row.name || "").trim());
+	                                  }
+	                                  return { ...prev, selectedEmployeeIds: nextIds, selectedEmployeeNames: nextNames, error: "" };
+	                                })}
+	                              >
+                                <span className="d-flex align-items-start gap-2">
+                                  <input type="checkbox" className="form-check-input mt-1" checked={checked} readOnly />
+                                  <span>
+                                    <span className="crm-inline-suggestions__item-main d-block">{row.name}</span>
+                                    <span className="crm-inline-suggestions__item-sub">{row.email || "-"}</span>
+                                  </span>
+                                </span>
+                              </button>
+                            );
+	                          })}
+	                      </div>
+	                    </div>
+	                  ) : null}
+	                </div>
+	                {Array.isArray(leadEditProposalCompletionPopup.selectedEmployeeIds) && leadEditProposalCompletionPopup.selectedEmployeeIds.length ? (
+	                  <div className="mt-2 d-flex flex-wrap gap-2 align-items-center">
+	                    {leadEditProposalCompletionPopup.selectedEmployeeIds.map((id, index) => {
+	                      const name = (Array.isArray(leadEditProposalCompletionPopup.selectedEmployeeNames) ? leadEditProposalCompletionPopup.selectedEmployeeNames[index] : "") || id;
+	                      return (
+	                        <span key={`lead-completed-edit-emp-chip-${id}-${index}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+	                          <button
+	                            type="button"
+	                            className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+	                            aria-label={`Remove ${name}`}
+	                            onClick={() => setLeadEditProposalCompletionPopup((prev) => {
+	                              if (!prev) return prev;
+	                              const nextIds = Array.isArray(prev.selectedEmployeeIds) ? [...prev.selectedEmployeeIds] : [];
+	                              const nextNames = Array.isArray(prev.selectedEmployeeNames) ? [...prev.selectedEmployeeNames] : [];
+	                              const idx = nextIds.indexOf(id);
+	                              if (idx >= 0) {
+	                                nextIds.splice(idx, 1);
+	                                if (idx < nextNames.length) nextNames.splice(idx, 1);
+	                              }
+	                              return { ...prev, selectedEmployeeIds: nextIds, selectedEmployeeNames: nextNames, error: "" };
+	                            })}
+	                          >
+	                            &times;
+	                          </button>
+	                          <span className="fw-semibold">{name}</span>
+	                        </span>
+	                      );
+	                    })}
+	                    <button
+	                      type="button"
+	                      className="btn btn-sm btn-outline-danger"
+	                      onClick={() => setLeadEditProposalCompletionPopup((prev) => (
+	                        prev ? { ...prev, selectedEmployeeIds: [], selectedEmployeeNames: [], error: "" } : prev
+	                      ))}
+	                    >
+	                      Clear
+	                    </button>
+	                  </div>
+	                ) : null}
+	                <div className="small text-secondary mt-2">Tip: You can select multiple employees and multiple teams.</div>
+              </div>
+
+              <div className="col-12 col-lg-6">
+                <label className="form-label small text-secondary mb-1">Team (right)</label>
+                <div className="crm-inline-suggestions-wrap">
+                  <input
+                    type="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search team name"
+                    value={leadEditProposalCompletionPopup.teamQuery || ""}
+                    onChange={(e) => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, teamQuery: e.target.value, teamOpen: true, employeeOpen: false, error: "" } : prev
+                    ))}
+                    onFocus={() => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, teamOpen: true, employeeOpen: false, error: "" } : prev
+                    ))}
+                    onClick={() => setLeadEditProposalCompletionPopup((prev) => (
+                      prev ? { ...prev, teamOpen: true, employeeOpen: false, error: "" } : prev
+                    ))}
+                    onBlur={() => window.setTimeout(() => {
+                      setLeadEditProposalCompletionPopup((prev) => (prev ? { ...prev, teamOpen: false } : prev));
+                    }, 120)}
+                  />
+                  {leadEditProposalCompletionPopup.teamOpen ? (
+                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                      <div className="crm-inline-suggestions__group">
+                        <div className="crm-inline-suggestions__title">Team List</div>
+                        {crmTeamOptions
+                          .filter((name) => {
+                            const q = String(leadEditProposalCompletionPopup.teamQuery || "").trim().toLowerCase();
+                            if (!q) return true;
+                            return String(name || "").toLowerCase().includes(q);
+                          })
+	                          .slice(0, 12)
+	                          .map((name) => {
+	                            const selectedTeams = Array.isArray(leadEditProposalCompletionPopup.selectedTeamNames)
+	                              ? leadEditProposalCompletionPopup.selectedTeamNames.map((value) => String(value || "").trim())
+	                              : [];
+	                            const normalizedName = String(name || "").trim();
+	                            const checked = normalizedName && selectedTeams.includes(normalizedName);
+	                            return (
+	                              <button
+	                                key={`lead-completed-edit-team-${name}`}
+	                                type="button"
+	                                className="crm-inline-suggestions__item"
+	                                onMouseDown={(event) => event.preventDefault()}
+	                                onClick={() => setLeadEditProposalCompletionPopup((prev) => {
+	                                  if (!prev) return prev;
+	                                  const nextTeams = Array.isArray(prev.selectedTeamNames)
+	                                    ? prev.selectedTeamNames.map((value) => String(value || "").trim()).filter(Boolean)
+	                                    : [];
+	                                  const idx = nextTeams.indexOf(normalizedName);
+	                                  if (idx >= 0) nextTeams.splice(idx, 1);
+	                                  else nextTeams.push(normalizedName);
+	                                  return { ...prev, selectedTeamNames: nextTeams, error: "" };
+	                                })}
+	                              >
+                                <span className="d-flex align-items-start gap-2">
+                                  <input type="checkbox" className="form-check-input mt-1" checked={checked} readOnly />
+                                  <span>
+                                    <span className="crm-inline-suggestions__item-main d-block">{name}</span>
+                                    <span className="crm-inline-suggestions__item-sub">Team</span>
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+	                      </div>
+	                    </div>
+	                  ) : null}
+	                </div>
+	                {Array.isArray(leadEditProposalCompletionPopup.selectedTeamNames) && leadEditProposalCompletionPopup.selectedTeamNames.length ? (
+	                  <div className="mt-2 d-flex flex-wrap gap-2 align-items-center">
+	                    {leadEditProposalCompletionPopup.selectedTeamNames.map((team) => (
+	                      <span key={`lead-completed-edit-team-chip-${team}`} className="badge text-bg-light border d-inline-flex align-items-center gap-2 wz-selected-chip">
+	                        <button
+	                          type="button"
+	                          className="btn btn-sm p-0 border text-secondary bg-transparent rounded-circle d-inline-flex align-items-center justify-content-center wz-selected-chip-remove"
+	                          aria-label={`Remove team ${team}`}
+	                          onClick={() => setLeadEditProposalCompletionPopup((prev) => {
+	                            if (!prev) return prev;
+	                            const nextTeams = Array.isArray(prev.selectedTeamNames) ? prev.selectedTeamNames.filter((value) => String(value || "").trim() !== String(team || "").trim()) : [];
+	                            return { ...prev, selectedTeamNames: nextTeams, error: "" };
+	                          })}
+	                        >
+	                          &times;
+	                        </button>
+	                        <span className="fw-semibold">{team}</span>
+	                      </span>
+	                    ))}
+	                    <button
+	                      type="button"
+	                      className="btn btn-sm btn-outline-danger"
+	                      onClick={() => setLeadEditProposalCompletionPopup((prev) => (
+	                        prev ? { ...prev, selectedTeamNames: [], error: "" } : prev
+	                      ))}
+	                    >
+	                      Clear
+	                    </button>
+	                  </div>
+	                ) : null}
+              </div>
+
+              <div className="col-12 d-flex justify-content-end gap-2 mt-1">
+                <button type="button" className="btn btn-outline-light" onClick={closeLeadEditProposalCompletionPopup} disabled={leadFinalizeProposalSaving}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success"
+                  disabled={leadFinalizeProposalSaving}
+                  onClick={saveLeadEditProposalCompletionPopup}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {dealQuickEditPopup ? (
         <div
           role="dialog"
@@ -29376,6 +30175,32 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     return Math.max(0, onHandQty - Math.max(0, reserved));
   }
 
+  function getInvoiceInventoryStockWarning(form, excludeInvoiceId = "") {
+    const reservationMap = getInventoryReservationMap(moduleData.invoices || [], excludeInvoiceId);
+    const requestedQtyMap = new Map();
+    (Array.isArray(form?.items) ? form.items : []).forEach((line) => {
+      const itemId = String(line?.inventoryItemId || "").trim();
+      if (!itemId) return;
+      const qty = parseNumber(line?.qty);
+      if (qty <= 0) return;
+      requestedQtyMap.set(itemId, (requestedQtyMap.get(itemId) || 0) + qty);
+    });
+
+    for (const [itemId, requestedQty] of requestedQtyMap.entries()) {
+      const item = inventoryItemLookup.get(itemId);
+      const availableQty = Math.max(
+        0,
+        parseNumber(item?.qty) - parseNumber(reservationMap.get(itemId) || 0)
+      );
+      if (requestedQty > availableQty) {
+        const itemLabel = String(item?.displayName || item?.itemName || item?.name || "Item").trim();
+        return `Insufficient Stock For ${itemLabel}. Available Qty: ${availableQty}, Requested Qty: ${requestedQty}.`;
+      }
+    }
+
+    return "";
+  }
+
   function applyInventoryItemToLine(kind, lineId, selectedValue) {
     const normalizedValue = String(selectedValue || "").trim();
     if (!normalizedValue) {
@@ -29618,6 +30443,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (selectedPaymentStatus !== "Pending" && !String(form.paymentMode || "").trim()) {
       setAccountsFormNotice("Payment Mode is required when Payment Status is Partial or Paid.");
       return;
+    }
+    if (kind === "invoice") {
+      const invoiceStockWarning = getInvoiceInventoryStockWarning(form, editingInvoiceId);
+      if (invoiceStockWarning) {
+        setAccountsFormNotice(invoiceStockWarning);
+        return;
+      }
     }
     const payload = {
       ...form,

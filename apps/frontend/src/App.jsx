@@ -2189,7 +2189,7 @@ function GlobalDeleteConfirmBridge() {
 
   useEffect(() => {
     const DELETE_CONFIRM_FLAG = "wzDeleteConfirmed";
-    const DELETE_CONFIRM_MESSAGE = "Are you sure you want to delete this item?";
+    const DELETE_CONFIRM_MESSAGE = "Are You Sure You Want To Delete This Item?";
     const DELETE_CONFIRM_TITLE = "Confirm Delete";
 
     const getActionElement = (target) => {

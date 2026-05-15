@@ -12,6 +12,30 @@ const defaultState = {
   resolve: null
 };
 
+function toAlertTitleCase(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  return text
+    .split(/(\s+)/)
+    .map((part) => {
+      if (/^\s+$/.test(part)) {
+        return part;
+      }
+      if (/[:/@<>\[\]{}|\\]/.test(part)) {
+        return part;
+      }
+      const match = part.match(/^([A-Za-z]+(?:'[A-Za-z]+)?)([^A-Za-z']*)$/);
+      if (!match) {
+        return part;
+      }
+      const [, word, suffix] = match;
+      return `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}${suffix}`;
+    })
+    .join("");
+}
+
 export function ConfirmProvider({ children }) {
   const [dialog, setDialog] = useState(defaultState);
 
@@ -20,10 +44,10 @@ export function ConfirmProvider({ children }) {
       new Promise((resolve) => {
         setDialog({
           open: true,
-          title: options?.title || "Please Confirm",
-          message: options?.message || "",
-          confirmText: options?.confirmText || "Confirm",
-          cancelText: options?.cancelText || "Cancel",
+          title: toAlertTitleCase(options?.title || "Please Confirm"),
+          message: toAlertTitleCase(options?.message || ""),
+          confirmText: toAlertTitleCase(options?.confirmText || "Confirm"),
+          cancelText: toAlertTitleCase(options?.cancelText || "Cancel"),
           confirmVariant: options?.confirmVariant || "primary",
           resolve
         });

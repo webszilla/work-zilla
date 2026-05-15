@@ -230,14 +230,35 @@ function getControlLabelText(control) {
     .trim();
 }
 
+function toDisplayLabel(text) {
+  return String(text || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (/^[A-Z0-9]+$/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
+function joinLabelsForAlert(labels) {
+  if (labels.length <= 1) return labels[0] || "";
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
 function buildMissingFieldsText(controls) {
   const labels = Array.from(new Set(
     controls
       .map((control) => getControlLabelText(control))
       .filter(Boolean)
+      .map((label) => toDisplayLabel(label))
   ));
-  if (!labels.length) return FORM_ALERT_TEXT;
-  return `${FORM_ALERT_TEXT} ${labels.join(", ")}`;
+  if (!labels.length) return "Required Fields Are Missing.";
+  if (labels.length === 1) {
+    return `${labels[0]} Is Required.`;
+  }
+  return `${joinLabelsForAlert(labels)} Are Required.`;
 }
 
 function upsertFormAlert(form, message) {

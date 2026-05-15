@@ -5280,6 +5280,34 @@ def _serialize_crm_lead(row: CrmLead):
     assigned_user_name = ""
     if row.assigned_user_id and row.assigned_user:
         assigned_user_name = str(row.assigned_user.get_full_name() or row.assigned_user.email or "").strip()
+    completed_by_user_name = _get_org_user_display_name(row.completed_by_user) if getattr(row, "completed_by_user_id", None) else ""
+    completed_by_team = str(getattr(row, "completed_by_team", "") or "").strip()
+    completed_by_type = str(getattr(row, "completed_by_type", "") or "").strip()
+    completed_by_user_ids = _crm_clean_user_id_list(getattr(row, "completed_by_user_ids", []) or [])
+    completed_by_user_names = []
+    if completed_by_user_ids:
+        users_by_id = {user.id: user for user in User.objects.filter(id__in=completed_by_user_ids)}
+        for user_id in completed_by_user_ids:
+            matched_user = users_by_id.get(int(user_id))
+            if not matched_user:
+                continue
+            display_name = _get_org_user_display_name(matched_user)
+            if display_name:
+                completed_by_user_names.append(display_name)
+    completed_by_team_names = [
+        str(name or "").strip()
+        for name in (getattr(row, "completed_by_team_names", None) or [])
+        if str(name or "").strip()
+    ]
+    completed_by_name_parts = []
+    completed_by_name_parts.extend(completed_by_user_names)
+    completed_by_name_parts.extend(completed_by_team_names)
+    if not completed_by_name_parts:
+        if completed_by_type.lower() == "team" and completed_by_team:
+            completed_by_name_parts = [completed_by_team]
+        elif completed_by_user_name:
+            completed_by_name_parts = [completed_by_user_name]
+    completed_by_name = ", ".join(completed_by_name_parts)
     return {
         "id": row.id,
         "crm_reference_id": str(row.crm_reference_id or "").strip(),
@@ -5303,6 +5331,14 @@ def _serialize_crm_lead(row: CrmLead):
         "proposal_finalized_at": row.proposal_finalized_at.isoformat() if getattr(row, "proposal_finalized_at", None) else None,
         "proposal_finalized_by_id": row.proposal_finalized_by_id if hasattr(row, "proposal_finalized_by_id") else None,
         "proposal_finalized_by_name": _get_org_user_display_name(row.proposal_finalized_by) if getattr(row, "proposal_finalized_by_id", None) else "",
+        "completed_by_type": completed_by_type,
+        "completed_by_user_id": getattr(row, "completed_by_user_id", None),
+        "completed_by_user_name": completed_by_user_name,
+        "completed_by_team": completed_by_team,
+        "completed_by_user_ids": completed_by_user_ids,
+        "completed_by_user_names": completed_by_user_names,
+        "completed_by_team_names": completed_by_team_names,
+        "completed_by_name": completed_by_name,
         "created_by_id": row.created_by_id,
         "created_by_name": _get_org_user_display_name(row.created_by) if row.created_by_id else "",
         "updated_by_id": row.updated_by_id,
@@ -7059,10 +7095,119 @@ def crm_leads(request, lead_id: int = None):
                     return JsonResponse({"detail": "final_proposal_amount_required"}, status=400)
                 row.proposal_finalized_at = timezone.now()
                 row.proposal_finalized_by = request.user
+                # Optional: who completed the proposal conversion (employees and/or teams).
+                completed_by_user_ids = payload.get("completed_by_user_ids") if "completed_by_user_ids" in payload else payload.get("completedByUserIds")
+                completed_by_teams = payload.get("completed_by_teams") if "completed_by_teams" in payload else payload.get("completedByTeams")
+                if not isinstance(completed_by_user_ids, list):
+                    completed_by_user_ids = []
+                if not isinstance(completed_by_teams, list):
+                    completed_by_teams = []
+                completed_by_user_id = _coerce_positive_int(payload.get("completed_by_user_id") if "completed_by_user_id" in payload else payload.get("completedByUserId"))
+                completed_by_team = str(payload.get("completed_by_team") if "completed_by_team" in payload else payload.get("completedByTeam") or "").strip()
+                if completed_by_user_id:
+                    completed_by_user_ids = [completed_by_user_id]
+                if completed_by_team:
+                    completed_by_teams = [completed_by_team]
+                # Validate user ids
+                cleaned_user_ids = []
+                for raw_id in completed_by_user_ids:
+                    user_id = _coerce_positive_int(raw_id)
+                    if not user_id:
+                        continue
+                    if user_id in cleaned_user_ids:
+                        continue
+                    completed_profile = UserProfile.objects.filter(organization=org, user_id=user_id).select_related("user").first()
+                    if not completed_profile:
+                        return JsonResponse({"detail": "completed_by_user_invalid"}, status=400)
+                    cleaned_user_ids.append(int(user_id))
+                cleaned_team_names = []
+                for name in completed_by_teams:
+                    value = str(name or "").strip()[:180]
+                    if not value or value in cleaned_team_names:
+                        continue
+                    cleaned_team_names.append(value)
+                row.completed_by_user_ids = cleaned_user_ids
+                row.completed_by_team_names = cleaned_team_names
+                # Keep legacy fields populated with the first values for backward compatibility
+                if cleaned_user_ids:
+                    row.completed_by_type = "Users"
+                    row.completed_by_user = User.objects.filter(id=cleaned_user_ids[0]).first()
+                elif cleaned_team_names:
+                    row.completed_by_type = "Team"
+                    row.completed_by_user = None
+                else:
+                    row.completed_by_type = ""
+                    row.completed_by_user = None
+                row.completed_by_team = cleaned_team_names[0] if cleaned_team_names else ""
+                update_fields.extend(["completed_by_type", "completed_by_user", "completed_by_team", "completed_by_user_ids", "completed_by_team_names"])
             else:
                 row.proposal_finalized_at = None
                 row.proposal_finalized_by = None
+                row.completed_by_type = ""
+                row.completed_by_team = ""
+                row.completed_by_user = None
+                row.completed_by_user_ids = []
+                row.completed_by_team_names = []
+                update_fields.extend(["completed_by_type", "completed_by_user", "completed_by_team", "completed_by_user_ids", "completed_by_team_names"])
             update_fields.extend(["proposal_finalized_at", "proposal_finalized_by"])
+        # Allow updating "completed by" fields without toggling proposal_finalized,
+        # but only when the proposal is already finalized.
+        if (
+            (
+                "completed_by_user_id" in payload
+                or "completedByUserId" in payload
+                or "completed_by_team" in payload
+                or "completedByTeam" in payload
+                or "completed_by_user_ids" in payload
+                or "completedByUserIds" in payload
+                or "completed_by_teams" in payload
+                or "completedByTeams" in payload
+            )
+            and not ("proposal_finalized" in payload or "proposalFinalized" in payload)
+            and getattr(row, "proposal_finalized_at", None)
+        ):
+            completed_by_user_id = _coerce_positive_int(payload.get("completed_by_user_id") if "completed_by_user_id" in payload else payload.get("completedByUserId"))
+            completed_by_team = str(payload.get("completed_by_team") if "completed_by_team" in payload else payload.get("completedByTeam") or "").strip()[:180]
+            completed_by_user_ids = payload.get("completed_by_user_ids") if "completed_by_user_ids" in payload else payload.get("completedByUserIds")
+            completed_by_teams = payload.get("completed_by_teams") if "completed_by_teams" in payload else payload.get("completedByTeams")
+            if not isinstance(completed_by_user_ids, list):
+                completed_by_user_ids = []
+            if not isinstance(completed_by_teams, list):
+                completed_by_teams = []
+            if completed_by_user_id:
+                completed_by_user_ids = [completed_by_user_id]
+            if completed_by_team:
+                completed_by_teams = [completed_by_team]
+            cleaned_user_ids = []
+            for raw_id in completed_by_user_ids:
+                user_id = _coerce_positive_int(raw_id)
+                if not user_id:
+                    continue
+                if user_id in cleaned_user_ids:
+                    continue
+                completed_profile = UserProfile.objects.filter(organization=org, user_id=user_id).select_related("user").first()
+                if not completed_profile:
+                    return JsonResponse({"detail": "completed_by_user_invalid"}, status=400)
+                cleaned_user_ids.append(int(user_id))
+            cleaned_team_names = []
+            for name in completed_by_teams:
+                value = str(name or "").strip()[:180]
+                if not value or value in cleaned_team_names:
+                    continue
+                cleaned_team_names.append(value)
+            row.completed_by_user_ids = cleaned_user_ids
+            row.completed_by_team_names = cleaned_team_names
+            if cleaned_user_ids:
+                row.completed_by_type = "Users"
+                row.completed_by_user = User.objects.filter(id=cleaned_user_ids[0]).first()
+            elif cleaned_team_names:
+                row.completed_by_type = "Team"
+                row.completed_by_user = None
+            else:
+                row.completed_by_type = ""
+                row.completed_by_user = None
+            row.completed_by_team = cleaned_team_names[0] if cleaned_team_names else ""
+            update_fields.extend(["completed_by_type", "completed_by_user", "completed_by_team", "completed_by_user_ids", "completed_by_team_names"])
         if "is_deleted" in payload:
             is_deleted = bool(payload.get("is_deleted"))
             row.is_deleted = is_deleted

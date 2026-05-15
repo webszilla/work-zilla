@@ -19,6 +19,15 @@ else
 fi
 VITE_API_BASE_URL="http://127.0.0.1:8000" npm run build
 
+python3 - <<'PY'
+from pathlib import Path
+
+index_path = Path("dist/index.html")
+lines = index_path.read_text(encoding="utf-8").splitlines()
+lines = [line for line in lines if 'rel="modulepreload"' not in line]
+index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+
 rm -rf "$BACKEND_DIR/frontend_dist"
 mkdir -p "$BACKEND_DIR/frontend_dist"
 cp -R "$FRONTEND_DIR/dist/" "$BACKEND_DIR/frontend_dist/"
