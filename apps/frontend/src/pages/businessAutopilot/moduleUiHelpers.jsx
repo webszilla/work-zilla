@@ -141,6 +141,35 @@ export function getCurrencyDisplayLabel(currencyCode) {
   }
 }
 
+export function formatDocumentFileTypeLabel(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "-";
+  }
+  const lower = rawValue.toLowerCase();
+  if (lower.includes("officedocument.wordprocessingml.document") || lower.endsWith(".docx")) {
+    return "DOCX";
+  }
+  if (lower.includes("msword") || lower.endsWith(".doc")) {
+    return "DOC";
+  }
+  if (lower.includes("pdf") || lower.endsWith(".pdf")) {
+    return "PDF";
+  }
+  if (lower.includes("spreadsheetml.sheet") || lower.endsWith(".xlsx")) {
+    return "XLSX";
+  }
+  if (lower.includes("text/plain") || lower.endsWith(".txt")) {
+    return "TXT";
+  }
+  const filename = rawValue.split(/[\\/]/).pop() || rawValue;
+  const extension = filename.includes(".") ? filename.split(".").pop() : "";
+  if (extension) {
+    return extension.toUpperCase();
+  }
+  return rawValue.length > 24 ? `${rawValue.slice(0, 21)}...` : rawValue;
+}
+
 export const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function getAccountsTaxUiConfig(countryValue) {
@@ -214,4 +243,3 @@ export function getAccountsTaxUiConfig(countryValue) {
     helperText: `${country} billing profile detected. VAT/Tax rule labels are shown.`,
   };
 }
-

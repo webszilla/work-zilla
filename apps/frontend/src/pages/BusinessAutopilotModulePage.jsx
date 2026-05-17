@@ -18,6 +18,7 @@ import {
   EMAIL_ADDRESS_RE,
   getAccountsTaxUiConfig,
   getCurrencyDisplayLabel,
+  formatDocumentFileTypeLabel,
   normalizeCountryName,
   normalizeTableActionNode,
 } from "./businessAutopilot/moduleUiHelpers.jsx";
@@ -8363,6 +8364,7 @@ function CrmOnePageModule() {
   const [leadFinalizeCompletedByPopup, setLeadFinalizeCompletedByPopup] = useState(null);
   const [leadReopenProposalPopup, setLeadReopenProposalPopup] = useState(null);
   const [leadEditProposalCompletionPopup, setLeadEditProposalCompletionPopup] = useState(null);
+  const [leadCompletionRecordPopup, setLeadCompletionRecordPopup] = useState(null);
   const [leadProposalsSubTab, setLeadProposalsSubTab] = useState("list");
   const [leadStatusTab, setLeadStatusTab] = useState("all");
   const [contactTagTab, setContactTagTab] = useState("all");
@@ -14407,8 +14409,48 @@ function CrmOnePageModule() {
     });
   }
 
+  function openLeadCompletionRecordPopup(row) {
+    const normalizedLead = normalizeCrmLeadRecord(row || {});
+    const completedByUserNames = Array.isArray(normalizedLead.completedByUserNames)
+      ? normalizedLead.completedByUserNames.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    const completedByTeamNames = Array.isArray(normalizedLead.completedByTeamNames)
+      ? normalizedLead.completedByTeamNames.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    const fallbackCompletedByNames = String(
+      normalizedLead.completedByName
+      || normalizedLead.completedByUserName
+      || normalizedLead.completedByTeam
+      || ""
+    )
+      .split(",")
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const completedByDisplayNames = Array.from(new Set([
+      ...completedByUserNames,
+      ...completedByTeamNames,
+      ...fallbackCompletedByNames,
+    ])).filter(Boolean);
+    setLeadCompletionRecordPopup({
+      leadId: String(normalizedLead.id || "").trim(),
+      name: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
+      crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
+      completedAt: String(normalizedLead.proposalFinalizedAt || "").trim(),
+      finalAmount: String(normalizedLead.finalProposalAmount || "").trim(),
+      finalizedBy: String(normalizedLead.proposalFinalizedBy || "-").trim() || "-",
+      completedByUserNames,
+      completedByTeamNames,
+      completedByDisplayNames,
+      status: String(normalizedLead.status || "-").trim() || "-",
+    });
+  }
+
   function closeLeadEditProposalCompletionPopup() {
     setLeadEditProposalCompletionPopup(null);
+  }
+
+  function closeLeadCompletionRecordPopup() {
+    setLeadCompletionRecordPopup(null);
   }
 
   async function saveLeadEditProposalCompletionPopup() {
@@ -19272,10 +19314,28 @@ function CrmOnePageModule() {
                                   const leadRow = (moduleData.leads || []).find((row) => String(row?.id || "").trim() === leadId) || null;
                                   const normalizedLead = leadRow ? normalizeCrmLeadRecord(leadRow) : null;
                                   const completedAt = normalizedLead?.proposalFinalizedAt || leadNotesPopup?.proposalFinalizedAt || "";
-                                  const completedBy = normalizedLead?.completedByName || normalizedLead?.completedByUserName || normalizedLead?.completedByTeam || "-";
+                                  const completedByNames = Array.from(new Set([
+                                    ...(Array.isArray(normalizedLead?.completedByUserNames) ? normalizedLead.completedByUserNames : []),
+                                    ...(Array.isArray(normalizedLead?.completedByTeamNames) ? normalizedLead.completedByTeamNames : []),
+                                    String(normalizedLead?.completedByName || normalizedLead?.completedByUserName || normalizedLead?.completedByTeam || "")
+                                      .split(",")
+                                      .map((value) => String(value || "").trim())
+                                      .filter(Boolean),
+                                  ].flat().map((value) => String(value || "").trim()).filter(Boolean)));
+                                  const completedByDisplay = completedByNames.join(", ") || "-";
                                   const finalizedBy = normalizedLead?.proposalFinalizedBy || "-";
                                   const finalAmount = parseNumber(normalizedLead?.finalProposalAmount || leadNotesPopup?.finalProposalAmount || "");
                                   const finalAmountDisplay = finalAmount ? formatCurrencyAmount(finalAmount, crmCurrencyCode) : "-";
+                                  const completedByCell = completedByNames.length > 1 ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link btn-sm p-0 align-baseline wz-link-primary"
+                                      title="View completion details"
+                                      onClick={() => openLeadCompletionRecordPopup(normalizedLead || leadNotesPopup || {})}
+                                    >
+                                      Click To View
+                                    </button>
+                                  ) : completedByDisplay;
                                   return (
                                     <>
                                       <SearchablePaginatedTableCard
@@ -19297,7 +19357,7 @@ function CrmOnePageModule() {
                                         renderCells={() => [
                                           completedAt ? new Date(completedAt).toLocaleString() : "-",
                                           finalAmountDisplay,
-                                          completedBy,
+                                          completedByCell,
                                           finalizedBy,
                                           (
                                             <div className="d-flex gap-2 justify-content-end">
@@ -19355,7 +19415,11 @@ function CrmOnePageModule() {
 				                    renderCells={(row) => [
 				                      String(row.display_name || row.base_name || "-"),
 				                      String(row.created_at ? new Date(row.created_at).toLocaleString() : "-"),
-				                      String(row.file_type || "-"),
+				                      (
+				                        <span title={String(row.file_type || "")}>
+				                          {formatDocumentFileTypeLabel(row.file_type || row.original_filename || row.display_name || "")}
+				                        </span>
+				                      ),
 				                      formatFileSizeLabel(row.file_size) || "-",
 				                      String(row.uploaded_by || "-"),
 				                      (
@@ -20041,6 +20105,106 @@ function CrmOnePageModule() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {leadCompletionRecordPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadCompletionRecordPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(720px, 94vw)", maxHeight: "88vh", overflowY: "auto" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {(() => {
+              const completedAtDisplay = leadCompletionRecordPopup.completedAt ? new Date(leadCompletionRecordPopup.completedAt).toLocaleString() : "-";
+              const finalAmountDisplay = parseNumber(leadCompletionRecordPopup.finalAmount)
+                ? formatCurrencyAmount(parseNumber(leadCompletionRecordPopup.finalAmount), crmCurrencyCode)
+                : "-";
+              const completedByUserNames = Array.isArray(leadCompletionRecordPopup.completedByUserNames)
+                ? leadCompletionRecordPopup.completedByUserNames.filter(Boolean)
+                : [];
+              const completedByTeamNames = Array.isArray(leadCompletionRecordPopup.completedByTeamNames)
+                ? leadCompletionRecordPopup.completedByTeamNames.filter(Boolean)
+                : [];
+              const completedByDisplay = Array.isArray(leadCompletionRecordPopup.completedByDisplayNames)
+                ? leadCompletionRecordPopup.completedByDisplayNames.filter(Boolean).join(", ")
+                : Array.from(new Set([
+                    ...completedByUserNames,
+                    ...completedByTeamNames,
+                  ])).join(", ");
+              const completedByDisplayText = completedByDisplay || "-";
+              const summaryItems = [
+                { label: "Lead", value: leadCompletionRecordPopup.name || "-" },
+                { label: "CRM ID", value: leadCompletionRecordPopup.crmReferenceId || "-" },
+                { label: "Completed At", value: completedAtDisplay },
+                { label: "Final Amount", value: finalAmountDisplay },
+                { label: "Finalized By", value: leadCompletionRecordPopup.finalizedBy || "-" },
+                { label: "Status", value: leadCompletionRecordPopup.status || "-" },
+              ];
+              return (
+                <>
+                  <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+                    <div>
+                      <h5 className="mb-1">Completion Details</h5>
+                      <div className="small text-secondary">{leadCompletionRecordPopup.name || "-"}</div>
+                    </div>
+                    <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadCompletionRecordPopup}>
+                      <i className="bi bi-x-lg" aria-hidden="true" />
+                    </button>
+                  </div>
+
+                  <div className="row g-3 small mb-3">
+                    {summaryItems.map((item) => (
+                      <div className="col-12 col-sm-6" key={`lead-completion-summary-${item.label}`}>
+                        <div className="text-secondary">{item.label}</div>
+                        <div className="fw-semibold text-break">{item.value || "-"}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="row g-3">
+                    <div className="col-12 col-lg-6">
+                      <div className="fw-semibold mb-2">Completed By Users</div>
+                      {completedByUserNames.length ? (
+                        <div className="d-flex flex-wrap gap-2">
+                          {completedByUserNames.map((name) => (
+                            <span key={`lead-completion-user-${name}`} className="badge text-bg-light border text-dark">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="small text-secondary">No employees recorded.</div>
+                      )}
+                    </div>
+                    <div className="col-12 col-lg-6">
+                      <div className="fw-semibold mb-2">Completed By Teams</div>
+                      {completedByTeamNames.length ? (
+                        <div className="d-flex flex-wrap gap-2">
+                          {completedByTeamNames.map((name) => (
+                            <span key={`lead-completion-team-${name}`} className="badge text-bg-light border text-dark">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="small text-secondary">No teams recorded.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="fw-semibold mb-2">Completed By</div>
+                    <div className="small text-break">{completedByDisplayText}</div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
@@ -27449,7 +27613,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [subscriptionAssignSearch, setSubscriptionAssignSearch] = useState("");
   const [subscriptionAssignSearchOpen, setSubscriptionAssignSearchOpen] = useState(false);
   const [accountsFormNotice, setAccountsFormNotice] = useState("");
-  const [accountsActionPopup, setAccountsActionPopup] = useState({ open: false, title: "", message: "" });
+  const [accountsActionPopup, setAccountsActionPopup] = useState({
+    open: false,
+    title: "",
+    message: "",
+    onConfirm: null,
+    confirmLabel: "",
+    cancelLabel: "",
+  });
+  const [accountsDocEmailPopup, setAccountsDocEmailPopup] = useState({
+    open: false,
+    kind: "invoice",
+    row: null,
+    recipients: [],
+    message: "",
+    sending: false,
+  });
   const [accountsDocumentViewPopup, setAccountsDocumentViewPopup] = useState(null);
   const taxUi = useMemo(() => getAccountsTaxUiConfig(orgBillingCountry), [orgBillingCountry]);
   const isIndiaBillingOrg = useMemo(() => normalizeCountryName(orgBillingCountry) === "india", [orgBillingCountry]);
@@ -27487,6 +27666,114 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const closeAccountsDocumentViewPopup = useCallback(() => {
     setAccountsDocumentViewPopup(null);
   }, []);
+
+  const resolveAccountsDocumentEmailRecipients = useCallback((kind, row) => {
+    const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
+    const doc = normalizeAccountsBillingDocumentRecord(row, normalizedKind);
+    const customerId = String(doc?.customerId || "").trim();
+    const customerName = String(doc?.customerName || "").trim().toLowerCase();
+    const customers = Array.isArray(moduleData?.customers) ? moduleData.customers : [];
+    const customer = customerId
+      ? customers.find((item) => String(item?.id || "").trim() === customerId)
+      : customers.find((item) => String(item?.companyName || item?.name || "").trim().toLowerCase() === customerName);
+    if (!customer) {
+      return [];
+    }
+    const primaryEmail = String(customer.email || "").trim();
+    const additionalEmails = Array.isArray(customer.additionalEmails) ? customer.additionalEmails : [];
+    const emailList = Array.isArray(customer.emailList) ? customer.emailList : additionalEmails;
+    const recipients = [primaryEmail, ...emailList.map((value) => String(value || "").trim())]
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const deduped = new Set();
+    const result = [];
+    recipients.forEach((value) => {
+      const normalized = value.toLowerCase();
+      if (deduped.has(normalized)) return;
+      deduped.add(normalized);
+      result.push(value);
+    });
+    return result;
+  }, [moduleData]);
+
+  const openAccountsDocumentEmailPopup = useCallback((kind, row, options = {}) => {
+    const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
+    const recipients = resolveAccountsDocumentEmailRecipients(normalizedKind, row);
+    if (!recipients.length) {
+      setAccountsActionPopup({
+        open: true,
+        title: "Client Email Missing",
+        message: "This client does not have an email address. Please add an email in Clients and try again.",
+      });
+      return;
+    }
+    const initialMessage = String(options?.message || "").trim();
+    setAccountsDocEmailPopup({
+      open: true,
+      kind: normalizedKind,
+      row: normalizeAccountsBillingDocumentRecord(row, normalizedKind),
+      recipients,
+      message: initialMessage,
+      sending: false,
+    });
+  }, [resolveAccountsDocumentEmailRecipients]);
+
+  const closeAccountsDocumentEmailPopup = useCallback(() => {
+    setAccountsDocEmailPopup({ open: false, kind: "invoice", row: null, recipients: [], message: "", sending: false });
+  }, []);
+
+  const closeAccountsActionPopup = useCallback(() => {
+    setAccountsActionPopup({ open: false, title: "", message: "", onConfirm: null, confirmLabel: "", cancelLabel: "" });
+  }, []);
+
+  const sendAccountsDocumentEmail = useCallback(async () => {
+    const kind = accountsDocEmailPopup.kind === "estimate" ? "estimate" : "invoice";
+    const row = accountsDocEmailPopup.row;
+    if (!row) return;
+    const docId = String(resolveAccountsDocumentId(row) || row.id || row.docNo || "").trim();
+    const recipients = Array.isArray(accountsDocEmailPopup.recipients) ? accountsDocEmailPopup.recipients : [];
+    if (!docId || !recipients.length) {
+      setAccountsActionPopup({ open: true, title: "Unable to Send Email", message: "Missing document or client email." });
+      return;
+    }
+    setAccountsDocEmailPopup((prev) => ({ ...prev, sending: true }));
+    try {
+      await apiFetch(`/api/business-autopilot/accounts/documents/${kind}/${encodeURIComponent(docId)}/email`, {
+        method: "POST",
+        body: JSON.stringify({
+          to: recipients,
+          message: String(accountsDocEmailPopup.message || ""),
+          document: row,
+        }),
+      });
+      closeAccountsDocumentEmailPopup();
+      setAccountsActionPopup({
+        open: true,
+        title: "Email Sent",
+        message: `${kind === "invoice" ? "Invoice" : "Estimate"} email sent to ${recipients.join(", ")}.`,
+      });
+    } catch (error) {
+      const message = String(error?.message || "").trim() || "Unable to send email.";
+      setAccountsDocEmailPopup((prev) => ({ ...prev, sending: false }));
+      setAccountsActionPopup({ open: true, title: "Email Failed", message });
+    }
+  }, [accountsDocEmailPopup, closeAccountsDocumentEmailPopup]);
+
+  const promptAccountsDocumentEmailAfterSave = useCallback((kind, documentRow, options = {}) => {
+    const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
+    const intro = String(options?.introMessage || "").trim();
+    setAccountsActionPopup({
+      open: true,
+      title: normalizedKind === "estimate" ? "Send Estimate Email?" : "Send Invoice Email?",
+      message: intro ? `${intro} Do you want to email this document to the client now?` : "Do you want to email this document to the client now?",
+      cancelLabel: "No",
+      confirmLabel: "Yes",
+      onConfirm: () => {
+        closeAccountsActionPopup();
+        openAccountsDocumentEmailPopup(normalizedKind, documentRow);
+      },
+    });
+  }, [closeAccountsActionPopup, openAccountsDocumentEmailPopup]);
 
   const renderAccountsDocumentPreview = useCallback((kind, row) => {
     const normalizedKind = kind === "estimate" ? "estimate" : "invoice";
@@ -30495,17 +30782,21 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (!payload.items.length) {
       payload.items = [createEmptyDocLine()];
     }
+    const nowTs = Date.now();
+    const defaultNewDocId = `${kind}_${nowTs}`;
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const editingId = kind === "estimate" ? editingEstimateId : editingInvoiceId;
     const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
     const hasEditingMatch = Boolean(editingId) && existingRows.some((row) => accountsDocumentMatchesReference(row, editingId));
+    const resolvedEditingRow = editingId ? existingRows.find((row) => accountsDocumentMatchesReference(row, editingId)) : null;
+    const resolvedDocIdForEmail = String(resolveAccountsDocumentId(payload) || resolvedEditingRow?.id || defaultNewDocId || "").trim();
     const sourceEstimateId = kind === "invoice" ? String(form.sourceEstimateId || "").trim() : "";
     setModuleData((prev) => {
       const rows = prev[listKey] || [];
       if (editingId) {
         if (!rows.some((row) => accountsDocumentMatchesReference(row, editingId))) {
           if (kind === "invoice") {
-            const fallbackInvoiceId = resolveAccountsDocumentId(payload) || `${kind}_${Date.now()}`;
+            const fallbackInvoiceId = resolveAccountsDocumentId(payload) || resolvedDocIdForEmail || defaultNewDocId;
             const nextInvoice = applyInventorySyncForInvoiceChange(null, { ...payload, id: fallbackInvoiceId, sourceEstimateId });
             const nextState = { ...prev, [listKey]: [nextInvoice, ...rows] };
             if (sourceEstimateId) {
@@ -30517,7 +30808,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             }
             return nextState;
           }
-          const fallbackEstimateId = resolveAccountsDocumentId(payload) || `${kind}_${Date.now()}`;
+          const fallbackEstimateId = resolveAccountsDocumentId(payload) || resolvedDocIdForEmail || defaultNewDocId;
           return { ...prev, [listKey]: [{ ...payload, id: fallbackEstimateId }, ...rows] };
         }
         if (kind === "invoice") {
@@ -30545,7 +30836,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         };
       }
       if (kind === "invoice") {
-        const nextInvoiceId = `${kind}_${Date.now()}`;
+        const nextInvoiceId = resolvedDocIdForEmail || defaultNewDocId;
         const nextInvoice = applyInventorySyncForInvoiceChange(null, { ...payload, id: nextInvoiceId, sourceEstimateId });
         const nextState = { ...prev, [listKey]: [nextInvoice, ...rows] };
         if (sourceEstimateId) {
@@ -30557,7 +30848,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         }
         return nextState;
       }
-      return { ...prev, [listKey]: [{ ...payload, id: `${kind}_${Date.now()}` }, ...rows] };
+      return { ...prev, [listKey]: [{ ...payload, id: resolvedDocIdForEmail || defaultNewDocId }, ...rows] };
     });
     setAccountsFormNotice("");
     if (kind === "estimate") {
@@ -30565,15 +30856,16 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       setEstimateForm(createEmptyBillingDocument("estimate", moduleData.estimates || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
       setOverviewDocTab("estimate");
       setActiveTab("estimates");
+      promptAccountsDocumentEmailAfterSave("estimate", { ...payload, id: resolvedDocIdForEmail || defaultNewDocId }, {
+        introMessage: editingId && hasEditingMatch ? "Estimate updated successfully." : "Estimate created successfully.",
+      });
     } else {
       setEditingInvoiceId("");
       setInvoiceForm(createEmptyBillingDocument("invoice", moduleData.invoices || [], moduleData.gstTemplates || [], moduleData.billingTemplates || []));
       setOverviewDocTab("invoice");
       setActiveTab("invoices");
-      setAccountsActionPopup({
-        open: true,
-        title: editingId && hasEditingMatch ? "Invoice Updated" : "Invoice Created",
-        message: editingId && hasEditingMatch ? "Invoice updated successfully." : "Invoice created successfully.",
+      promptAccountsDocumentEmailAfterSave("invoice", { ...payload, id: resolvedDocIdForEmail || defaultNewDocId }, {
+        introMessage: editingId && hasEditingMatch ? "Invoice updated successfully." : "Invoice created successfully.",
       });
     }
   }
@@ -32383,6 +32675,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 	            {!isDeletedRow ? (
 	              <button
 	                type="button"
+	                className="btn btn-sm btn-outline-light"
+	                title={kind === "estimate" ? "Email Estimate" : "Email Invoice"}
+	                aria-label={kind === "estimate" ? "Email Estimate" : "Email Invoice"}
+	                onClick={() => openAccountsDocumentEmailPopup(kind, row)}
+	              >
+	                <i className="bi bi-envelope" aria-hidden="true" />
+	              </button>
+	            ) : null}
+	            {!isDeletedRow ? (
+	              <button
+	                type="button"
 	                className="btn btn-sm btn-outline-info"
 	                onClick={(event) => {
 	                  event.preventDefault();
@@ -32496,7 +32799,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
           role="dialog"
           aria-modal="true"
           className="modal-overlay wz-crm-popup-overlay"
-          onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+          onClick={closeAccountsActionPopup}
         >
           <div className="modal-panel wz-crm-popup" style={{ width: "min(420px, 92vw)" }} onClick={(event) => event.stopPropagation()}>
             <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -32504,19 +32807,91 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               <button
                 type="button"
                 className="btn btn-sm wz-crm-popup-close"
-                onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+                onClick={closeAccountsActionPopup}
               >
                 <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             </div>
             <div className="text-secondary mb-3">{toPopupTitleCase(accountsActionPopup.message || "Operation completed successfully.")}</div>
-            <div className="d-flex justify-content-end">
+            {typeof accountsActionPopup.onConfirm === "function" ? (
+              <div className="d-flex justify-content-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={closeAccountsActionPopup}
+                >
+                  {String(accountsActionPopup.cancelLabel || "Cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  onClick={accountsActionPopup.onConfirm}
+                >
+                  {String(accountsActionPopup.confirmLabel || "Confirm")}
+                </button>
+              </div>
+            ) : (
+              <div className="d-flex justify-content-end">
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  onClick={closeAccountsActionPopup}
+                >
+                  OK
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {accountsDocEmailPopup.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeAccountsDocumentEmailPopup}
+        >
+          <div className="modal-panel wz-crm-popup" style={{ width: "min(560px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-2">
+              <h5 className="mb-0">
+                {accountsDocEmailPopup.kind === "estimate" ? "Send Estimate Email" : "Send Invoice Email"}
+              </h5>
               <button
                 type="button"
-                className="btn btn-success btn-sm"
-                onClick={() => setAccountsActionPopup({ open: false, title: "", message: "" })}
+                className="btn btn-sm wz-crm-popup-close"
+                onClick={closeAccountsDocumentEmailPopup}
+                disabled={accountsDocEmailPopup.sending}
               >
-                OK
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="small text-secondary mb-3">
+              <div className="mb-1">
+                <span className="fw-semibold">To:</span>{" "}
+                <span className="text-break">{(accountsDocEmailPopup.recipients || []).join(", ")}</span>
+              </div>
+              <div>
+                <span className="fw-semibold">{accountsDocEmailPopup.kind === "estimate" ? "Estimate:" : "Invoice:"}</span>{" "}
+                <span className="text-break">{resolveAccountsDocumentNo(accountsDocEmailPopup.row || {}) || "-"}</span>
+              </div>
+            </div>
+            <div className="mb-3">
+              <label className="form-label small text-secondary mb-1">Additional Message (Optional)</label>
+              <textarea
+                className="form-control"
+                rows={5}
+                placeholder="Add extra details for the client..."
+                value={accountsDocEmailPopup.message || ""}
+                onChange={(event) => setAccountsDocEmailPopup((prev) => ({ ...prev, message: event.target.value }))}
+                disabled={accountsDocEmailPopup.sending}
+              />
+            </div>
+            <div className="d-flex justify-content-end gap-2">
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAccountsDocumentEmailPopup} disabled={accountsDocEmailPopup.sending}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-success btn-sm" onClick={sendAccountsDocumentEmail} disabled={accountsDocEmailPopup.sending}>
+                {accountsDocEmailPopup.sending ? "Sending..." : "Send Email"}
               </button>
             </div>
           </div>

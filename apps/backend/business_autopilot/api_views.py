@@ -4963,6 +4963,121 @@ def accounts_document_print(request, doc_type: str, doc_id: str):
     return render(request, "business_autopilot/accounts/document_print.html", context)
 
 
+@require_http_methods(["POST"])
+def accounts_document_email(request, doc_type: str, doc_id: str):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    normalized_doc_type = (doc_type or "").strip().lower()
+    doc_type_aliases = {
+        "estimate": "estimate",
+        "invoice": "invoice",
+    }
+    normalized_doc_type = doc_type_aliases.get(normalized_doc_type, normalized_doc_type)
+    if normalized_doc_type not in {"estimate", "invoice"}:
+        return JsonResponse({"detail": "invalid_doc_type"}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    extra_message = str(payload.get("message") or "").strip()
+    subject_override = str(payload.get("subject") or "").strip()
+    recipient_override = payload.get("to")
+    document_override = payload.get("document") if isinstance(payload.get("document"), dict) else None
+
+    recipients = []
+    if isinstance(recipient_override, (list, tuple)):
+        recipients = [str(item or "").strip() for item in recipient_override]
+    elif isinstance(recipient_override, str):
+        recipients = [item.strip() for item in recipient_override.split(",")]
+    recipients = [item for item in recipients if item]
+
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+
+    list_key = "estimates" if normalized_doc_type == "estimate" else "invoices"
+    document = document_override or next(
+        (row for row in data.get(list_key, []) if str(row.get("id")) == str(doc_id)),
+        None,
+    )
+    if not document:
+        return JsonResponse({"detail": "document_not_found"}, status=404)
+
+    customer_id = str(document.get("customerId") or document.get("customer_id") or "").strip()
+    customer_name = str(
+        document.get("customerName")
+        or document.get("customer_name")
+        or document.get("companyOrClientName")
+        or document.get("company_or_client_name")
+        or document.get("company")
+        or document.get("clients")
+        or ""
+    ).strip()
+
+    if not recipients:
+        customers = data.get("customers") if isinstance(data.get("customers"), list) else []
+        customer = None
+        if customer_id:
+            customer = next((row for row in customers if str(row.get("id") or "").strip() == customer_id), None)
+        if customer is None and customer_name:
+            normalized_customer_name = customer_name.lower().strip()
+            customer = next(
+                (
+                    row
+                    for row in customers
+                    if str(row.get("companyName") or row.get("name") or "").lower().strip() == normalized_customer_name
+                ),
+                None,
+            )
+        if customer:
+            primary_email = str(customer.get("email") or "").strip()
+            additional_emails = customer.get("additionalEmails") if isinstance(customer.get("additionalEmails"), list) else []
+            email_list = customer.get("emailList") if isinstance(customer.get("emailList"), list) else additional_emails
+            recipients = [primary_email, *[str(item or "").strip() for item in email_list]]
+            recipients = [item for item in recipients if item]
+
+    if not recipients:
+        return JsonResponse({"detail": "client_email_missing"}, status=400)
+
+    gst_templates = {str(row.get("id")): row for row in data.get("gstTemplates", []) if isinstance(row, dict)}
+    totals = _document_totals(document, gst_templates)
+    grand_total = totals.get("grand_total") if isinstance(totals, dict) else None
+
+    doc_no = str(document.get("docNo") or document.get("doc_no") or "").strip()
+    issue_date = str(document.get("issueDate") or document.get("issue_date") or document.get("date") or "").strip()
+    due_date = str(document.get("dueDate") or document.get("due_date") or "").strip()
+
+    doc_label = "Invoice" if normalized_doc_type == "invoice" else "Estimate"
+    subject = subject_override or f"{doc_label} {doc_no or doc_id} from {org.name}"
+
+    print_url = request.build_absolute_uri(
+        f"/api/business-autopilot/accounts/documents/{normalized_doc_type}/{doc_id}/print?format=pdf"
+    )
+
+    context = {
+        "org_name": org.name,
+        "doc_type": normalized_doc_type,
+        "doc_label": doc_label,
+        "doc_no": doc_no or doc_id,
+        "customer_name": customer_name or "-",
+        "issue_date": issue_date or "-",
+        "due_date": due_date or "-",
+        "grand_total": grand_total if grand_total is not None else "-",
+        "extra_message": extra_message,
+        "print_url": print_url,
+    }
+
+    mail_sent = send_templated_email(recipients, subject, "emails/accounts_document_sent.txt", context)
+    if not mail_sent:
+        return JsonResponse({"detail": "email_send_failed"}, status=502)
+    return JsonResponse({"sent": True, "recipients": recipients})
+
+
 def _crm_is_admin(user: User, org: Organization):
     if not user or not user.is_authenticated:
         return False
@@ -6656,18 +6771,22 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
         nonlocal y
         y = height - 18 * mm
         logo_height = _ba_draw_pdf_logo(pdf, logo_image, left, y + 1 * mm, 22 * mm, 12 * mm)
-        title_x = left + (24 * mm if logo_height else 0)
         if include_title:
-            pdf.setFont("Helvetica-Bold", 16)
-            pdf.drawString(title_x, y, "CRM Performance Report")
             pdf.setFillColorRGB(0.07, 0.12, 0.2)
-            pdf.setFont("Helvetica-Bold", 11)
-            pdf.drawString(title_x, y - 5 * mm, company_name)
-            pdf.setFont("Helvetica", 10)
-            pdf.drawString(title_x, y - 9 * mm, f"Period: {from_date} to {to_date}")
-            pdf.drawString(title_x, y - 13 * mm, f"Generated: {generated_at.strftime('%d-%m-%Y %I:%M %p')}")
+            pdf.setFont("Helvetica-Bold", 16)
+            pdf.drawString(left, y, "CRM Performance Report")
             pdf.drawRightString(right, y, f"Group By: {'User' if group_by == 'user' else 'Team'}")
-            y = y - (max(logo_height, 14 * mm) + 8 * mm)
+            pdf.setStrokeColorRGB(0.82, 0.85, 0.91)
+            pdf.setLineWidth(0.7)
+            pdf.line(left, y - 4.5 * mm, right, y - 4.5 * mm)
+            info_x = left + (24 * mm if logo_height else 0)
+            pdf.setFont("Helvetica-Bold", 11)
+            # Extra spacing below the title rule.
+            pdf.drawString(info_x, y - 11 * mm, company_name)
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(info_x, y - 15 * mm, f"Period: {from_date} to {to_date}")
+            pdf.drawString(info_x, y - 19 * mm, f"Generated: {generated_at.strftime('%d-%m-%Y %I:%M %p')}")
+            y = y - (max(logo_height, 18 * mm) + 10 * mm)
         else:
             y = y - (max(logo_height, 6 * mm) + 4 * mm)
 
@@ -6742,8 +6861,8 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
     def draw_lead_header():
         nonlocal y
         x = left
-        pdf.setFillColorRGB(*theme_primary_rgb)
         for header, col_width in zip(lead_headers, lead_col_widths):
+            pdf.setFillColorRGB(*theme_primary_rgb)
             pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
             pdf.setFillColorRGB(1, 1, 1)
             pdf.setFont("Helvetica-Bold", 8)
@@ -6779,20 +6898,21 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
             x += col_width
         y -= 5 * mm
 
-    y -= 3 * mm
+    # Extra gap between lead details and the performance table title.
+    y -= 6 * mm
     table_title = "User Performance Table" if group_by == "user" else "Team Performance Table"
-    ensure_space(16 * mm)
+    ensure_space(28 * mm)
     pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(left, y, table_title)
-    y -= 5 * mm
+    y -= 6 * mm
     headers = ["User / Team", "Total", "Pending", "Completed", "SO", "Estimate", "Invoice"]
     col_widths = [56 * mm, 14 * mm, 18 * mm, 18 * mm, 12 * mm, 18 * mm, 18 * mm]
 
     def draw_table_header():
         nonlocal y
-        pdf.setFillColorRGB(*theme_primary_rgb)
         x = left
         for header, col_width in zip(headers, col_widths):
+            pdf.setFillColorRGB(*theme_primary_rgb)
             pdf.rect(x, y - 5 * mm, col_width, 5 * mm, stroke=0, fill=1)
             pdf.setFillColorRGB(1, 1, 1)
             pdf.setFont("Helvetica-Bold", 8)
@@ -6835,7 +6955,8 @@ def _crm_report_pdf_response(org: Organization, request_user: User, payload):
     pdf.showPage()
     pdf.save()
     buffer.seek(0)
-    filename = f"crm_report_{from_date}_to_{to_date}.pdf".replace(":", "-")
+    ts = generated_at.strftime("%Y%m%d_%H%M%S")
+    filename = f"crm_report_{from_date}_to_{to_date}_{group_by}_{ts}.pdf".replace(":", "-")
     response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response

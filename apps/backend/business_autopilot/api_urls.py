@@ -78,4 +78,9 @@ urlpatterns = [
         api_views.accounts_document_print,
         name="business_autopilot_accounts_document_print",
     ),
+    path(
+        "accounts/documents/<slug:doc_type>/<str:doc_id>/email",
+        api_views.accounts_document_email,
+        name="business_autopilot_accounts_document_email",
+    ),
 ]

@@ -1,0 +1,19 @@
+Hello {{ customer_name }},
+
+{{ doc_label }}: {{ doc_no }}
+Organization: {{ org_name }}
+Issue Date: {{ issue_date }}
+{% if doc_type == "invoice" %}Due Date: {{ due_date }}
+{% endif %}{% if grand_total != "-" %}Total: {{ grand_total }}
+{% endif %}
+
+{% if extra_message %}
+Message from {{ org_name }}:
+{{ extra_message }}
+
+{% endif %}
+You can download a PDF copy here:
+{{ print_url }}
+
+Thank you,
+{{ org_name }}
