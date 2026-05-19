@@ -694,6 +694,10 @@ def _crm_has_unrestricted_row_access(user: User, org: Organization):
     return _crm_section_access_level(user, org, "crm") in {"Create, View and Edit All", "Full Access"}
 
 
+def _crm_has_full_access(user: User, org: Organization):
+    return _crm_section_access_level(user, org, "crm") == "Full Access"
+
+
 def _crm_business_autopilot_permission(user: User):
     if not user or not user.is_authenticated:
         return ""
@@ -762,6 +766,26 @@ def _crm_can_edit_row(user: User, org: Organization, row):
     return False
 
 
+def _hr_section_access_level(user: User, org: Organization, section_key: str = "hr"):
+    if _crm_is_admin(user, org):
+        return "Full Access"
+    if not user or not user.is_authenticated or not org:
+        return "No Access"
+    settings_obj = OrganizationSettings.objects.filter(organization=org).only("business_autopilot_role_access_map").first()
+    role_access_map = _normalize_role_access_map(getattr(settings_obj, "business_autopilot_role_access_map", {}) or {})
+    profile = UserProfile.objects.filter(user=user).only("role").first()
+    membership = _get_org_membership(user, org)
+    role_access_record = _crm_resolve_role_access_record(
+        role_access_map,
+        getattr(profile, "role", ""),
+        getattr(membership, "employee_role", ""),
+    )
+    if not role_access_record:
+        return "No Access"
+    sections = role_access_record.get("sections") if isinstance(role_access_record.get("sections"), dict) else {}
+    return ROLE_ACCESS_LEVEL_ALIASES.get(str(sections.get(section_key) or "No Access").strip(), "No Access")
+
+
 def _serialize_openai_settings(settings_obj: OrganizationSettings):
     return {
         "enabled": bool(settings_obj.business_autopilot_openai_enabled),
@@ -789,6 +813,8 @@ def _can_manage_payroll(user: User, org: Organization = None):
         return False
     if user.is_superuser or user.is_staff:
         return True
+    if org and _hr_section_access_level(user, org, "hr") == "Full Access":
+        return True
     profile = UserProfile.objects.filter(user=user).only("role").first()
     role = str(profile.role or "").strip().lower() if profile else ""
     if role in {"company_admin", "org_admin", "superadmin", "super_admin"}:
@@ -805,6 +831,8 @@ def _can_view_salary_history(user: User, org: Organization = None):
     if not user or not user.is_authenticated:
         return False
     if user.is_superuser or user.is_staff:
+        return True
+    if org and _hr_section_access_level(user, org, "hr") == "Full Access":
         return True
     profile = UserProfile.objects.filter(user=user).only("role").first()
     role = str(profile.role or "").strip().lower() if profile else ""
@@ -7211,6 +7239,10 @@ def crm_leads(request, lead_id: int = None):
             update_fields.append("final_proposal_amount")
         if "proposal_finalized" in payload or "proposalFinalized" in payload:
             should_finalize = bool(payload.get("proposal_finalized") if "proposal_finalized" in payload else payload.get("proposalFinalized"))
+            # Reopening (clearing finalized state) is restricted to CRM Full Access.
+            # This avoids allowing view/edit roles to reopen an already completed proposal process.
+            if not should_finalize and getattr(row, "proposal_finalized_at", None) and not _crm_has_full_access(request.user, org):
+                return JsonResponse({"detail": "forbidden"}, status=403)
             if should_finalize:
                 if _crm_to_decimal(getattr(row, "final_proposal_amount", 0) or 0) <= 0:
                     return JsonResponse({"detail": "final_proposal_amount_required"}, status=400)
@@ -7627,6 +7659,8 @@ def crm_contacts(request, contact_id: int = None):
                 payload = json.loads(request.body.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
+        if not _crm_can_edit_row(request.user, org, row):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         next_name = str(row.name or "").strip()
         next_company = str(row.company or "").strip()
         next_email = str(row.email or "").strip()

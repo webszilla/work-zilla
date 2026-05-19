@@ -12,6 +12,164 @@ const HR_STORAGE_KEY = "wz_business_autopilot_hr_module";
 const LAST_SIGNOUT_AT_STORAGE_KEY = "wz_last_signout_at";
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+function getCurrentTimeHm() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatTimeToAmPm(value) {
+  const raw = String(value || "").trim();
+  if (!/^\d{2}:\d{2}$/.test(raw)) {
+    return "-";
+  }
+  const [hhRaw, mmRaw] = raw.split(":");
+  const hh = Number(hhRaw);
+  const mm = Number(mmRaw);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) {
+    return "-";
+  }
+  const suffix = hh >= 12 ? "PM" : "AM";
+  const hour12 = ((hh + 11) % 12) + 1;
+  return `${hour12}:${String(mm).padStart(2, "0")} ${suffix}`;
+}
+
+function toMinutesFromHm(value) {
+  const raw = String(value || "").trim();
+  if (!/^\d{2}:\d{2}$/.test(raw)) {
+    return null;
+  }
+  const [hhRaw, mmRaw] = raw.split(":");
+  const hh = Number(hhRaw);
+  const mm = Number(mmRaw);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return null;
+  }
+  return (hh * 60) + mm;
+}
+
+function formatDurationFromMinutes(totalMinutes) {
+  const minutes = Math.max(0, Math.floor(Number(totalMinutes || 0)));
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const hourLabel = hours === 1 ? "Hr" : "Hrs";
+  const minLabel = mins === 1 ? "Min" : "Min";
+  return `${hours} ${hourLabel} ${String(mins).padStart(2, "0")} ${minLabel}`;
+}
+
+function computeDurationMinutes(startHm, endHm) {
+  const start = toMinutesFromHm(startHm);
+  const end = toMinutesFromHm(endHm);
+  if (start == null || end == null) {
+    return null;
+  }
+  if (end < start) {
+    return null;
+  }
+  return end - start;
+}
+
+function normalizeAttendanceRows(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function isDeletedAttendanceRow(row) {
+  return Boolean(row?.is_deleted || row?.isDeleted || row?.deleted_at || row?.deletedAt);
+}
+
+function normalizeDeletedAttendanceRow(row) {
+  const normalized = row && typeof row === "object" ? { ...row } : {};
+  const isDeleted = Boolean(normalized.is_deleted || normalized.isDeleted);
+  const deletedAt = String(normalized.deleted_at || normalized.deletedAt || "").trim();
+  if (isDeleted || deletedAt) {
+    normalized.is_deleted = true;
+    normalized.deleted_at = deletedAt || "";
+  }
+  return normalized;
+}
+
+function purgeOldDeletedAttendanceRows(rows, days = 60) {
+  const maxAgeMs = Math.max(1, Number(days || 60)) * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const normalized = normalizeDeletedAttendanceRow(row);
+    if (!normalized.is_deleted) {
+      return true;
+    }
+    const deletedAt = String(normalized.deleted_at || "").trim();
+    if (!deletedAt) {
+      return true;
+    }
+    const ts = Date.parse(deletedAt);
+    if (Number.isNaN(ts)) {
+      return true;
+    }
+    return (now - ts) <= maxAgeMs;
+  });
+}
+
+function safeReadHrModuleData() {
+  try {
+    const raw = window.localStorage.getItem(HR_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const base = parsed && typeof parsed === "object" ? parsed : {};
+    const attendance = purgeOldDeletedAttendanceRows(normalizeAttendanceRows(base.attendance)).map((row) => normalizeDeletedAttendanceRow(row));
+    const next = { ...base, attendance };
+    // Keep storage cleaned up so other pages (HR) read consistent data.
+    safeWriteHrModuleData(next);
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function safeWriteHrModuleData(nextData) {
+  try {
+    window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(nextData || {}));
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+function upsertAttendanceRow({ employeeName, isoDate, patch = {} }) {
+  const name = String(employeeName || "").trim();
+  const date = String(isoDate || "").trim();
+  if (!name || !date) {
+    return null;
+  }
+  const data = safeReadHrModuleData();
+  const rows = purgeOldDeletedAttendanceRows(normalizeAttendanceRows(data.attendance)).map((row) => normalizeDeletedAttendanceRow(row));
+  let index = rows.findIndex((row) =>
+    !isDeletedAttendanceRow(row)
+    && String(row?.employee || "").trim() === name
+    && String(row?.date || "").trim() === date
+  );
+  if (index < 0) {
+    index = rows.findIndex((row) =>
+      String(row?.employee || "").trim() === name && String(row?.date || "").trim() === date
+    );
+  }
+  const base = index >= 0 ? (rows[index] || {}) : {
+    id: `attendance_${Date.now()}`,
+    employee: name,
+    date,
+    entryMode: "User Side",
+    inTime: "",
+    outTime: "",
+    workedHours: "",
+    status: "Present",
+    permissionHours: "",
+    notes: "",
+    completedTasks: "",
+    taskNotes: "",
+  };
+  const nextRow = { ...base, is_deleted: false, deleted_at: "", ...patch, employee: name, date };
+  const nextRows = index >= 0
+    ? rows.map((row, idx) => (idx === index ? nextRow : row))
+    : [nextRow, ...rows];
+  safeWriteHrModuleData({ ...data, attendance: nextRows });
+  return nextRow;
+}
+
 function normalizeDateValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -259,8 +417,172 @@ export default function BusinessAutopilotDashboardPage({
     myPlans: Array.isArray(subscriptions) ? subscriptions.length : 0,
     lastSignoutAt: "",
   });
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [attendancePunch, setAttendancePunch] = useState({ mode: "in", saving: false, error: "" });
+  const [attendanceToday, setAttendanceToday] = useState({ inTime: "", outTime: "", durationLabel: "", hasIn: false, hasOut: false });
+  const [attendanceOutModal, setAttendanceOutModal] = useState({
+    open: false,
+    outTime: "",
+    completedTasks: "",
+    taskNotes: "",
+  });
   const entries = Array.isArray(modules) ? modules : [];
   const allModules = Array.isArray(catalog) && catalog.length ? catalog : entries;
+
+  function readTodayAttendanceRow(employeeName) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const hrData = safeReadHrModuleData();
+    const attendanceRows = normalizeAttendanceRows(hrData?.attendance);
+    return attendanceRows.find((row) =>
+      !isDeletedAttendanceRow(row)
+      && String(row?.employee || "").trim() === employeeName
+      && String(row?.date || "").trim() === todayIso
+    ) || null;
+  }
+
+  function syncAttendanceToday(employeeName) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const hrData = safeReadHrModuleData();
+    const attendanceRows = normalizeAttendanceRows(hrData?.attendance);
+    const todayRow = attendanceRows.find((row) =>
+      !isDeletedAttendanceRow(row)
+      && String(row?.employee || "").trim() === employeeName
+      && String(row?.date || "").trim() === todayIso
+    ) || null;
+    const inTime = String(todayRow?.inTime || "").trim();
+    const outTime = String(todayRow?.outTime || "").trim();
+    const hasIn = Boolean(inTime);
+    const hasOut = Boolean(outTime);
+
+    const nowHm = getCurrentTimeHm();
+    const durationMinutes = hasIn
+      ? (hasOut ? computeDurationMinutes(inTime, outTime) : computeDurationMinutes(inTime, nowHm))
+      : null;
+    const durationLabel = durationMinutes == null ? "" : `(${formatDurationFromMinutes(durationMinutes)})`;
+
+    setAttendanceToday({ inTime, outTime, durationLabel, hasIn, hasOut });
+    setAttendancePunch((prev) => ({
+      ...prev,
+      mode: hasIn && hasOut ? "done" : (hasIn ? "out" : "in"),
+    }));
+    if (hasIn) {
+      setQuickStats((prev) => ({ ...prev, myAttendance: 1 }));
+    }
+  }
+
+  function closeAttendanceOutModal() {
+    setAttendanceOutModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function openAttendanceOutModal() {
+    const employeeName = String(currentUserName || "").trim();
+    if (!employeeName) {
+      setAttendancePunch((prev) => ({ ...prev, error: "Unable to resolve employee name." }));
+      return;
+    }
+    const todayRow = readTodayAttendanceRow(employeeName);
+    if (!String(todayRow?.inTime || "").trim()) {
+      setAttendancePunch((prev) => ({ ...prev, error: "Please punch in first." }));
+      syncAttendanceToday(employeeName);
+      return;
+    }
+    if (String(todayRow?.outTime || "").trim()) {
+      setAttendancePunch((prev) => ({ ...prev, error: "Attendance already completed for today." }));
+      syncAttendanceToday(employeeName);
+      return;
+    }
+    setAttendanceOutModal({
+      open: true,
+      outTime: getCurrentTimeHm(),
+      completedTasks: String(todayRow?.completedTasks || "").trim(),
+      taskNotes: String(todayRow?.taskNotes || "").trim(),
+    });
+  }
+
+  function submitAttendanceOutModal(event) {
+    event.preventDefault();
+    const employeeName = String(currentUserName || "").trim();
+    if (!employeeName) {
+      closeAttendanceOutModal();
+      return;
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayRow = readTodayAttendanceRow(employeeName);
+    if (!String(todayRow?.inTime || "").trim()) {
+      closeAttendanceOutModal();
+      setAttendancePunch((prev) => ({ ...prev, error: "Please punch in first." }));
+      syncAttendanceToday(employeeName);
+      return;
+    }
+    if (String(todayRow?.outTime || "").trim()) {
+      closeAttendanceOutModal();
+      setAttendancePunch((prev) => ({ ...prev, error: "Attendance already completed for today." }));
+      syncAttendanceToday(employeeName);
+      return;
+    }
+    upsertAttendanceRow({
+      employeeName,
+      isoDate: todayIso,
+      patch: {
+        entryMode: "User Side",
+        outTime: attendanceOutModal.outTime || getCurrentTimeHm(),
+        status: "Present",
+        completedTasks: String(attendanceOutModal.completedTasks || "").trim(),
+        taskNotes: String(attendanceOutModal.taskNotes || "").trim(),
+      },
+    });
+    closeAttendanceOutModal();
+    setAttendancePunch((prev) => ({ ...prev, error: "" }));
+    syncAttendanceToday(employeeName);
+  }
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const authData = await apiFetch("/api/auth/me").catch(() => null);
+      if (!active) return;
+      const fallbackName = String(
+        authData?.user?.first_name
+        || authData?.user?.username
+        || authData?.profile?.name
+        || ""
+      ).trim();
+      const normalizedEmail = String(authData?.user?.email || "").trim().toLowerCase();
+      const usersData = normalizedEmail ? await apiFetch("/api/business-autopilot/users").catch(() => null) : null;
+      const directoryUsers = Array.isArray(usersData?.users) ? usersData.users : [];
+      const matchedDirectoryUser = normalizedEmail
+        ? directoryUsers.find((row) => String(row?.email || "").trim().toLowerCase() === normalizedEmail)
+        : null;
+      const resolvedName = String(matchedDirectoryUser?.name || fallbackName || "Current User").trim() || "Current User";
+      setCurrentUserName(resolvedName);
+      syncAttendanceToday(resolvedName);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserName) {
+      return undefined;
+    }
+    const onFocus = () => syncAttendanceToday(currentUserName);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [currentUserName]);
+
+  useEffect(() => {
+    if (!attendanceToday.hasIn || attendanceToday.hasOut) {
+      return undefined;
+    }
+    if (!currentUserName) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      syncAttendanceToday(currentUserName);
+    }, 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, [attendanceToday.hasIn, attendanceToday.hasOut, currentUserName]);
 
   useEffect(() => {
     let active = true;
@@ -536,9 +858,161 @@ export default function BusinessAutopilotDashboardPage({
     };
   }, [accountsWorkspace, selectedComparisonYear]);
 
+  function handleSelfAttendancePunch(nextMode) {
+    const employeeName = String(currentUserName || "").trim();
+    if (!employeeName) {
+      setAttendancePunch((prev) => ({ ...prev, error: "Unable to resolve employee name." }));
+      return;
+    }
+    if (nextMode === "out") {
+      openAttendanceOutModal();
+      return;
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    setAttendancePunch((prev) => ({ ...prev, saving: true, error: "" }));
+    try {
+      const hrData = safeReadHrModuleData();
+      const attendanceRows = normalizeAttendanceRows(hrData?.attendance);
+      const todayRow = attendanceRows.find((row) =>
+        String(row?.employee || "").trim() === employeeName && String(row?.date || "").trim() === todayIso
+      ) || null;
+
+      if (nextMode === "in") {
+        if (String(todayRow?.outTime || "").trim()) {
+          setAttendancePunch((prev) => ({ ...prev, saving: false, mode: "done", error: "Attendance already completed for today." }));
+          syncAttendanceToday(employeeName);
+          return;
+        }
+        if (String(todayRow?.inTime || "").trim()) {
+          setAttendancePunch((prev) => ({ ...prev, saving: false, mode: "out", error: "Already punched in today." }));
+          syncAttendanceToday(employeeName);
+          return;
+        }
+        upsertAttendanceRow({
+          employeeName,
+          isoDate: todayIso,
+          patch: { entryMode: "User Side", inTime: getCurrentTimeHm(), status: "Present" },
+        });
+        setQuickStats((prev) => ({ ...prev, myAttendance: 1 }));
+        setAttendancePunch((prev) => ({ ...prev, saving: false, mode: "out", error: "" }));
+        syncAttendanceToday(employeeName);
+        return;
+      }
+    } catch {
+      setAttendancePunch((prev) => ({ ...prev, saving: false, error: "Unable to update attendance. Please try again." }));
+    }
+  }
+
   return (
     <div>
-      <h4 className="mb-2">Business Autopilot</h4>
+      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+        <h4 className="mb-0">Business Autopilot</h4>
+        <div className="d-flex flex-column align-items-end gap-1">
+          <div className="d-flex align-items-center gap-2">
+            <Link
+              to={withProductBase("/hrm/#attendance")}
+              className="small text-secondary text-decoration-underline"
+              title="Open Attendance"
+            >
+              My Attendance:
+            </Link>
+            {attendancePunch.error ? (
+              <span className="small text-danger">{attendancePunch.error}</span>
+            ) : null}
+          {attendancePunch.mode === "out" ? (
+            <button
+              type="button"
+              className="btn btn-outline-info btn-sm"
+              disabled={attendancePunch.saving}
+              onClick={() => handleSelfAttendancePunch("out")}
+              title="Attendance Out"
+            >
+              {attendancePunch.saving ? "Saving..." : "Out"}
+            </button>
+          ) : attendancePunch.mode === "done" ? (
+            <Link
+              to={withProductBase("/hrm/#attendance")}
+              className="btn btn-outline-light btn-sm"
+              title="Open Attendance"
+            >
+              Done
+            </Link>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-outline-success btn-sm"
+              disabled={attendancePunch.saving}
+              onClick={() => handleSelfAttendancePunch("in")}
+              title="Attendance In"
+            >
+              {attendancePunch.saving ? "Saving..." : "In"}
+            </button>
+          )}
+          </div>
+          {attendanceToday.hasIn ? (
+            <div className="small text-secondary" style={{ lineHeight: 1.2, textAlign: "right" }}>
+              In {formatTimeToAmPm(attendanceToday.inTime)} {attendanceToday.durationLabel}
+              {attendanceToday.hasOut ? ` • Out ${formatTimeToAmPm(attendanceToday.outTime)}` : ""}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      {attendanceOutModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeAttendanceOutModal}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(700px, 100%)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-2">
+              <div>
+                <h5 className="mb-1">Attendance Out - Completed Tasks</h5>
+                <div className="small text-secondary">
+                  {currentUserName || "-"} • {new Date().toISOString().slice(0, 10)}
+                  {attendanceOutModal.outTime ? ` • Out Time ${formatTimeToAmPm(attendanceOutModal.outTime)}` : ""}
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceOutModal}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <form className="d-flex flex-column gap-3" onSubmit={submitAttendanceOutModal}>
+              <div>
+                <label className="form-label small text-secondary mb-1">Completed Work Task List</label>
+                <textarea
+                  className="form-control"
+                  rows={5}
+                  placeholder="Enter completed tasks (one line per task / summary details)"
+                  value={attendanceOutModal.completedTasks}
+                  onChange={(e) => setAttendanceOutModal((prev) => ({ ...prev, completedTasks: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="form-label small text-secondary mb-1">Notes (Optional)</label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  placeholder="Blockers / pending follow-up / handover notes"
+                  value={attendanceOutModal.taskNotes}
+                  onChange={(e) => setAttendanceOutModal((prev) => ({ ...prev, taskNotes: e.target.value }))}
+                />
+              </div>
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">Save & Attendance Out</button>
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceOutModal}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
       <p className="text-secondary mb-3">
         Modular suite for CRM, HR, Projects, Accounts, Ticketing, and Stocks.
       </p>

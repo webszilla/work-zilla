@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 import json
 
 from apps.backend.business_autopilot.models import (
@@ -7,6 +8,8 @@ from apps.backend.business_autopilot.models import (
     CrmContact,
     CrmDeal,
     CrmLead,
+    PayrollEntry,
+    Payslip,
     CrmSalesOrder,
     OrganizationDepartment,
     OrganizationUser,
@@ -329,6 +332,164 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(response.json().get("detail"), "org_admin_deactivate_forbidden")
         membership.refresh_from_db()
         self.assertTrue(membership.is_active)
+
+    def test_hr_full_access_role_can_manage_payroll_workspace(self):
+        hr_user = User.objects.create_user(
+            username="hr.full@workzilla.test",
+            email="hr.full@workzilla.test",
+            password="pw123456",
+            first_name="HR",
+            last_name="Full",
+        )
+        UserProfile.objects.create(
+            user=hr_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=hr_user,
+            role="org_user",
+            employee_role="Sales",
+            is_active=True,
+        )
+        payroll_entry = PayrollEntry.objects.create(
+            organization=self.org,
+            employee_name="HR Full",
+            source_user_id=hr_user.id,
+            payroll_month="2026-05",
+            currency="INR",
+            gross_salary="50000",
+            total_deductions="0",
+            net_salary="50000",
+            status="processed",
+        )
+        Payslip.objects.create(
+            organization=self.org,
+            payroll_entry=payroll_entry,
+            slip_number="SLIP-HR-FULL",
+            generated_for_month="2026-05",
+            employee_name="HR Full",
+            source_user_id=hr_user.id,
+            currency="INR",
+        )
+
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "system:org_user": {
+                "sections": {"hr": "Full Access"},
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        self.client.force_login(hr_user)
+        response = self.client.get("/api/business-autopilot/payroll/workspace")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["permissions"]["can_manage_payroll"])
+        self.assertTrue(payload["permissions"]["can_view_salary_history"])
+        self.assertEqual(len(payload["payroll_entries"]), 1)
+        self.assertEqual(len(payload["payslips"]), 1)
+        self.assertEqual(payload["payslips"][0]["source_user_id"], hr_user.id)
+
+    def test_hr_view_role_only_sees_own_payslips(self):
+        viewer = User.objects.create_user(
+            username="hr.viewer@workzilla.test",
+            email="hr.viewer@workzilla.test",
+            password="pw123456",
+            first_name="HR",
+            last_name="Viewer",
+        )
+        peer = User.objects.create_user(
+            username="hr.peer@workzilla.test",
+            email="hr.peer@workzilla.test",
+            password="pw123456",
+            first_name="HR",
+            last_name="Peer",
+        )
+        UserProfile.objects.create(
+            user=viewer,
+            organization=self.org,
+            role="org_user",
+        )
+        UserProfile.objects.create(
+            user=peer,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=viewer,
+            role="org_user",
+            employee_role="Sales",
+            is_active=True,
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=peer,
+            role="org_user",
+            employee_role="Sales",
+            is_active=True,
+        )
+        viewer_entry = PayrollEntry.objects.create(
+            organization=self.org,
+            employee_name="HR Viewer",
+            source_user_id=viewer.id,
+            payroll_month="2026-05",
+            currency="INR",
+            gross_salary="50000",
+            total_deductions="0",
+            net_salary="50000",
+            status="processed",
+        )
+        peer_entry = PayrollEntry.objects.create(
+            organization=self.org,
+            employee_name="HR Peer",
+            source_user_id=peer.id,
+            payroll_month="2026-05",
+            currency="INR",
+            gross_salary="62000",
+            total_deductions="0",
+            net_salary="62000",
+            status="processed",
+        )
+        Payslip.objects.create(
+            organization=self.org,
+            payroll_entry=viewer_entry,
+            slip_number="SLIP-HR-VIEWER",
+            generated_for_month="2026-05",
+            employee_name="HR Viewer",
+            source_user_id=viewer.id,
+            currency="INR",
+        )
+        Payslip.objects.create(
+            organization=self.org,
+            payroll_entry=peer_entry,
+            slip_number="SLIP-HR-PEER",
+            generated_for_month="2026-05",
+            employee_name="HR Peer",
+            source_user_id=peer.id,
+            currency="INR",
+        )
+
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "system:org_user": {
+                "sections": {"hr": "View"},
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        self.client.force_login(viewer)
+        response = self.client.get("/api/business-autopilot/payroll/workspace")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["permissions"]["can_manage_payroll"])
+        self.assertEqual(len(payload["payroll_entries"]), 1)
+        self.assertEqual(len(payload["payslips"]), 1)
+        self.assertEqual(payload["payslips"][0]["source_user_id"], viewer.id)
 
     def test_crm_deal_patch_allows_company_admin_role_alias(self):
         self.admin.userprofile.role = "Company Admin"
@@ -792,6 +953,80 @@ class BusinessAutopilotUserAccessTests(TestCase):
         duplicate_fields = set(payload.get("duplicate_fields") or [])
         self.assertTrue({"company", "email", "phone"}.issubset(duplicate_fields))
 
+    def test_crm_contacts_patch_with_role_access_map_create_view_edit_own_blocks_other_member_contact(self):
+        crm_user = User.objects.create_user(
+            username="crm-own-contact-edit@workzilla.test",
+            email="crm-own-contact-edit@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Executive",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Executive": {
+                "sections": {"crm": "Create, View and Edit Own"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        other_user = User.objects.create_user(
+            username="crm-own-contact-owner@workzilla.test",
+            email="crm-own-contact-owner@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=other_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=other_user,
+            role="org_user",
+            is_active=True,
+        )
+        other_member_contact = CrmContact.objects.create(
+            organization=self.org,
+            name="Other Member Contact",
+            company="Other Member Corp",
+            email="other.member@workzilla.test",
+            phone_country_code="+91",
+            phone="9191919191",
+            tag="Client",
+            created_by=other_user,
+            updated_by=other_user,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/contacts/{other_member_contact.id}",
+            data=json.dumps(
+                {
+                    "name": "Other Member Contact Updated",
+                    "company": "Other Member Corp Updated",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("detail"), "forbidden")
+
     def test_crm_deal_get_detail_allows_business_autopilot_product_edit_permission(self):
         crm_user = User.objects.create_user(
             username="product-edit-detail@workzilla.test",
@@ -928,6 +1163,128 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertEqual(payload["lead"]["lead_amount"], 7500.0)
         lead.refresh_from_db()
         self.assertEqual(float(lead.lead_amount), 7500.0)
+
+    def test_crm_lead_reopen_requires_full_access(self):
+        crm_user = User.objects.create_user(
+            username="crm-reopen-forbidden@workzilla.test",
+            email="crm-reopen-forbidden@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Executive",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Executive": {
+                "sections": {"crm": "Create, View and Edit Own"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Reopen Lead",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=crm_user,
+            assigned_user_ids=[crm_user.id],
+            stage="New",
+            status="Converted",
+            final_proposal_amount="2500",
+            proposal_finalized_at=timezone.now(),
+            proposal_finalized_by=crm_user,
+            created_by=crm_user,
+            updated_by=crm_user,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{lead.id}",
+            data=json.dumps({"status": "Open", "final_proposal_amount": "2500", "proposal_finalized": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        lead.refresh_from_db()
+        self.assertIsNotNone(lead.proposal_finalized_at)
+
+    def test_crm_lead_reopen_allows_full_access(self):
+        crm_user = User.objects.create_user(
+            username="crm-reopen-allowed@workzilla.test",
+            email="crm-reopen-allowed@workzilla.test",
+            password="pw123456",
+        )
+        UserProfile.objects.create(
+            user=crm_user,
+            organization=self.org,
+            role="org_user",
+        )
+        OrganizationUser.objects.create(
+            organization=self.org,
+            user=crm_user,
+            role="org_user",
+            employee_role="Sales Manager",
+            is_active=True,
+        )
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=self.org)
+        settings_obj.business_autopilot_role_access_map = {
+            "employee_role:Sales Manager": {
+                "sections": {"crm": "Full Access"},
+                "user_sub_sections": {},
+                "can_export": False,
+                "can_delete": False,
+                "attendance_self_service": False,
+                "remarks": "",
+            }
+        }
+        settings_obj.save(update_fields=["business_autopilot_role_access_map"])
+
+        lead = CrmLead.objects.create(
+            organization=self.org,
+            lead_name="Reopen Lead 2",
+            company="Acme",
+            phone="9999999999",
+            lead_amount="5000",
+            lead_source="Website",
+            assign_type="Users",
+            assigned_user=crm_user,
+            assigned_user_ids=[crm_user.id],
+            stage="New",
+            status="Converted",
+            final_proposal_amount="2500",
+            proposal_finalized_at=timezone.now(),
+            proposal_finalized_by=crm_user,
+            created_by=crm_user,
+            updated_by=crm_user,
+        )
+
+        self.client.force_login(crm_user)
+        response = self.client.patch(
+            f"/api/business-autopilot/leads/{lead.id}",
+            data=json.dumps({"status": "Open", "final_proposal_amount": "2500", "proposal_finalized": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        lead.refresh_from_db()
+        self.assertIsNone(lead.proposal_finalized_at)
 
     def test_crm_lead_list_with_role_access_map_create_view_edit_own_is_row_scoped(self):
         crm_user = User.objects.create_user(

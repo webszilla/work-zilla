@@ -2810,6 +2810,45 @@ function isValidHrData(value) {
   return value && typeof value === "object" && Object.keys(HR_TAB_CONFIG).every((key) => Array.isArray(value[key]));
 }
 
+function _isDeletedAttendanceRow(row) {
+  return Boolean(row?.is_deleted || row?.isDeleted || row?.deleted_at || row?.deletedAt);
+}
+
+function _normalizeDeletedAttendanceRow(row) {
+  const normalized = row && typeof row === "object" ? { ...row } : {};
+  const isDeleted = Boolean(normalized.is_deleted || normalized.isDeleted);
+  const deletedAt = String(normalized.deleted_at || normalized.deletedAt || "").trim();
+  if (isDeleted || deletedAt) {
+    normalized.is_deleted = true;
+    if (deletedAt) {
+      normalized.deleted_at = deletedAt;
+    } else {
+      normalized.deleted_at = "";
+    }
+  }
+  return normalized;
+}
+
+function _purgeOldDeletedAttendanceRows(rows, days = 60) {
+  const maxAgeMs = Math.max(1, Number(days || 60)) * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const normalized = _normalizeDeletedAttendanceRow(row);
+    if (!normalized.is_deleted) {
+      return true;
+    }
+    const deletedAt = String(normalized.deleted_at || "").trim();
+    if (!deletedAt) {
+      return true;
+    }
+    const ts = Date.parse(deletedAt);
+    if (Number.isNaN(ts)) {
+      return true;
+    }
+    return (now - ts) <= maxAgeMs;
+  });
+}
+
 function normalizeHrData(value) {
   if (!value || typeof value !== "object") {
     return Object.fromEntries(
@@ -2818,7 +2857,12 @@ function normalizeHrData(value) {
   }
   const next = {};
   Object.keys(HR_TAB_CONFIG).forEach((key) => {
-    next[key] = Array.isArray(value[key]) ? value[key] : [];
+    const rows = Array.isArray(value[key]) ? value[key] : [];
+    if (key === "attendance") {
+      next[key] = _purgeOldDeletedAttendanceRows(rows).map((row) => _normalizeDeletedAttendanceRow(row));
+      return;
+    }
+    next[key] = rows;
   });
   return next;
 }
@@ -5605,6 +5649,122 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
     salaryHistoryForm.incrementValue
   );
 
+  if (!canManagePayroll) {
+    return (
+      <div className="d-flex flex-column gap-3">
+        {readOnlyNotice}
+        {saveError ? <div className="small text-danger">{saveError}</div> : null}
+        <div className="row g-3">
+          {payrollStats.map((item) => (
+            <div className="col-12 col-md-4" key={item.label}>
+              <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                <div className="stat-icon stat-icon-primary mb-2">
+                  <i className={`bi ${item.icon}`} aria-hidden="true" />
+                </div>
+                <div className="text-secondary small">{item.label}</div>
+                <h5 className="mb-0 mt-1">{item.value}</h5>
+              </div>
+            </div>
+          ))}
+        </div>
+        <SearchablePaginatedTableCard
+          title="Payslips"
+          badgeLabel={`${filteredPayslips.length}/${(workspace.payslips || []).length} items`}
+          rows={filteredPayslips}
+          columns={[
+            { key: "slipNumber", label: "Slip Number" },
+            { key: "employeeName", label: "Employee" },
+            { key: "generatedForMonth", label: "Month" },
+            { key: "currency", label: "Currency" },
+            { key: "generatedAt", label: "Generated At" },
+          ]}
+          headerBottom={(
+            <div className="row g-2">
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">Month Picker</label>
+                <input
+                  type="month"
+                  className="form-control"
+                  value={payslipFilters.monthPicker}
+                  onChange={(event) => onPayslipMonthPickerChange(event.target.value)}
+                />
+              </div>
+              <div className="col-6 col-md-2">
+                <label className="form-label small text-secondary mb-1">Year</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.year}
+                  onChange={(event) => onPayslipYearFilterChange(event.target.value)}
+                >
+                  <option value="all">All Years</option>
+                  {payslipYearOptions.map((year) => (
+                    <option key={`payslip-year-${year}`} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-6 col-md-2">
+                <label className="form-label small text-secondary mb-1">Month</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.month}
+                  onChange={(event) => onPayslipMonthFilterChange(event.target.value)}
+                >
+                  <option value="all">All Months</option>
+                  {PAYSLIP_MONTH_FILTER_OPTIONS.map((option) => (
+                    <option key={`payslip-month-${option.value}`} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-3">
+                <label className="form-label small text-secondary mb-1">User</label>
+                <select
+                  className="form-select"
+                  value={payslipFilters.user}
+                  onChange={(event) => setPayslipFilters((prev) => ({ ...prev, user: event.target.value }))}
+                >
+                  <option value="all">All Users</option>
+                  {payslipEmployeeOptions.map((option) => (
+                    <option key={`payslip-user-${option.key}`} value={option.key}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-2 d-flex align-items-end">
+                <button type="button" className="btn btn-outline-light btn-sm w-100" onClick={resetPayslipFilters}>
+                  Reset Filters
+                </button>
+              </div>
+            </div>
+          )}
+          searchPlaceholder="Search payslips"
+          noRowsText={(workspace.payslips || []).length ? "No payslips match the selected filters." : "No payslips generated yet."}
+          searchBy={(row) => [
+            row.slipNumber,
+            row.employeeName,
+            buildPayrollEmployeeCode(row.sourceUserId),
+            row.generatedForMonth,
+            monthToLabel(row.generatedForMonth),
+            row.currency,
+          ].join(" ")}
+          renderCells={(row) => [
+            <span className="fw-semibold">{row.slipNumber || "-"}</span>,
+            <div>
+              <div>{row.employeeName || "-"}</div>
+              <div className="small text-secondary">{buildPayrollEmployeeCode(row.sourceUserId) || "-"}</div>
+            </div>,
+            monthToLabel(row.generatedForMonth),
+            row.currency || payrollCurrency,
+            row.generatedAt ? new Date(row.generatedAt).toLocaleString() : "-",
+          ]}
+          renderActions={(row) => (
+            <div className="d-inline-flex gap-2">
+              <button type="button" className="btn btn-sm btn-outline-success" onClick={() => downloadPayslipPdf(row.id)}>PDF</button>
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
+
   if (activeTab === "payrollSettings") {
     return (
       <div className="d-flex flex-column gap-3">
@@ -6767,6 +6927,7 @@ function normalizeSpreadsheetRows(rows) {
 function SearchablePaginatedTableCard({
   title,
   badgeLabel = "",
+  toolbarPrefix = null,
   rows = [],
   columns = [],
   renderCells,
@@ -7098,6 +7259,7 @@ function SearchablePaginatedTableCard({
 
   const toolbarControls = (
     <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+      {toolbarPrefix}
       {badgeLabel ? <span className="badge bg-secondary table-count-badge">{badgeLabel}</span> : null}
       {enableExport ? (
         <>
@@ -8665,9 +8827,6 @@ function CrmOnePageModule() {
 
   function isRowAssignedToCurrentUser(sectionKey, row) {
     if (!row || isCrmAdmin) {
-      return true;
-    }
-    if (sectionKey === "contacts") {
       return true;
     }
     const createdBy = String(row.createdBy || "").trim().toLowerCase();
@@ -14335,6 +14494,10 @@ function CrmOnePageModule() {
 
   async function confirmReopenLeadAndClearCompletedBy() {
     if (!leadReopenProposalPopup) return;
+    if (!hasCrmFullAccess) {
+      setLeadFinalizeProposalError("You don't have permission to reopen this proposal.");
+      return;
+    }
     const leadId = String(leadReopenProposalPopup.leadId || "").trim();
     if (!leadId) return;
     const nextStatus = String(leadReopenProposalPopup.nextStatus || "").trim() || "Open";
@@ -15918,7 +16081,12 @@ function CrmOnePageModule() {
         );
         const formValues = forms[sectionKey] || {};
         const editingId = editingIds[sectionKey] || "";
-        const canSubmitSectionForm = editingId ? hasCrmEditAccess : canCreateCrmRows;
+        const currentEditingRow = editingId
+          ? (moduleData[sectionKey] || []).find((row) => String(row.id || "") === String(editingId))
+          : null;
+        const canSubmitSectionForm = editingId
+          ? (hasCrmAllRecordAccess || canEditCrmRow(sectionKey, currentEditingRow))
+          : canCreateCrmRows;
         const shouldShowCrmForm = sectionKey !== "deals" && (canCreateCrmRows || Boolean(editingId));
         const hasPhoneCountryCodeField = config.fields.some((field) => field.key === "phoneCountryCode");
 	        const leadCompanyQuery = sectionKey === "leads" ? String(formValues.company || "").trim().toLowerCase() : "";
@@ -19373,6 +19541,7 @@ function CrmOnePageModule() {
                                                 type="button"
                                                 className="btn btn-sm btn-outline-danger"
                                                 title="Reopen"
+                                                disabled={!hasCrmFullAccess}
                                                 onClick={() => {
                                                   finalizeLeadProposalProcess({
                                                     amount: String(normalizedLead?.finalProposalAmount || leadNotesPopup?.finalProposalAmount || "").trim(),
@@ -23196,7 +23365,15 @@ function ProjectDetailPage() {
   );
 }
 
-export function HrManagementModule({ embeddedEmployeeOnly = false }) {
+export function HrManagementModule({
+  embeddedEmployeeOnly = false,
+  currentUserName = "",
+  currentUserId = "",
+  currentUserEmail = "",
+  currentUserRole = "",
+  currentUserEmployeeRole = "",
+  roleAccessMap = {},
+}) {
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
   const [hrFormNotice, setHrFormNotice] = useState("");
@@ -23208,6 +23385,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   const [hrUserDirectory, setHrUserDirectory] = useState([]);
   const [hrDepartmentOptions, setHrDepartmentOptions] = useState([]);
   const [hrEmployeeRoleOptions, setHrEmployeeRoleOptions] = useState([]);
+  const [resolvedCurrentUserName, setResolvedCurrentUserName] = useState("");
+  const [resolvedCurrentUserId, setResolvedCurrentUserId] = useState("");
+  const [resolvedCurrentUserEmail, setResolvedCurrentUserEmail] = useState("");
+  const [resolvedCurrentUserRole, setResolvedCurrentUserRole] = useState("");
+  const [resolvedCurrentUserEmployeeRole, setResolvedCurrentUserEmployeeRole] = useState("");
+  const [resolvedRoleAccessMap, setResolvedRoleAccessMap] = useState({});
   const [editingId, setEditingId] = useState("");
   const [hrEmployeeSuggestOpen, setHrEmployeeSuggestOpen] = useState(false);
   const [myAttendanceEmployee, setMyAttendanceEmployee] = useState("");
@@ -23220,6 +23403,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     outTime: "",
     completedTasks: "",
     taskNotes: "",
+    sourceUserId: "",
+    sourceUserEmail: "",
     mode: "edit",
   });
   const [attendanceNotesModal, setAttendanceNotesModal] = useState({
@@ -23229,10 +23414,60 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     date: "",
     notes: "",
   });
+  const [attendanceDeleteConfirm, setAttendanceDeleteConfirm] = useState({
+    open: false,
+    row: null,
+  });
   const [employeeViewModal, setEmployeeViewModal] = useState({ open: false, row: null });
   const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
   const [attendanceMonthFilter, setAttendanceMonthFilter] = useState("");
+  const [attendanceListMode, setAttendanceListMode] = useState("active"); // active | deleted
+  const [attendanceScope, setAttendanceScope] = useState("my"); // my | all
+  const [attendanceUserFilter, setAttendanceUserFilter] = useState("");
+  const [attendanceFromDate, setAttendanceFromDate] = useState("");
+  const [attendanceToDate, setAttendanceToDate] = useState("");
   const showOnlyEmployeeForm = Boolean(embeddedEmployeeOnly);
+  const effectiveCurrentUserName = String(resolvedCurrentUserName || currentUserName || "").trim();
+  const effectiveCurrentUserId = String(resolvedCurrentUserId || currentUserId || "").trim();
+  const effectiveCurrentUserEmail = String(resolvedCurrentUserEmail || currentUserEmail || "").trim().toLowerCase();
+  const effectiveCurrentUserRole = String(resolvedCurrentUserRole || currentUserRole || "").trim();
+  const effectiveCurrentUserEmployeeRole = String(resolvedCurrentUserEmployeeRole || currentUserEmployeeRole || "").trim();
+  const effectiveRoleAccessMap = resolvedRoleAccessMap && typeof resolvedRoleAccessMap === "object" && !Array.isArray(resolvedRoleAccessMap) && Object.keys(resolvedRoleAccessMap).length
+    ? resolvedRoleAccessMap
+    : roleAccessMap;
+  const currentUserDirectoryEntry = useMemo(() => {
+    const normalizedUserId = effectiveCurrentUserId;
+    const normalizedEmail = effectiveCurrentUserEmail;
+    const normalizedName = effectiveCurrentUserName.toLowerCase();
+    return (hrUserDirectory || []).find((item) => (
+      (normalizedUserId && String(item?.id || "").trim() === normalizedUserId)
+      || (normalizedEmail && String(item?.email || "").trim().toLowerCase() === normalizedEmail)
+      || (normalizedName && String(item?.name || "").trim().toLowerCase() === normalizedName)
+    )) || null;
+  }, [effectiveCurrentUserEmail, effectiveCurrentUserId, effectiveCurrentUserName, hrUserDirectory]);
+  const currentHrEmployeeName = String(currentUserDirectoryEntry?.name || effectiveCurrentUserName || "").trim();
+  const currentHrEmployeeSourceUserId = String(currentUserDirectoryEntry?.id || effectiveCurrentUserId || "").trim();
+  const currentHrEmployeeEmail = String(currentUserDirectoryEntry?.email || effectiveCurrentUserEmail || "").trim().toLowerCase();
+  const currentUserRoleToken = normalizeCrmRoleToken(effectiveCurrentUserRole);
+  const currentUserEmployeeRoleToken = normalizeCrmRoleToken(effectiveCurrentUserEmployeeRole);
+  const hrRoleAccessRecord = useMemo(
+    () => resolveCrmRoleAccessRecord(effectiveRoleAccessMap, effectiveCurrentUserRole, effectiveCurrentUserEmployeeRole),
+    [effectiveCurrentUserEmployeeRole, effectiveCurrentUserRole, effectiveRoleAccessMap]
+  );
+  const isHrAdmin = ["company_admin", "org_admin", "owner", "superadmin", "super_admin"].includes(currentUserRoleToken);
+  const isHrPayrollManager = currentUserEmployeeRoleToken === "hr_manager" || currentUserEmployeeRoleToken === "hr";
+  const hrSectionAccessLevel = normalizeCrmAccessLevel(
+    hrRoleAccessRecord?.sections?.hr || (isHrAdmin || isHrPayrollManager ? "Full Access" : "No Access")
+  );
+  const hasHrFullAccess = Boolean(embeddedEmployeeOnly) || isHrAdmin || isHrPayrollManager || hrSectionAccessLevel === "Full Access";
+  const hasHrSelfServiceAccess = Boolean(embeddedEmployeeOnly) || hasHrFullAccess || hrSectionAccessLevel !== "No Access";
+  const visibleHrTabs = useMemo(() => {
+    const fullAccessTabs = Object.entries(HR_TAB_CONFIG).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
+    if (hasHrFullAccess) {
+      return fullAccessTabs;
+    }
+    return fullAccessTabs.filter((tab) => ["attendance", "leaves", "payroll", "payslips"].includes(tab.key));
+  }, [hasHrFullAccess]);
 
   useEffect(() => {
     try {
@@ -23241,10 +23476,70 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         return;
       }
       const parsed = JSON.parse(raw);
-      setModuleData(normalizeHrData(parsed));
+      const normalized = normalizeHrData(parsed);
+      setModuleData(normalized);
+      // Ensure storage is cleaned up (purge >60d deleted rows) even when app didn't write yet.
+      window.localStorage.setItem(HR_STORAGE_KEY, JSON.stringify(normalized));
     } catch (_error) {
       // Ignore invalid cached module data.
     }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadHrAuthContext() {
+      try {
+        const [authData, roleAccessData] = await Promise.all([
+          apiFetch("/api/auth/me").catch(() => null),
+          apiFetch("/api/business-autopilot/role-access").catch(() => null),
+        ]);
+        if (!active) {
+          return;
+        }
+        const fallbackName = String(
+          authData?.user?.first_name
+          || authData?.user?.username
+          || authData?.profile?.name
+          || ""
+        ).trim();
+        const fallbackEmail = String(authData?.user?.email || "").trim().toLowerCase();
+        const fallbackRole = String(authData?.profile?.role || authData?.user?.role || "").trim();
+        const fallbackEmployeeRole = String(authData?.profile?.employee_role || authData?.user?.employee_role || "").trim();
+        const fallbackMembershipRole = String(authData?.profile?.membership_role || authData?.user?.membership_role || "").trim();
+        let loadedRoleAccessMap = {};
+        if (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map)) {
+          loadedRoleAccessMap = roleAccessData.role_access_map;
+        }
+        const directoryResponse = await apiFetch("/api/business-autopilot/users").catch(() => null);
+        if (!active) {
+          return;
+        }
+        const directoryUsers = Array.isArray(directoryResponse?.users) ? directoryResponse.users : [];
+        const matchedDirectoryUser = fallbackEmail
+          ? directoryUsers.find((row) => String(row?.email || "").trim().toLowerCase() === fallbackEmail)
+          : null;
+        setResolvedCurrentUserName(String(matchedDirectoryUser?.name || fallbackName || "Current User").trim() || "Current User");
+        setResolvedCurrentUserId(String(authData?.user?.id || matchedDirectoryUser?.id || "").trim());
+        setResolvedCurrentUserEmail(String(matchedDirectoryUser?.email || fallbackEmail || "").trim().toLowerCase());
+        setResolvedCurrentUserRole(fallbackRole);
+        setResolvedCurrentUserEmployeeRole(String(matchedDirectoryUser?.employee_role || fallbackEmployeeRole || fallbackMembershipRole || "").trim());
+        setResolvedRoleAccessMap(loadedRoleAccessMap);
+      } catch {
+        if (!active) {
+          return;
+        }
+        setResolvedCurrentUserName("");
+        setResolvedCurrentUserId("");
+        setResolvedCurrentUserEmail("");
+        setResolvedCurrentUserRole("");
+        setResolvedCurrentUserEmployeeRole("");
+        setResolvedRoleAccessMap({});
+      }
+    }
+    loadHrAuthContext();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -23332,8 +23627,12 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     if (activeTab === "attendance") {
       next.date = getTodayIsoDate();
     }
+    if (activeTab === "leaves" && !hasHrFullAccess) {
+      next.employee = currentHrEmployeeName || "";
+      next.status = "Pending";
+    }
     setFormValues(next);
-  }, [activeTab]);
+  }, [activeTab, currentHrEmployeeName, hasHrFullAccess]);
 
   useEffect(() => {
     if (activeTab !== "employees") {
@@ -23365,7 +23664,18 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       return column;
     });
   }, [activeTab, config.columns]);
-  const currentRows = moduleData[activeTab] || [];
+  const currentRows = useMemo(() => {
+    if (activeTab === "attendance") {
+      return Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    }
+    if (activeTab === "leaves") {
+      return Array.isArray(moduleData.leaves) ? moduleData.leaves : [];
+    }
+    if (activeTab === "employees" && !hasHrFullAccess) {
+      return [];
+    }
+    return moduleData[activeTab] || [];
+  }, [activeTab, hasHrFullAccess, moduleData]);
   const todayIso = getTodayIsoDate();
   function normalizeIsoDateValue(rawValue) {
     const value = String(rawValue || "").trim();
@@ -23472,8 +23782,161 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     [hrEmployeeRoleOptions]
   );
 
-  const attendanceDateMeta = useMemo(() => {
+  function resolveHrRowOwnerIdentity(employeeName) {
+    const normalizedName = String(employeeName || "").trim().toLowerCase();
+    const matchedUser = normalizedName
+      ? (hrUserLookupByName.get(normalizedName) || null)
+      : null;
+    const matchedEmployee = normalizedName
+      ? (hrEmployeeLookupByName.get(normalizedName) || null)
+      : null;
+    return {
+      sourceUserId: String(
+        matchedUser?.id
+        || matchedEmployee?.sourceUserId
+        || matchedEmployee?.userId
+        || (normalizedName && normalizedName === currentHrEmployeeName.toLowerCase() ? currentHrEmployeeSourceUserId : "")
+        || ""
+      ).trim(),
+      sourceUserEmail: String(
+        matchedUser?.email
+        || matchedEmployee?.sourceUserEmail
+        || (normalizedName && normalizedName === currentHrEmployeeName.toLowerCase() ? currentHrEmployeeEmail : "")
+        || ""
+      ).trim().toLowerCase(),
+      employeeName: String(
+        matchedUser?.name
+        || matchedEmployee?.name
+        || employeeName
+        || currentHrEmployeeName
+        || ""
+      ).trim(),
+    };
+  }
+
+  function isCurrentHrAttendanceRow(row) {
+    if (hasHrFullAccess) {
+      return true;
+    }
+    const rowEmployeeName = String(row?.employee || "").trim().toLowerCase();
+    const rowSourceUserId = String(row?.sourceUserId || row?.userId || "").trim();
+    const rowSourceUserEmail = String(row?.sourceUserEmail || "").trim().toLowerCase();
+    if (!currentHrEmployeeName && !currentHrEmployeeSourceUserId && !currentHrEmployeeEmail) {
+      return false;
+    }
+    return Boolean(
+      (currentHrEmployeeSourceUserId && rowSourceUserId && rowSourceUserId === currentHrEmployeeSourceUserId)
+      || (currentHrEmployeeEmail && rowSourceUserEmail && rowSourceUserEmail === currentHrEmployeeEmail)
+      || (currentHrEmployeeName && rowEmployeeName === currentHrEmployeeName.toLowerCase())
+    );
+  }
+
+  function isCurrentHrLeaveRow(row) {
+    if (hasHrFullAccess) {
+      return true;
+    }
+    const rowEmployeeName = String(row?.employee || "").trim().toLowerCase();
+    const rowSourceUserId = String(row?.sourceUserId || row?.userId || "").trim();
+    const rowSourceUserEmail = String(row?.sourceUserEmail || "").trim().toLowerCase();
+    if (!currentHrEmployeeName && !currentHrEmployeeSourceUserId && !currentHrEmployeeEmail) {
+      return false;
+    }
+    return Boolean(
+      (currentHrEmployeeSourceUserId && rowSourceUserId && rowSourceUserId === currentHrEmployeeSourceUserId)
+      || (currentHrEmployeeEmail && rowSourceUserEmail && rowSourceUserEmail === currentHrEmployeeEmail)
+      || (currentHrEmployeeName && rowEmployeeName === currentHrEmployeeName.toLowerCase())
+    );
+  }
+
+  const hrAttendanceRows = useMemo(() => {
     const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    return rows.filter((row) => isCurrentHrAttendanceRow(row));
+  }, [hasHrFullAccess, currentHrEmployeeEmail, currentHrEmployeeName, currentHrEmployeeSourceUserId, moduleData.attendance, hrUserDirectory, hrEmployeeLookupByName, hrUserLookupByName]);
+
+  const hrLeaveRows = useMemo(() => {
+    const rows = Array.isArray(moduleData.leaves) ? moduleData.leaves : [];
+    return rows.filter((row) => isCurrentHrLeaveRow(row));
+  }, [hasHrFullAccess, currentHrEmployeeEmail, currentHrEmployeeName, currentHrEmployeeSourceUserId, moduleData.leaves, hrUserDirectory, hrEmployeeLookupByName, hrUserLookupByName]);
+
+  const myAttendanceRows = useMemo(() => {
+    const selfName = String(currentHrEmployeeName || "").trim();
+    if (!selfName) {
+      return [];
+    }
+    const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    return rows.filter((row) => String(row?.employee || "").trim() === selfName);
+  }, [currentHrEmployeeName, moduleData.attendance]);
+
+  const attendanceBaseRows = useMemo(() => {
+    if (!hasHrFullAccess) {
+      return hrAttendanceRows;
+    }
+    const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    if (attendanceScope === "all") {
+      const selectedEmployee = String(attendanceUserFilter || "").trim();
+      if (selectedEmployee) {
+        return rows.filter((row) => String(row?.employee || "").trim() === selectedEmployee);
+      }
+      return rows;
+    }
+    return myAttendanceRows;
+  }, [attendanceScope, attendanceUserFilter, hasHrFullAccess, hrAttendanceRows, moduleData.attendance, myAttendanceRows]);
+
+  const passesAttendanceDateFilters = useCallback((rawDate) => {
+    const date = String(rawDate || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return true;
+    }
+
+    const fromIso = String(attendanceFromDate || "").trim();
+    const toIso = String(attendanceToDate || "").trim();
+    if (fromIso && /^\d{4}-\d{2}-\d{2}$/.test(fromIso) && date < fromIso) return false;
+    if (toIso && /^\d{4}-\d{2}-\d{2}$/.test(toIso) && date > toIso) return false;
+
+    if (!fromIso && !toIso) {
+      if (attendanceYearFilter && date.slice(0, 4) !== attendanceYearFilter) return false;
+      if (attendanceMonthFilter && date.slice(5, 7) !== attendanceMonthFilter) return false;
+    }
+    return true;
+  }, [attendanceFromDate, attendanceMonthFilter, attendanceToDate, attendanceYearFilter]);
+
+  const attendanceCounts = useMemo(() => {
+    let active = 0;
+    let deleted = 0;
+    const rows = Array.isArray(attendanceBaseRows) ? attendanceBaseRows : [];
+    rows.forEach((row) => {
+      if (!passesAttendanceDateFilters(row?.date)) {
+        return;
+      }
+      if (_isDeletedAttendanceRow(row)) {
+        deleted += 1;
+      } else {
+        active += 1;
+      }
+    });
+    return { active, deleted };
+  }, [attendanceBaseRows, passesAttendanceDateFilters]);
+
+  const attendanceAvailableEmployees = useMemo(() => {
+    const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    const unique = Array.from(new Set(rows.map((row) => String(row?.employee || "").trim()).filter(Boolean)));
+    unique.sort((a, b) => a.localeCompare(b));
+    return unique;
+  }, [moduleData.attendance]);
+
+  useEffect(() => {
+    if (!hasHrFullAccess) {
+      if (attendanceScope !== "my") {
+        setAttendanceScope("my");
+      }
+      if (attendanceUserFilter) {
+        setAttendanceUserFilter("");
+      }
+    }
+  }, [attendanceScope, attendanceUserFilter, hasHrFullAccess]);
+
+  const attendanceDateMeta = useMemo(() => {
+    const rows = Array.isArray(attendanceBaseRows) ? attendanceBaseRows : [];
     const validDates = rows
       .map((row) => String(row?.date || "").trim())
       .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
@@ -23481,6 +23944,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     if (!validDates.length) {
       const now = new Date();
       return {
+        minIso: getTodayIsoDate(),
+        maxIso: getTodayIsoDate(),
         minYear: now.getFullYear(),
         maxYear: now.getFullYear(),
         minMonthByYear: new Map([[String(now.getFullYear()), now.getMonth() + 1]]),
@@ -23503,8 +23968,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         maxMonthByYear.set(yearKey, monthNum);
       }
     });
-    return { minYear, maxYear, minMonthByYear, maxMonthByYear };
-  }, [moduleData.attendance]);
+    return { minIso: min, maxIso: max, minYear, maxYear, minMonthByYear, maxMonthByYear };
+  }, [attendanceBaseRows]);
 
   const attendanceYearOptions = useMemo(() => {
     const years = [];
@@ -23528,11 +23993,20 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   }, [attendanceDateMeta, attendanceYearFilter]);
 
   useEffect(() => {
-    if (myAttendanceEmployee && employeeNameOptions.includes(myAttendanceEmployee)) {
+    if (hasHrFullAccess && myAttendanceEmployee && employeeNameOptions.includes(myAttendanceEmployee)) {
       return;
     }
-    setMyAttendanceEmployee(employeeNameOptions[0] || "");
-  }, [employeeNameOptions, myAttendanceEmployee]);
+    setMyAttendanceEmployee(hasHrFullAccess ? (currentHrEmployeeName || employeeNameOptions[0] || "") : (currentHrEmployeeName || ""));
+  }, [currentHrEmployeeName, employeeNameOptions, hasHrFullAccess, myAttendanceEmployee]);
+
+  useEffect(() => {
+    if (!visibleHrTabs.length) {
+      return;
+    }
+    if (!visibleHrTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visibleHrTabs[0].key);
+    }
+  }, [activeTab, visibleHrTabs]);
 
   useEffect(() => {
     const yearOptions = attendanceYearOptions;
@@ -23547,11 +24021,11 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   }, [attendanceMonthOptions]);
 
   const stats = useMemo(() => {
-    const employees = (moduleData.employees || []).length;
-    const attendanceToday = (moduleData.attendance || []).filter((item) =>
+    const employees = (hasHrFullAccess ? moduleData.employees : []).length;
+    const attendanceToday = (hrAttendanceRows || []).filter((item) =>
       String(item.status || "").toLowerCase().includes("present")
     ).length;
-    const pendingLeaves = (moduleData.leaves || []).filter((item) =>
+    const pendingLeaves = (hrLeaveRows || []).filter((item) =>
       String(item.status || "").toLowerCase() === "pending"
     ).length;
     return [
@@ -23559,7 +24033,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       { label: "Attendance Today", value: String(attendanceToday), icon: "bi-calendar-check" },
       { label: "Pending Leaves", value: String(pendingLeaves), icon: "bi-hourglass-split" }
     ];
-  }, [moduleData]);
+  }, [hasHrFullAccess, hrAttendanceRows, hrLeaveRows, moduleData.employees]);
   const employeeFieldMap = useMemo(
     () => new Map(HR_TAB_CONFIG.employees.fields.map((field) => [field.key, field])),
     []
@@ -23719,6 +24193,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <div className="crm-inline-suggestions-wrap">
             <input
               type="text"
+              name={field.key}
               className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               autoComplete="off"
               placeholder={field.placeholder}
@@ -23760,6 +24235,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <div className="crm-inline-suggestions-wrap">
             <input
               type="text"
+              name={field.key}
               className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               autoComplete="off"
               placeholder={field.placeholder}
@@ -23799,8 +24275,32 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               </div>
             ) : null}
           </div>
+        ) : activeTab === "leaves" && field.key === "employee" && !hasHrFullAccess ? (
+          <input
+            type="text"
+            name={field.key}
+            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
+            autoComplete="off"
+            placeholder={field.placeholder}
+            value={formValues[field.key] || currentHrEmployeeName || ""}
+            required={isRequiredField}
+            readOnly
+            maxLength={getBusinessAutopilotMaxLength(field.key)}
+          />
+        ) : activeTab === "leaves" && field.key === "status" && !hasHrFullAccess ? (
+          <input
+            type="text"
+            name={field.key}
+            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
+            placeholder={field.placeholder}
+            value={formValues[field.key] || "Pending"}
+            required={isRequiredField}
+            readOnly
+            maxLength={getBusinessAutopilotMaxLength(field.key)}
+          />
         ) : activeTab === "employees" && field.key === "department" ? (
           <select
+            name={field.key}
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
             required={isRequiredField}
@@ -23818,6 +24318,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </select>
         ) : activeTab === "employees" && field.key === "designation" ? (
           <select
+            name={field.key}
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
             required={isRequiredField}
@@ -23844,6 +24345,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             />
             <input
               type="tel"
+              name={field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber"}
               className={`form-control hr-phone-input ${hasFieldError ? "is-invalid" : ""}`}
                 placeholder={
                   field.key === "secondaryContactCountryCode"
@@ -23859,10 +24361,10 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               maxLength={getBusinessAutopilotMaxLength(
                 field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber"
               )}
-              onChange={(event) => onChangeField(
-                field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber",
-                event.target.value
-              )}
+                onChange={(event) => onChangeField(
+                  field.key === "secondaryContactCountryCode" ? "secondaryContactNumber" : "contactNumber",
+                  event.target.value
+                )}
             />
           </div>
         ) : activeTab === "employees" && field.type === "imageUpload" ? (
@@ -23951,6 +24453,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             if (stateOptions.length) {
               return (
                 <select
+                  name={field.key}
                   className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
                   value={formValues[field.key] || ""}
                   required={isRequiredField}
@@ -23966,6 +24469,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             return (
               <input
                 type="text"
+                name={field.key}
                 className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
                 placeholder={field.placeholder}
                 value={formValues[field.key] || ""}
@@ -23977,6 +24481,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           })()
         ) : activeTab === "employees" && field.type === "phoneNumber" ? null : field.type === "select" ? (
           <select
+            name={field.key}
             className={`form-select ${hasFieldError ? "is-invalid" : ""}`}
             value={formValues[field.key] || ""}
             required={isRequiredField}
@@ -23989,6 +24494,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </select>
         ) : field.type === "textarea" ? (
           <textarea
+            name={field.key}
             className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
             rows={3}
             placeholder={field.placeholder}
@@ -24001,6 +24507,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <>
             <input
               type="date"
+              name={field.key}
               className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
@@ -24017,6 +24524,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         ) : (
           <input
             type={field.type || "text"}
+            name={field.key}
             className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
             placeholder={field.placeholder}
             value={formValues[field.key] || ""}
@@ -24111,19 +24619,41 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   function onDeleteRow(rowOrId) {
     const targetId = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.id : rowOrId) || "").trim();
     const targetName = String((typeof rowOrId === "object" && rowOrId !== null ? rowOrId.name : "") || "").trim().toLowerCase();
+    const isAttendanceDelete = activeTab === "attendance";
+    const deleteTimestamp = new Date().toISOString();
     setModuleData((prev) => ({
       ...prev,
-      [activeTab]: (prev[activeTab] || []).filter((row) => {
-        const rowId = String(row?.id || "").trim();
-        const rowName = String(row?.name || "").trim().toLowerCase();
-        if (targetId && rowId) {
-          return rowId !== targetId;
-        }
-        if (targetName && rowName) {
-          return rowName !== targetName;
-        }
-        return true;
-      })
+      [activeTab]: isAttendanceDelete
+        ? (() => {
+          const rows = prev[activeTab] || [];
+          const matchedRow = rows.find((row) => String(row?.id || "").trim() && String(row?.id || "").trim() === targetId) || null;
+          // If already soft-deleted, delete permanently (remove from list).
+          if (matchedRow && _isDeletedAttendanceRow(matchedRow)) {
+            return rows.filter((row) => String(row?.id || "").trim() !== targetId);
+          }
+          // Otherwise soft delete attendance row; it will appear in the Deleted tab and auto-purge after 60 days.
+          return rows.map((row) => {
+            const rowId = String(row?.id || "").trim();
+            const matched = targetId && rowId ? rowId === targetId : false;
+            if (!matched) return row;
+            return {
+              ...row,
+              is_deleted: true,
+              deleted_at: deleteTimestamp,
+            };
+          });
+        })()
+        : (prev[activeTab] || []).filter((row) => {
+          const rowId = String(row?.id || "").trim();
+          const rowName = String(row?.name || "").trim().toLowerCase();
+          if (targetId && rowId) {
+            return rowId !== targetId;
+          }
+          if (targetName && rowName) {
+            return rowName !== targetName;
+          }
+          return true;
+        })
     }));
     if (targetId && String(editingId || "").trim() === targetId) {
       onCancelEdit();
@@ -24226,14 +24756,26 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       }
     }
     if (activeTab === "attendance") {
+      const ownerIdentity = resolveHrRowOwnerIdentity(payload.employee);
       payload.date = payload.date || todayIso;
       payload.entryMode = payload.entryMode || "HR Side";
+      payload.sourceUserId = ownerIdentity.sourceUserId || "";
+      payload.sourceUserEmail = ownerIdentity.sourceUserEmail || "";
       if (payload.status !== "Permission") {
         payload.permissionHours = "";
       }
       payload.workedHours = computeWorkedDuration(payload.inTime, payload.outTime);
       payload.completedTasks = String(payload.completedTasks || "").trim();
       payload.taskNotes = String(payload.taskNotes || "").trim();
+    }
+    if (activeTab === "leaves") {
+      const ownerIdentity = resolveHrRowOwnerIdentity(payload.employee || currentHrEmployeeName);
+      payload.employee = hasHrFullAccess ? String(payload.employee || ownerIdentity.employeeName || "").trim() : (ownerIdentity.employeeName || currentHrEmployeeName || "").trim();
+      payload.sourceUserId = ownerIdentity.sourceUserId || "";
+      payload.sourceUserEmail = ownerIdentity.sourceUserEmail || "";
+      if (!hasHrFullAccess) {
+        payload.status = "Pending";
+      }
     }
     if (activeTab === "employees") {
       const dob = String(payload.dateOfBirth || "").trim();
@@ -24357,6 +24899,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     if (!name) {
       return;
     }
+    const ownerIdentity = resolveHrRowOwnerIdentity(name);
     const currentTime = getCurrentTimeHm();
     if (action === "out") {
       const existing = (moduleData.attendance || []).find((row) =>
@@ -24370,6 +24913,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         outTime: currentTime,
         completedTasks: String(existing?.completedTasks || "").trim(),
         taskNotes: String(existing?.taskNotes || "").trim(),
+        sourceUserId: String(existing?.sourceUserId || ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "").trim(),
+        sourceUserEmail: String(existing?.sourceUserEmail || ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "").trim(),
         mode: "punchOut",
       });
       return;
@@ -24378,8 +24923,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       employee: name,
       date: todayIso,
       patch: action === "in"
-        ? { entryMode: source, inTime: currentTime, status: "Present" }
-        : { entryMode: source, outTime: currentTime, status: "Present" }
+        ? { entryMode: source, inTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
+        : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
     });
   }
 
@@ -24392,12 +24937,45 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
       outTime: String(row?.outTime || "").trim(),
       completedTasks: String(row?.completedTasks || "").trim(),
       taskNotes: String(row?.taskNotes || "").trim(),
+      sourceUserId: String(row?.sourceUserId || "").trim(),
+      sourceUserEmail: String(row?.sourceUserEmail || "").trim(),
       mode: "edit",
     });
   }
 
   function closeAttendanceTaskModal() {
     setAttendanceTaskModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function requestDeleteAttendanceRow(row) {
+    setAttendanceDeleteConfirm({ open: true, row: row || null });
+  }
+
+  function closeAttendanceDeleteConfirm() {
+    setAttendanceDeleteConfirm({ open: false, row: null });
+  }
+
+  function confirmDeleteAttendanceRow() {
+    if (!attendanceDeleteConfirm.open || !attendanceDeleteConfirm.row) {
+      closeAttendanceDeleteConfirm();
+      return;
+    }
+    const row = attendanceDeleteConfirm.row;
+    closeAttendanceDeleteConfirm();
+    onDeleteRow(row);
+  }
+
+  function restoreAttendanceRow(rowId) {
+    const normalizedId = String(rowId || "").trim();
+    if (!normalizedId) return;
+    setModuleData((prev) => ({
+      ...prev,
+      attendance: (prev.attendance || []).map((row) => (
+        String(row?.id || "").trim() === normalizedId
+          ? { ...row, is_deleted: false, deleted_at: "", isDeleted: false, deletedAt: "" }
+          : row
+      )),
+    }));
   }
 
   function submitAttendanceTaskModal(event) {
@@ -24411,6 +24989,8 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
     const patch = {
       completedTasks: String(attendanceTaskModal.completedTasks || "").trim(),
       taskNotes: String(attendanceTaskModal.taskNotes || "").trim(),
+      sourceUserId: String(attendanceTaskModal.sourceUserId || currentHrEmployeeSourceUserId || "").trim(),
+      sourceUserEmail: String(attendanceTaskModal.sourceUserEmail || currentHrEmployeeEmail || "").trim(),
     };
     if (attendanceTaskModal.mode === "punchOut") {
       patch.entryMode = attendanceTaskModal.source || "User Side";
@@ -24423,25 +25003,40 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
   }
 
   const myAttendanceToday = useMemo(
-    () => (moduleData.attendance || []).find((row) =>
-      String(row.employee || "").trim() === String(myAttendanceEmployee || "").trim()
+    () => (hrAttendanceRows || []).find((row) =>
+      String(row.employee || "").trim() === String(myAttendanceEmployee || currentHrEmployeeName || "").trim()
       && String(row.date || "").trim() === todayIso
+      && !_isDeletedAttendanceRow(row)
     ) || null,
-    [moduleData.attendance, myAttendanceEmployee, todayIso]
+    [currentHrEmployeeName, hrAttendanceRows, myAttendanceEmployee, todayIso]
   );
 
   const attendanceFilteredRows = useMemo(() => {
     if (activeTab !== "attendance") {
       return currentRows;
     }
-    return (currentRows || []).filter((row) => {
-      const date = String(row?.date || "");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true;
-      if (attendanceYearFilter && date.slice(0, 4) !== attendanceYearFilter) return false;
-      if (attendanceMonthFilter && date.slice(5, 7) !== attendanceMonthFilter) return false;
-      return true;
+    const baseRows = Array.isArray(attendanceBaseRows) ? attendanceBaseRows : [];
+    const rows = baseRows.filter((row) => {
+      const isDeleted = _isDeletedAttendanceRow(row);
+      if (!hasHrFullAccess && isDeleted) {
+        return false;
+      }
+      if (hasHrFullAccess && attendanceListMode === "deleted") {
+        if (!isDeleted) return false;
+      } else if (isDeleted) {
+        return false;
+      }
+      return passesAttendanceDateFilters(row?.date);
     });
-  }, [activeTab, currentRows, attendanceYearFilter, attendanceMonthFilter]);
+    return rows;
+  }, [
+    activeTab,
+    attendanceBaseRows,
+    attendanceListMode,
+    currentRows,
+    hasHrFullAccess,
+    passesAttendanceDateFilters,
+  ]);
 
   function openAttendanceNotesModal(row) {
     setAttendanceNotesModal({
@@ -24478,14 +25073,17 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           <h4 className="mb-2">HR</h4>
           <p className="text-secondary mb-3">Handle employees, attendance, leave approvals, and payroll.</p>
           <div className="d-flex flex-wrap gap-2">
-            {Object.entries(HR_TAB_CONFIG).map(([tabKey, tabValue]) => (
+            {visibleHrTabs.map((tabValue) => (
               <button
-                key={tabKey}
+                key={tabValue.key}
                 type="button"
-                className={`btn btn-sm ${activeTab === tabKey ? "btn-success" : "btn-outline-light"}`}
+                className={`btn btn-sm ${activeTab === tabValue.key ? "btn-success" : "btn-outline-light"}`}
                 onClick={() => {
-                  setActiveTab(tabKey);
-                  const nextHash = String(tabKey || "").replace(/[A-Z]/g, (match) => match.toLowerCase());
+                  setActiveTab(tabValue.key);
+                  if (tabValue.key === "attendance") {
+                    setAttendanceListMode("active");
+                  }
+                  const nextHash = String(tabValue.key || "").replace(/[A-Z]/g, (match) => match.toLowerCase());
                   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${nextHash}`);
                 }}
               >
@@ -24516,6 +25114,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
         <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
       ) : (
         <>
+      {activeTab !== "attendance" || hasHrFullAccess ? (
       <div className="card p-3">
         <h6 className="mb-3">
           {editingId
@@ -24626,7 +25225,7 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
               {config.fields.map((field) => renderHrField(field, "col-12 col-md-4"))}
             </div>
           )}
-          {activeTab === "attendance" ? (
+          {activeTab === "attendance" && hasHrFullAccess ? (
             <div className="d-flex flex-wrap align-items-center gap-2">
               <span className="small text-secondary">User Login Attendance:</span>
               <button
@@ -24660,25 +25259,32 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
           </div>
         </form>
       </div>
+      ) : null}
 
       {!showOnlyEmployeeForm && activeTab === "attendance" ? (
         <div className="card p-3">
           <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <h6 className="mb-0">My Attendance (HR)</h6>
-            <div className="d-flex align-items-center gap-2">
-              <label className="small text-secondary mb-0">Employee</label>
-              <select
-                className="form-select form-select-sm"
-                style={{ minWidth: "180px" }}
-                value={myAttendanceEmployee}
-                onChange={(e) => setMyAttendanceEmployee(e.target.value)}
-              >
-                <option value="">Select Employee</option>
-                {employeeNameOptions.map((name) => (
-                  <option key={`my-attendance-${name}`} value={name}>{name}</option>
-                ))}
-              </select>
-            </div>
+            {hasHrFullAccess ? (
+              <div className="d-flex align-items-center gap-2">
+                <label className="small text-secondary mb-0">Employee</label>
+                <select
+                  className="form-select form-select-sm"
+                  style={{ minWidth: "180px" }}
+                  value={myAttendanceEmployee}
+                  onChange={(e) => setMyAttendanceEmployee(e.target.value)}
+                >
+                  <option value="">Select Employee</option>
+                  {employeeNameOptions.map((name) => (
+                    <option key={`my-attendance-${name}`} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="small text-secondary">
+                Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
+              </div>
+            )}
           </div>
           <div className="row g-3 align-items-end">
             <div className="col-12 col-md-2">
@@ -24731,45 +25337,172 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
 
       {!showOnlyEmployeeForm || activeTab === "employees" ? (
         <SearchablePaginatedTableCard
-          title={showOnlyEmployeeForm && activeTab === "employees" ? "Employee List" : config.label}
-          badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : currentRows).length} items`}
-          rows={activeTab === "attendance" ? attendanceFilteredRows : currentRows}
+          title={
+            showOnlyEmployeeForm && activeTab === "employees"
+              ? "Employee List"
+              : (activeTab === "attendance" && !hasHrFullAccess
+                ? "My Attendance"
+                : (activeTab === "leaves" && !hasHrFullAccess ? "My Leaves" : config.label))
+          }
+          badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : activeTab === "leaves" ? hrLeaveRows : currentRows).length} items`}
+          toolbarPrefix={
+            activeTab === "attendance" && hasHrFullAccess ? (
+              <button
+                type="button"
+                className={`btn btn-sm ${attendanceListMode === "deleted" ? "btn-danger" : "btn-outline-danger"}`}
+                onClick={() => setAttendanceListMode((prev) => (prev === "deleted" ? "active" : "deleted"))}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                Deleted ({attendanceCounts.deleted})
+              </button>
+            ) : null
+          }
+          rows={activeTab === "attendance" ? attendanceFilteredRows : activeTab === "leaves" ? hrLeaveRows : currentRows}
           columns={hrTableColumns}
           withoutOuterCard={["attendance", "leaves", "payroll"].includes(activeTab)}
           headerBottom={activeTab === "attendance" ? (
-            <div className="d-flex flex-wrap align-items-end gap-2">
-              <div>
-                <label className="form-label small text-secondary mb-1">Year</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={attendanceYearFilter}
-                  onChange={(e) => setAttendanceYearFilter(e.target.value)}
-                  style={{ minWidth: "110px" }}
-                >
-                  {attendanceYearOptions.map((year) => (
-                    <option key={`attendance-year-${year}`} value={year}>{year}</option>
-                  ))}
-                </select>
+            hasHrFullAccess ? (
+              <div className="d-flex flex-column gap-2">
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                  <div className="btn-group" role="group" aria-label="Attendance scope">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${attendanceScope === "my" ? "btn-success" : "btn-outline-light"}`}
+                      onClick={() => {
+                        setAttendanceScope("my");
+                        setAttendanceUserFilter("");
+                        setAttendanceFromDate("");
+                        setAttendanceToDate("");
+                        setAttendanceListMode("active");
+                      }}
+                    >
+                      My Attendance
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${attendanceScope === "all" ? "btn-success" : "btn-outline-light"}`}
+                      onClick={() => {
+                        setAttendanceScope("all");
+                        setAttendanceFromDate("");
+                        setAttendanceToDate("");
+                        setAttendanceListMode("active");
+                      }}
+                    >
+                      All Members
+                    </button>
+                  </div>
+                </div>
+
+                <div className="d-flex align-items-end gap-2 flex-nowrap" style={{ overflowX: "auto" }}>
+                  <div style={{ minWidth: 160 }}>
+                    <label className="form-label small text-secondary mb-1">User</label>
+                    <select
+                      className="form-select form-select-sm"
+                      value={attendanceScope === "all" ? attendanceUserFilter : ""}
+                      disabled={attendanceScope !== "all"}
+                      onChange={(e) => setAttendanceUserFilter(e.target.value)}
+                    >
+                      <option value="">{attendanceScope === "all" ? "All Members" : "My Attendance"}</option>
+                      {attendanceAvailableEmployees.map((name) => (
+                        <option key={`attendance-user-${name}`} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ minWidth: 140 }}>
+                    <label className="form-label small text-secondary mb-1">Year</label>
+                    <select
+                      className="form-select form-select-sm"
+                      value={attendanceYearFilter}
+                      disabled={Boolean(attendanceFromDate || attendanceToDate)}
+                      onChange={(e) => setAttendanceYearFilter(e.target.value)}
+                    >
+                      {attendanceYearOptions.map((year) => (
+                        <option key={`attendance-year-${year}`} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ minWidth: 140 }}>
+                    <label className="form-label small text-secondary mb-1">Month</label>
+                    <select
+                      className="form-select form-select-sm"
+                      value={attendanceMonthFilter}
+                      disabled={Boolean(attendanceFromDate || attendanceToDate)}
+                      onChange={(e) => setAttendanceMonthFilter(e.target.value)}
+                    >
+                      {attendanceMonthOptions.map((month) => (
+                        <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ minWidth: 140 }}>
+                    <label className="form-label small text-secondary mb-1">From</label>
+                    <input
+                      type="date"
+                      className="form-control form-control-sm"
+                      value={attendanceFromDate}
+                      min={attendanceDateMeta.minIso || undefined}
+                      max={attendanceToDate || undefined}
+                      onChange={(e) => setAttendanceFromDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ minWidth: 140 }}>
+                    <label className="form-label small text-secondary mb-1">To</label>
+                    <input
+                      type="date"
+                      className="form-control form-control-sm"
+                      value={attendanceToDate}
+                      min={attendanceFromDate || undefined}
+                      max={attendanceDateMeta.maxIso || undefined}
+                      onChange={(e) => setAttendanceToDate(e.target.value)}
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="form-label small text-secondary mb-1">Month</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={attendanceMonthFilter}
-                  onChange={(e) => setAttendanceMonthFilter(e.target.value)}
-                  style={{ minWidth: "120px" }}
-                >
-                  {attendanceMonthOptions.map((month) => (
-                    <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
-                  ))}
-                </select>
+            ) : (
+              <div className="d-flex flex-wrap align-items-end justify-content-end gap-2">
+                <div>
+                  <label className="form-label small text-secondary mb-1">Year</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={attendanceYearFilter}
+                    onChange={(e) => setAttendanceYearFilter(e.target.value)}
+                    style={{ minWidth: "110px" }}
+                  >
+                    {attendanceYearOptions.map((year) => (
+                      <option key={`attendance-year-${year}`} value={year}>{year}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label small text-secondary mb-1">Month</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={attendanceMonthFilter}
+                    onChange={(e) => setAttendanceMonthFilter(e.target.value)}
+                    style={{ minWidth: "120px" }}
+                  >
+                    {attendanceMonthOptions.map((month) => (
+                      <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+            )
           ) : null}
-          actionHeaderStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
-          actionCellStyle={activeTab === "attendance" ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+          actionHeaderStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+          actionCellStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
-          noRowsText={`No ${config.label.toLowerCase()} yet.`}
+          noRowsText={
+            activeTab === "attendance" && !hasHrFullAccess
+              ? "No attendance records found."
+              : activeTab === "leaves" && !hasHrFullAccess
+                ? "No leave requests found."
+                : `No ${config.label.toLowerCase()} yet.`
+          }
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
           renderCells={(row) => config.columns.map((column) => {
             if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
@@ -24787,42 +25520,68 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
             }
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
-          renderActions={(row) => (
-            <div className="d-inline-flex gap-2 flex-nowrap">
-              {activeTab === "attendance" ? (() => {
-                const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
-                return (
-                  <>
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
-                      onClick={() => openAttendanceTaskModal(row)}
-                    >
-                      Task
+          renderActions={
+            ((activeTab === "attendance" || activeTab === "leaves") && !hasHrFullAccess)
+              ? null
+              : ((row) => (
+                <div className="d-inline-flex gap-2 flex-nowrap">
+                  {activeTab === "attendance" ? (() => {
+                    const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
+                    const isDeletedRow = _isDeletedAttendanceRow(row);
+                    return (
+                      <>
+                        {!isDeletedRow ? (
+                          <>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
+                              onClick={() => openAttendanceTaskModal(row)}
+                            >
+                              Task
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-success" : "btn-outline-success"}`}
+                              onClick={() => openAttendanceNotesModal(row)}
+                            >
+                              Notes
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-success"
+                            onClick={() => restoreAttendanceRow(row.id)}
+                          >
+                            Restore
+                          </button>
+                        )}
+                      </>
+                    );
+                  })() : null}
+                  {activeTab === "employees" ? (
+                    <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openEmployeeViewModal(row)}>
+                      View
                     </button>
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-success" : "btn-outline-success"}`}
-                      onClick={() => openAttendanceNotesModal(row)}
-                    >
-                      Notes
-                    </button>
-                  </>
-                );
-              })() : null}
-              {activeTab === "employees" ? (
-                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openEmployeeViewModal(row)}>
-                  View
-                </button>
-              ) : null}
-              <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
-                Edit
-              </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
-                Delete
-              </button>
-            </div>
-          )}
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-info"
+                    disabled={activeTab === "attendance" && _isDeletedAttendanceRow(row)}
+                    onClick={() => onEditRow(row)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-danger"
+                    onClick={() => (activeTab === "attendance" ? requestDeleteAttendanceRow(row) : onDeleteRow(row))}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+          }
         />
       ) : null}
 
@@ -24986,6 +25745,45 @@ export function HrManagementModule({ embeddedEmployeeOnly = false }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceDeleteConfirm.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
+          onClick={closeAttendanceDeleteConfirm}
+        >
+          <div
+            className="card p-3"
+            style={{ width: "min(560px, 100%)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-2">
+              <div>
+                <h5 className="mb-1">Delete Attendance Entry?</h5>
+                <div className="small text-secondary">
+                  {String(attendanceDeleteConfirm.row?.employee || "-").trim()} • {String(attendanceDeleteConfirm.row?.date || "-").trim()}
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceDeleteConfirm}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="alert alert-warning py-2 mb-3">
+              This will move the attendance record to <b>Deleted</b>. After deletion, the user can punch <b>In</b> and <b>Out</b> again for the same day. Deleted records auto-clear after 60 days.
+            </div>
+            <div className="d-flex justify-content-end gap-2">
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceDeleteConfirm}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger btn-sm" onClick={confirmDeleteAttendanceRow}>
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
