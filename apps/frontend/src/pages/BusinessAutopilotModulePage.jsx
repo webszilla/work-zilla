@@ -1,4 +1,5 @@
 import { Children, Fragment, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
@@ -3725,26 +3726,28 @@ function normalizeCrmSalesOrderRecord(row = {}) {
       : Array.isArray(row.products)
         ? row.products
         : [];
-  const normalizedItems = rawItems.length
-    ? rawItems.map((item) => {
-      const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
-      return {
-        ...splitDocumentLineDescription(item?.description, item?.customText),
-        id: String(item?.id || createEmptyDocLine().id).trim(),
-        itemMasterId: String(item?.itemMasterId || "").trim(),
-        inventoryItemId: String(item?.inventoryItemId || "").trim(),
-        hsnSacType: normalizeHsnSacType(
-          item?.hsnSacType || item?.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
-          "HSN"
-        ),
-        hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
-        qty: sanitizeDigitsOnlyInput(String(item?.qty ?? "").trim(), 8),
-        rate: String(item?.rate ?? "").trim(),
-        taxPercent: normalizedTaxOverride.taxPercent,
-        taxPercentSource: normalizedTaxOverride.taxPercentSource,
-      };
-    })
-    : [createEmptyDocLine()];
+	  const normalizedItems = rawItems.length
+	    ? rawItems.map((item) => {
+	      const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
+	      const itemDescription = item?.description ?? item?.line_description ?? item?.lineDescription;
+	      const itemCustomText = item?.customText ?? item?.custom_text ?? item?.custom_text_line ?? item?.customTextLine;
+	      return {
+	        ...splitDocumentLineDescription(itemDescription, itemCustomText),
+	        id: String(item?.id || item?.lineId || item?.line_id || createEmptyDocLine().id).trim(),
+	        itemMasterId: String(item?.itemMasterId || item?.item_master_id || item?.item_id || "").trim(),
+	        inventoryItemId: String(item?.inventoryItemId || item?.inventory_item_id || item?.inventoryId || item?.inventory_id || "").trim(),
+	        hsnSacType: normalizeHsnSacType(
+	          item?.hsnSacType || item?.hsn_sac_type || inferHsnSacTypeFromItem(item, "HSN"),
+	          "HSN"
+	        ),
+	        hsnSacCode: String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim(),
+	        qty: sanitizeDigitsOnlyInput(String(item?.qty ?? item?.quantity ?? item?.qty_value ?? "").trim(), 8),
+	        rate: String(item?.rate ?? item?.price ?? item?.unitPrice ?? item?.unit_price ?? "").trim(),
+	        taxPercent: normalizedTaxOverride.taxPercent,
+	        taxPercentSource: normalizedTaxOverride.taxPercentSource,
+	      };
+	    })
+	    : [createEmptyDocLine()];
   const assignType = "Users";
   const paymentDetails = normalizePaymentDetails({
     paymentStatus: row.paymentStatus || row.payment_status || payload.paymentStatus || payload.payment_status,
@@ -14253,14 +14256,15 @@ function CrmOnePageModule() {
     setLeadFinalizeProposalError("");
     setLeadFinalizeProposalSaving(false);
     setLeadProposalsSubTab("list");
-    setLeadNotesPopup({
-      leadId: String(normalizedLead.id || "").trim(),
-      leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
-      crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
-      status: String(normalizedLead.status || "Open").trim() || "Open",
-      noteDate: new Date().toISOString().slice(0, 10),
-      noteText: "",
-      error: "",
+	    setLeadNotesPopup({
+	      leadId: String(normalizedLead.id || "").trim(),
+	      leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
+	      crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
+	      leadAmount: String(normalizedLead.leadAmount || "").trim(),
+	      status: String(normalizedLead.status || "Open").trim() || "Open",
+	      noteDate: new Date().toISOString().slice(0, 10),
+	      noteText: "",
+	      error: "",
       history: Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [],
       finalProposalAmount: String(normalizedLead.finalProposalAmount || "").trim(),
       proposalFinalizedAt: String(normalizedLead.proposalFinalizedAt || "").trim(),
@@ -19411,41 +19415,55 @@ function CrmOnePageModule() {
 				                  );
 				                })()}
 					                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
-					                <div className="d-flex flex-wrap gap-2 mb-2">
+						                <div className="d-flex flex-wrap gap-2 mb-2">
+						                  <button
+						                    type="button"
+						                    className={`btn btn-sm ${leadProposalsSubTab === "list" ? "btn-success" : "btn-outline-light"}`}
+						                    onClick={() => setLeadProposalsSubTab("list")}
+						                  >
+					                    Proposal List
+					                  </button>
 					                  <button
 					                    type="button"
-					                    className={`btn btn-sm ${leadProposalsSubTab === "list" ? "btn-success" : "btn-outline-light"}`}
-					                    onClick={() => setLeadProposalsSubTab("list")}
+					                    className={`btn btn-sm ${leadProposalsSubTab === "status" ? "btn-success" : "btn-outline-light"}`}
+					                    onClick={() => setLeadProposalsSubTab("status")}
 					                  >
-				                    Proposal List
-				                  </button>
-				                  <button
-				                    type="button"
-				                    className={`btn btn-sm ${leadProposalsSubTab === "status" ? "btn-success" : "btn-outline-light"}`}
-				                    onClick={() => setLeadProposalsSubTab("status")}
-				                  >
-					                    Status
-					                  </button>
-					                </div>
-					                {leadProposalsSubTab === "status" ? (
-				                  <div className="mb-3">
-				                    <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
-				                      <h6 className="mb-0">Complete Proposal Process</h6>
-				                      {leadNotesPopup?.proposalFinalizedAt ? (
+						                    Status
+						                  </button>
+						                </div>
+						                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
+						                {leadProposalsSubTab === "status" ? (
+					                  <div className="mb-3">
+					                    <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+					                      <h6 className="mb-0">Complete Proposal Process</h6>
+					                      {leadNotesPopup?.proposalFinalizedAt ? (
 				                        <span className="badge text-bg-success">Completed</span>
 					                      ) : (
 					                        <span className="badge text-bg-secondary">Pending</span>
 					                      )}
-					                    </div>
-                              {!(leadNotesPopup?.proposalFinalizedAt && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted") ? (
-					                    <div className="row g-3 align-items-end">
-					                      <div className="col-12 col-md-6">
-					                      <label className="form-label small text-secondary mb-1">Final Proposal Amount *</label>
-					                      <input
-					                        type="text"
-				                        inputMode="decimal"
-				                        className="form-control"
-				                        placeholder={`Enter amount in ${crmCurrencyCode}`}
+						                    </div>
+	                              {!(leadNotesPopup?.proposalFinalizedAt && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted") ? (
+						                    <div className="row g-3 align-items-end">
+						                      <div className="col-12 col-md-6">
+						                      {(() => {
+						                        const leadAmtValue = parseNumber(leadNotesPopup?.leadAmount ?? leadNotesPopup?.lead_amount ?? "");
+						                        const leadAmtRaw = leadAmtValue > 0 ? formatCurrencyAmount(leadAmtValue, crmCurrencyCode) : "";
+						                        const leadAmtLabel = leadAmtRaw
+						                          ? (String(crmCurrencyCode || "").trim().toUpperCase() === "INR"
+						                            ? `Rs.${leadAmtRaw.replace(/[^\d,.]/g, "").replace(/\\.00$/, "")}`
+						                            : leadAmtRaw)
+						                          : "";
+						                        return (
+						                          <label className="form-label small text-secondary mb-1">
+						                            Final Proposal Amount *{leadAmtLabel ? ` (Lead Amt ${leadAmtLabel})` : ""}
+						                          </label>
+						                        );
+						                      })()}
+						                      <input
+						                        type="text"
+					                        inputMode="decimal"
+					                        className="form-control"
+					                        placeholder={`Enter amount in ${crmCurrencyCode}`}
 				                        value={leadFinalProposalAmount}
 				                        onChange={(event) => {
 				                          setLeadFinalProposalAmount(formatCurrencyNumberInput(sanitizeCurrencyInput(event.target.value), crmCurrencyCode));
@@ -23406,6 +23424,8 @@ export function HrManagementModule({
     sourceUserId: "",
     sourceUserEmail: "",
     mode: "edit",
+    readOnly: false,
+    adminSatisfaction: "",
   });
   const [attendanceNotesModal, setAttendanceNotesModal] = useState({
     open: false,
@@ -23413,6 +23433,7 @@ export function HrManagementModule({
     employee: "",
     date: "",
     notes: "",
+    readOnly: false,
   });
   const [attendanceDeleteConfirm, setAttendanceDeleteConfirm] = useState({
     open: false,
@@ -24758,7 +24779,8 @@ export function HrManagementModule({
     if (activeTab === "attendance") {
       const ownerIdentity = resolveHrRowOwnerIdentity(payload.employee);
       payload.date = payload.date || todayIso;
-      payload.entryMode = payload.entryMode || "HR Side";
+      // Attendance created/edited from HR panel should be marked as Admin.
+      payload.entryMode = hasHrFullAccess ? "Admin" : (payload.entryMode || "HR Side");
       payload.sourceUserId = ownerIdentity.sourceUserId || "";
       payload.sourceUserEmail = ownerIdentity.sourceUserEmail || "";
       if (payload.status !== "Permission") {
@@ -24905,6 +24927,7 @@ export function HrManagementModule({
       const existing = (moduleData.attendance || []).find((row) =>
         String(row.employee || "").trim() === name && String(row.date || "").trim() === todayIso
       );
+      const hasExistingTaskDetails = Boolean(String(existing?.completedTasks || "").trim() || String(existing?.taskNotes || "").trim());
       setAttendanceTaskModal({
         open: true,
         employee: name,
@@ -24916,6 +24939,9 @@ export function HrManagementModule({
         sourceUserId: String(existing?.sourceUserId || ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "").trim(),
         sourceUserEmail: String(existing?.sourceUserEmail || ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "").trim(),
         mode: "punchOut",
+        // Org users can submit only once. HR Full Access / Admin can always edit.
+        readOnly: !hasHrFullAccess && hasExistingTaskDetails,
+        adminSatisfaction: String(existing?.adminSatisfaction || existing?.admin_satisfaction || "").trim(),
       });
       return;
     }
@@ -24929,6 +24955,7 @@ export function HrManagementModule({
   }
 
   function openAttendanceTaskModal(row) {
+    const hasExistingTaskDetails = Boolean(String(row?.completedTasks || "").trim() || String(row?.taskNotes || "").trim());
     setAttendanceTaskModal({
       open: true,
       employee: String(row?.employee || "").trim(),
@@ -24940,6 +24967,9 @@ export function HrManagementModule({
       sourceUserId: String(row?.sourceUserId || "").trim(),
       sourceUserEmail: String(row?.sourceUserEmail || "").trim(),
       mode: "edit",
+      // Org users should only view from table icon; they can submit only via punch-out popup.
+      readOnly: !hasHrFullAccess ? true : false,
+      adminSatisfaction: String(row?.adminSatisfaction || row?.admin_satisfaction || "").trim(),
     });
   }
 
@@ -24980,6 +25010,11 @@ export function HrManagementModule({
 
   function submitAttendanceTaskModal(event) {
     event.preventDefault();
+    if (attendanceTaskModal.readOnly && !hasHrFullAccess) {
+      setHrFormNotice("Task details already submitted. Only Admin / HR Full Access can edit.");
+      closeAttendanceTaskModal();
+      return;
+    }
     const employee = String(attendanceTaskModal.employee || "").trim();
     const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
     if (!employee) {
@@ -24992,6 +25027,9 @@ export function HrManagementModule({
       sourceUserId: String(attendanceTaskModal.sourceUserId || currentHrEmployeeSourceUserId || "").trim(),
       sourceUserEmail: String(attendanceTaskModal.sourceUserEmail || currentHrEmployeeEmail || "").trim(),
     };
+    if (hasHrFullAccess) {
+      patch.adminSatisfaction = String(attendanceTaskModal.adminSatisfaction || "").trim();
+    }
     if (attendanceTaskModal.mode === "punchOut") {
       patch.entryMode = attendanceTaskModal.source || "User Side";
       patch.outTime = attendanceTaskModal.outTime || getCurrentTimeHm();
@@ -25000,6 +25038,14 @@ export function HrManagementModule({
     upsertAttendanceRecord({ employee, date, patch });
     setHrFormNotice("");
     closeAttendanceTaskModal();
+  }
+
+  function updateAttendanceAdminSatisfaction(nextValue) {
+    if (!hasHrFullAccess) return;
+    const employee = String(attendanceTaskModal.employee || "").trim();
+    const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
+    if (!employee) return;
+    upsertAttendanceRecord({ employee, date, patch: { adminSatisfaction: String(nextValue || "").trim() } });
   }
 
   const myAttendanceToday = useMemo(
@@ -25045,6 +25091,7 @@ export function HrManagementModule({
       employee: String(row?.employee || "").trim(),
       date: String(row?.date || todayIso).trim() || todayIso,
       notes: String(row?.notes || "").trim(),
+      readOnly: !hasHrFullAccess,
     });
   }
 
@@ -25054,6 +25101,10 @@ export function HrManagementModule({
 
   function submitAttendanceNotesModal(event) {
     event.preventDefault();
+    if (!hasHrFullAccess) {
+      closeAttendanceNotesModal();
+      return;
+    }
     const rowId = String(attendanceNotesModal.rowId || "").trim();
     if (!rowId) return;
     const notes = String(attendanceNotesModal.notes || "").trim();
@@ -25396,17 +25447,17 @@ export function HrManagementModule({
                 <div className="d-flex align-items-end gap-2 flex-nowrap" style={{ overflowX: "auto" }}>
                   <div style={{ minWidth: 160 }}>
                     <label className="form-label small text-secondary mb-1">User</label>
-                    <select
-                      className="form-select form-select-sm"
+                    <AutocompleteSelectSm
                       value={attendanceScope === "all" ? attendanceUserFilter : ""}
+                      placeholder={attendanceScope === "all" ? "All Members" : "My Attendance"}
                       disabled={attendanceScope !== "all"}
-                      onChange={(e) => setAttendanceUserFilter(e.target.value)}
-                    >
-                      <option value="">{attendanceScope === "all" ? "All Members" : "My Attendance"}</option>
-                      {attendanceAvailableEmployees.map((name) => (
-                        <option key={`attendance-user-${name}`} value={name}>{name}</option>
-                      ))}
-                    </select>
+                      options={attendanceAvailableEmployees}
+                      onChange={(nextValue) => {
+                        // Keep it as plain text filter; empty means all members.
+                        setAttendanceUserFilter(nextValue);
+                      }}
+                      ariaLabel="Filter attendance by user"
+                    />
                   </div>
 
                   <div style={{ minWidth: 140 }}>
@@ -25513,74 +25564,147 @@ export function HrManagementModule({
             }
             if (activeTab === "attendance" && column.key === "status") {
               const status = String(row.status || "").trim();
+              const entryModeRaw = String(row.entryMode || "").trim();
+              const entryModeToken = entryModeRaw.toLowerCase();
+              const entryModeLabel = entryModeToken.includes("hr self") || entryModeToken === "self"
+                ? "Self"
+                : (entryModeToken.includes("admin") || entryModeToken.includes("hr side"))
+                  ? "Admin"
+                  : entryModeToken.includes("user")
+                    ? "User"
+                    : (entryModeRaw || "");
               if (status === "Permission" && String(row.permissionHours || "").trim()) {
-                return `Permission (${String(row.permissionHours).trim()} hrs)`;
+                const base = `Permission (${String(row.permissionHours).trim()} hrs)`;
+                return entryModeLabel ? `${base} (${entryModeLabel})` : base;
               }
-              return row.entryMode ? `${status || "-"}${row.entryMode ? ` (${row.entryMode})` : ""}` : (status || "-");
+              const base = status || "-";
+              return entryModeLabel ? `${base} (${entryModeLabel})` : base;
             }
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={
-            ((activeTab === "attendance" || activeTab === "leaves") && !hasHrFullAccess)
-              ? null
-              : ((row) => (
-                <div className="d-inline-flex gap-2 flex-nowrap">
-                  {activeTab === "attendance" ? (() => {
-                    const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
-                    const isDeletedRow = _isDeletedAttendanceRow(row);
-                    return (
-                      <>
-                        {!isDeletedRow ? (
-                          <>
-                            <button
-                              type="button"
-                              className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
-                              onClick={() => openAttendanceTaskModal(row)}
-                            >
-                              Task
-                            </button>
-                            <button
-                              type="button"
-                              className={`btn btn-sm ${String(row?.notes || "").trim() ? "btn-success" : "btn-outline-success"}`}
-                              onClick={() => openAttendanceNotesModal(row)}
-                            >
-                              Notes
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-success"
-                            onClick={() => restoreAttendanceRow(row.id)}
-                          >
-                            Restore
-                          </button>
-                        )}
-                      </>
-                    );
-                  })() : null}
-                  {activeTab === "employees" ? (
+            (row) => {
+              if (activeTab === "attendance") {
+                const isDeletedRow = _isDeletedAttendanceRow(row);
+                const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
+                const hasAdminNotes = Boolean(String(row?.notes || "").trim());
+
+                if (!hasHrFullAccess) {
+                  if (isDeletedRow) {
+                    return null;
+                  }
+	                  return (
+	                    <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
+	                      <button
+	                        type="button"
+	                        className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
+	                        title="View completed tasks"
+	                        onClick={() => openAttendanceTaskModal(row)}
+	                        aria-label="View completed tasks"
+	                      >
+	                        <i className="bi bi-list-check" aria-hidden="true" />
+	                      </button>
+	                      <button
+	                        type="button"
+	                        className={`btn btn-sm ${hasAdminNotes ? "btn-success" : "btn-outline-secondary"}`}
+	                        title={hasAdminNotes ? "View admin notes" : "No admin notes yet"}
+	                        disabled={!hasAdminNotes}
+	                        onClick={() => openAttendanceNotesModal(row)}
+	                        aria-label={hasAdminNotes ? "View admin notes" : "No admin notes yet"}
+	                      >
+	                        <i className="bi bi-chat-left-text" aria-hidden="true" />
+	                      </button>
+	                    </div>
+	                  );
+	                }
+
+                return (
+                  <div className="d-inline-flex gap-2 flex-nowrap">
+	                    {!isDeletedRow ? (
+	                      <>
+	                        <button
+	                          type="button"
+	                          className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
+	                          title="Completed tasks"
+	                          onClick={() => openAttendanceTaskModal(row)}
+	                          aria-label="Completed tasks"
+	                        >
+	                          <i className="bi bi-list-check" aria-hidden="true" />
+	                        </button>
+	                        <button
+	                          type="button"
+	                          className={`btn btn-sm ${hasAdminNotes ? "btn-success" : "btn-outline-success"}`}
+	                          title="Notes"
+	                          onClick={() => openAttendanceNotesModal(row)}
+	                          aria-label="Notes"
+	                        >
+	                          <i className="bi bi-chat-left-text" aria-hidden="true" />
+	                        </button>
+	                      </>
+	                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-success"
+                        onClick={() => restoreAttendanceRow(row.id)}
+                      >
+                        Restore
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-info"
+                      disabled={isDeletedRow}
+                      onClick={() => onEditRow(row)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger"
+                      onClick={() => requestDeleteAttendanceRow(row)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              }
+
+              if (activeTab === "employees") {
+                return (
+                  <div className="d-inline-flex gap-2 flex-nowrap">
                     <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => openEmployeeViewModal(row)}>
                       View
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-info"
-                    disabled={activeTab === "attendance" && _isDeletedAttendanceRow(row)}
-                    onClick={() => onEditRow(row)}
-                  >
+                    {hasHrFullAccess ? (
+                      <>
+                        <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
+                          Delete
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              }
+
+              if ((activeTab === "leaves" || activeTab === "payroll" || activeTab === "payslips" || activeTab === "salary-structures" || activeTab === "payroll-settings") && !hasHrFullAccess) {
+                return null;
+              }
+
+              // Default actions for other tabs (full access).
+              return (
+                <div className="d-inline-flex gap-2 flex-nowrap">
+                  <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-danger"
-                    onClick={() => (activeTab === "attendance" ? requestDeleteAttendanceRow(row) : onDeleteRow(row))}
-                  >
+                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
                     Delete
                   </button>
                 </div>
-              ))
+              );
+            }
           }
         />
       ) : null}
@@ -25670,6 +25794,11 @@ export function HrManagementModule({
               </button>
             </div>
             <form className="d-flex flex-column gap-3" onSubmit={submitAttendanceTaskModal}>
+              {attendanceTaskModal.readOnly && !hasHrFullAccess ? (
+                <div className="alert alert-info py-2 mb-0">
+                  Task details already submitted. Only Admin / HR Full Access can edit this.
+                </div>
+              ) : null}
               <div>
                 <label className="form-label small text-secondary mb-1">Completed Work Task List</label>
                 <textarea
@@ -25677,6 +25806,7 @@ export function HrManagementModule({
                   rows={5}
                   placeholder="Enter completed tasks (one line per task / summary details)"
                   value={attendanceTaskModal.completedTasks}
+                  disabled={attendanceTaskModal.readOnly && !hasHrFullAccess}
                   onChange={(e) => setAttendanceTaskModal((prev) => ({ ...prev, completedTasks: e.target.value }))}
                 />
               </div>
@@ -25687,15 +25817,48 @@ export function HrManagementModule({
                   rows={3}
                   placeholder="Blockers / pending follow-up / handover notes"
                   value={attendanceTaskModal.taskNotes}
+                  disabled={attendanceTaskModal.readOnly && !hasHrFullAccess}
                   onChange={(e) => setAttendanceTaskModal((prev) => ({ ...prev, taskNotes: e.target.value }))}
                 />
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">
-                  {attendanceTaskModal.mode === "punchOut" ? "Save & Attendance Out" : "Save Task Details"}
-                </button>
+                {hasHrFullAccess && !attendanceTaskModal.readOnly ? (
+                  <div className="d-inline-flex align-items-center gap-2 me-auto">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${attendanceTaskModal.adminSatisfaction === "up" ? "btn-success" : "btn-outline-success"}`}
+                      title="Satisfied"
+                      onClick={() => {
+                        const nextValue = attendanceTaskModal.adminSatisfaction === "up" ? "" : "up";
+                        setAttendanceTaskModal((prev) => ({ ...prev, adminSatisfaction: nextValue }));
+                        updateAttendanceAdminSatisfaction(nextValue);
+                      }}
+                      style={{ width: 40, height: 36, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <i className="bi bi-hand-thumbs-up" aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${attendanceTaskModal.adminSatisfaction === "down" ? "btn-danger" : "btn-outline-danger"}`}
+                      title="Not satisfied"
+                      onClick={() => {
+                        const nextValue = attendanceTaskModal.adminSatisfaction === "down" ? "" : "down";
+                        setAttendanceTaskModal((prev) => ({ ...prev, adminSatisfaction: nextValue }));
+                        updateAttendanceAdminSatisfaction(nextValue);
+                      }}
+                      style={{ width: 40, height: 36, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <i className="bi bi-hand-thumbs-down" aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }} />
+                    </button>
+                  </div>
+                ) : null}
+                {attendanceTaskModal.readOnly && !hasHrFullAccess ? null : (
+                  <button type="submit" className="btn btn-success btn-sm">
+                    {attendanceTaskModal.mode === "punchOut" ? "Save & Attendance Out" : "Save Task Details"}
+                  </button>
+                )}
                 <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceTaskModal}>
-                  Cancel
+                  {attendanceTaskModal.readOnly && !hasHrFullAccess ? "Close" : "Cancel"}
                 </button>
               </div>
             </form>
@@ -25735,13 +25898,16 @@ export function HrManagementModule({
                   rows={6}
                   placeholder="Add notes, queries, clarifications, pending items..."
                   value={attendanceNotesModal.notes}
+                  disabled={Boolean(attendanceNotesModal.readOnly)}
                   onChange={(e) => setAttendanceNotesModal((prev) => ({ ...prev, notes: e.target.value }))}
                 />
               </div>
               <div className="d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">Save Notes</button>
+                {attendanceNotesModal.readOnly ? null : (
+                  <button type="submit" className="btn btn-success btn-sm">Save Notes</button>
+                )}
                 <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceNotesModal}>
-                  Cancel
+                  {attendanceNotesModal.readOnly ? "Close" : "Cancel"}
                 </button>
               </div>
             </form>
@@ -35661,6 +35827,178 @@ function BusinessAutopilotFormLimitScope({ children }) {
       onInputCapture={(event) => applyBusinessAutopilotCharacterLimit(event.target)}
     >
       {children}
+    </div>
+  );
+}
+
+function AutocompleteSelectSm({
+  value,
+  onChange,
+  options = [],
+  placeholder = "",
+  disabled = false,
+  inputClassName = "",
+  menuMaxHeight = 220,
+  ariaLabel = "Select option",
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const rootRef = useRef(null);
+  const inputRef = useRef(null);
+  const [menuStyle, setMenuStyle] = useState(null);
+
+  const safeValue = String(value ?? "");
+  const normalizedQuery = safeValue.trim().toLowerCase();
+
+  const filteredOptions = useMemo(() => {
+    const rawOptions = Array.isArray(options) ? options : [];
+    const unique = Array.from(
+      new Set(rawOptions.map((item) => String(item ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+    if (!normalizedQuery) {
+      return unique.slice(0, 50);
+    }
+    return unique
+      .filter((item) => item.toLowerCase().includes(normalizedQuery))
+      .slice(0, 50);
+  }, [normalizedQuery, options]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function onDocMouseDown(event) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(event.target)) {
+        setOpen(false);
+        setHighlightIndex(-1);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+
+    function updatePosition() {
+      const inputEl = inputRef.current;
+      if (!inputEl) {
+        return;
+      }
+      const rect = inputEl.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || 0;
+      const desiredTop = rect.bottom + 6;
+      const maxHeight = Math.max(140, Math.min(Number(menuMaxHeight) || 220, viewportHeight - desiredTop - 12));
+      setMenuStyle({
+        position: "fixed",
+        left: `${rect.left}px`,
+        top: `${desiredTop}px`,
+        width: `${rect.width}px`,
+        maxHeight: `${maxHeight}px`,
+        zIndex: 2000,
+      });
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [menuMaxHeight, open]);
+
+  function selectOption(nextValue) {
+    onChange?.(String(nextValue ?? ""));
+    setOpen(false);
+    setHighlightIndex(-1);
+  }
+
+  const menuNode = open && !disabled && filteredOptions.length && menuStyle ? (
+    <div
+      className="wz-autocomplete-menu"
+      role="listbox"
+      style={menuStyle}
+    >
+      {filteredOptions.map((optionValue, index) => {
+        const active = index === highlightIndex;
+        return (
+          <button
+            key={`wz-autocomplete-${optionValue}`}
+            type="button"
+            className={`wz-autocomplete-item ${active ? "active" : ""}`.trim()}
+            role="option"
+            aria-selected={active ? "true" : "false"}
+            onMouseEnter={() => setHighlightIndex(index)}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              selectOption(optionValue);
+            }}
+          >
+            {optionValue}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  return (
+    <div ref={rootRef} className="position-relative">
+      <input
+        ref={inputRef}
+        type="text"
+        className={`form-control form-control-sm wz-no-focus-shadow ${inputClassName}`.trim()}
+        value={safeValue}
+        placeholder={placeholder}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        autoComplete="off"
+        onFocus={() => {
+          if (disabled) return;
+          setOpen(true);
+        }}
+        onChange={(event) => {
+          onChange?.(event.target.value);
+          if (!disabled && !open) {
+            setOpen(true);
+          }
+          setHighlightIndex(-1);
+        }}
+        onKeyDown={(event) => {
+          if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            setOpen(true);
+            return;
+          }
+          if (!open) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setOpen(false);
+            setHighlightIndex(-1);
+            return;
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setHighlightIndex((prev) => Math.min(filteredOptions.length - 1, prev + 1));
+            return;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setHighlightIndex((prev) => Math.max(0, prev - 1));
+            return;
+          }
+          if (event.key === "Enter") {
+            if (highlightIndex >= 0 && highlightIndex < filteredOptions.length) {
+              event.preventDefault();
+              selectOption(filteredOptions[highlightIndex]);
+            }
+          }
+        }}
+      />
+      {menuNode ? createPortal(menuNode, document.body) : null}
     </div>
   );
 }

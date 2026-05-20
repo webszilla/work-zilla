@@ -1151,6 +1151,15 @@ function AppShell({ state, productPrefix, productSlug }) {
     state.user?.username ||
     state.user?.email ||
     "Work Zilla User";
+  const sidebarUserName = (
+    [state.profile?.first_name, state.profile?.last_name]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+    || String(state.profile?.name || "").trim()
+    || userDisplayName
+  );
   const roleDisplayName = formatWorkspaceText(
     isHrView ? "hr_view" : state.profile?.role || state.profile?.access_role || (isSaasAdmin ? "super_admin" : "member"),
     "Member"
@@ -1241,8 +1250,8 @@ function AppShell({ state, productPrefix, productSlug }) {
 
           <div className="wz-sidebar__meta">
             <div>
-              <p className="wz-sidebar__meta-title">{orgNameForUi}</p>
-              <p className="wz-sidebar__meta-subtitle">{roleDisplayName}</p>
+              <p className="wz-sidebar__meta-title">{sidebarUserName}</p>
+              <p className="wz-sidebar__meta-subtitle">{roleDisplayName} • {orgNameForUi}</p>
             </div>
             <div className="d-flex flex-wrap gap-2">
               <span className={statusTone}>{statusLabel}</span>
@@ -1444,8 +1453,8 @@ function AppShell({ state, productPrefix, productSlug }) {
               <Link className="wz-topbar__panel" to={withBase("/profile")}>
                 <i className="bi bi-buildings" aria-hidden="true" />
                 <div className="wz-topbar__panel-copy">
-                  <strong>{orgNameForUi}</strong>
-                  <span>{roleDisplayName}</span>
+                  <strong>{sidebarUserName}</strong>
+                  <span>{roleDisplayName} • {orgNameForUi}</span>
                 </div>
               </Link>
               <div className="wz-topbar__panel">

@@ -28,6 +28,13 @@ lines = [line for line in lines if 'rel="modulepreload"' not in line]
 index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
-rm -rf "$BACKEND_DIR/frontend_dist"
+# NOTE:
+# We intentionally do NOT delete existing `frontend_dist/assets` on each build.
+# If a user already loaded an older `index-*.js` bundle, it may still request older
+# hashed chunks via dynamic imports. Deleting the old assets causes sporadic
+# "error loading dynamically imported module" until the user refreshes.
+#
+# Keeping previous hashed assets avoids these transient 404s during local rebuilds
+# and deployments, while new builds still overwrite `index.html` + new assets.
 mkdir -p "$BACKEND_DIR/frontend_dist"
-cp -R "$FRONTEND_DIR/dist/" "$BACKEND_DIR/frontend_dist/"
+cp -R "$FRONTEND_DIR/dist/"* "$BACKEND_DIR/frontend_dist/"
