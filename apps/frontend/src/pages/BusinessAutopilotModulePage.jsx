@@ -23447,6 +23447,8 @@ export function HrManagementModule({
   const [attendanceUserFilter, setAttendanceUserFilter] = useState("");
   const [attendanceFromDate, setAttendanceFromDate] = useState("");
   const [attendanceToDate, setAttendanceToDate] = useState("");
+  const attendanceFromInputRef = useRef(null);
+  const attendanceToInputRef = useRef(null);
   const showOnlyEmployeeForm = Boolean(embeddedEmployeeOnly);
   const effectiveCurrentUserName = String(resolvedCurrentUserName || currentUserName || "").trim();
   const effectiveCurrentUserId = String(resolvedCurrentUserId || currentUserId || "").trim();
@@ -23904,13 +23906,13 @@ export function HrManagementModule({
   }, [attendanceScope, attendanceUserFilter, hasHrFullAccess, hrAttendanceRows, moduleData.attendance, myAttendanceRows]);
 
   const passesAttendanceDateFilters = useCallback((rawDate) => {
-    const date = String(rawDate || "").trim();
+    const date = normalizeIsoDateValue(rawDate);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return true;
     }
 
-    const fromIso = String(attendanceFromDate || "").trim();
-    const toIso = String(attendanceToDate || "").trim();
+    const fromIso = normalizeIsoDateValue(attendanceFromDate);
+    const toIso = normalizeIsoDateValue(attendanceToDate);
     if (fromIso && /^\d{4}-\d{2}-\d{2}$/.test(fromIso) && date < fromIso) return false;
     if (toIso && /^\d{4}-\d{2}-\d{2}$/.test(toIso) && date > toIso) return false;
 
@@ -23956,41 +23958,123 @@ export function HrManagementModule({
     }
   }, [attendanceScope, attendanceUserFilter, hasHrFullAccess]);
 
-  const attendanceDateMeta = useMemo(() => {
-    const rows = Array.isArray(attendanceBaseRows) ? attendanceBaseRows : [];
-    const validDates = rows
-      .map((row) => String(row?.date || "").trim())
-      .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
-      .sort();
-    if (!validDates.length) {
-      const now = new Date();
-      return {
-        minIso: getTodayIsoDate(),
-        maxIso: getTodayIsoDate(),
-        minYear: now.getFullYear(),
-        maxYear: now.getFullYear(),
-        minMonthByYear: new Map([[String(now.getFullYear()), now.getMonth() + 1]]),
-        maxMonthByYear: new Map([[String(now.getFullYear()), now.getMonth() + 1]]),
-      };
+  const attendanceSubjectStartIso = useMemo(() => {
+    const today = getTodayIsoDate();
+    const normalizeStartDate = (value) => {
+      const iso = normalizeIsoDateValue(value);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+        return iso;
+      }
+      if (iso && /^\d{4}-\d{2}-\d{2}T/.test(iso)) {
+        return iso.slice(0, 10);
+      }
+      if (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) {
+        return iso.slice(0, 10);
+      }
+      return "";
+    };
+
+    const directoryRows = Array.isArray(hrUserDirectory) ? hrUserDirectory : [];
+    const matchDirectoryUser = (token) => {
+      const normalizedToken = String(token || "").trim().toLowerCase();
+      if (!normalizedToken) {
+        return null;
+      }
+      return directoryRows.find((row) => (
+        String(row?.email || "").trim().toLowerCase() === normalizedToken
+        || String(row?.name || "").trim().toLowerCase() === normalizedToken
+      )) || null;
+    };
+
+    if (attendanceScope === "all") {
+      const selectedEmployee = String(attendanceUserFilter || "").trim();
+      if (selectedEmployee) {
+        const matched = matchDirectoryUser(selectedEmployee);
+        const startIso = normalizeStartDate(matched?.created_at);
+        return startIso || today;
+      }
+      const startDates = directoryRows
+        .map((row) => normalizeStartDate(row?.created_at))
+        .filter((iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso))
+        .sort();
+      return startDates[0] || today;
     }
-    const min = validDates[0];
-    const max = validDates[validDates.length - 1];
-    const minYear = Number(min.slice(0, 4));
-    const maxYear = Number(max.slice(0, 4));
+
+    const startIso = normalizeStartDate(currentUserDirectoryEntry?.created_at);
+    return startIso || today;
+  }, [attendanceScope, attendanceUserFilter, currentUserDirectoryEntry, hrUserDirectory]);
+
+  const attendanceDateMeta = useMemo(() => {
+    const todayIsoDate = getTodayIsoDate();
+    // Calendar bounds should start from the user's sign-in/membership date (created_at)
+    // so we don't allow selecting dates before the user existed.
+    // If attendance exists, still never go earlier than attendanceSubjectStartIso.
+    const rows = Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
+    const validDates = rows
+      .map((row) => normalizeIsoDateValue(row?.date))
+      .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")))
+      .sort();
+
+    const earliestAttendanceIso = validDates.length ? validDates[0] : "";
+    const normalizedSubjectStart = /^\d{4}-\d{2}-\d{2}$/.test(String(attendanceSubjectStartIso || ""))
+      ? String(attendanceSubjectStartIso)
+      : "";
+    const minCandidate = [normalizedSubjectStart, earliestAttendanceIso].filter(Boolean).sort()[0] || todayIsoDate;
+    const maxCandidate = todayIsoDate;
+
+    const minYear = Number(String(minCandidate).slice(0, 4));
+    const maxYear = Number(String(maxCandidate).slice(0, 4));
     const minMonthByYear = new Map();
     const maxMonthByYear = new Map();
-    validDates.forEach((iso) => {
-      const yearKey = iso.slice(0, 4);
-      const monthNum = Number(iso.slice(5, 7));
-      if (!minMonthByYear.has(yearKey) || monthNum < minMonthByYear.get(yearKey)) {
-        minMonthByYear.set(yearKey, monthNum);
+
+    // Build month bounds from minCandidate -> maxCandidate range.
+    for (let year = minYear; year <= maxYear; year += 1) {
+      const yearKey = String(year);
+      const minMonth = year === minYear ? Number(String(minCandidate).slice(5, 7)) : 1;
+      const maxMonth = year === maxYear ? Number(String(maxCandidate).slice(5, 7)) : 12;
+      minMonthByYear.set(yearKey, minMonth);
+      maxMonthByYear.set(yearKey, maxMonth);
+    }
+
+    return {
+      minIso: minCandidate,
+      maxIso: maxCandidate,
+      minYear,
+      maxYear,
+      minMonthByYear,
+      maxMonthByYear,
+    };
+  }, [attendanceSubjectStartIso, moduleData.attendance]);
+
+  useEffect(() => {
+    const applyPickerBounds = (input, { minDate, maxDate }) => {
+      if (!input) return;
+      const instance = input.__wzFlatpickrInstance;
+      if (!instance || typeof instance.set !== "function") return;
+      instance.set("minDate", minDate || null);
+      instance.set("maxDate", maxDate || null);
+      if (typeof instance.redraw === "function") {
+        instance.redraw();
       }
-      if (!maxMonthByYear.has(yearKey) || monthNum > maxMonthByYear.get(yearKey)) {
-        maxMonthByYear.set(yearKey, monthNum);
-      }
+    };
+
+    applyPickerBounds(attendanceFromInputRef.current, {
+      minDate: attendanceDateMeta.minIso || null,
+      maxDate: attendanceToDate || todayIso,
     });
-    return { minIso: min, maxIso: max, minYear, maxYear, minMonthByYear, maxMonthByYear };
-  }, [attendanceBaseRows]);
+    applyPickerBounds(attendanceToInputRef.current, {
+      minDate: attendanceFromDate || attendanceDateMeta.minIso || null,
+      maxDate: todayIso,
+    });
+  }, [attendanceDateMeta.minIso, attendanceFromDate, attendanceToDate, todayIso]);
+
+  useEffect(() => {
+    const fromIso = normalizeIsoDateValue(attendanceFromDate);
+    const toIso = normalizeIsoDateValue(attendanceToDate);
+    if (fromIso && toIso && /^\d{4}-\d{2}-\d{2}$/.test(fromIso) && /^\d{4}-\d{2}-\d{2}$/.test(toIso) && toIso < fromIso) {
+      setAttendanceToDate("");
+    }
+  }, [attendanceFromDate, attendanceToDate]);
 
   const attendanceYearOptions = useMemo(() => {
     const years = [];
@@ -24533,7 +24617,12 @@ export function HrManagementModule({
               placeholder={field.placeholder}
               value={formValues[field.key] || ""}
               required={isRequiredField}
-              max={activeTab === "employees" && field.key === "dateOfBirth" ? todayIso : undefined}
+              max={
+                (activeTab === "employees" && field.key === "dateOfBirth")
+                || (activeTab === "attendance" && field.key === "date")
+                  ? todayIso
+                  : undefined
+              }
               onInput={(event) => onChangeField(field.key, event.target.value)}
               onChange={(event) => onChangeField(field.key, event.target.value)}
               onBlur={(event) => onChangeField(field.key, event.target.value)}
@@ -24924,6 +25013,34 @@ export function HrManagementModule({
     const ownerIdentity = resolveHrRowOwnerIdentity(name);
     const currentTime = getCurrentTimeHm();
     if (action === "out") {
+      // HR/Admin quick punch-out should be instant (no mandatory task popup).
+      // The punch-out task modal is meant for org-user self-service flows.
+      if (hasHrFullAccess && String(source || "").toLowerCase().includes("hr")) {
+        upsertAttendanceRecord({
+          employee: name,
+          date: todayIso,
+          patch: {
+            entryMode: source,
+            outTime: currentTime,
+            status: "Present",
+            sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "",
+            sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "",
+          }
+        });
+        if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
+          setFormValues((prev) => ({
+            ...prev,
+            employee: name,
+            date: todayIso,
+            entryMode: source,
+            outTime: currentTime,
+            status: "Present",
+          }));
+          setHrFormNotice("");
+          setHrFieldErrors({});
+        }
+        return;
+      }
       const existing = (moduleData.attendance || []).find((row) =>
         String(row.employee || "").trim() === name && String(row.date || "").trim() === todayIso
       );
@@ -24952,6 +25069,21 @@ export function HrManagementModule({
         ? { entryMode: source, inTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
         : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
     });
+
+    // Keep the Attendance form in sync for HR instant In/Out buttons
+    // (so user doesn't need to fill mandatory fields just to punch).
+    if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
+      setFormValues((prev) => ({
+        ...prev,
+        employee: name,
+        date: todayIso,
+        entryMode: source,
+        ...(action === "in" ? { inTime: currentTime } : { outTime: currentTime }),
+        status: "Present",
+      }));
+      setHrFormNotice("");
+      setHrFieldErrors({});
+    }
   }
 
   function openAttendanceTaskModal(row) {
@@ -25491,11 +25623,12 @@ export function HrManagementModule({
                   <div style={{ minWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">From</label>
                     <input
+                      ref={attendanceFromInputRef}
                       type="date"
                       className="form-control form-control-sm"
                       value={attendanceFromDate}
                       min={attendanceDateMeta.minIso || undefined}
-                      max={attendanceToDate || undefined}
+                      max={attendanceToDate || todayIso}
                       onChange={(e) => setAttendanceFromDate(e.target.value)}
                     />
                   </div>
@@ -25503,12 +25636,28 @@ export function HrManagementModule({
                   <div style={{ minWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">To</label>
                     <input
+                      ref={attendanceToInputRef}
                       type="date"
                       className="form-control form-control-sm"
                       value={attendanceToDate}
-                      min={attendanceFromDate || undefined}
-                      max={attendanceDateMeta.maxIso || undefined}
-                      onChange={(e) => setAttendanceToDate(e.target.value)}
+                      min={attendanceFromDate || attendanceDateMeta.minIso || undefined}
+                      max={todayIso}
+                      onChange={(e) => {
+                        const nextRaw = e.target.value;
+                        const nextIso = normalizeIsoDateValue(nextRaw);
+                        const fromIso = normalizeIsoDateValue(attendanceFromDate || attendanceDateMeta.minIso);
+                        if (
+                          nextIso
+                          && fromIso
+                          && /^\d{4}-\d{2}-\d{2}$/.test(nextIso)
+                          && /^\d{4}-\d{2}-\d{2}$/.test(fromIso)
+                          && nextIso < fromIso
+                        ) {
+                          setAttendanceToDate("");
+                          return;
+                        }
+                        setAttendanceToDate(nextRaw);
+                      }}
                     />
                   </div>
                 </div>

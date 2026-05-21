@@ -3927,6 +3927,55 @@ def product_pending_transfer_action(request, slug, transfer_id, action):
 
 
 @login_required
+@require_http_methods(["POST"])
+def transfer_action(request, transfer_id, action):
+    """
+    Action endpoint for the unified SaaS Admin transfers page.
+
+    Routes the action to the existing product-specific pending-transfer handler
+    by inferring the product slug from the PendingTransfer row.
+    """
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    transfer = get_object_or_404(PendingTransfer, id=transfer_id)
+    if transfer.request_type == "dealer":
+        return JsonResponse({"error": "dealer_not_supported"}, status=400)
+    if transfer.status != "pending":
+        return JsonResponse({"error": "not_pending"}, status=400)
+    if not transfer.plan or not getattr(transfer.plan, "product", None) or not getattr(transfer.plan.product, "slug", ""):
+        return JsonResponse({"error": "missing_product"}, status=400)
+
+    product_slug = str(transfer.plan.product.slug or "").strip().lower()
+    if not product_slug:
+        return JsonResponse({"error": "missing_product"}, status=400)
+
+    return product_pending_transfer_action(request, product_slug, transfer_id, action)
+
+
+@login_required
+@require_http_methods(["POST"])
+def transfer_clear_receipt(request, transfer_id):
+    """
+    Receipt clear endpoint for the unified SaaS Admin transfers page.
+    """
+    if not _is_saas_admin_user(request.user):
+        return HttpResponseForbidden("Access denied.")
+
+    transfer = get_object_or_404(PendingTransfer, id=transfer_id)
+    if transfer.request_type == "dealer":
+        return JsonResponse({"error": "dealer_not_supported"}, status=400)
+    if not transfer.plan or not getattr(transfer.plan, "product", None) or not getattr(transfer.plan.product, "slug", ""):
+        return JsonResponse({"error": "missing_product"}, status=400)
+
+    product_slug = str(transfer.plan.product.slug or "").strip().lower()
+    if not product_slug:
+        return JsonResponse({"error": "missing_product"}, status=400)
+
+    return product_pending_transfer_clear_receipt(request, product_slug, transfer_id)
+
+
+@login_required
 @require_http_methods(["GET"])
 def product_pending_transfer_detail(request, slug, transfer_id):
     if not _is_saas_admin_user(request.user):

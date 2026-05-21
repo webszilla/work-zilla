@@ -152,6 +152,52 @@ function enhanceDateInput(input) {
     config.maxDate = input.max;
   }
   input.__wzFlatpickrInstance = window.flatpickr(input, config);
+
+  // Keep flatpickr bounds in sync when min/max attributes change dynamically.
+  // React can update `min`/`max` after the picker is already initialized.
+  if (!input.__wzFlatpickrAttrObserver && typeof MutationObserver !== "undefined") {
+    const updateBounds = () => {
+      const instance = input.__wzFlatpickrInstance;
+      if (!instance || typeof instance.set !== "function") {
+        return;
+      }
+      instance.set("minDate", input.min || null);
+      instance.set("maxDate", input.max || null);
+      if (typeof instance.redraw === "function") {
+        instance.redraw();
+      }
+    };
+    const observer = new MutationObserver((mutations) => {
+      const shouldUpdate = mutations.some((mutation) => (
+        mutation.type === "attributes"
+        && (mutation.attributeName === "min" || mutation.attributeName === "max")
+      ));
+      if (shouldUpdate) {
+        updateBounds();
+      }
+    });
+    observer.observe(input, { attributes: true, attributeFilter: ["min", "max"] });
+    input.__wzFlatpickrAttrObserver = observer;
+    // One extra sync in case bounds are set right after init.
+    updateBounds();
+  }
+
+  // Safety: when the picker is opened, re-sync bounds from attributes.
+  // This handles cases where attributes changed but mutation observer didn't fire (browser quirks).
+  if (input.__wzFlatpickrInstance && typeof input.__wzFlatpickrInstance.set === "function") {
+    const previousOnOpen = input.__wzFlatpickrInstance.config?.onOpen;
+    input.__wzFlatpickrInstance.set("onOpen", [
+      ...(Array.isArray(previousOnOpen) ? previousOnOpen : previousOnOpen ? [previousOnOpen] : []),
+      () => {
+        try {
+          input.__wzFlatpickrInstance.set("minDate", input.min || null);
+          input.__wzFlatpickrInstance.set("maxDate", input.max || null);
+        } catch {
+          // ignore
+        }
+      },
+    ]);
+  }
 }
 
 function enhanceTimeInput(input) {

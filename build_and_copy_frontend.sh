@@ -29,12 +29,8 @@ index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
 # NOTE:
-# We intentionally do NOT delete existing `frontend_dist/assets` on each build.
-# If a user already loaded an older `index-*.js` bundle, it may still request older
-# hashed chunks via dynamic imports. Deleting the old assets causes sporadic
-# "error loading dynamically imported module" until the user refreshes.
-#
-# Keeping previous hashed assets avoids these transient 404s during local rebuilds
-# and deployments, while new builds still overwrite `index.html` + new assets.
+# We replace the backend `frontend_dist` contents on each build so Git and deploys
+# only contain the current hashed assets referenced by `index.html`.
 mkdir -p "$BACKEND_DIR/frontend_dist"
+rm -rf "$BACKEND_DIR/frontend_dist/assets"
 cp -R "$FRONTEND_DIR/dist/"* "$BACKEND_DIR/frontend_dist/"

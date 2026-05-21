@@ -192,7 +192,7 @@ export default function SaasAdminPage() {
     { label: "Total Orgs", value: stats.total_orgs ?? 0, icon: "bi-building" },
     { label: "Total Users", value: stats.total_users ?? 0, icon: "bi-people" },
     { label: "Active Subs", value: stats.active_subscriptions ?? 0, icon: "bi-check2-circle" },
-    { label: "Pending Transfers", value: stats.pending_transfers ?? 0, icon: "bi-hourglass-split" },
+    { label: "Pending Transfers", value: stats.pending_transfers ?? 0, icon: "bi-hourglass-split", to: "/saas-admin/transfers" },
     { label: "Expiring (Monthly)", value: stats.expiring_monthly ?? 0, icon: "bi-clock" },
     { label: "Expiring (Yearly)", value: stats.expiring_yearly ?? 0, icon: "bi-clock-history" },
     { label: "MRR (INR)", value: stats.mrr ?? 0, icon: "bi-cash" },
@@ -436,13 +436,23 @@ export default function SaasAdminPage() {
         {!showProductsOnly ? (
           <div className="saas-admin-kpis">
             {statCards.map((card) => (
-              <div className="card p-3 h-100 stat-card" key={card.label}>
-                <div className="stat-icon stat-icon-primary">
-                  <i className={`bi ${card.icon}`} aria-hidden="true" />
+              card.to ? (
+                <Link className="card p-3 h-100 stat-card text-decoration-none" to={card.to} key={card.label}>
+                  <div className="stat-icon stat-icon-primary">
+                    <i className={`bi ${card.icon}`} aria-hidden="true" />
+                  </div>
+                  <h6 className="mb-1">{card.label}</h6>
+                  <div className="stat-value">{card.value}</div>
+                </Link>
+              ) : (
+                <div className="card p-3 h-100 stat-card" key={card.label}>
+                  <div className="stat-icon stat-icon-primary">
+                    <i className={`bi ${card.icon}`} aria-hidden="true" />
+                  </div>
+                  <h6 className="mb-1">{card.label}</h6>
+                  <div className="stat-value">{card.value}</div>
                 </div>
-                <h6 className="mb-1">{card.label}</h6>
-                <div className="stat-value">{card.value}</div>
-              </div>
+              )
             ))}
           </div>
         ) : null}

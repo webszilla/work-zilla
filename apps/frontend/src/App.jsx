@@ -49,6 +49,7 @@ import SaasAdminApplicationDownloadsPage from "./pages/SaasAdminApplicationDownl
 import SaasAdminWhatsAppSettingsPage from "./pages/SaasAdminWhatsAppSettingsPage.jsx";
 import SaasAdminSystemBackupManagerPage from "./pages/SaasAdminSystemBackupManagerPage.jsx";
 import SaasAdminBillingPage from "./pages/SaasAdminBillingPage.jsx";
+import SaasAdminTransfersPage from "./pages/SaasAdminTransfersPage.jsx";
 import SaasAdminBackupActivityPage from "./pages/SaasAdminBackupActivityPage.jsx";
 import BackupHistoryPage from "./pages/BackupHistoryPage.jsx";
 import SaasAdminServerMonitoringPage from "./pages/SaasAdminServerMonitoringPage.jsx";
@@ -2071,6 +2072,10 @@ function AppShell({ state, productPrefix, productSlug }) {
           <Route
             path="/saas-admin/billing"
             element={isSaasAdmin ? <SaasAdminBillingPage /> : <Navigate to={withBase("/")} replace />}
+          />
+          <Route
+            path="/saas-admin/transfers"
+            element={isSaasAdmin ? <SaasAdminTransfersPage /> : <Navigate to={withBase("/")} replace />}
           />
           <Route
             path="/saas-admin/organizations/:orgId"
