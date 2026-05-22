@@ -43,6 +43,7 @@ from .models import (
     CrmContact,
     CrmDeal,
     CrmLead,
+    CrmLeadModification,
     CrmLeadProposalDocument,
     CrmMeeting,
     CrmSalesOrder,
@@ -5491,6 +5492,83 @@ def _serialize_crm_lead(row: CrmLead):
     }
 
 
+def _crm_lead_snapshot(row: CrmLead) -> dict:
+    if not row:
+        return {}
+    return {
+        "crm_reference_id": str(getattr(row, "crm_reference_id", "") or "").strip(),
+        "lead_name": str(getattr(row, "lead_name", "") or "").strip(),
+        "company": str(getattr(row, "company", "") or "").strip(),
+        "phone": str(getattr(row, "phone", "") or "").strip(),
+        "lead_amount": float(getattr(row, "lead_amount", 0) or 0),
+        "lead_source": str(getattr(row, "lead_source", "") or "").strip(),
+        "assign_type": str(getattr(row, "assign_type", "") or "").strip(),
+        "assigned_user_id": getattr(row, "assigned_user_id", None),
+        "assigned_user_ids": _crm_clean_user_id_list(getattr(row, "assigned_user_ids", []) or []),
+        "assigned_team": str(getattr(row, "assigned_team", "") or "").strip(),
+        "stage": str(getattr(row, "stage", "") or "").strip(),
+        "priority": str(getattr(row, "priority", "") or "").strip(),
+        "status": str(getattr(row, "status", "") or "").strip(),
+        "is_deleted": bool(getattr(row, "is_deleted", False)),
+        "final_proposal_amount": float(getattr(row, "final_proposal_amount", 0) or 0),
+        "proposal_finalized_at": getattr(row, "proposal_finalized_at", None).isoformat() if getattr(row, "proposal_finalized_at", None) else None,
+        "completed_by_type": str(getattr(row, "completed_by_type", "") or "").strip(),
+        "completed_by_user_id": getattr(row, "completed_by_user_id", None),
+        "completed_by_team": str(getattr(row, "completed_by_team", "") or "").strip(),
+        "completed_by_user_ids": _crm_clean_user_id_list(getattr(row, "completed_by_user_ids", []) or []),
+        "completed_by_team_names": [
+            str(item or "").strip()
+            for item in (getattr(row, "completed_by_team_names", None) or [])
+            if str(item or "").strip()
+        ],
+    }
+
+
+def _crm_diff_snapshots(before: dict, after: dict) -> list:
+    safe_before = before if isinstance(before, dict) else {}
+    safe_after = after if isinstance(after, dict) else {}
+    keys = sorted(set(safe_before.keys()) | set(safe_after.keys()))
+    changes = []
+    for key in keys:
+        old_value = safe_before.get(key)
+        new_value = safe_after.get(key)
+        if old_value == new_value:
+            continue
+        changes.append({"field": key, "old": old_value, "new": new_value})
+    return changes
+
+
+def _crm_log_lead_modification(org: Organization, lead: CrmLead, *, changed_by: User = None, action: str = "update", changes: list = None):
+    try:
+        CrmLeadModification.objects.create(
+            organization=org,
+            lead=lead,
+            lead_reference_id=str(getattr(lead, "crm_reference_id", "") or "").strip(),
+            lead_name=str(getattr(lead, "lead_name", "") or "").strip(),
+            changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+            action=str(action or "update").strip()[:40] or "update",
+            changes=changes if isinstance(changes, list) else [],
+        )
+    except (DatabaseError, OperationalError, IntegrityError):
+        logger.exception("Failed to record CRM lead modification org_id=%s lead_id=%s", getattr(org, "id", None), getattr(lead, "id", None))
+
+
+def _serialize_crm_lead_modification(row: CrmLeadModification):
+    if not row:
+        return {}
+    return {
+        "id": row.id,
+        "lead_id": row.lead_id,
+        "lead_reference_id": str(row.lead_reference_id or "").strip(),
+        "lead_name": str(row.lead_name or "").strip(),
+        "action": str(row.action or "").strip(),
+        "changed_by_id": row.changed_by_id,
+        "changed_by_name": _get_org_user_display_name(row.changed_by) if row.changed_by_id else "",
+        "changes": row.changes if isinstance(row.changes, list) else [],
+        "created_at": timezone.localtime(row.created_at).isoformat() if row.created_at else "",
+    }
+
+
 def _serialize_crm_contact(row: CrmContact):
     return {
         "id": row.id,
@@ -7124,6 +7202,14 @@ def crm_leads(request, lead_id: int = None):
             created_by=request.user,
             updated_by=request.user,
         )
+        snapshot_after = _crm_lead_snapshot(row)
+        _crm_log_lead_modification(
+            org,
+            row,
+            changed_by=request.user,
+            action="create",
+            changes=_crm_diff_snapshots({}, snapshot_after),
+        )
         return JsonResponse({"lead": _serialize_crm_lead(row)}, status=201)
 
     if resolved_method == "GET" and not lead_id:
@@ -7150,6 +7236,7 @@ def crm_leads(request, lead_id: int = None):
         return JsonResponse({"lead": _serialize_crm_lead(row)})
 
     if resolved_method == "PATCH":
+        before_snapshot = _crm_lead_snapshot(row)
         if payload is None:
             try:
                 payload = json.loads(request.body.decode("utf-8") or "{}")
@@ -7395,16 +7482,33 @@ def crm_leads(request, lead_id: int = None):
                         "updated_at",
                     ]
                 )
+        after_snapshot = _crm_lead_snapshot(row)
+        changes = _crm_diff_snapshots(before_snapshot, after_snapshot)
+        if changes:
+            action = "update"
+            if bool(before_snapshot.get("is_deleted")) is False and bool(after_snapshot.get("is_deleted")) is True:
+                action = "delete"
+            elif bool(before_snapshot.get("is_deleted")) is True and bool(after_snapshot.get("is_deleted")) is False:
+                action = "restore"
+            _crm_log_lead_modification(org, row, changed_by=request.user, action=action, changes=changes)
         return JsonResponse({"lead": _serialize_crm_lead(row)})
 
     if resolved_method == "DELETE":
         if not _crm_can_edit_row(request.user, org, row):
             return JsonResponse({"detail": "forbidden"}, status=403)
+        before_snapshot = _crm_lead_snapshot(row)
         permanent = (
             str(request.GET.get("permanent") or "").strip().lower() in {"1", "true", "yes"}
             or bool((payload or {}).get("__crm_permanent"))
         )
         if permanent:
+            _crm_log_lead_modification(
+                org,
+                row,
+                changed_by=request.user,
+                action="delete_permanent",
+                changes=_crm_diff_snapshots(before_snapshot, {}),
+            )
             row.delete()
             return JsonResponse({"deleted": True, "permanent": True})
         row.is_deleted = True
@@ -7412,9 +7516,42 @@ def crm_leads(request, lead_id: int = None):
         row.deleted_by = request.user
         row.updated_by = request.user
         row.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "updated_at"])
+        after_snapshot = _crm_lead_snapshot(row)
+        _crm_log_lead_modification(
+            org,
+            row,
+            changed_by=request.user,
+            action="delete",
+            changes=_crm_diff_snapshots(before_snapshot, after_snapshot),
+        )
         return JsonResponse({"deleted": True})
 
     return JsonResponse({"detail": "invalid_method"}, status=405)
+
+
+@require_http_methods(["GET"])
+def crm_lead_history(request, lead_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    lead = CrmLead.objects.filter(organization=org, id=lead_id).select_related("assigned_user", "created_by").first()
+    if not lead:
+        return JsonResponse({"detail": "lead_not_found"}, status=404)
+    if not _crm_can_view_row(request.user, org, lead):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    reference_id = str(getattr(lead, "crm_reference_id", "") or "").strip()
+    rows = (
+        CrmLeadModification.objects
+        .filter(organization=org)
+        .filter(Q(lead_id=lead.id) | Q(lead_reference_id=reference_id))
+        .select_related("changed_by")
+        .order_by("-created_at")[:200]
+    )
+    return JsonResponse({"history": [_serialize_crm_lead_modification(row) for row in rows]})
 
 
 def _crm_sanitize_proposal_base_name(value):

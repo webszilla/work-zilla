@@ -14,6 +14,7 @@ urlpatterns = [
     path("contacts/<int:contact_id>", api_views.crm_contacts, name="business_autopilot_crm_contact_detail"),
     path("leads", api_views.crm_leads, name="business_autopilot_crm_leads"),
     path("leads/<int:lead_id>", api_views.crm_leads, name="business_autopilot_crm_lead_detail"),
+    path("leads/<int:lead_id>/history", api_views.crm_lead_history, name="business_autopilot_crm_lead_history"),
     path("leads/<int:lead_id>/proposals", api_views.crm_lead_proposals, name="business_autopilot_crm_lead_proposals"),
     path(
         "leads/<int:lead_id>/proposals/<int:proposal_id>",

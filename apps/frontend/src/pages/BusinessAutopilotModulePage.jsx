@@ -8512,6 +8512,7 @@ function CrmOnePageModule() {
   const [meetingPopup, setMeetingPopup] = useState(null);
   const [leadViewPopup, setLeadViewPopup] = useState(null);
   const [leadNotesPopup, setLeadNotesPopup] = useState(null);
+  const [leadHistoryPopup, setLeadHistoryPopup] = useState(null);
   const [leadDataPopupTab, setLeadDataPopupTab] = useState("notes");
   const [leadProposals, setLeadProposals] = useState([]);
   const [leadProposalsLoading, setLeadProposalsLoading] = useState(false);
@@ -14291,6 +14292,33 @@ function CrmOnePageModule() {
     setLeadProposalsSubTab("list");
   }
 
+  async function openLeadHistoryPopup(row) {
+    const normalizedLead = normalizeCrmLeadRecord(row);
+    const leadId = String(normalizedLead.id || "").trim();
+    if (!leadId) {
+      return;
+    }
+    setLeadHistoryPopup({
+      leadId,
+      leadName: String(normalizedLead.name || normalizedLead.company || "Lead").trim(),
+      crmReferenceId: String(normalizedLead.crmReferenceId || normalizedLead.crm_reference_id || "").trim(),
+      loading: true,
+      error: "",
+      rows: [],
+    });
+    try {
+      const data = await apiFetch(`/api/business-autopilot/leads/${encodeURIComponent(leadId)}/history`);
+      const historyRows = Array.isArray(data?.history) ? data.history : [];
+      setLeadHistoryPopup((prev) => (prev ? { ...prev, loading: false, rows: historyRows } : prev));
+    } catch (_error) {
+      setLeadHistoryPopup((prev) => (prev ? { ...prev, loading: false, error: "Unable to load modification history.", rows: [] } : prev));
+    }
+  }
+
+  function closeLeadHistoryPopup() {
+    setLeadHistoryPopup(null);
+  }
+
   async function refreshLeadProposals(leadId) {
     const normalizedLeadId = String(leadId || "").trim();
     if (!normalizedLeadId) {
@@ -18696,6 +18724,17 @@ function CrmOnePageModule() {
                       </button>
                     ) : null}
 	                    {sectionKey === "leads" ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                          title="Modification History"
+                          aria-label="Modification History"
+                          onClick={() => openLeadHistoryPopup(row)}
+                        >
+                          <i className="bi bi-clock-history" aria-hidden="true" />
+                        </button>
+                      ) : null}
+	                    {sectionKey === "leads" ? (
 	                      <button
 	                        type="button"
 	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
@@ -19186,6 +19225,81 @@ function CrmOnePageModule() {
                 </>
               );
             })()}
+          </div>
+        </div>
+      ) : null}
+      {leadHistoryPopup ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="modal-overlay wz-crm-popup-overlay"
+          onClick={closeLeadHistoryPopup}
+        >
+          <div
+            className="card p-3 wz-crm-popup"
+            style={{ width: "min(920px, 96vw)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h5 className="mb-1">Lead Modification History</h5>
+                <div className="small text-secondary">{[leadHistoryPopup.leadName, leadHistoryPopup.crmReferenceId].filter(Boolean).join(" • ") || "-"}</div>
+              </div>
+              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeLeadHistoryPopup}>
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            {leadHistoryPopup.loading ? (
+              <div className="text-secondary small">Loading history...</div>
+            ) : leadHistoryPopup.error ? (
+              <div className="alert alert-danger py-2 mb-0">{leadHistoryPopup.error}</div>
+            ) : (leadHistoryPopup.rows || []).length ? (
+              <div className="table-responsive">
+                <table className="table table-sm table-dark align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th style={{ whiteSpace: "nowrap" }}>Date</th>
+                      <th style={{ whiteSpace: "nowrap" }}>User</th>
+                      <th style={{ whiteSpace: "nowrap" }}>Action</th>
+                      <th>Changes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(leadHistoryPopup.rows || []).map((entry) => {
+                      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+                      const changeText = changes
+                        .map((change) => {
+                          const field = String(change?.field || "").trim() || "-";
+                          const oldValue = change?.old === null || typeof change?.old === "undefined" ? "-" : String(change.old);
+                          const newValue = change?.new === null || typeof change?.new === "undefined" ? "-" : String(change.new);
+                          return `${field}: ${oldValue} → ${newValue}`;
+                        })
+                        .filter(Boolean);
+                      return (
+                        <tr key={`lead-history-${entry?.id || entry?.created_at || Math.random()}`}>
+                          <td style={{ whiteSpace: "nowrap" }}>{formatDateTimeCellValue("created_at", entry?.created_at, "-")}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{String(entry?.changed_by_name || "").trim() || "-"}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{String(entry?.action || "").trim() || "-"}</td>
+                          <td className="small">
+                            {changeText.length ? (
+                              <div className="d-flex flex-column gap-1">
+                                {changeText.map((text, idx) => (
+                                  <div key={`lead-history-change-${entry?.id || "x"}-${idx}`} className="text-break">{text}</div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-secondary">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-secondary small">No modifications yet.</div>
+            )}
           </div>
         </div>
       ) : null}

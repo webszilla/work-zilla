@@ -545,6 +545,52 @@ class CrmLead(models.Model):
         return f"Lead({self.organization_id} - {self.lead_name})"
 
 
+class CrmLeadModification(models.Model):
+    ACTION_CHOICES = (
+        ("create", "create"),
+        ("update", "update"),
+        ("delete", "delete"),
+        ("delete_permanent", "delete_permanent"),
+        ("restore", "restore"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_crm_lead_modifications",
+    )
+    lead = models.ForeignKey(
+        CrmLead,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modifications",
+    )
+    lead_reference_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    lead_name = models.CharField(max_length=180, blank=True, default="")
+    action = models.CharField(max_length=40, choices=ACTION_CHOICES, default="update")
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_crm_lead_modifications",
+    )
+    changes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["organization", "lead", "created_at"]),
+            models.Index(fields=["organization", "lead_reference_id", "created_at"]),
+        ]
+
+    def __str__(self):
+        ref = str(self.lead_reference_id or "").strip() or f"lead:{self.lead_id}"
+        return f"{self.organization_id} {ref} {self.action}"
+
+
 def _crm_lead_proposal_upload_to(instance, filename: str):
     lead_id = getattr(instance, "lead_id", None) or "unknown"
     org_id = getattr(instance, "organization_id", None) or "unknown"
