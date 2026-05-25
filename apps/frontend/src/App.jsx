@@ -291,6 +291,20 @@ function hasBusinessAutopilotSectionAccess(accessRecord, sectionKey, isAdmin) {
   return value && value !== "No Access";
 }
 
+function hasBusinessAutopilotSectionFullAccess(accessRecord, sectionKey, isAdmin) {
+  if (isAdmin) {
+    return true;
+  }
+  if (!sectionKey) {
+    return false;
+  }
+  const sections = accessRecord?.sections || {};
+  const rawValue = sectionKey === "subscriptions"
+    ? (sections.subscriptions || sections.accounts || "No Access")
+    : (sections[sectionKey] || "No Access");
+  return normalizeBusinessAutopilotAccessLevel(rawValue) === "Full Access";
+}
+
 function hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, profileRole, isAdmin) {
   if (!isBusinessAutopilot || isAdmin) {
     return false;
@@ -1553,6 +1567,7 @@ function AppShell({ state, productPrefix, productSlug }) {
                           modules={autopilotModules}
                           catalog={autopilotCatalog}
                           canManageModules={autopilotCanManageModules}
+                          hasDashboardFullAccess={hasBusinessAutopilotSectionFullAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)}
                           isOrgAdmin={isAdmin}
                           onToggleModule={toggleAutopilotModule}
                           savingModuleSlug={autopilotSavingSlug}

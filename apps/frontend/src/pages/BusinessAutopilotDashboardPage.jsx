@@ -391,6 +391,7 @@ export default function BusinessAutopilotDashboardPage({
   modules = [],
   catalog = [],
   canManageModules = false,
+  hasDashboardFullAccess = false,
   onToggleModule,
   savingModuleSlug = "",
   moduleError = "",
@@ -817,8 +818,9 @@ export default function BusinessAutopilotDashboardPage({
     { key: "meetings", label: "Today Meetings", value: String(quickStats.todayMeetings || 0), icon: "bi-calendar-event", href: "#" },
     { key: "lastSignout", label: "My Last Signout", value: formatDateTime(quickStats.lastSignoutAt), icon: "bi-box-arrow-right", href: "#" },
   ];
-  const statCards = isOrgAdmin ? adminStatCards : userStatCards;
-  const showDashboardDetails = isOrgAdmin;
+  const useAdminDashboardView = isOrgAdmin || hasDashboardFullAccess;
+  const statCards = useAdminDashboardView ? adminStatCards : userStatCards;
+  const showDashboardDetails = useAdminDashboardView;
 
   const comparisonData = useMemo(() => {
     const invoiceRows = Array.isArray(accountsWorkspace?.invoices) ? accountsWorkspace.invoices : [];

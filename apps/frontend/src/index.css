@@ -1095,28 +1095,20 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .table td.table-actions :is(button, a, [role="button"])[aria-label],
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip],
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip],
-.app-shell .table :is(button, a, [role="button"])[title][aria-label],
-.app-shell .table :is(button, a, [role="button"])[data-tooltip],
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip],
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title],
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[aria-label],
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title],
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label],
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]{
   position: relative;
 }
 .table td.table-actions :is(button, a, [role="button"])[title]::after,
 .table td.table-actions :is(button, a, [role="button"])[aria-label]::after,
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]::after,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::after,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]::after,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]::after,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[aria-label]::after,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]::after,
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]::after,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]::after{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]::after{
   position: absolute;
   left: 50%;
   bottom: calc(100% + 10px);
@@ -1152,36 +1144,24 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .table td.table-actions :is(button, a, [role="button"])[title]::after{
   content: attr(title);
 }
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]::after,
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]::after,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]::after{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]::after{
   content: attr(title);
 }
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]::after{
   content: attr(data-tooltip);
 }
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]::after{
-  content: attr(data-tooltip);
-}
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::after{
-  content: attr(data-wz-tooltip);
-}
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]::after{
   content: attr(data-wz-tooltip);
 }
 .table td.table-actions :is(button, a, [role="button"])[title]::before,
 .table td.table-actions :is(button, a, [role="button"])[aria-label]::before,
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]::before,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]::before,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]::before,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]::before,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]::before,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]::before,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[aria-label]::before,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]::before,
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]::before,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]::before{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]::before{
   content: "";
   position: absolute;
   left: 50%;
@@ -1206,12 +1186,6 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]:focus-visible::after,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:hover::after,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::after,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]:hover::after,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]:focus-visible::after,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]:hover::after,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]:focus-visible::after,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]:hover::after,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]:hover::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]:focus-visible::after,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[aria-label]:hover::after,
@@ -1219,9 +1193,7 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]:hover::after,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]:focus-visible::after,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:hover::after,
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:focus-visible::after,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]:hover::after,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]:focus-visible::after{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:focus-visible::after{
   opacity: 1;
   visibility: visible;
   transform: translateX(-50%) translateY(0);
@@ -1234,12 +1206,6 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]:focus-visible::before,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:hover::before,
 .table td.table-actions :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::before,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]:hover::before,
-.app-shell .table :is(button, a, [role="button"])[title][aria-label]:focus-visible::before,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]:hover::before,
-.app-shell .table :is(button, a, [role="button"])[data-tooltip]:focus-visible::before,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]:hover::before,
-.app-shell .table :is(button, a, [role="button"])[data-wz-tooltip]:focus-visible::before,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]:hover::before,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[title]:focus-visible::before,
 .app-shell :is(button, a, [role="button"]).saas-org-icon-btn[aria-label]:hover::before,
@@ -1247,9 +1213,7 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]:hover::before,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[title]:focus-visible::before,
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:hover::before,
-.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:focus-visible::before,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]:hover::before,
-.app-shell :is(button, a, [role="button"]).btn[title][aria-label]:focus-visible::before{
+.app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]:focus-visible::before{
   opacity: 1;
   visibility: visible;
   transform: translateX(-50%) rotate(45deg) translateY(0);
@@ -2381,6 +2345,17 @@ html[data-theme="light"] .wz-users-create-fieldset:disabled .btn-primary{
 }
 .wz-users-tabs-row{
   padding-top: 15px;
+}
+.wz-access-preview-badge{
+  background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.14) !important;
+  border: 1px solid rgba(var(--color-primary-rgb, 79, 70, 229), 0.28);
+  color: var(--color-primary, #4f46e5) !important;
+  font-weight: 600;
+}
+html[data-theme="light"] .wz-access-preview-badge{
+  background: rgba(var(--color-primary-rgb, 29, 78, 216), 0.10) !important;
+  border-color: rgba(var(--color-primary-rgb, 29, 78, 216), 0.22);
+  color: var(--color-primary, #1d4ed8) !important;
 }
 .form-control[type="file"]::file-selector-button:hover,
 .form-control[type="file"]::-webkit-file-upload-button:hover{

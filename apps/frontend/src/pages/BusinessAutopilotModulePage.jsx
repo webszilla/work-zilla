@@ -3428,6 +3428,86 @@ function normalizeCrmAccessLevel(value) {
   return "No Access";
 }
 
+function getBusinessAutopilotSectionAccessLevel(accessRecord, sectionKey, fallback = "No Access") {
+  const sections = accessRecord?.sections || {};
+  if (sectionKey === "subscriptions") {
+    return normalizeCrmAccessLevel(sections.subscriptions || sections.accounts || fallback);
+  }
+  return normalizeCrmAccessLevel(sections[sectionKey] || fallback);
+}
+
+function canBusinessAutopilotSectionDelete({ accessRecord, sectionKey, isAdmin = false }) {
+  if (isAdmin) {
+    return true;
+  }
+  const sectionAccessLevel = getBusinessAutopilotSectionAccessLevel(accessRecord, sectionKey, "No Access");
+  return sectionAccessLevel === "Full Access" && Boolean(accessRecord?.can_delete);
+}
+
+function useBusinessAutopilotDeleteAccess(sectionKey) {
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDeleteAccess() {
+      try {
+        const [authData, roleAccessData, usersData] = await Promise.all([
+          apiFetch("/api/auth/me").catch(() => null),
+          apiFetch("/api/business-autopilot/role-access").catch(() => null),
+          apiFetch("/api/business-autopilot/users").catch(() => null),
+        ]);
+        if (!active) {
+          return;
+        }
+
+        const profileRole = String(authData?.profile?.access_role || authData?.profile?.role || authData?.user?.role || "").trim();
+        const profileRoleToken = normalizeCrmRoleToken(profileRole);
+        const currentEmail = String(authData?.user?.email || authData?.user?.username || "").trim().toLowerCase();
+        const directoryUsers = Array.isArray(usersData?.users) ? usersData.users : [];
+        const matchedUser = currentEmail
+          ? directoryUsers.find((row) => String(row?.email || "").trim().toLowerCase() === currentEmail)
+          : null;
+        const membershipRoleToken = normalizeCrmRoleToken(matchedUser?.role || "");
+        const employeeRole = String(matchedUser?.employee_role || authData?.profile?.employee_role || authData?.user?.employee_role || "").trim();
+        const roleAccessMap = (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map))
+          ? roleAccessData.role_access_map
+          : readCrmRoleAccessMapFromStorage();
+        const accessRecord = resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole);
+        const isAdmin = [
+          "company_admin",
+          "org_admin",
+          "owner",
+          "superadmin",
+          "super_admin",
+          "system_admin",
+        ].includes(profileRoleToken) || [
+          "company_admin",
+          "org_admin",
+        ].includes(membershipRoleToken);
+
+        setCanDelete(canBusinessAutopilotSectionDelete({ accessRecord, sectionKey, isAdmin }));
+      } catch {
+        if (active) {
+          setCanDelete(false);
+        }
+      }
+    }
+
+    loadDeleteAccess();
+    const refresh = () => loadDeleteAccess();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("wz:business-autopilot-role-access-changed", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("wz:business-autopilot-role-access-changed", refresh);
+    };
+  }, [sectionKey]);
+
+  return canDelete;
+}
+
 function readCrmRoleAccessMapFromStorage() {
   if (typeof window === "undefined") {
     return {};
@@ -8735,6 +8815,7 @@ function CrmOnePageModule() {
   const hasCrmAllRecordAccess = isCrmAdmin || hasCrmFullAccess || crmSectionAccessLevel === "Create, View and Edit All";
   const hasCrmEditAccess = isCrmAdmin || hasCrmAllRecordAccess || crmSectionAccessLevel === "View and Edit" || crmSectionAccessLevel === "Create, View and Edit Own";
   const canCreateCrmRows = isCrmAdmin || hasCrmAllRecordAccess || crmSectionAccessLevel === "Create, View and Edit Own";
+  const canDeleteCrmRows = canBusinessAutopilotSectionDelete({ accessRecord: crmRoleAccessRecord, sectionKey: "crm", isAdmin: isCrmAdmin });
 
   function isSoftDeletedCrmRow(row) {
     return Boolean(row?.isDeleted || row?.is_deleted) || Boolean(row?.deletedAt || row?.deleted_at);
@@ -8974,7 +9055,7 @@ function CrmOnePageModule() {
   }
 
   function canDeleteCrmRow(sectionKey, row) {
-    return Boolean(isCrmAdmin);
+    return Boolean(canDeleteCrmRows);
   }
 
   useEffect(() => {
@@ -9543,8 +9624,23 @@ function CrmOnePageModule() {
     [moduleData.teams]
   );
   const crmDirectoryOptions = useMemo(() => {
-    return [...crmDirectoryPool].sort((a, b) => a.name.localeCompare(b.name));
-  }, [crmDirectoryPool]);
+    const normalizedUserId = String(currentUserId || "").trim();
+    const normalizedUserEmail = String(currentUserEmail || "").trim().toLowerCase();
+    const normalizedUserName = String(currentUserName || "").trim().toLowerCase();
+    const isOwnOption = (row) => (
+      (normalizedUserId && String(row?.id || "").trim() === normalizedUserId)
+      || (normalizedUserEmail && String(row?.email || "").trim().toLowerCase() === normalizedUserEmail)
+      || (normalizedUserName && String(row?.name || "").trim().toLowerCase() === normalizedUserName)
+    );
+    return [...crmDirectoryPool].sort((a, b) => {
+      const aOwn = isOwnOption(a);
+      const bOwn = isOwnOption(b);
+      if (aOwn !== bOwn) {
+        return aOwn ? -1 : 1;
+      }
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+  }, [crmDirectoryPool, currentUserEmail, currentUserId, currentUserName]);
   const crmUserOptions = useMemo(
     () => Array.from(new Set(crmDirectoryOptions.map((row) => row.name))).sort((a, b) => a.localeCompare(b)),
     [crmDirectoryOptions]
@@ -17539,7 +17635,10 @@ function CrmOnePageModule() {
                                                     readOnly
                                                   />
                                                   <span>
-                                                    <span className="crm-inline-suggestions__item-main d-block">{user.name}</span>
+                                                    <span className="crm-inline-suggestions__item-main d-block">
+                                                      {user.name}
+                                                      {normalizedCurrentUserEmail && String(user.email || "").trim().toLowerCase() === normalizedCurrentUserEmail ? " (Own)" : ""}
+                                                    </span>
                                                     <span className="crm-inline-suggestions__item-sub">
                                                       {[user.department, user.employeeRole].filter(Boolean).join(" / ") || user.email || "-"}
                                                     </span>
@@ -18779,6 +18878,17 @@ function CrmOnePageModule() {
 	                        <i className="bi bi-eye" aria-hidden="true" />
 	                      </button>
 	                    ) : null}
+	                    {sectionKey === "leads" ? (
+	                      <button
+	                        type="button"
+	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                        data-wz-tooltip="Lead Notes & Proposals"
+                        aria-label="Lead Notes & Proposals"
+                        onClick={() => openLeadNotesPopup(row)}
+                      >
+                        <i className="bi bi-journal-text" aria-hidden="true" />
+	                      </button>
+	                    ) : null}
 	                    {sectionKey === "leads" && canCreateCrmRows && canEditCrmRow(sectionKey, row) ? (() => {
 	                      const linkedDeal = findLinkedDealForLead(row);
 	                      const leadRowId = String(row?.id || "").trim();
@@ -18814,17 +18924,6 @@ function CrmOnePageModule() {
 	                        </button>
 	                      );
 	                    })() : null}
-	                    {sectionKey === "leads" ? (
-	                      <button
-	                        type="button"
-	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-	                        data-wz-tooltip="Lead Notes & Proposals"
-                        aria-label="Lead Notes & Proposals"
-                        onClick={() => openLeadNotesPopup(row)}
-                      >
-                        <i className="bi bi-journal-text" aria-hidden="true" />
-	                      </button>
-	                    ) : null}
                     {sectionKey === "deals" ? (
                       <button
                         type="button"
@@ -20994,6 +21093,7 @@ function CrmOnePageModule() {
 
 function ProjectManagementModule() {
   const navigate = useNavigate();
+  const canDeleteProjectRows = useBusinessAutopilotDeleteAccess("projects");
   const [activeTab, setActiveTab] = useState("projects");
   const [moduleData, setModuleData] = useState(() => readProjectWorkspaceData());
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
@@ -22392,7 +22492,7 @@ function ProjectManagementModule() {
                     <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editProjectTeam(row)}>
                       Edit
                     </button>
-                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                    <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteProjectRows} onClick={() => onDeleteRow(row.id)}>
                       Delete
                     </button>
                   </div>
@@ -22651,7 +22751,7 @@ function ProjectManagementModule() {
             <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
               Edit
             </button>
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteProjectRows} onClick={() => onDeleteRow(row.id)}>
               Delete
             </button>
           </div>
@@ -23798,6 +23898,7 @@ export function HrManagementModule({
   );
   const hasHrFullAccess = Boolean(embeddedEmployeeOnly) || isHrAdmin || isHrPayrollManager || hrSectionAccessLevel === "Full Access";
   const hasHrSelfServiceAccess = Boolean(embeddedEmployeeOnly) || hasHrFullAccess || hrSectionAccessLevel !== "No Access";
+  const canHrDeleteRows = canBusinessAutopilotSectionDelete({ accessRecord: hrRoleAccessRecord, sectionKey: "hr", isAdmin: isHrAdmin || isHrPayrollManager });
 
   const attendanceActorName = String(effectiveCurrentUserName || currentHrEmployeeName || "Current User").trim() || "Current User";
   const attendanceActorEmail = String(effectiveCurrentUserEmail || currentHrEmployeeEmail || "").trim().toLowerCase();
@@ -27722,6 +27823,7 @@ export function HrManagementModule({
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-danger"
+                      disabled={!canHrDeleteRows}
                       onClick={() => requestDeleteAttendanceRow(row)}
                     >
                       Delete
@@ -27741,7 +27843,7 @@ export function HrManagementModule({
                         <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                           Edit
                         </button>
-                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
+                        <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canHrDeleteRows} onClick={() => onDeleteRow(row)}>
                           Delete
                         </button>
                       </>
@@ -27760,7 +27862,7 @@ export function HrManagementModule({
                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                     Edit
                   </button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
+                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canHrDeleteRows} onClick={() => onDeleteRow(row)}>
                     Delete
                   </button>
                 </div>
@@ -28328,6 +28430,8 @@ function CategoryCrudModule({
   const [inventorySubCategorySearchText, setInventorySubCategorySearchText] = useState("");
   const extraTabKeys = useMemo(() => (extraTabs || []).map((tab) => tab.key), [extraTabs]);
   const isStocksModule = storageKey === STOCKS_STORAGE_KEY;
+  const roleSectionKey = storageKey === TICKETING_STORAGE_KEY ? "ticketing" : (storageKey === STOCKS_STORAGE_KEY ? "stocks" : "");
+  const canDeleteCategoryRows = useBusinessAutopilotDeleteAccess(roleSectionKey);
   const isInventoryItemsTab = isStocksModule && activeTab === "items";
   const isInventoryAssetsTab = isStocksModule && activeTab === "assets";
   const inventoryBranches = useMemo(
@@ -29111,7 +29215,7 @@ function CategoryCrudModule({
                           <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onCategoryEditRow(tabKey, row)}>
                             Edit
                           </button>
-                          <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onCategoryDeleteRow(tabKey, row.id)}>
+                          <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteCategoryRows} onClick={() => onCategoryDeleteRow(tabKey, row.id)}>
                             Delete
                           </button>
                         </div>
@@ -29153,7 +29257,7 @@ function CategoryCrudModule({
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                 Edit
               </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row)}>
+              <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteCategoryRows} onClick={() => onDeleteRow(row)}>
                 Delete
               </button>
             </div>
@@ -29982,7 +30086,7 @@ function CategoryCrudModule({
                   <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                     Edit
                   </button>
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+                  <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteCategoryRows} onClick={() => onDeleteRow(row.id)}>
                     Delete
                   </button>
                 </div>
@@ -30008,7 +30112,7 @@ function CategoryCrudModule({
               <button type="button" className="btn btn-sm btn-outline-info" onClick={() => onEditRow(row)}>
                 Edit
               </button>
-              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+              <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteCategoryRows} onClick={() => onDeleteRow(row.id)}>
                 Delete
               </button>
             </div>
@@ -30067,6 +30171,7 @@ function TicketingSystemModule() {
 }
 
 function StocksManagementModule() {
+  const canDeleteStockRows = useBusinessAutopilotDeleteAccess("stocks");
   const [stockHistoryPopup, setStockHistoryPopup] = useState({
     open: false,
     itemName: "",
@@ -30679,7 +30784,7 @@ function StocksManagementModule() {
             >
               History
             </button>
-            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onDeleteRow(row.id)}>
+            <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteStockRows} onClick={() => onDeleteRow(row.id)}>
               Delete
             </button>
           </div>
@@ -30752,6 +30857,7 @@ function StocksManagementModule() {
 function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false, headingTitle = "Accounts" }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const canDeleteAccountsRows = useBusinessAutopilotDeleteAccess(subscriptionsOnly ? "subscriptions" : "accounts");
   const estimateEditorRef = useRef(null);
   const invoiceEditorRef = useRef(null);
   const suspendAccountsDraftAutoloadRef = useRef(false);
@@ -36018,12 +36124,12 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 	                <button type="button" className="btn btn-sm btn-outline-success" onClick={() => restoreDocument(kind, row.id)}>
 	                  Restore
 	                </button>
-	                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id, { permanent: true })}>
+	                <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteDocument(kind, row.id, { permanent: true })}>
 	                  Delete
 	                </button>
 	              </>
 	            ) : (
-	              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteDocument(kind, row.id)}>
+	              <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteDocument(kind, row.id)}>
 	                Delete
 	              </button>
 	            )}
@@ -36290,7 +36396,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             renderActions={(row) => (
               <div className="d-inline-flex gap-2">
                 <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editGstTemplate(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteGstTemplate(row.id)}>Delete</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteGstTemplate(row.id)}>Delete</button>
               </div>
             )}
           />
@@ -36667,7 +36773,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             renderActions={(row) => (
               <div className="d-inline-flex gap-2">
                 <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editCustomer(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteCustomer(row.id)}>Delete</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteCustomer(row.id)}>Delete</button>
               </div>
             )}
           />
@@ -36759,7 +36865,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 renderActions={(row) => (
                   <div className="d-inline-flex gap-2">
                     <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editItemMaster(row)}>Edit</button>
-                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteItemMaster(row.id)}>Delete</button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteItemMaster(row.id)}>Delete</button>
                   </div>
                 )}
               />
@@ -36794,7 +36900,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 renderActions={(row) => (
                   <div className="d-inline-flex gap-2">
                     <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editItemMaster(row)}>Edit</button>
-                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteItemMaster(row.id)}>Delete</button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteItemMaster(row.id)}>Delete</button>
                   </div>
                 )}
               />
@@ -36861,7 +36967,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             renderActions={(row) => (
               <div className="d-inline-flex gap-2">
                 <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editBillingTemplate(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteBillingTemplate(row.id)}>Delete</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteBillingTemplate(row.id)}>Delete</button>
               </div>
             )}
           />
@@ -37144,7 +37250,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionCategory(row)}>
                           Edit
                         </button>
-                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionCategory(row.id)}>
+                        <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteSubscriptionCategory(row.id)}>
                           Delete
                         </button>
                       </div>
@@ -37229,7 +37335,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                         <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionSubCategory(row)}>
                           Edit
                         </button>
-                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscriptionSubCategory(row.id)}>
+                        <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteSubscriptionSubCategory(row.id)}>
                           Delete
                         </button>
                       </div>
@@ -37460,7 +37566,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                     renderActions={(row) => (
                       <div className="d-inline-flex gap-2">
                         <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editSubscriptionDraft(row)}>Edit</button>
-                        <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
+                        <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteSubscription(row.id)}>Delete</button>
                       </div>
                     )}
                   />
@@ -37698,7 +37804,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                   <div className="d-inline-flex gap-2">
                     <button type="button" className="btn btn-sm btn-outline-info" onClick={() => openSubscriptionView(row)}>View</button>
                     <button type="button" className="btn btn-sm btn-outline-success" onClick={() => editSubscription(row)}>Edit</button>
-                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteSubscription(row.id)}>Delete</button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" disabled={!canDeleteAccountsRows} onClick={() => deleteSubscription(row.id)}>Delete</button>
                   </div>
                 )}
               />

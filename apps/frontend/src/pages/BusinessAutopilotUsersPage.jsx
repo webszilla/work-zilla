@@ -5039,7 +5039,7 @@ export default function BusinessAutopilotUsersPage() {
                       <th>Official Email</th>
                       <th>Dept / Designation</th>
                       <th>Status</th>
-                      <th className="table-actions">Action</th>
+                      <th className="table-actions text-end">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5060,8 +5060,8 @@ export default function BusinessAutopilotUsersPage() {
                             </div>
                           </td>
                           <td>{user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive")}</td>
-                          <td className="table-actions">
-                            <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                          <td className="table-actions text-end">
+                            <div className="d-flex align-items-center justify-content-end gap-2 flex-nowrap">
                               <button
                                 type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn"
@@ -5195,7 +5195,7 @@ export default function BusinessAutopilotUsersPage() {
                       <th>Official Email</th>
                       <th>Dept / Designation</th>
                       <th>Deleted At</th>
-                      <th>Action</th>
+                      <th className="text-end">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5216,8 +5216,8 @@ export default function BusinessAutopilotUsersPage() {
                             </div>
                           </td>
                           <td>{user.deleted_at ? new Date(user.deleted_at).toLocaleString() : "-"}</td>
-                          <td>
-                            <div className="d-inline-flex gap-2">
+                          <td className="text-end">
+                            <div className="d-flex justify-content-end gap-2">
                               <button
                                 type="button"
                                 className="btn btn-sm btn-outline-success"
@@ -5255,7 +5255,7 @@ export default function BusinessAutopilotUsersPage() {
                       <th>Official Email</th>
                       <th>Dept / Designation</th>
                       <th>Email Status</th>
-                      <th>Action</th>
+                      <th className="text-end">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5276,7 +5276,7 @@ export default function BusinessAutopilotUsersPage() {
                             </div>
                           </td>
                           <td>Pending</td>
-                          <td>
+                          <td className="text-end">
                             <button
                               type="button"
                               className="btn btn-sm btn-primary"
@@ -5726,14 +5726,14 @@ export default function BusinessAutopilotUsersPage() {
             <div className="small text-secondary mb-2">Enabled Access Preview</div>
             <div className="d-flex flex-wrap gap-2">
               {visibleRoleAccessSections.filter((section) => (selectedRoleAccess.sections?.[section.key] || "No Access") !== "No Access").map((section) => (
-                <span key={`rbac-preview-${section.key}`} className="badge text-bg-success">
+                <span key={`rbac-preview-${section.key}`} className="badge wz-access-preview-badge">
                   {section.label}: {selectedRoleAccess.sections?.[section.key]}
                 </span>
               ))}
               {USER_SUB_ACCESS_OPTIONS
                 .filter((item) => Boolean(selectedRoleAccess.user_sub_sections?.[item.key]?.enabled))
                 .map((item) => (
-                  <span key={`rbac-sub-preview-${item.key}`} className="badge text-bg-primary">
+                  <span key={`rbac-sub-preview-${item.key}`} className="badge wz-access-preview-badge">
                     Users/{item.label}: {selectedRoleAccess.user_sub_sections?.[item.key]?.access_level || "No Access"}
                   </span>
                 ))}
