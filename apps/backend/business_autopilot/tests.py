@@ -8,6 +8,7 @@ from apps.backend.business_autopilot.models import (
     CrmContact,
     CrmDeal,
     CrmLead,
+    OrganizationEmployeeRole,
     PayrollEntry,
     Payslip,
     CrmSalesOrder,
@@ -71,6 +72,16 @@ class BusinessAutopilotUserAccessTests(TestCase):
             product=self.wa_product,
             subscription_status="active",
         )
+        self.department = OrganizationDepartment.objects.create(
+            organization=self.org,
+            name="Sales",
+            is_active=True,
+        )
+        self.employee_role = OrganizationEmployeeRole.objects.create(
+            organization=self.org,
+            name="Executive",
+            is_active=True,
+        )
 
     def test_existing_org_user_requires_confirmation_and_keeps_password(self):
         existing_user = User.objects.create_user(
@@ -100,6 +111,9 @@ class BusinessAutopilotUserAccessTests(TestCase):
                 "last_name": "PR",
                 "email": "pr@gmail.com",
                 "password": "newpass456",
+                "phone_number": "+91 9999999999",
+                "department": self.department.name,
+                "employee_role": self.employee_role.name,
                 "role": "org_user",
             },
             content_type="application/json",
@@ -122,6 +136,9 @@ class BusinessAutopilotUserAccessTests(TestCase):
                 "first_name": "Pradeep",
                 "last_name": "PR",
                 "email": "pr@gmail.com",
+                "phone_number": "+91 9999999999",
+                "department": self.department.name,
+                "employee_role": self.employee_role.name,
                 "role": "org_user",
                 "confirm_existing_user": True,
             },
@@ -170,6 +187,43 @@ class BusinessAutopilotUserAccessTests(TestCase):
         self.assertTrue(payload["same_password_allowed"])
         self.assertFalse(payload["password_required"])
         self.assertEqual(payload["existing_products"][0]["slug"], "whatsapp-automation")
+
+    def test_bulk_user_import_accepts_excel_password_column_payload(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            "/api/business-autopilot/users",
+            data={
+                "bulk_import": True,
+                "rows": [
+                    {
+                        "first_name": "Asha",
+                        "last_name": "Devi",
+                        "email": "asha@example.com",
+                        "phone_number": "+91 9876543210",
+                        "password": "excelpass123",
+                        "department": "Operations",
+                        "employee_role": "Manager",
+                        "role": "org_user",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["import_summary"]["imported_count"], 1)
+        imported_user = User.objects.get(email="asha@example.com")
+        self.assertTrue(imported_user.check_password("excelpass123"))
+        membership = OrganizationUser.objects.get(organization=self.org, user=imported_user)
+        self.assertEqual(membership.department, "Operations")
+        self.assertEqual(membership.employee_role, "Manager")
+        self.assertTrue(
+            OrganizationDepartment.objects.filter(organization=self.org, name="Operations", is_active=True).exists()
+        )
+        self.assertTrue(
+            OrganizationEmployeeRole.objects.filter(organization=self.org, name="Manager", is_active=True).exists()
+        )
 
     def test_deleting_business_autopilot_user_only_revokes_that_product_access(self):
         product_user = User.objects.create_user(

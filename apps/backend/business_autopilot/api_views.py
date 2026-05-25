@@ -591,12 +591,32 @@ def _normalize_role_access_map(payload):
     raw_map = payload if isinstance(payload, dict) else {}
     normalized = {}
     user_sub_section_keys = ("employee", "clients", "vendors")
+    section_feature_keys = {
+        "dashboard": ("overview", "widgets", "analytics"),
+        "inbox": ("tickets", "messages", "followups"),
+        "crm": ("leads", "contacts", "deals", "sales_orders", "meetings", "reports"),
+        "hr": ("employees", "attendance", "payroll"),
+        "projects": ("projects", "tasks", "timeline"),
+        "accounts": ("customers", "vendors", "invoices"),
+        "subscriptions": ("plans", "renewals", "alerts"),
+        "ticketing": ("tickets", "categories", "assignments"),
+        "stocks": ("assets", "stock_entries", "reports"),
+        "users": ("directory", "roles", "permissions"),
+        "billing": ("summary", "transactions", "addons"),
+        "plans": ("plan_list", "upgrades", "history"),
+        "profile": ("account", "security", "activity"),
+    }
     for raw_key, raw_record in raw_map.items():
         key = str(raw_key or "").strip()
         if not key or len(key) > 200:
             continue
         record = raw_record if isinstance(raw_record, dict) else {}
         sections = record.get("sections") if isinstance(record.get("sections"), dict) else {}
+        raw_section_features = (
+            record.get("section_features")
+            if isinstance(record.get("section_features"), dict)
+            else {}
+        )
         raw_user_sub_sections = (
             record.get("user_sub_sections")
             if isinstance(record.get("user_sub_sections"), dict)
@@ -606,6 +626,17 @@ def _normalize_role_access_map(payload):
         for section_key in ROLE_ACCESS_SECTION_KEYS:
             raw_level = str(sections.get(section_key) or "No Access").strip()
             normalized_sections[section_key] = ROLE_ACCESS_LEVEL_ALIASES.get(raw_level, "No Access")
+        normalized_section_features = {}
+        for section_key, feature_keys in section_feature_keys.items():
+            raw_feature_record = (
+                raw_section_features.get(section_key)
+                if isinstance(raw_section_features.get(section_key), dict)
+                else {}
+            )
+            normalized_section_features[section_key] = {
+                feature_key: bool(raw_feature_record.get(feature_key, True))
+                for feature_key in feature_keys
+            }
         normalized_user_sub_sections = {}
         for sub_key in user_sub_section_keys:
             raw_sub_record = (
@@ -622,6 +653,7 @@ def _normalize_role_access_map(payload):
             }
         normalized[key] = {
             "sections": normalized_sections,
+            "section_features": normalized_section_features,
             "user_sub_sections": normalized_user_sub_sections,
             "can_export": bool(record.get("can_export")),
             "can_delete": bool(record.get("can_delete")),
@@ -1424,6 +1456,209 @@ def _extract_person_name(payload):
             last_name = " ".join(parts[1:]).strip()
 
     return first_name, last_name
+
+
+def _resolve_org_department_from_payload(org, payload):
+    department = str(payload.get("department") or "").strip()
+    department_id = payload.get("department_id")
+    if department_id not in (None, ""):
+        try:
+            department_id = int(department_id)
+        except (TypeError, ValueError):
+            return None, JsonResponse({"detail": "invalid_department"}, status=400)
+        selected_department = OrganizationDepartment.objects.filter(
+            organization=org, id=department_id, is_active=True
+        ).first()
+        if not selected_department:
+            return None, JsonResponse({"detail": "department_not_found"}, status=404)
+        return selected_department.name, None
+    if not department:
+        return None, JsonResponse({"detail": "department_required"}, status=400)
+    department_row, _ = OrganizationDepartment.objects.get_or_create(
+        organization=org,
+        name=department,
+        defaults={"is_active": True},
+    )
+    if not department_row.is_active:
+        department_row.is_active = True
+        department_row.save(update_fields=["is_active", "updated_at"])
+    return department_row.name, None
+
+
+def _resolve_org_employee_role_from_payload(org, payload):
+    employee_role = str(payload.get("employee_role") or "").strip()
+    employee_role_id = payload.get("employee_role_id")
+    if employee_role_id not in (None, ""):
+        try:
+            employee_role_id = int(employee_role_id)
+        except (TypeError, ValueError):
+            return None, JsonResponse({"detail": "invalid_employee_role"}, status=400)
+        selected_role = OrganizationEmployeeRole.objects.filter(
+            organization=org,
+            id=employee_role_id,
+            is_active=True,
+        ).first()
+        if not selected_role:
+            return None, JsonResponse({"detail": "employee_role_not_found"}, status=404)
+        return selected_role.name, None
+    if not employee_role:
+        return None, JsonResponse({"detail": "employee_role_required"}, status=400)
+    role_row, _ = OrganizationEmployeeRole.objects.get_or_create(
+        organization=org,
+        name=employee_role,
+        defaults={"is_active": True},
+    )
+    if not role_row.is_active:
+        role_row.is_active = True
+        role_row.save(update_fields=["is_active", "updated_at"])
+    return role_row.name, None
+
+
+def _create_or_attach_org_user(org, payload, *, requested_by):
+    first_name, last_name = _extract_person_name(payload)
+    name = " ".join([first_name, last_name]).strip()
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    phone_number = str(payload.get("phone_number") or "").strip()
+    confirm_existing_user = bool(payload.get("confirm_existing_user"))
+    role = (payload.get("role") or "org_user").strip().lower()
+    if role not in ERP_EMPLOYEE_ROLES:
+        role = "org_user"
+    if not phone_number:
+        return {"ok": False, "response": JsonResponse({"detail": "phone_required"}, status=400)}
+    department, department_error = _resolve_org_department_from_payload(org, payload)
+    if department_error:
+        return {"ok": False, "response": department_error}
+    employee_role, employee_role_error = _resolve_org_employee_role_from_payload(org, payload)
+    if employee_role_error:
+        return {"ok": False, "response": employee_role_error}
+    existing_user = User.objects.filter(email__iexact=email).first()
+    if not name or not email:
+        return {"ok": False, "response": JsonResponse({"detail": "name_email_required"}, status=400)}
+    if not existing_user and not password:
+        return {"ok": False, "response": JsonResponse({"detail": "password_required"}, status=400)}
+    if password and len(password) < 6:
+        return {"ok": False, "response": JsonResponse({"detail": "password_too_short"}, status=400)}
+
+    newly_created_user = False
+    plain_password_for_share = ""
+    with transaction.atomic():
+        if existing_user:
+            existing_profile = UserProfile.objects.filter(user=existing_user).first()
+            if existing_profile and existing_profile.organization_id and existing_profile.organization_id != org.id:
+                return {"ok": False, "response": JsonResponse({"detail": "email_belongs_to_another_organization"}, status=409)}
+            existing_products = _get_user_granted_products(existing_user)
+            already_has_business_autopilot = any(
+                product["slug"] == BUSINESS_AUTOPILOT_PRODUCT_SLUG for product in existing_products
+            )
+            if not already_has_business_autopilot and not confirm_existing_user:
+                return {
+                    "ok": False,
+                    "response": JsonResponse(
+                        {
+                            "detail": "existing_org_user_requires_confirmation",
+                            "message": "This user is already assigned to another product in this organization. The same password will continue to work.",
+                            "same_password_allowed": True,
+                            "existing_products": existing_products,
+                        },
+                        status=409,
+                    ),
+                }
+            if already_has_business_autopilot:
+                return {"ok": False, "response": JsonResponse({"detail": "user_already_assigned_to_business_autopilot"}, status=409)}
+            user = existing_user
+            if first_name or last_name:
+                user.first_name = first_name
+                user.last_name = last_name
+                user.save(update_fields=["first_name", "last_name"])
+            if existing_profile:
+                existing_profile.organization = org
+                existing_profile.role = role
+                existing_profile.phone_number = phone_number
+                existing_profile.save(update_fields=["organization", "role", "phone_number"])
+            else:
+                UserProfile.objects.create(
+                    user=user,
+                    organization=org,
+                    role=role,
+                    phone_number=phone_number,
+                )
+        else:
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                is_active=True,
+            )
+            UserProfile.objects.update_or_create(
+                user=user,
+                defaults={
+                    "organization": org,
+                    "role": role,
+                    "phone_number": phone_number,
+                },
+            )
+            newly_created_user = True
+            plain_password_for_share = str(password or "")
+
+        OrganizationUser.objects.update_or_create(
+            organization=org,
+            user=user,
+            defaults={
+                "role": role,
+                "employee_role": employee_role,
+                "department": department,
+                "is_active": True,
+                "is_deleted": False,
+                "deleted_at": None,
+            },
+        )
+        _grant_business_autopilot_access(user, requested_by, role)
+        _sync_org_users_to_plan_limit(org, requested_by=requested_by)
+
+    is_existing_user_added = bool(existing_user) and not newly_created_user
+    created_user_credentials = None
+    credential_delivery = {
+        "is_new_user": False,
+        "email_sent": False,
+        "status": "not_applicable",
+    }
+    if newly_created_user or is_existing_user_added:
+        login_url = PUBLIC_LOGIN_URL
+        password_for_share = plain_password_for_share if newly_created_user else "Use your existing password"
+        created_user_credentials = {
+            "name": _get_org_user_display_name(user),
+            "email": str(user.email or "").strip(),
+            "password": password_for_share,
+            "login_url": login_url,
+        }
+        mail_sent = send_templated_email(
+            user.email,
+            "Your Work Zilla login credentials",
+            "emails/business_autopilot_user_credentials.txt",
+            {
+                "name": created_user_credentials["name"] or "User",
+                "email": created_user_credentials["email"],
+                "password": password_for_share,
+                "login_url": login_url,
+                "organization_name": str(org.name or "").strip(),
+            },
+        )
+        credential_delivery = {
+            "is_new_user": bool(newly_created_user),
+            "email_sent": bool(mail_sent),
+            "status": "sent" if mail_sent else "failed",
+        }
+    return {
+        "ok": True,
+        "user": user,
+        "created_user_credentials": created_user_credentials,
+        "credential_delivery": credential_delivery,
+        "newly_created_user": newly_created_user,
+        "is_existing_user_added": is_existing_user_added,
+    }
 
 
 def _normalize_payroll_month(value):
@@ -2397,6 +2632,92 @@ def org_users(request):
     if request.method == "POST":
         if not can_manage_users:
             return JsonResponse({"detail": "forbidden"}, status=403)
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if payload.get("bulk_import") is True:
+            rows = payload.get("rows")
+            if not isinstance(rows, list) or not rows:
+                return JsonResponse({"detail": "rows_required"}, status=400)
+            results = []
+            imported_count = 0
+            skipped_count = 0
+            failed_count = 0
+            for index, row in enumerate(rows, start=1):
+                if not isinstance(row, dict):
+                    failed_count += 1
+                    results.append({
+                        "row_number": index,
+                        "email": "",
+                        "status": "failed",
+                        "detail": "invalid_row",
+                        "message": "Each imported row must be an object.",
+                    })
+                    continue
+                _sync_org_users_to_plan_limit(org, requested_by=request.user)
+                current_users = _safe_serialize_org_users(org)
+                current_meta = _build_org_user_meta(org, users=current_users)
+                if not current_meta.get("can_add_users"):
+                    failed_count += 1
+                    results.append({
+                        "row_number": index,
+                        "email": str(row.get("email") or "").strip().lower(),
+                        "status": "failed",
+                        "detail": "employee_limit_reached",
+                        "message": current_meta.get("limit_message") or "User limit reached. Add-on users required.",
+                    })
+                    continue
+                import_payload = dict(row)
+                import_payload["confirm_existing_user"] = True
+                result = _create_or_attach_org_user(org, import_payload, requested_by=request.user)
+                if not result.get("ok"):
+                    response = result.get("response")
+                    detail_payload = {}
+                    try:
+                        detail_payload = json.loads(response.content.decode("utf-8") or "{}")
+                    except Exception:
+                        detail_payload = {}
+                    detail = str(detail_payload.get("detail") or "import_failed").strip() or "import_failed"
+                    failed_count += 1
+                    results.append({
+                        "row_number": index,
+                        "email": str(row.get("email") or "").strip().lower(),
+                        "status": "failed",
+                        "detail": detail,
+                        "message": str(detail_payload.get("message") or detail).strip(),
+                    })
+                    continue
+                imported_count += 1
+                status = "created" if result.get("newly_created_user") else "attached"
+                if result.get("is_existing_user_added"):
+                    skipped_count += 0
+                results.append({
+                    "row_number": index,
+                    "email": str(getattr(result.get("user"), "email", "") or "").strip().lower(),
+                    "status": status,
+                    "detail": status,
+                    "message": "Imported successfully." if status == "created" else "Existing user linked successfully.",
+                })
+            _sync_org_users_to_plan_limit(org, requested_by=request.user)
+            payload = _build_org_users_response_payload(
+                org,
+                can_manage_users,
+                message=f"Imported {imported_count} user(s).",
+            )
+            payload["organization"] = {
+                "id": org.id,
+                "name": org.name,
+                "company_key": org.company_key,
+            }
+            payload["import_summary"] = {
+                "total_rows": len(rows),
+                "imported_count": imported_count,
+                "skipped_count": skipped_count,
+                "failed_count": failed_count,
+                "results": results,
+            }
+            return JsonResponse(payload)
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
         current_users = _safe_serialize_org_users(org)
         current_meta = _build_org_user_meta(org, users=current_users)
@@ -2409,167 +2730,11 @@ def org_users(request):
                 },
                 status=403,
             )
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
-        first_name, last_name = _extract_person_name(payload)
-        name = " ".join([first_name, last_name]).strip()
-        email = (payload.get("email") or "").strip().lower()
-        password = payload.get("password") or ""
-        phone_number = str(payload.get("phone_number") or "").strip()
-        confirm_existing_user = bool(payload.get("confirm_existing_user"))
-        role = (payload.get("role") or "org_user").strip().lower()
-        employee_role = (payload.get("employee_role") or "").strip()
-        employee_role_id = payload.get("employee_role_id")
-        department = (payload.get("department") or "").strip()
-        department_id = payload.get("department_id")
-        if role not in ERP_EMPLOYEE_ROLES:
-            role = "org_user"
-        if not phone_number:
-            return JsonResponse({"detail": "phone_required"}, status=400)
-        if not (department_id not in (None, "") or department):
-            return JsonResponse({"detail": "department_required"}, status=400)
-        if not (employee_role_id not in (None, "") or employee_role):
-            return JsonResponse({"detail": "employee_role_required"}, status=400)
-        if department_id not in (None, ""):
-            try:
-                department_id = int(department_id)
-            except (TypeError, ValueError):
-                return JsonResponse({"detail": "invalid_department"}, status=400)
-            selected_department = OrganizationDepartment.objects.filter(
-                organization=org, id=department_id, is_active=True
-            ).first()
-            if not selected_department:
-                return JsonResponse({"detail": "department_not_found"}, status=404)
-            department = selected_department.name
-        if employee_role_id not in (None, ""):
-            try:
-                employee_role_id = int(employee_role_id)
-            except (TypeError, ValueError):
-                return JsonResponse({"detail": "invalid_employee_role"}, status=400)
-            selected_role = OrganizationEmployeeRole.objects.filter(
-                organization=org,
-                id=employee_role_id,
-                is_active=True,
-            ).first()
-            if not selected_role:
-                return JsonResponse({"detail": "employee_role_not_found"}, status=404)
-            employee_role = selected_role.name
-        existing_user = User.objects.filter(email__iexact=email).first()
-        if not name or not email:
-            return JsonResponse({"detail": "name_email_required"}, status=400)
-        if not existing_user and not password:
-            return JsonResponse({"detail": "password_required"}, status=400)
-        if password and len(password) < 6:
-            return JsonResponse({"detail": "password_too_short"}, status=400)
-
-        newly_created_user = False
-        plain_password_for_share = ""
-        with transaction.atomic():
-            if existing_user:
-                existing_profile = UserProfile.objects.filter(user=existing_user).first()
-                if existing_profile and existing_profile.organization_id and existing_profile.organization_id != org.id:
-                    return JsonResponse({"detail": "email_belongs_to_another_organization"}, status=409)
-                existing_products = _get_user_granted_products(existing_user)
-                already_has_business_autopilot = any(
-                    product["slug"] == BUSINESS_AUTOPILOT_PRODUCT_SLUG for product in existing_products
-                )
-                if not already_has_business_autopilot and not confirm_existing_user:
-                    return JsonResponse(
-                        {
-                            "detail": "existing_org_user_requires_confirmation",
-                            "message": "This user is already assigned to another product in this organization. The same password will continue to work.",
-                            "same_password_allowed": True,
-                            "existing_products": existing_products,
-                        },
-                        status=409,
-                    )
-                if already_has_business_autopilot:
-                    return JsonResponse({"detail": "user_already_assigned_to_business_autopilot"}, status=409)
-                user = existing_user
-                if first_name or last_name:
-                    user.first_name = first_name
-                    user.last_name = last_name
-                    user.save(update_fields=["first_name", "last_name"])
-                if existing_profile:
-                    existing_profile.organization = org
-                    existing_profile.role = role
-                    existing_profile.phone_number = phone_number
-                    existing_profile.save(update_fields=["organization", "role", "phone_number"])
-                else:
-                    UserProfile.objects.create(
-                        user=user,
-                        organization=org,
-                        role=role,
-                        phone_number=phone_number,
-                    )
-            else:
-                user = User.objects.create_user(
-                    username=email,
-                    email=email,
-                    password=password,
-                    first_name=first_name,
-                    last_name=last_name,
-                    is_active=True,
-                )
-                UserProfile.objects.update_or_create(
-                    user=user,
-                    defaults={
-                        "organization": org,
-                        "role": role,
-                        "phone_number": phone_number,
-                    },
-                )
-                newly_created_user = True
-                plain_password_for_share = str(password or "")
-
-            OrganizationUser.objects.update_or_create(
-                organization=org,
-                user=user,
-                defaults={
-                    "role": role,
-                    "employee_role": employee_role,
-                    "department": department,
-                    "is_active": True,
-                    "is_deleted": False,
-                    "deleted_at": None,
-                },
-            )
-            _grant_business_autopilot_access(user, request.user, role)
-            _sync_org_users_to_plan_limit(org, requested_by=request.user)
-
-        is_existing_user_added = bool(existing_user) and not newly_created_user
-        if newly_created_user or is_existing_user_added:
-            login_url = PUBLIC_LOGIN_URL
-            password_for_share = (
-                plain_password_for_share
-                if newly_created_user
-                else "Use your existing password"
-            )
-            created_user_credentials = {
-                "name": _get_org_user_display_name(user),
-                "email": str(user.email or "").strip(),
-                "password": password_for_share,
-                "login_url": login_url,
-            }
-            mail_sent = send_templated_email(
-                user.email,
-                "Your Work Zilla login credentials",
-                "emails/business_autopilot_user_credentials.txt",
-                {
-                    "name": created_user_credentials["name"] or "User",
-                    "email": created_user_credentials["email"],
-                    "password": password_for_share,
-                    "login_url": login_url,
-                    "organization_name": str(org.name or "").strip(),
-                },
-            )
-            credential_delivery = {
-                "is_new_user": bool(newly_created_user),
-                "email_sent": bool(mail_sent),
-                "status": "sent" if mail_sent else "failed",
-            }
+        result = _create_or_attach_org_user(org, payload, requested_by=request.user)
+        if not result.get("ok"):
+            return result["response"]
+        created_user_credentials = result.get("created_user_credentials")
+        credential_delivery = result.get("credential_delivery") or credential_delivery
 
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
     payload = _build_org_users_response_payload(

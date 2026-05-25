@@ -222,6 +222,21 @@ async function downloadDocumentPdf(kind, id) {
   }
 }
 
+function truncateTableCellText(value, maxLength = 20) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "-";
+  }
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return (
+    <span title={text}>
+      {`${text.slice(0, Math.max(1, maxLength)).trimEnd()}...`}
+    </span>
+  );
+}
+
 const CRM_SECTION_CONFIG = {
 	  leads: {
 	    label: "Leads",
@@ -269,7 +284,7 @@ const CRM_SECTION_CONFIG = {
       { key: "email", label: "Email", placeholder: "contact@example.com" },
       { key: "phoneCountryCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: "+91" },
       { key: "phone", label: "Phone", placeholder: "Phone number" },
-      { key: "tag", label: "Tag", type: "select", options: ["Client", "Prospect", "Vendor"], defaultValue: "" }
+      { key: "tag", label: "Tag", type: "select", options: ["Client", "Vendor"], defaultValue: "" }
     ]
   },
 	  teams: {
@@ -575,8 +590,8 @@ const HR_TAB_CONFIG = {
     label: "Attendance",
     itemLabel: "Attendance Entry",
     columns: [
-      { key: "employee", label: "Employee" },
       { key: "date", label: "Date" },
+      { key: "employee", label: "Employee" },
       { key: "inTime", label: "In Time" },
       { key: "outTime", label: "Out Time" },
       { key: "workedHours", label: "Worked" },
@@ -638,6 +653,17 @@ const HR_TAB_CONFIG = {
     itemLabel: "Payroll Settings",
     columns: [],
     fields: [],
+  },
+  holidays: {
+    label: "Holiday List",
+    itemLabel: "Holiday",
+    columns: [
+      { key: "date", label: "Date" },
+      { key: "occasion", label: "Occasion" },
+      { key: "day", label: "Day" },
+      { key: "type", label: "Type" },
+    ],
+    fields: [],
   }
 };
 
@@ -646,6 +672,7 @@ const DEFAULT_HR_DATA = {
     { id: "e1", name: "Guru", department: "Engineering", designation: "Project Lead" },
     { id: "e2", name: "Nithya", department: "HR", designation: "HR Executive" }
   ],
+  workingShifts: [],
   attendance: [
     { id: "a1", employee: "Guru", date: "2026-02-19", entryMode: "HR Side", inTime: "09:10", outTime: "18:05", workedHours: "8h 55m", status: "Present", notes: "" },
     { id: "a2", employee: "Nithya", date: "2026-02-19", entryMode: "User Side", inTime: "09:25", outTime: "17:48", workedHours: "8h 23m", status: "Present", notes: "" }
@@ -661,6 +688,7 @@ const DEFAULT_HR_DATA = {
   salaryStructures: [],
   payslips: [],
   payrollSettings: [],
+  holidays: [],
 };
 
 const TICKETING_TAB_CONFIG = {
@@ -753,7 +781,7 @@ const STOCKS_TAB_CONFIG = {
     ]
   },
   assets: {
-    label: "Assets",
+    label: "Office Assets",
     itemLabel: "Asset",
     columns: [
       { key: "assetName", label: "Asset Name" },
@@ -2851,16 +2879,28 @@ function _purgeOldDeletedAttendanceRows(rows, days = 60) {
 }
 
 function normalizeHrData(value) {
+  const dataKeys = [...Object.keys(HR_TAB_CONFIG), "workingShifts"];
+  const base = Object.fromEntries(
+    dataKeys.map((key) => [key, Array.isArray(DEFAULT_HR_DATA[key]) ? [...DEFAULT_HR_DATA[key]] : []])
+  );
   if (!value || typeof value !== "object") {
-    return Object.fromEntries(
-      Object.keys(HR_TAB_CONFIG).map((key) => [key, Array.isArray(DEFAULT_HR_DATA[key]) ? [...DEFAULT_HR_DATA[key]] : []])
-    );
+    return base;
   }
-  const next = {};
-  Object.keys(HR_TAB_CONFIG).forEach((key) => {
+  const next = { ...base };
+  dataKeys.forEach((key) => {
     const rows = Array.isArray(value[key]) ? value[key] : [];
     if (key === "attendance") {
       next[key] = _purgeOldDeletedAttendanceRows(rows).map((row) => _normalizeDeletedAttendanceRow(row));
+      return;
+    }
+    if (key === "workingShifts") {
+      next[key] = rows.map((row) => {
+        if (!row || typeof row !== "object") return row;
+        const assignedUserIds = Array.isArray(row.assignedUserIds)
+          ? row.assignedUserIds.map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        return { ...row, assignedUserIds };
+      });
       return;
     }
     next[key] = rows;
@@ -3501,7 +3541,7 @@ function normalizeCrmContactTag(value) {
     return "Client";
   }
   if (normalized === "prospect") {
-    return "Prospect";
+    return "Client";
   }
   if (normalized === "vendor" || normalized === "vendors") {
     return "Vendor";
@@ -5780,19 +5820,19 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                 {saveMessage ? <span className="small text-success">{saveMessage}</span> : null}
               </div>
               <div className="row g-3">
-                <div className="col-12">
+                <div className="col-12 col-md-6 col-xl-3">
                   <div className="small text-secondary mb-1">Company Name</div>
                   <div className="fw-semibold">{organizationProfileForm.organizationName || "-"}</div>
                 </div>
-                <div className="col-12 col-md-6">
+                <div className="col-12 col-md-6 col-xl-3">
                   <div className="small text-secondary mb-1">Country</div>
                   <div className="fw-semibold">{organizationProfileForm.country || "-"}</div>
                 </div>
-                <div className="col-12 col-md-6">
+                <div className="col-12 col-md-6 col-xl-3">
                   <div className="small text-secondary mb-1">Currency</div>
                   <div className="fw-semibold">{organizationProfileForm.currency || "-"}</div>
                 </div>
-                <div className="col-12">
+                <div className="col-12 col-md-6 col-xl-3">
                   <div className="small text-secondary mb-1">Timezone</div>
                   <div className="fw-semibold">{organizationProfileForm.timezone || "-"}</div>
                 </div>
@@ -5818,20 +5858,20 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
                     Enable ESI
                   </label>
                 </div>
-                <div className="row g-3" style={{ paddingTop: "35px" }}>
-                  <div className="col-12 col-md-6">
+                <div className="row g-3" style={{ paddingTop: "10px" }}>
+                  <div className="col-12 col-md-6 col-xl-3">
                     <label className="form-label small text-secondary mb-1">PF Employee %</label>
                     <input className="form-control" value={payrollSettingsForm.pfEmployeePercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, pfEmployeePercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enablePf} />
                   </div>
-                  <div className="col-12 col-md-6">
+                  <div className="col-12 col-md-6 col-xl-3">
                     <label className="form-label small text-secondary mb-1">PF Employer %</label>
                     <input className="form-control" value={payrollSettingsForm.pfEmployerPercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, pfEmployerPercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enablePf} />
                   </div>
-                  <div className="col-12 col-md-6">
+                  <div className="col-12 col-md-6 col-xl-3">
                     <label className="form-label small text-secondary mb-1">ESI Employee %</label>
                     <input className="form-control" value={payrollSettingsForm.esiEmployeePercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, esiEmployeePercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enableEsi} />
                   </div>
-                  <div className="col-12 col-md-6">
+                  <div className="col-12 col-md-6 col-xl-3">
                     <label className="form-label small text-secondary mb-1">ESI Employer %</label>
                     <input className="form-control" value={payrollSettingsForm.esiEmployerPercent || ""} onChange={(e) => setPayrollSettingsForm((prev) => ({ ...prev, esiEmployerPercent: e.target.value }))} disabled={!canManagePayroll || !payrollSettingsForm.enableEsi} />
                   </div>
@@ -6114,6 +6154,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         </div>
         <SearchablePaginatedTableCard
           title="Salary Structure Templates"
+          withoutOuterCard
           badgeLabel={`${(workspace.salaryStructures || []).length} items`}
           rows={workspace.salaryStructures || []}
           columns={[
@@ -6140,6 +6181,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         />
         <SearchablePaginatedTableCard
           title="Salary History"
+          withoutOuterCard
           badgeLabel={`${(workspace.salaryHistory || []).length} items`}
           rows={workspace.salaryHistory || []}
           columns={[
@@ -6412,6 +6454,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       {saveError ? <div className="small text-danger">{saveError}</div> : null}
       <SearchablePaginatedTableCard
         title="Payroll Entries"
+        withoutOuterCard
         badgeLabel={`${(workspace.payrollEntries || []).length} items`}
         rows={workspace.payrollEntries || []}
         columns={[
@@ -6939,6 +6982,7 @@ function SearchablePaginatedTableCard({
   searchPlaceholder = "Search",
   searchBy,
   pageSize = DEFAULT_TABLE_PAGE_SIZE,
+  hidePagination = false,
   withoutOuterCard = false,
   headerBottom = null,
   initialSearchTerm = "",
@@ -7416,14 +7460,16 @@ function SearchablePaginatedTableCard({
         <div className="table-info">
           Showing {startEntry} to {endEntry} of {totalItems} entries
         </div>
-        <TablePagination
-          page={safePage}
-          totalPages={totalPages}
-          onPageChange={setPage}
-          showPageLinks
-          showPageLabel={false}
-          maxPageLinks={5}
-        />
+        {!hidePagination && totalPages > 1 ? (
+          <TablePagination
+            page={safePage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            showPageLinks
+            showPageLabel={false}
+            maxPageLinks={5}
+          />
+        ) : null}
       </div>
       {importSummary.open ? (
         <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setImportSummary((prev) => ({ ...prev, open: false }))}>
@@ -14265,6 +14311,7 @@ function CrmOnePageModule() {
 	      status: String(normalizedLead.status || "Open").trim() || "Open",
 	      noteDate: new Date().toISOString().slice(0, 10),
 	      noteText: "",
+	      editingNoteId: "",
 	      error: "",
       history: Array.isArray(normalizedLead.leadNotesHistory) ? normalizedLead.leadNotesHistory : [],
       finalProposalAmount: String(normalizedLead.finalProposalAmount || "").trim(),
@@ -14812,8 +14859,9 @@ function CrmOnePageModule() {
       setLeadNotesPopup((prev) => (prev ? { ...prev, error: "Date and notes are required." } : prev));
       return;
     }
+    const editingNoteId = String(leadNotesPopup.editingNoteId || "").trim();
     const nextEntry = {
-      id: `lead_note_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: editingNoteId || `lead_note_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       noteDate,
       noteText,
       createdAt: new Date().toISOString(),
@@ -14825,9 +14873,16 @@ function CrmOnePageModule() {
           return row;
         }
         const normalizedRow = normalizeCrmLeadRecord(row);
+        const currentHistory = Array.isArray(normalizedRow.leadNotesHistory) ? normalizedRow.leadNotesHistory : [];
         return {
           ...normalizedRow,
-          leadNotesHistory: [nextEntry, ...(normalizedRow.leadNotesHistory || [])],
+          leadNotesHistory: editingNoteId
+            ? currentHistory.map((entry) => (
+              String(entry?.id || "").trim() === editingNoteId
+                ? { ...entry, noteDate, noteText }
+                : entry
+            ))
+            : [nextEntry, ...currentHistory],
         };
       }),
     }));
@@ -14837,11 +14892,72 @@ function CrmOnePageModule() {
             ...prev,
             noteDate: new Date().toISOString().slice(0, 10),
             noteText: "",
+            editingNoteId: "",
             error: "",
-            history: [nextEntry, ...(prev.history || [])],
+            history: editingNoteId
+              ? (prev.history || []).map((entry) => (
+                String(entry?.id || "").trim() === editingNoteId
+                  ? { ...entry, noteDate, noteText }
+                  : entry
+              ))
+              : [nextEntry, ...(prev.history || [])],
           }
         : prev
     ));
+  }
+
+  function editLeadNoteEntry(noteRow = {}) {
+    const noteId = String(noteRow?.id || "").trim();
+    if (!noteId) {
+      return;
+    }
+    setLeadNotesPopup((prev) => (
+      prev
+        ? {
+            ...prev,
+            noteDate: String(noteRow?.noteDate || "").trim() || new Date().toISOString().slice(0, 10),
+            noteText: String(noteRow?.noteText || "").trim(),
+            editingNoteId: noteId,
+            error: "",
+          }
+        : prev
+    ));
+  }
+
+  function deleteLeadNoteEntry(noteRow = {}) {
+    if (!leadNotesPopup) {
+      return;
+    }
+    const noteId = String(noteRow?.id || "").trim();
+    if (!noteId) {
+      return;
+    }
+    const leadId = String(leadNotesPopup.leadId || "").trim();
+    setModuleData((prev) => ({
+      ...prev,
+      leads: (prev.leads || []).map((row) => {
+        if (String(row?.id || "").trim() !== leadId) {
+          return row;
+        }
+        const normalizedRow = normalizeCrmLeadRecord(row);
+        return {
+          ...normalizedRow,
+          leadNotesHistory: (normalizedRow.leadNotesHistory || []).filter((entry) => String(entry?.id || "").trim() !== noteId),
+        };
+      }),
+    }));
+    setLeadNotesPopup((prev) => {
+      if (!prev) return prev;
+      const wasEditing = String(prev.editingNoteId || "").trim() === noteId;
+      return {
+        ...prev,
+        noteDate: wasEditing ? new Date().toISOString().slice(0, 10) : prev.noteDate,
+        noteText: wasEditing ? "" : prev.noteText,
+        editingNoteId: wasEditing ? "" : prev.editingNoteId,
+        error: "",
+        history: (prev.history || []).filter((entry) => String(entry?.id || "").trim() !== noteId),
+      };
+    });
   }
 
   function appendLeadMeetingNote(crmReferenceId, { noteDate, title, status }) {
@@ -15669,9 +15785,10 @@ function CrmOnePageModule() {
           </div>
         </div>
 
-        <div className="text-secondary small mt-2">
+        <div className="text-secondary small mt-3 mb-3">
           PDF export includes infographic layout. Excel export contains raw data (Summary, Performance, Lead Details).
         </div>
+        <hr className="my-0 mb-4" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
 
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-4 mb-2">
           <div className="fw-semibold">Lead Details</div>
@@ -15900,7 +16017,6 @@ function CrmOnePageModule() {
         const contactTagTabs = [
           { key: "all", label: "All" },
           { key: "client", label: "Clients" },
-          { key: "prospect", label: "Prospect" },
           { key: "vendor", label: "Vendors" },
         ];
         const dealStatusTabs = [
@@ -16611,7 +16727,7 @@ function CrmOnePageModule() {
 	                          <button
 	                            type="button"
 	                            className="btn btn-sm btn-outline-light"
-	                            title="View Sales Order"
+	                            data-wz-tooltip="View Sales Order"
                             aria-label="View Sales Order"
                             onClick={() => openCrmSalesOrderViewPopup(row)}
                           >
@@ -16645,7 +16761,7 @@ function CrmOnePageModule() {
 		                                }`}
 		                                onClick={handleConvertClick}
 		                                disabled={isDisabled}
-		                                title={isDisabled ? undefined : title}
+		                                data-wz-tooltip={isDisabled ? undefined : title}
 		                                aria-label={title}
 		                              >
 		                                {hasEstimate || hasInvoice ? (
@@ -16670,7 +16786,7 @@ function CrmOnePageModule() {
 	                          <button
 	                            type="button"
 	                            className="btn btn-sm btn-outline-light"
-                            title="Download PDF"
+	                            data-wz-tooltip="Download PDF"
                             aria-label="Download PDF"
                             onClick={() => downloadDocumentPdf("salesOrder", row.id)}
                           >
@@ -16679,7 +16795,7 @@ function CrmOnePageModule() {
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-info"
-                            title="Edit Sales Order"
+                            data-wz-tooltip="Edit Sales Order"
                             aria-label="Edit Sales Order"
                             onClick={() => editCrmSalesOrder(row)}
                           >
@@ -16689,7 +16805,7 @@ function CrmOnePageModule() {
                             <button
                               type="button"
                               className="btn btn-sm btn-outline-danger"
-                              title="Delete Sales Order"
+                              data-wz-tooltip="Delete Sales Order"
                               aria-label="Delete Sales Order"
                               onClick={() => onDelete(sectionKey, row.id)}
                             >
@@ -18603,6 +18719,12 @@ function CrmOnePageModule() {
                     const amount = parseNumber(row[column.key]);
                     return amount ? formatCurrencyAmount(amount, crmCurrencyCode) : "-";
                   }
+                  if (
+                    sectionKey === "leads"
+                    && ["name", "company", "status", "priority"].includes(column.key)
+                  ) {
+                    return truncateTableCellText(formatDateLikeCellValue(column.key, row[column.key], "-"), 20);
+                  }
                   if (sectionKey === "deals" && (column.key === "dealValueExpected" || column.key === "wonAmountFinal")) {
                     const amount = parseNumber(row[column.key]);
                     return amount ? formatCurrencyAmount(amount, crmCurrencyCode) : "-";
@@ -18650,7 +18772,7 @@ function CrmOnePageModule() {
 	                      <button
 	                        type="button"
 	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-	                        title="View Lead"
+	                        data-wz-tooltip="View Lead"
 	                        aria-label="View Lead"
 	                        onClick={() => openLeadViewPopup(row)}
 	                      >
@@ -18668,7 +18790,7 @@ function CrmOnePageModule() {
                             type="button"
                             className="btn btn-sm btn-outline-success saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                             onClick={() => openLinkedDealFromLead(row)}
-                            title="Open Converted Deal"
+                            data-wz-tooltip="Open Converted Deal"
                             aria-label="Open Converted Deal"
                           >
                             <i className="bi bi-hand-thumbs-up" aria-hidden="true" />
@@ -18681,7 +18803,7 @@ function CrmOnePageModule() {
                           className="btn btn-sm btn-outline-info saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                           onClick={() => onConvertLeadToDeal(row)}
                           disabled={isStatusBlocked || isConverting}
-                          title={isConverting ? "Converting..." : "Click to Convert"}
+                          data-wz-tooltip={isConverting ? "Converting..." : "Click to Convert"}
                           aria-label={isConverting ? "Converting..." : "Click to Convert"}
                         >
                           <i
@@ -18692,11 +18814,22 @@ function CrmOnePageModule() {
 	                        </button>
 	                      );
 	                    })() : null}
+	                    {sectionKey === "leads" ? (
+	                      <button
+	                        type="button"
+	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                        data-wz-tooltip="Lead Notes & Proposals"
+                        aria-label="Lead Notes & Proposals"
+                        onClick={() => openLeadNotesPopup(row)}
+                      >
+                        <i className="bi bi-journal-text" aria-hidden="true" />
+	                      </button>
+	                    ) : null}
                     {sectionKey === "deals" ? (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-                        title="View Deal"
+                        data-wz-tooltip="View Deal"
                         aria-label="View Deal"
                         onClick={() => openDealViewPopup(row)}
                       >
@@ -18727,24 +18860,13 @@ function CrmOnePageModule() {
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-                          title="Modification History"
+                          data-wz-tooltip="Modification History"
                           aria-label="Modification History"
                           onClick={() => openLeadHistoryPopup(row)}
                         >
                           <i className="bi bi-clock-history" aria-hidden="true" />
                         </button>
                       ) : null}
-	                    {sectionKey === "leads" ? (
-	                      <button
-	                        type="button"
-	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-	                        title="Lead Notes"
-                        aria-label="Lead Notes"
-                        onClick={() => openLeadNotesPopup(row)}
-                      >
-                        <i className="bi bi-journal-text" aria-hidden="true" />
-	                      </button>
-	                    ) : null}
                     {sectionKey === "contacts" && canEditCrmRow(sectionKey, row) ? (
                       <button
                         type="button"
@@ -19312,7 +19434,7 @@ function CrmOnePageModule() {
         >
           <div
             className="card p-3 wz-crm-popup"
-            style={{ width: "min(760px, 96vw)" }}
+            style={{ width: "min(810px, 96vw)" }}
             onClick={(event) => event.stopPropagation()}
 	          >
 	            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -19388,7 +19510,30 @@ function CrmOnePageModule() {
                     </div>
                     <div className="col-12 col-md-2 d-flex flex-column">
                       <label className="form-label small mb-1 opacity-0 user-select-none">Submit</label>
-                      <button type="submit" className="btn btn-success w-100">Submit</button>
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-success w-100">
+                          {leadNotesPopup?.editingNoteId ? "Update" : "Submit"}
+                        </button>
+                        {leadNotesPopup?.editingNoteId ? (
+                          <button
+                            type="button"
+                            className="btn btn-outline-light"
+                            onClick={() => setLeadNotesPopup((prev) => (
+                              prev
+                                ? {
+                                    ...prev,
+                                    noteDate: new Date().toISOString().slice(0, 10),
+                                    noteText: "",
+                                    editingNoteId: "",
+                                    error: "",
+                                  }
+                                : prev
+                            ))}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </form>
                 ) : null}
@@ -19398,7 +19543,8 @@ function CrmOnePageModule() {
 		                  rows={leadNotesPopup.history || []}
 	                  columns={[
 	                    { key: "noteDate", label: "Date", thStyle: { width: "25%" }, tdStyle: { width: "25%", whiteSpace: "nowrap" } },
-	                    { key: "noteText", label: "Notes", thStyle: { width: "75%" }, tdStyle: { width: "75%" } },
+	                    { key: "noteText", label: "Notes", thStyle: { width: "55%" }, tdStyle: { width: "55%" } },
+                      { key: "__actions", label: "Action", thStyle: { width: "20%", whiteSpace: "nowrap" }, tdStyle: { width: "20%", whiteSpace: "nowrap" } },
 	                  ]}
 	                  pageSize={DEFAULT_TABLE_PAGE_SIZE}
 	                  withoutOuterCard
@@ -19408,6 +19554,26 @@ function CrmOnePageModule() {
 	                  renderCells={(row) => [
 	                    formatDateLikeCellValue("noteDate", row.noteDate, "-"),
 	                    row.noteText || "-",
+                      (
+                        <div className="d-flex gap-2 justify-content-end">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-light"
+                            title="Edit note"
+                            onClick={() => editLeadNoteEntry(row)}
+                          >
+                            <i className="bi bi-pencil" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            title="Delete note"
+                            onClick={() => deleteLeadNoteEntry(row)}
+                          >
+                            <i className="bi bi-trash" aria-hidden="true" />
+                          </button>
+                        </div>
+                      ),
 	                  ]}
 		                />
 		              </>
@@ -19432,7 +19598,7 @@ function CrmOnePageModule() {
 					                  const isNewProposal = leadProposalBaseChoice === "__new__" || baseNames.length === 0;
                             const isProposalLockedForLead = Boolean(leadNotesPopup?.proposalFinalizedAt)
                               && String(leadNotesPopup?.status || "").trim().toLowerCase() === "converted";
-					                  return isProposalLockedForLead ? null : (
+					                  return isProposalLockedForLead || leadProposalsSubTab !== "list" ? null : (
 					                    <>
 				                      {baseNames.length && isNewProposal ? (
 				                        <div className="row g-3 mb-3">
@@ -19490,9 +19656,10 @@ function CrmOnePageModule() {
 			                              type="text"
 			                              className="form-control"
 			                              placeholder="Enter Proposal Document Name"
+			                              maxLength={15}
 			                              value={leadProposalName}
 			                              onChange={(event) => {
-			                                setLeadProposalName(event.target.value);
+			                                setLeadProposalName(String(event.target.value || "").slice(0, 15));
 			                                setLeadProposalUploadError("");
 			                              }}
 			                            />
@@ -19529,7 +19696,7 @@ function CrmOnePageModule() {
 				                  );
 				                })()}
 					                <hr className="my-0 mb-3" style={{ borderColor: "rgba(170, 180, 190, 0.65)" }} />
-						                <div className="d-flex flex-wrap gap-2 mb-2">
+						                <div className="d-flex flex-wrap gap-2 mb-3">
 						                  <button
 						                    type="button"
 						                    className={`btn btn-sm ${leadProposalsSubTab === "list" ? "btn-success" : "btn-outline-light"}`}
@@ -22238,7 +22405,7 @@ function ProjectManagementModule() {
         <>
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
-        <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+        <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           {projectFormNotice ? (
             <div className="alert alert-danger py-2 mb-0">{projectFormNotice}</div>
           ) : null}
@@ -22433,7 +22600,7 @@ function ProjectManagementModule() {
         badgeLabel={`${currentRows.length} items`}
         rows={currentRows}
         columns={config.columns}
-        withoutOuterCard={activeTab === "projects"}
+        withoutOuterCard={activeTab === "projects" || activeTab === "employees"}
         searchPlaceholder={`Search ${config.label.toLowerCase()}`}
         noRowsText={`No ${config.label.toLowerCase()} yet.`}
         headerBottom={activeTab === "projects" ? (
@@ -23506,6 +23673,7 @@ export function HrManagementModule({
   currentUserEmployeeRole = "",
   roleAccessMap = {},
 }) {
+  const WORKING_SHIFT_NAME_MAX = 40;
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
   const [hrFormNotice, setHrFormNotice] = useState("");
@@ -23553,6 +23721,7 @@ export function HrManagementModule({
     open: false,
     row: null,
   });
+  const [attendanceHistoryPopup, setAttendanceHistoryPopup] = useState(null);
   const [employeeViewModal, setEmployeeViewModal] = useState({ open: false, row: null });
   const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
   const [attendanceMonthFilter, setAttendanceMonthFilter] = useState("");
@@ -23561,8 +23730,39 @@ export function HrManagementModule({
   const [attendanceUserFilter, setAttendanceUserFilter] = useState("");
   const [attendanceFromDate, setAttendanceFromDate] = useState("");
   const [attendanceToDate, setAttendanceToDate] = useState("");
+  const hrEntryFormRef = useRef(null);
   const attendanceFromInputRef = useRef(null);
   const attendanceToInputRef = useRef(null);
+  const [holidayYear, setHolidayYear] = useState("");
+  const [holidayMonth, setHolidayMonth] = useState("");
+  const [holidayModal, setHolidayModal] = useState({
+    open: false,
+    mode: "add", // add | edit
+    id: "",
+    date: "",
+    occasion: "",
+    type: "Holiday",
+  });
+  const [shiftModal, setShiftModal] = useState({
+    open: false,
+    mode: "add", // add | edit
+    id: "",
+    name: "",
+    fromTime: "09:00",
+    toTime: "18:00",
+  });
+  const [shiftAssignPage, setShiftAssignPage] = useState({
+    open: false,
+    focusShiftId: "",
+    query: "",
+    notice: "",
+    pendingUserId: "",
+    targetShiftId: "",
+  });
+  const [draggingShiftUserId, setDraggingShiftUserId] = useState("");
+  const [shiftDropTargetId, setShiftDropTargetId] = useState("");
+  const [draggingShiftColumnId, setDraggingShiftColumnId] = useState("");
+  const [shiftColumnDropTargetId, setShiftColumnDropTargetId] = useState("");
   const showOnlyEmployeeForm = Boolean(embeddedEmployeeOnly);
   const effectiveCurrentUserName = String(resolvedCurrentUserName || currentUserName || "").trim();
   const effectiveCurrentUserId = String(resolvedCurrentUserId || currentUserId || "").trim();
@@ -23598,6 +23798,506 @@ export function HrManagementModule({
   );
   const hasHrFullAccess = Boolean(embeddedEmployeeOnly) || isHrAdmin || isHrPayrollManager || hrSectionAccessLevel === "Full Access";
   const hasHrSelfServiceAccess = Boolean(embeddedEmployeeOnly) || hasHrFullAccess || hrSectionAccessLevel !== "No Access";
+
+  const attendanceActorName = String(effectiveCurrentUserName || currentHrEmployeeName || "Current User").trim() || "Current User";
+  const attendanceActorEmail = String(effectiveCurrentUserEmail || currentHrEmployeeEmail || "").trim().toLowerCase();
+
+  const workingShiftRows = useMemo(
+    () => (Array.isArray(moduleData.workingShifts) ? moduleData.workingShifts : []).map((row) => {
+      if (!row || typeof row !== "object") return row;
+      const assignedUserIds = Array.isArray(row.assignedUserIds) ? row.assignedUserIds.filter(Boolean).map((item) => String(item).trim()).filter(Boolean) : [];
+      return { ...row, assignedUserIds };
+    }),
+    [moduleData.workingShifts]
+  );
+
+  const formatWorkingShiftHours = useCallback((fromTime, toTime) => {
+    const fromRaw = String(fromTime || "").trim();
+    const toRaw = String(toTime || "").trim();
+    if (!/^\d{2}:\d{2}$/.test(fromRaw) || !/^\d{2}:\d{2}$/.test(toRaw)) return "-";
+    const [fromH, fromM] = fromRaw.split(":").map((n) => Number(n));
+    const [toH, toM] = toRaw.split(":").map((n) => Number(n));
+    if ([fromH, fromM, toH, toM].some((n) => Number.isNaN(n))) return "-";
+    const fromMinutes = (fromH * 60) + fromM;
+    const toMinutes = (toH * 60) + toM;
+    const diffMinutes = (toMinutes >= fromMinutes)
+      ? (toMinutes - fromMinutes)
+      : ((toMinutes + (24 * 60)) - fromMinutes);
+    const hours = diffMinutes / 60;
+    const rounded = Math.round(hours * 10) / 10;
+    const label = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${label} Hrs`;
+  }, []);
+
+  const openAddWorkingShift = useCallback(() => {
+    setShiftModal({
+      open: true,
+      mode: "add",
+      id: "",
+      name: "",
+      fromTime: "09:00",
+      toTime: "18:00",
+    });
+  }, []);
+
+  const openAssignWorkingShift = useCallback((row) => {
+    const shiftId = String(row?.id || "").trim();
+    setShiftAssignPage({
+      open: true,
+      focusShiftId: shiftId,
+      query: "",
+      notice: "",
+      pendingUserId: "",
+      targetShiftId: shiftId,
+    });
+  }, []);
+
+  const openEditWorkingShift = useCallback((row) => {
+    setShiftModal({
+      open: true,
+      mode: "edit",
+      id: String(row?.id || "").trim(),
+      name: String(row?.name || "").trim(),
+      fromTime: String(row?.fromTime || row?.from || "09:00").trim() || "09:00",
+      toTime: String(row?.toTime || row?.to || "18:00").trim() || "18:00",
+    });
+  }, []);
+
+  const closeWorkingShiftModal = useCallback(() => {
+    setShiftModal((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const closeShiftAssignPage = useCallback(() => {
+    setShiftAssignPage((prev) => ({
+      ...prev,
+      open: false,
+      notice: "",
+      pendingUserId: "",
+      targetShiftId: "",
+    }));
+    setDraggingShiftUserId("");
+    setShiftDropTargetId("");
+  }, []);
+
+  const shiftAssigneeDirectory = useMemo(() => {
+    const rows = Array.isArray(hrUserDirectory) ? hrUserDirectory : [];
+    return rows
+      .map((row) => ({
+        id: String(row?.id || "").trim(),
+        name: String(row?.name || "").trim(),
+        email: String(row?.email || "").trim().toLowerCase(),
+      }))
+      .filter((row) => row.id && row.name);
+  }, [hrUserDirectory]);
+
+  const shiftAssigneeMaps = useMemo(() => {
+    const labelToId = new Map();
+    const idToLabel = new Map();
+    const idToName = new Map();
+    const options = [];
+    shiftAssigneeDirectory.forEach((row) => {
+      const label = row.email ? `${row.name} (${row.email})` : row.name;
+      if (!labelToId.has(label)) {
+        labelToId.set(label, row.id);
+        options.push(label);
+      }
+      if (!idToLabel.has(row.id)) {
+        idToLabel.set(row.id, label);
+      }
+      if (!idToName.has(row.id)) {
+        idToName.set(row.id, row.name);
+      }
+    });
+    return { options, labelToId, idToLabel, idToName };
+  }, [shiftAssigneeDirectory]);
+
+  const attendanceShiftSubjectUserId = useMemo(() => {
+    if (attendanceScope === "all") {
+      const token = String(attendanceUserFilter || "").trim();
+      if (!token) return "";
+      const normalizedToken = token.toLowerCase();
+      const match = shiftAssigneeDirectory.find((row) => row.name.toLowerCase() === normalizedToken) || null;
+      return String(match?.id || "").trim();
+    }
+    return String(currentHrEmployeeSourceUserId || effectiveCurrentUserId || "").trim();
+  }, [attendanceScope, attendanceUserFilter, currentHrEmployeeSourceUserId, effectiveCurrentUserId, shiftAssigneeDirectory]);
+
+  const attendanceShiftSubject = useMemo(() => {
+    const userId = String(attendanceShiftSubjectUserId || "").trim();
+    if (!userId) return null;
+    const match = workingShiftRows.find((row) => Array.isArray(row?.assignedUserIds) && row.assignedUserIds.includes(userId)) || null;
+    if (!match) return null;
+    const fromTime = String(match?.fromTime || match?.from || "").trim();
+    const toTime = String(match?.toTime || match?.to || "").trim();
+    const hrsLabel = formatWorkingShiftHours(fromTime, toTime);
+    return {
+      name: String(match?.name || "").trim(),
+      fromTime,
+      toTime,
+      hrsLabel: hrsLabel !== "-" ? hrsLabel : "",
+    };
+  }, [attendanceShiftSubjectUserId, formatWorkingShiftHours, workingShiftRows]);
+
+  const resolveShiftAssigneeId = useCallback((rawQuery) => {
+    const query = String(rawQuery || "").trim();
+    if (!query) return "";
+    const fromLabel = shiftAssigneeMaps.labelToId.get(query);
+    if (fromLabel) return fromLabel;
+    const normalized = query.toLowerCase();
+    const matchByName = shiftAssigneeDirectory.find((row) => row.name.toLowerCase() === normalized);
+    return String(matchByName?.id || "").trim();
+  }, [shiftAssigneeDirectory, shiftAssigneeMaps.labelToId]);
+
+  const assignedShiftByUserId = useMemo(() => {
+    const map = new Map();
+    workingShiftRows.forEach((row) => {
+      const shiftId = String(row?.id || "").trim();
+      if (!shiftId) return;
+      const assignedUserIds = Array.isArray(row?.assignedUserIds) ? row.assignedUserIds : [];
+      assignedUserIds.forEach((userId) => {
+        const normalizedUserId = String(userId || "").trim();
+        if (!normalizedUserId || map.has(normalizedUserId)) return;
+        map.set(normalizedUserId, row);
+      });
+    });
+    return map;
+  }, [workingShiftRows]);
+
+  const shiftAssignmentUsers = useMemo(() => {
+    return shiftAssigneeDirectory
+      .map((row) => ({
+        ...row,
+        assignedShift: assignedShiftByUserId.get(row.id) || null,
+      }))
+      .sort((left, right) => String(left.name || "").localeCompare(String(right.name || "")));
+  }, [assignedShiftByUserId, shiftAssigneeDirectory]);
+
+  const filteredShiftAssignmentUsers = useMemo(() => {
+    const query = String(shiftAssignPage.query || "").trim().toLowerCase();
+    if (!query) {
+      return shiftAssignmentUsers.filter((row) => !row.assignedShift);
+    }
+    return shiftAssignmentUsers.filter((row) => {
+      const shiftName = String(row?.assignedShift?.name || "").trim().toLowerCase();
+      return String(row?.name || "").trim().toLowerCase().includes(query)
+        || String(row?.email || "").trim().toLowerCase().includes(query)
+        || shiftName.includes(query);
+    });
+  }, [shiftAssignPage.query, shiftAssignmentUsers]);
+
+  const shiftAssignmentSummary = useMemo(() => {
+    const total = shiftAssignmentUsers.length;
+    const assigned = shiftAssignmentUsers.filter((row) => row.assignedShift).length;
+    return {
+      total,
+      assigned,
+      unassigned: Math.max(total - assigned, 0),
+    };
+  }, [shiftAssignmentUsers]);
+
+  const startShiftUserAssignment = useCallback((userId, preferredShiftId = "") => {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) return;
+    const normalizedShiftId = String(preferredShiftId || "").trim();
+    setShiftAssignPage((prev) => ({
+      ...prev,
+      notice: "",
+      pendingUserId: normalizedUserId,
+      targetShiftId: normalizedShiftId || prev.focusShiftId || String(workingShiftRows?.[0]?.id || "").trim(),
+    }));
+  }, [workingShiftRows]);
+
+  const cancelShiftUserAssignment = useCallback(() => {
+    setShiftAssignPage((prev) => ({
+      ...prev,
+      notice: "",
+      pendingUserId: "",
+      targetShiftId: "",
+    }));
+  }, []);
+
+  const moveUserToWorkingShift = useCallback((userId, targetShiftId) => {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedTargetShiftId = String(targetShiftId || "").trim();
+    if (!normalizedUserId || !normalizedTargetShiftId) {
+      setShiftAssignPage((prev) => ({
+        ...prev,
+        notice: "Please select a shift to assign this user.",
+      }));
+      return;
+    }
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.workingShifts) ? prev.workingShifts : [];
+      return {
+        ...prev,
+        workingShifts: rows.map((row) => {
+          const rowId = String(row?.id || "").trim();
+          const currentUsers = Array.isArray(row?.assignedUserIds)
+            ? row.assignedUserIds.map((item) => String(item || "").trim()).filter(Boolean)
+            : [];
+          const withoutUser = currentUsers.filter((value) => value !== normalizedUserId);
+          if (rowId === normalizedTargetShiftId) {
+            return {
+              ...row,
+              assignedUserIds: withoutUser.includes(normalizedUserId)
+                ? withoutUser
+                : [...withoutUser, normalizedUserId],
+            };
+          }
+          return currentUsers.length === withoutUser.length ? row : { ...row, assignedUserIds: withoutUser };
+        }),
+      };
+    });
+    setShiftAssignPage((prev) => ({
+      ...prev,
+      notice: "",
+      pendingUserId: "",
+      targetShiftId: normalizedTargetShiftId,
+      focusShiftId: prev.focusShiftId || normalizedTargetShiftId,
+    }));
+  }, []);
+
+  const assignSearchUserToShift = useCallback(() => {
+    const selectedId = resolveShiftAssigneeId(shiftAssignPage.query);
+    if (!selectedId) {
+      setShiftAssignPage((prev) => ({
+        ...prev,
+        notice: "Search and select a valid user name first.",
+      }));
+      return;
+    }
+    startShiftUserAssignment(selectedId);
+  }, [resolveShiftAssigneeId, shiftAssignPage.query, startShiftUserAssignment]);
+
+  const removeUserFromWorkingShift = useCallback((userId, shiftId) => {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedShiftId = String(shiftId || "").trim();
+    if (!normalizedUserId || !normalizedShiftId) return;
+    setModuleData((prev) => ({
+      ...prev,
+      workingShifts: (Array.isArray(prev.workingShifts) ? prev.workingShifts : []).map((row) => {
+        const rowId = String(row?.id || "").trim();
+        if (rowId !== normalizedShiftId) return row;
+        const nextAssignedUserIds = Array.isArray(row?.assignedUserIds)
+          ? row.assignedUserIds.map((item) => String(item || "").trim()).filter((item) => item && item !== normalizedUserId)
+          : [];
+        return { ...row, assignedUserIds: nextAssignedUserIds };
+      }),
+    }));
+    setShiftAssignPage((prev) => ({
+      ...prev,
+      notice: "",
+      pendingUserId: prev.pendingUserId === normalizedUserId ? "" : prev.pendingUserId,
+    }));
+  }, []);
+
+  const handleShiftUserDragStart = useCallback((event, userId, fromShiftId = "") => {
+    const payload = {
+      userId: String(userId || "").trim(),
+      fromShiftId: String(fromShiftId || "").trim(),
+    };
+    if (!payload.userId) return;
+    event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = "move";
+    setDraggingShiftUserId(payload.userId);
+  }, []);
+
+  const handleShiftColumnDragOver = useCallback((event, shiftId) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setShiftDropTargetId(String(shiftId || "").trim());
+  }, []);
+
+  const handleShiftColumnDragLeave = useCallback((shiftId) => {
+    const normalizedShiftId = String(shiftId || "").trim();
+    setShiftDropTargetId((prev) => (prev === normalizedShiftId ? "" : prev));
+  }, []);
+
+  const handleShiftColumnDrop = useCallback((event, targetShiftId) => {
+    event.preventDefault();
+    const normalizedTargetShiftId = String(targetShiftId || "").trim();
+    let payload = null;
+    try {
+      payload = JSON.parse(event.dataTransfer.getData("application/json") || "{}");
+    } catch {
+      payload = null;
+    }
+    const draggedUserId = String(payload?.userId || "").trim();
+    if (draggedUserId && normalizedTargetShiftId) {
+      moveUserToWorkingShift(draggedUserId, normalizedTargetShiftId);
+    }
+    setDraggingShiftUserId("");
+    setShiftDropTargetId("");
+  }, [moveUserToWorkingShift]);
+
+  const handleShiftDragEnd = useCallback(() => {
+    setDraggingShiftUserId("");
+    setShiftDropTargetId("");
+  }, []);
+
+  const reorderWorkingShiftColumns = useCallback((dragShiftId, targetShiftId) => {
+    const normalizedDragShiftId = String(dragShiftId || "").trim();
+    const normalizedTargetShiftId = String(targetShiftId || "").trim();
+    if (!normalizedDragShiftId || !normalizedTargetShiftId || normalizedDragShiftId === normalizedTargetShiftId) {
+      return;
+    }
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.workingShifts) ? [...prev.workingShifts] : [];
+      const fromIndex = rows.findIndex((row) => String(row?.id || "").trim() === normalizedDragShiftId);
+      const toIndex = rows.findIndex((row) => String(row?.id || "").trim() === normalizedTargetShiftId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+        return prev;
+      }
+      const [draggedRow] = rows.splice(fromIndex, 1);
+      rows.splice(toIndex, 0, draggedRow);
+      return { ...prev, workingShifts: rows };
+    });
+  }, []);
+
+  const handleShiftColumnCardDragStart = useCallback((event, shiftId) => {
+    const normalizedShiftId = String(shiftId || "").trim();
+    if (!normalizedShiftId) return;
+    event.dataTransfer.setData("text/wz-shift-column", normalizedShiftId);
+    event.dataTransfer.effectAllowed = "move";
+    setDraggingShiftColumnId(normalizedShiftId);
+  }, []);
+
+  const handleShiftColumnCardDragOver = useCallback((event, shiftId) => {
+    const dragShiftId = event.dataTransfer.getData("text/wz-shift-column");
+    if (!dragShiftId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setShiftColumnDropTargetId(String(shiftId || "").trim());
+  }, []);
+
+  const handleShiftColumnCardDrop = useCallback((event, shiftId) => {
+    const normalizedTargetShiftId = String(shiftId || "").trim();
+    const dragShiftId = String(event.dataTransfer.getData("text/wz-shift-column") || "").trim();
+    if (dragShiftId && normalizedTargetShiftId) {
+      event.preventDefault();
+      reorderWorkingShiftColumns(dragShiftId, normalizedTargetShiftId);
+    }
+    setDraggingShiftColumnId("");
+    setShiftColumnDropTargetId("");
+  }, [reorderWorkingShiftColumns]);
+
+  const handleShiftColumnCardDragLeave = useCallback((shiftId) => {
+    const normalizedShiftId = String(shiftId || "").trim();
+    setShiftColumnDropTargetId((prev) => (prev === normalizedShiftId ? "" : prev));
+  }, []);
+
+  const handleShiftColumnCardDragEnd = useCallback(() => {
+    setDraggingShiftColumnId("");
+    setShiftColumnDropTargetId("");
+  }, []);
+
+  const saveWorkingShift = useCallback((event) => {
+    event?.preventDefault?.();
+    const mode = String(shiftModal.mode || "add").trim() || "add";
+    const editingId = String(shiftModal.id || "").trim();
+    const nameRaw = String(shiftModal.name || "").trim();
+    const name = nameRaw.replace(/\s+/g, " ").slice(0, WORKING_SHIFT_NAME_MAX);
+    const fromTime = String(shiftModal.fromTime || "").trim();
+    const toTime = String(shiftModal.toTime || "").trim();
+
+    if (!name || !fromTime || !toTime) {
+      setHrFormNotice("Please provide shift name and shift time.");
+      return;
+    }
+    if (nameRaw.length > WORKING_SHIFT_NAME_MAX) {
+      setHrFormNotice(`Shift name must be ${WORKING_SHIFT_NAME_MAX} characters or fewer.`);
+      return;
+    }
+    if (!/^\d{2}:\d{2}$/.test(fromTime) || !/^\d{2}:\d{2}$/.test(toTime)) {
+      setHrFormNotice("Shift time must be in HH:MM format.");
+      return;
+    }
+
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.workingShifts) ? prev.workingShifts : [];
+      if (mode === "edit" && editingId) {
+        return {
+          ...prev,
+          workingShifts: rows.map((row) => (
+            String(row?.id || "").trim() === editingId
+              ? { ...row, name, fromTime, toTime }
+              : row
+          )),
+        };
+      }
+      const nextRow = {
+        id: `shift_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        fromTime,
+        toTime,
+        assignedUserIds: [],
+      };
+      return { ...prev, workingShifts: [nextRow, ...rows] };
+    });
+    setHrFormNotice("");
+    closeWorkingShiftModal();
+  }, [WORKING_SHIFT_NAME_MAX, closeWorkingShiftModal, shiftModal.fromTime, shiftModal.id, shiftModal.mode, shiftModal.name, shiftModal.toTime]);
+
+  const deleteWorkingShift = useCallback((row) => {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId) return;
+    const name = String(row?.name || "").trim() || "this shift";
+    const ok = window.confirm(`Delete ${name}?`);
+    if (!ok) return;
+    setModuleData((prev) => ({
+      ...prev,
+      workingShifts: (prev.workingShifts || []).filter((item) => String(item?.id || "").trim() !== rowId),
+    }));
+  }, []);
+
+  function buildAttendanceModificationEntry({ previousRow, nextRow, action = "Update" }) {
+    const trackedKeys = [
+      "entryMode",
+      "inTime",
+      "outTime",
+      "status",
+      "permissionHours",
+      "notes",
+      "completedTasks",
+      "taskNotes",
+      "adminSatisfaction",
+    ];
+    const changes = [];
+    trackedKeys.forEach((key) => {
+      const oldValue = previousRow && typeof previousRow === "object" ? previousRow[key] : "";
+      const newValue = nextRow && typeof nextRow === "object" ? nextRow[key] : "";
+      const oldText = oldValue === null || typeof oldValue === "undefined" ? "" : String(oldValue).trim();
+      const newText = newValue === null || typeof newValue === "undefined" ? "" : String(newValue).trim();
+      if (oldText !== newText) {
+        changes.push({ field: key, old: oldText || "-", new: newText || "-" });
+      }
+    });
+    if (!changes.length) {
+      return null;
+    }
+    return {
+      id: `att_hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      created_at: new Date().toISOString(),
+      changed_by_name: attendanceActorName,
+      changed_by_email: attendanceActorEmail,
+      action: String(action || "Update").trim() || "Update",
+      changes,
+    };
+  }
+
+  function openAttendanceHistoryPopup(row) {
+    const normalizedRow = row && typeof row === "object" ? row : null;
+    if (!normalizedRow) return;
+    setAttendanceHistoryPopup({
+      rowId: String(normalizedRow.id || "").trim(),
+      employee: String(normalizedRow.employee || "").trim(),
+      date: String(normalizedRow.date || "").trim(),
+    });
+  }
+
+  function closeAttendanceHistoryPopup() {
+    setAttendanceHistoryPopup(null);
+  }
   const visibleHrTabs = useMemo(() => {
     const fullAccessTabs = Object.entries(HR_TAB_CONFIG).map(([tabKey, tabValue]) => ({ key: tabKey, label: tabValue.label }));
     if (hasHrFullAccess) {
@@ -24230,14 +24930,24 @@ export function HrManagementModule({
   useEffect(() => {
     const yearOptions = attendanceYearOptions;
     if (!yearOptions.length) return;
-    setAttendanceYearFilter((prev) => (prev && yearOptions.includes(prev) ? prev : yearOptions[0]));
-  }, [attendanceYearOptions]);
+    const todayYear = String(todayIso || "").slice(0, 4);
+    setAttendanceYearFilter((prev) => {
+      if (prev && yearOptions.includes(prev)) return prev;
+      if (todayYear && yearOptions.includes(todayYear)) return todayYear;
+      return yearOptions[yearOptions.length - 1] || yearOptions[0];
+    });
+  }, [attendanceYearOptions, todayIso]);
 
   useEffect(() => {
     const monthOptions = attendanceMonthOptions;
     if (!monthOptions.length) return;
-    setAttendanceMonthFilter((prev) => (prev && monthOptions.some((m) => m.value === prev) ? prev : monthOptions[0].value));
-  }, [attendanceMonthOptions]);
+    const todayMonth = String(todayIso || "").slice(5, 7);
+    setAttendanceMonthFilter((prev) => {
+      if (prev && monthOptions.some((m) => m.value === prev)) return prev;
+      if (todayMonth && monthOptions.some((m) => m.value === todayMonth)) return todayMonth;
+      return monthOptions[monthOptions.length - 1]?.value || monthOptions[0].value;
+    });
+  }, [attendanceMonthOptions, todayIso]);
 
   const stats = useMemo(() => {
     const employees = (hasHrFullAccess ? moduleData.employees : []).length;
@@ -24807,7 +25517,13 @@ export function HrManagementModule({
     setEditingId(row.id);
     const nextValues = {};
     config.fields.forEach((field) => {
-      nextValues[field.key] = row[field.key] || field.defaultValue || "";
+      const rowValue = row[field.key];
+      if (activeTab === "attendance" && (field.key === "inTime" || field.key === "outTime")) {
+        const normalized = normalizeMeetingTimeValue(rowValue ?? field.defaultValue ?? "");
+        nextValues[field.key] = /^\d{2}:\d{2}$/.test(normalized) ? normalized : "";
+        return;
+      }
+      nextValues[field.key] = rowValue || field.defaultValue || "";
     });
     if (activeTab === "employees") {
       nextValues.sourceUserId = row.sourceUserId || row.userId || "";
@@ -24824,6 +25540,9 @@ export function HrManagementModule({
       nextValues.temporarySameAsPermanent = temporarySameAsPermanent;
     }
     setFormValues(nextValues);
+    window.requestAnimationFrame(() => {
+      syncFlatpickrValuesFromState(hrEntryFormRef.current || document, config.fields, nextValues);
+    });
   }
 
   function onCancelEdit() {
@@ -25014,9 +25733,35 @@ export function HrManagementModule({
     setModuleData((prev) => {
       const existing = prev[activeTab] || [];
       if (editingId) {
+        if (activeTab === "attendance") {
+          return {
+            ...prev,
+            [activeTab]: existing.map((row) => {
+              if (row.id !== editingId) return row;
+              const nextRow = { ...row, ...payload };
+              const historyEntry = buildAttendanceModificationEntry({ previousRow: row, nextRow, action: "Edit" });
+              if (historyEntry) {
+                const history = Array.isArray(row.modificationHistory) ? row.modificationHistory : [];
+                nextRow.modificationHistory = [historyEntry, ...history].slice(0, 200);
+              } else {
+                nextRow.modificationHistory = Array.isArray(row.modificationHistory) ? row.modificationHistory : [];
+              }
+              return nextRow;
+            })
+          };
+        }
         return {
           ...prev,
           [activeTab]: existing.map((row) => (row.id === editingId ? { ...row, ...payload } : row))
+        };
+      }
+      if (activeTab === "attendance") {
+        const newRow = { id: nextRowId, ...payload };
+        const historyEntry = buildAttendanceModificationEntry({ previousRow: null, nextRow: newRow, action: "Created" });
+        newRow.modificationHistory = historyEntry ? [historyEntry] : [];
+        return {
+          ...prev,
+          [activeTab]: [newRow, ...existing]
         };
       }
       return {
@@ -25075,7 +25820,7 @@ export function HrManagementModule({
     onCancelEdit();
   }
 
-  function upsertAttendanceRecord({ employee, date = todayIso, patch = {} }) {
+  function upsertAttendanceRecord({ employee, date = todayIso, patch = {}, action = "" }) {
     const employeeName = String(employee || "").trim();
     const isoDate = String(date || todayIso).trim() || todayIso;
     if (!employeeName) {
@@ -25106,6 +25851,15 @@ export function HrManagementModule({
       if (nextRow.status !== "Permission") {
         nextRow.permissionHours = "";
       }
+      const normalizedAction = String(action || "").trim()
+        || (Object.prototype.hasOwnProperty.call(patch, "inTime") ? "Punch In" : "")
+        || (Object.prototype.hasOwnProperty.call(patch, "outTime") ? "Punch Out" : "")
+        || (Object.prototype.hasOwnProperty.call(patch, "completedTasks") || Object.prototype.hasOwnProperty.call(patch, "taskNotes") ? "Task Update" : "")
+        || (Object.prototype.hasOwnProperty.call(patch, "adminSatisfaction") ? "Admin Review" : "")
+        || "Update";
+      const historyEntry = buildAttendanceModificationEntry({ previousRow: base, nextRow, action: normalizedAction });
+      const history = Array.isArray(base.modificationHistory) ? base.modificationHistory : [];
+      nextRow.modificationHistory = historyEntry ? [historyEntry, ...history].slice(0, 200) : history;
       if (index >= 0) {
         return {
           ...prev,
@@ -25139,7 +25893,8 @@ export function HrManagementModule({
             status: "Present",
             sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "",
             sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "",
-          }
+          },
+          action: "Punch Out",
         });
         if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
           setFormValues((prev) => ({
@@ -25181,7 +25936,8 @@ export function HrManagementModule({
       date: todayIso,
       patch: action === "in"
         ? { entryMode: source, inTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
-        : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
+        : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" },
+      action: action === "in" ? "Punch In" : "Punch Out",
     });
 
     // Keep the Attendance form in sync for HR instant In/Out buttons
@@ -25254,6 +26010,207 @@ export function HrManagementModule({
     }));
   }
 
+  const holidayYearOptions = useMemo(() => {
+    const currentYear = Number(String(todayIso || "").slice(0, 4)) || new Date().getFullYear();
+    const yearsFromData = (moduleData.holidays || [])
+      .map((row) => Number(String(row?.date || "").slice(0, 4)))
+      .filter((y) => Number.isFinite(y) && y > 1990 && y < 2100);
+    const minYear = Math.min(currentYear - 1, ...(yearsFromData.length ? yearsFromData : [currentYear]));
+    const maxYear = Math.max(currentYear + 2, ...(yearsFromData.length ? yearsFromData : [currentYear]));
+    const years = [];
+    for (let y = minYear; y <= maxYear; y += 1) {
+      years.push(String(y));
+    }
+    return years;
+  }, [moduleData.holidays, todayIso]);
+
+  const holidayMonthOptions = useMemo(() => ([
+    { value: "01", label: "January" },
+    { value: "02", label: "February" },
+    { value: "03", label: "March" },
+    { value: "04", label: "April" },
+    { value: "05", label: "May" },
+    { value: "06", label: "June" },
+    { value: "07", label: "July" },
+    { value: "08", label: "August" },
+    { value: "09", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+  ]), []);
+
+  useEffect(() => {
+    const todayYear = String(todayIso || "").slice(0, 4);
+    const fallbackYear = holidayYearOptions.includes(todayYear) ? todayYear : (holidayYearOptions[holidayYearOptions.length - 1] || todayYear);
+    setHolidayYear((prev) => (prev && holidayYearOptions.includes(prev) ? prev : fallbackYear));
+  }, [holidayYearOptions, todayIso]);
+
+  useEffect(() => {
+    const todayMonth = String(todayIso || "").slice(5, 7);
+    const fallbackMonth = holidayMonthOptions.some((m) => m.value === todayMonth) ? todayMonth : (holidayMonthOptions[0]?.value || "01");
+    setHolidayMonth((prev) => (prev && holidayMonthOptions.some((m) => m.value === prev) ? prev : fallbackMonth));
+  }, [holidayMonthOptions, todayIso]);
+
+  const holidayRows = useMemo(() => {
+    const rows = Array.isArray(moduleData.holidays) ? moduleData.holidays : [];
+    return rows
+      .map((row) => {
+        const date = normalizeMeetingDateValue(row?.date || "");
+        return {
+          ...row,
+          id: String(row?.id || "").trim(),
+          date,
+          occasion: String(row?.occasion || row?.title || "").trim(),
+          type: String(row?.type || "Holiday").trim() || "Holiday",
+          created_at: String(row?.created_at || row?.createdAt || "").trim(),
+          created_by_name: String(row?.created_by_name || row?.createdBy || "").trim(),
+        };
+      })
+      .filter((row) => row.id && row.date);
+  }, [moduleData.holidays]);
+
+  const holidayMonthCounts = useMemo(() => {
+    const counts = new Map(holidayMonthOptions.map((month) => [month.value, 0]));
+    holidayRows.forEach((row) => {
+      const year = String(row.date || "").slice(0, 4);
+      const month = String(row.date || "").slice(5, 7);
+      if (year === String(holidayYear || "").trim() && counts.has(month)) {
+        counts.set(month, (counts.get(month) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [holidayMonthOptions, holidayRows, holidayYear]);
+
+  const selectedHolidayRows = useMemo(() => {
+    const year = String(holidayYear || "").trim();
+    const month = String(holidayMonth || "").trim();
+    const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return holidayRows
+      .filter((row) => row.date && row.date.slice(0, 4) === year && row.date.slice(5, 7) === month)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .map((row, idx) => {
+        const parsed = new Date(`${row.date}T00:00:00`);
+        const dayLabel = !Number.isNaN(parsed.getTime()) ? (weekdayLabels[parsed.getDay()] || "-") : "-";
+        return { ...row, index: idx + 1, day: dayLabel };
+      });
+  }, [holidayMonth, holidayRows, holidayYear]);
+
+  function openHolidayAddModal() {
+    const defaultDate = `${String(holidayYear || String(todayIso).slice(0, 4)).padStart(4, "0")}-${String(holidayMonth || "01").padStart(2, "0")}-01`;
+    setHolidayModal({
+      open: true,
+      mode: "add",
+      id: "",
+      date: defaultDate,
+      occasion: "",
+      type: "Holiday",
+    });
+    setHrFormNotice("");
+  }
+
+  function openHolidayEditModal(row) {
+    const normalizedId = String(row?.id || "").trim();
+    if (!normalizedId) return;
+    setHolidayModal({
+      open: true,
+      mode: "edit",
+      id: normalizedId,
+      date: normalizeMeetingDateValue(row?.date || ""),
+      occasion: String(row?.occasion || row?.title || "").trim(),
+      type: String(row?.type || "Holiday").trim() || "Holiday",
+    });
+    setHrFormNotice("");
+  }
+
+  function closeHolidayModal() {
+    setHolidayModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function saveHolidayFromModal(event) {
+    event.preventDefault();
+    const mode = String(holidayModal.mode || "add").trim() || "add";
+    const editingId = String(holidayModal.id || "").trim();
+    const date = normalizeMeetingDateValue(holidayModal.date);
+    const occasion = String(holidayModal.occasion || "").trim();
+    const type = String(holidayModal.type || "Holiday").trim() || "Holiday";
+    if (!date || !occasion) {
+      setHrFormNotice("Please provide holiday date and occasion.");
+      return;
+    }
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.holidays) ? prev.holidays : [];
+      if (mode === "edit" && editingId) {
+        const hasDuplicate = rows.some((row) => (
+          String(row?.id || "").trim() !== editingId
+          && normalizeMeetingDateValue(row?.date || "") === date
+        ));
+        if (hasDuplicate) {
+          return prev;
+        }
+        return {
+          ...prev,
+          holidays: rows.map((row) => (
+            String(row?.id || "").trim() === editingId
+              ? { ...row, date, occasion, type, updated_at: new Date().toISOString(), updated_by_name: attendanceActorName }
+              : row
+          )),
+        };
+      }
+
+      const exists = rows.some((row) => normalizeMeetingDateValue(row?.date || "") === date);
+      if (exists) {
+        return prev;
+      }
+      const nextRow = {
+        id: `holiday_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        date,
+        occasion,
+        type,
+        created_at: new Date().toISOString(),
+        created_by_name: attendanceActorName,
+      };
+      return { ...prev, holidays: [nextRow, ...rows] };
+    });
+    setHrFormNotice("");
+    closeHolidayModal();
+  }
+
+  function deleteHolidayRow(rowId) {
+    const normalizedId = String(rowId || "").trim();
+    if (!normalizedId) return;
+    setModuleData((prev) => ({
+      ...prev,
+      holidays: (prev.holidays || []).filter((row) => String(row?.id || "").trim() !== normalizedId),
+    }));
+  }
+
+  function markAllSundaysForYear() {
+    const year = Number(String(holidayYear || "").trim());
+    if (!Number.isFinite(year) || year < 1990 || year > 2100) return;
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.holidays) ? prev.holidays : [];
+      const existingDates = new Set(rows.map((row) => normalizeMeetingDateValue(row?.date || "")).filter(Boolean));
+      const nextRows = [...rows];
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== 0) continue;
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (existingDates.has(iso)) continue;
+        existingDates.add(iso);
+        nextRows.push({
+          id: `holiday_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          date: iso,
+          occasion: "Sunday",
+          type: "Sunday",
+          created_at: new Date().toISOString(),
+          created_by_name: attendanceActorName,
+        });
+      }
+      return { ...prev, holidays: nextRows };
+    });
+  }
+
   function submitAttendanceTaskModal(event) {
     event.preventDefault();
     if (attendanceTaskModal.readOnly && !hasHrFullAccess) {
@@ -25281,7 +26238,7 @@ export function HrManagementModule({
       patch.outTime = attendanceTaskModal.outTime || getCurrentTimeHm();
       patch.status = "Present";
     }
-    upsertAttendanceRecord({ employee, date, patch });
+    upsertAttendanceRecord({ employee, date, patch, action: attendanceTaskModal.mode === "punchOut" ? "Punch Out" : "Task Update" });
     setHrFormNotice("");
     closeAttendanceTaskModal();
   }
@@ -25291,7 +26248,7 @@ export function HrManagementModule({
     const employee = String(attendanceTaskModal.employee || "").trim();
     const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
     if (!employee) return;
-    upsertAttendanceRecord({ employee, date, patch: { adminSatisfaction: String(nextValue || "").trim() } });
+    upsertAttendanceRecord({ employee, date, patch: { adminSatisfaction: String(nextValue || "").trim() }, action: "Admin Review" });
   }
 
   const myAttendanceToday = useMemo(
@@ -25320,14 +26277,154 @@ export function HrManagementModule({
       }
       return passesAttendanceDateFilters(row?.date);
     });
+
+    // For "My Attendance", show a full month view (date-wise) by filling missing days
+    // with placeholder rows (Absent / No record). This makes it easier to review attendance
+    // even when only a few records exist.
+    if (attendanceListMode !== "deleted" && attendanceScope === "my") {
+      const selectedYear = String(attendanceYearFilter || "").trim();
+      const selectedMonth = String(attendanceMonthFilter || "").trim();
+      const hasMonthSelection = /^\d{4}$/.test(selectedYear) && /^\d{2}$/.test(selectedMonth);
+      if (hasMonthSelection) {
+        const subjectEmployee = String(
+          (hasHrFullAccess ? (myAttendanceEmployee || currentHrEmployeeName) : currentHrEmployeeName) || ""
+        ).trim();
+        const monthStartIso = `${selectedYear}-${selectedMonth}-01`;
+        const monthStartDate = new Date(`${monthStartIso}T00:00:00`);
+        if (!Number.isNaN(monthStartDate.getTime())) {
+          const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0);
+          const monthEndIso = `${selectedYear}-${selectedMonth}-${String(monthEndDate.getDate()).padStart(2, "0")}`;
+
+          const minIso = /^\d{4}-\d{2}-\d{2}$/.test(String(attendanceDateMeta?.minIso || "")) ? attendanceDateMeta.minIso : monthStartIso;
+          const maxIso = /^\d{4}-\d{2}-\d{2}$/.test(String(attendanceDateMeta?.maxIso || "")) ? attendanceDateMeta.maxIso : getTodayIsoDate();
+
+          const rangeStartIso = [monthStartIso, minIso].sort().pop() || monthStartIso;
+          const rangeEndIso = [monthEndIso, maxIso].sort()[0] || monthEndIso;
+
+          if (/^\d{4}-\d{2}-\d{2}$/.test(rangeStartIso) && /^\d{4}-\d{2}-\d{2}$/.test(rangeEndIso) && rangeStartIso <= rangeEndIso) {
+            const rowByDate = new Map();
+            rows.forEach((row) => {
+              const iso = normalizeIsoDateValue(row?.date);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                return;
+              }
+              rowByDate.set(iso, row);
+            });
+
+            const holidayByDate = new Map();
+            (holidayRows || []).forEach((holiday) => {
+              const holidayIso = normalizeMeetingDateValue(holiday?.date || "");
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(holidayIso)) return;
+              if (holidayIso.slice(0, 4) !== selectedYear) return;
+              holidayByDate.set(holidayIso, holiday);
+            });
+
+            const result = [];
+            const start = new Date(`${rangeStartIso}T00:00:00`);
+            const end = new Date(`${rangeEndIso}T00:00:00`);
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+              for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+                const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+                const holiday = holidayByDate.get(iso) || null;
+                const holidayOccasion = String(holiday?.occasion || holiday?.title || "").trim();
+                const holidayType = String(holiday?.type || "").trim();
+                const existing = rowByDate.get(iso);
+                if (existing) {
+                  result.push({
+                    ...existing,
+                    holidayOccasion: existing?.holidayOccasion || holidayOccasion,
+                    holidayType: existing?.holidayType || holidayType,
+                  });
+                  continue;
+                }
+                result.push({
+                  __placeholder: true,
+                  id: `placeholder-${subjectEmployee || "employee"}-${iso}`,
+                  employee: subjectEmployee || "-",
+                  date: iso,
+                  inTime: "",
+                  outTime: "",
+                  workedHours: "",
+                  status: holiday ? "Holiday" : "Absent",
+                  holidayOccasion,
+                  holidayType,
+                });
+              }
+              return result;
+            }
+          }
+        }
+      }
+    }
+
     return rows;
   }, [
     activeTab,
     attendanceBaseRows,
+    attendanceDateMeta,
     attendanceListMode,
+    attendanceMonthFilter,
+    attendanceScope,
     currentRows,
+    currentHrEmployeeName,
+    holidayRows,
     hasHrFullAccess,
+    myAttendanceEmployee,
     passesAttendanceDateFilters,
+    attendanceYearFilter,
+  ]);
+
+  const attendanceMonthSummaryLabel = useMemo(() => {
+    if (activeTab !== "attendance") {
+      return "";
+    }
+    const isMonthView = attendanceScope === "my"
+      && attendanceListMode !== "deleted"
+      && !attendanceFromDate
+      && !attendanceToDate
+      && /^\d{4}$/.test(String(attendanceYearFilter || ""))
+      && /^\d{2}$/.test(String(attendanceMonthFilter || ""));
+    if (!isMonthView) {
+      return `${(attendanceFilteredRows || []).length} items`;
+    }
+    const rows = Array.isArray(attendanceFilteredRows) ? attendanceFilteredRows : [];
+    const counts = {
+      present: 0,
+      leave: 0,
+      holiday: 0,
+      absent: 0,
+      permission: 0,
+      halfDay: 0,
+    };
+    rows.forEach((row) => {
+      const raw = String(row?.status || "").trim().toLowerCase();
+      if (raw.startsWith("present")) counts.present += 1;
+      else if (raw === "leave") counts.leave += 1;
+      else if (raw === "holiday") counts.holiday += 1;
+      else if (raw === "absent") counts.absent += 1;
+      else if (raw === "permission") counts.permission += 1;
+      else if (raw === "half day" || raw === "halfday") counts.halfDay += 1;
+    });
+
+    const parts = [];
+    if (counts.leave) parts.push(`Leaves (${counts.leave})`);
+    if (counts.present) parts.push(`Present (${counts.present})`);
+    if (counts.holiday) parts.push(`Holiday (${counts.holiday})`);
+    if (counts.permission) parts.push(`Permission (${counts.permission})`);
+    if (counts.halfDay) parts.push(`Half Day (${counts.halfDay})`);
+    if (counts.absent) parts.push(`Absent (${counts.absent})`);
+
+    const prefix = parts.length ? `${parts.join("  ")}` : "No records";
+    return `${prefix}  •  ${rows.length} days`;
+  }, [
+    activeTab,
+    attendanceFilteredRows,
+    attendanceFromDate,
+    attendanceListMode,
+    attendanceMonthFilter,
+    attendanceScope,
+    attendanceToDate,
+    attendanceYearFilter,
   ]);
 
   function openAttendanceNotesModal(row) {
@@ -25411,171 +26508,619 @@ export function HrManagementModule({
         <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
       ) : (
         <>
-      {activeTab !== "attendance" || hasHrFullAccess ? (
-      <div className="card p-3">
-        <h6 className="mb-3">
-          {editingId
-            ? `Edit ${config.itemLabel}`
-            : (showOnlyEmployeeForm && activeTab === "employees" ? config.itemLabel : `Create ${config.itemLabel}`)}
-        </h6>
-        <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
-          {hrFormNotice ? (
-            <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
-          ) : null}
-          {activeTab === "employees" ? (
-            <>
-              <div className="row g-3">
-                {[
-                  "name",
-                  "gender",
-                  "department",
-                  "designation",
-                ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
-              </div>
-              <div className="row g-3">
-                {[
-                  "dateOfJoining",
-                  "dateOfBirth",
-                  "bloodGroup",
-                  "fatherName",
-                  "motherName",
-                ].map((fieldKey) => renderHrField(
-                  employeeFieldMap.get(fieldKey),
-                  ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
-                    ? "col-12 col-md-6 col-xl-2"
-                    : "col-12 col-md-6 col-xl-3"
-                ))}
-              </div>
-              <div className="row g-3 hr-upload-divider">
-                {[
-                  "photoDataUrl",
-                  "documentName",
-                ].map((fieldKey) => renderHrField(
-                  employeeFieldMap.get(fieldKey),
-                  "col-12 col-xl-6"
-                ))}
-              </div>
-              <div className="row g-3">
-                {[
-                  "contactCountryCode",
-                  "secondaryContactCountryCode",
-                  "maritalStatus",
-                  "wifeName",
-                ].map((fieldKey) => renderHrField(
-                  employeeFieldMap.get(fieldKey),
-                  "col-12 col-md-6 col-xl-3"
-                ))}
-              </div>
-              <hr className="section-divider mt-1 mb-2" />
-              <div className="row g-3">
-                <div className="col-12 col-xl-6">
-                  <div className="h-100">
-                    <h6 className="mb-3">Permanent Address</h6>
-                    <div className="row g-3">
-                      {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
-                        renderHrField(
-                          employeeFieldMap.get(fieldKey),
-                          fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
-                        )
-                      )}
+	      {(activeTab !== "attendance" || hasHrFullAccess) && activeTab !== "holidays" ? (
+          activeTab === "attendance" && hasHrFullAccess && !showOnlyEmployeeForm ? (
+            shiftAssignPage.open ? (
+              <div>
+                <div className="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+                  <div>
+                    <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={closeShiftAssignPage}>
+                        <i className="bi bi-arrow-left me-1" aria-hidden="true" />
+                        Back to Attendance
+                      </button>
+                      <span className="badge text-bg-light border">Shift Assignment Workspace</span>
                     </div>
+                    <h6 className="mb-1">Assign Users to Shifts</h6>
+                    <div className="small text-secondary">Search, assign, move, and rebalance users across shifts in one screen.</div>
+                  </div>
+                  <div className="d-flex flex-wrap gap-2">
+                    <span className="badge text-bg-light border">Total Users: {shiftAssignmentSummary.total}</span>
+                    <span className="badge text-bg-light border text-success">Assigned: {shiftAssignmentSummary.assigned}</span>
+                    <span className="badge text-bg-light border text-secondary">Unassigned: {shiftAssignmentSummary.unassigned}</span>
                   </div>
                 </div>
-                <div className="col-12 col-xl-6">
-                  <div className="h-100">
-                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                      <h6 className="mb-0">Temporary Address</h6>
-                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
-                        <input
-                          type="checkbox"
-                          className="form-check-input mt-0"
-                          checked={Boolean(formValues.temporarySameAsPermanent)}
-                          onChange={(event) => {
-                            const checked = event.target.checked;
-                            setFormValues((prev) => {
-                              const next = { ...prev, temporarySameAsPermanent: checked };
-                              return checked ? syncTemporaryAddressFromPermanent(next) : next;
-                            });
-                          }}
-                        />
-                        Temporary same as permanent
-                      </label>
-                    </div>
-                    {!formValues.temporarySameAsPermanent ? (
-                      <div className="row g-3">
-                        {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
-                          renderHrField(
-                            employeeFieldMap.get(fieldKey),
-                            fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
-                          )
+
+                {shiftAssignPage.notice ? (
+                  <div className="alert alert-danger py-2 mb-3">{shiftAssignPage.notice}</div>
+                ) : null}
+
+                <div className="row g-3">
+                  <div className="col-12 col-xl-3">
+                    <div className="border rounded-4 p-3 h-100 d-flex flex-column gap-3">
+                      <div>
+                        <label className="form-label small text-secondary mb-1">User Search</label>
+                        <div className="input-group input-group-sm">
+                          <input
+                            className="form-control"
+                            placeholder="Search employee name..."
+                            value={shiftAssignPage.query}
+                            onChange={(event) => setShiftAssignPage((prev) => ({ ...prev, query: event.target.value, notice: "" }))}
+                          />
+                          <button type="button" className="btn btn-success" onClick={assignSearchUserToShift} disabled={!workingShiftRows.length}>
+                            <i className="bi bi-plus-lg" aria-hidden="true" />
+                          </button>
+                        </div>
+                        <div className="small text-secondary mt-2">Click the `+` button on a user, choose a shift, or drag the user card into a shift column.</div>
+                      </div>
+
+                      {shiftAssignPage.pendingUserId ? (
+                        <div className="border rounded-4 p-3 bg-light-subtle">
+                          <div className="small text-secondary mb-2">Move selected user to</div>
+                          <div className="d-flex flex-column gap-2">
+                            <select
+                              className="form-select form-select-sm"
+                              value={shiftAssignPage.targetShiftId}
+                              onChange={(event) => setShiftAssignPage((prev) => ({ ...prev, targetShiftId: event.target.value, notice: "" }))}
+                            >
+                              <option value="">Select shift</option>
+                              {workingShiftRows.map((row) => (
+                                <option key={`assign-shift-target-${row.id}`} value={row.id}>{row.name}</option>
+                              ))}
+                            </select>
+                            <div className="d-flex gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-success btn-sm flex-fill"
+                                disabled={!shiftAssignPage.targetShiftId}
+                                onClick={() => moveUserToWorkingShift(shiftAssignPage.pendingUserId, shiftAssignPage.targetShiftId)}
+                              >
+                                Assign to Shift
+                              </button>
+                              <button type="button" className="btn btn-outline-light btn-sm" onClick={cancelShiftUserAssignment}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="d-flex flex-column" style={{ maxHeight: "70vh", overflowY: "auto", overflowX: "hidden" }}>
+                        {filteredShiftAssignmentUsers.length ? filteredShiftAssignmentUsers.map((user, userIndex) => {
+                          const shiftName = String(user?.assignedShift?.name || "").trim();
+                          const isFocusedShiftUser = shiftName && String(user?.assignedShift?.id || "").trim() === String(shiftAssignPage.focusShiftId || "").trim();
+                          return (
+                            <div key={`shift-assign-user-${user.id}`}>
+                              <div
+                                className={`py-2 d-flex align-items-center justify-content-between gap-2 ${draggingShiftUserId === user.id ? "opacity-50" : ""}`}
+                                draggable
+                                onDragStart={(event) => handleShiftUserDragStart(event, user.id, String(user?.assignedShift?.id || "").trim())}
+                                onDragEnd={handleShiftDragEnd}
+                                style={{ cursor: "grab", background: isFocusedShiftUser ? "rgba(25, 135, 84, 0.05)" : "transparent", minWidth: 0 }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn btn-link text-start text-decoration-none p-0 flex-grow-1"
+                                  onClick={() => startShiftUserAssignment(user.id, String(user?.assignedShift?.id || shiftAssignPage.focusShiftId || "").trim())}
+                                  style={{ minWidth: 0 }}
+                                >
+                                  <div className="d-flex align-items-center gap-2 flex-wrap">
+                                    <span className="fw-semibold text-body">{user.name}</span>
+                                    <span className={`small ${shiftName ? "text-success" : "text-secondary"}`}>
+                                      {shiftName || "Unassigned"}
+                                    </span>
+                                  </div>
+                                  <div className="small text-secondary">{user.email || "No email"}</div>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-success d-inline-flex align-items-center justify-content-center p-0"
+                                  aria-label={`Assign ${user.name}`}
+                                  title="Choose shift"
+                                  onClick={() => startShiftUserAssignment(user.id, String(user?.assignedShift?.id || shiftAssignPage.focusShiftId || "").trim())}
+                                  style={{ width: "20px", height: "21px", minWidth: "20px", borderRadius: "4px", lineHeight: 1, fontSize: "12px" }}
+                                >
+                                  <i className="bi bi-plus-lg small" aria-hidden="true" />
+                                </button>
+                              </div>
+                              {userIndex < filteredShiftAssignmentUsers.length - 1 ? <hr className="my-1" /> : null}
+                            </div>
+                          );
+                        }) : (
+                          <div className="small text-secondary">No users match this search.</div>
                         )}
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="col-12 col-xl-9">
+                    {workingShiftRows.length ? (
+                      <div className="row g-3">
+                        {workingShiftRows.map((row) => {
+                          const shiftId = String(row?.id || "").trim();
+                          const assignedUsers = shiftAssignmentUsers.filter((user) => String(user?.assignedShift?.id || "").trim() === shiftId);
+                          const isDropTarget = shiftDropTargetId === shiftId;
+                          const isFocusedShift = String(shiftAssignPage.focusShiftId || "").trim() === shiftId;
+                          const isColumnDropTarget = shiftColumnDropTargetId === shiftId;
+                          return (
+                            <div key={`shift-assign-column-${shiftId}`} className="col-12 col-md-6 col-xl-3">
+                              <div
+                                className="border rounded-3 p-3 h-100 d-flex flex-column"
+                                onDragOver={(event) => handleShiftColumnDragOver(event, shiftId)}
+                                onDragLeave={() => handleShiftColumnDragLeave(shiftId)}
+                                onDrop={(event) => handleShiftColumnDrop(event, shiftId)}
+                                style={{
+                                  minHeight: "420px",
+                                  borderColor: isDropTarget || isFocusedShift || isColumnDropTarget ? "rgba(25, 135, 84, 0.45)" : undefined,
+                                  boxShadow: isDropTarget || isFocusedShift || isColumnDropTarget ? "0 0 0 3px rgba(25, 135, 84, 0.08)" : undefined,
+                                  background: isDropTarget || isColumnDropTarget ? "rgba(25, 135, 84, 0.04)" : "transparent",
+                                }}
+                              >
+                                <div
+                                  className={`d-flex align-items-start justify-content-between gap-2 mb-3 ${draggingShiftColumnId === shiftId ? "opacity-50" : ""}`}
+                                  draggable
+                                  onDragStart={(event) => handleShiftColumnCardDragStart(event, shiftId)}
+                                  onDragOver={(event) => handleShiftColumnCardDragOver(event, shiftId)}
+                                  onDrop={(event) => handleShiftColumnCardDrop(event, shiftId)}
+                                  onDragLeave={() => handleShiftColumnCardDragLeave(shiftId)}
+                                  onDragEnd={handleShiftColumnCardDragEnd}
+                                  style={{ cursor: "grab" }}
+                                >
+                                  <div>
+                                    <div className="fw-semibold">{row.name}</div>
+                                    <div className="small text-secondary">
+                                      {formatTimeToAmPm(row.fromTime) || row.fromTime || "-"} - {formatTimeToAmPm(row.toTime) || row.toTime || "-"}
+                                    </div>
+                                  </div>
+                                  <span className="badge text-bg-light border">{assignedUsers.length}</span>
+                                </div>
+                                <div className="small text-secondary mb-3">{formatWorkingShiftHours(row.fromTime, row.toTime)}</div>
+                                <div className="d-flex flex-column gap-2 flex-grow-1">
+                                  {assignedUsers.length ? assignedUsers.map((user) => (
+                                    <div
+                                      key={`shift-user-chip-${shiftId}-${user.id}`}
+                                      className={`border rounded-3 p-2 d-flex align-items-start justify-content-between gap-2 ${draggingShiftUserId === user.id ? "opacity-50" : ""}`}
+                                      draggable
+                                      onDragStart={(event) => handleShiftUserDragStart(event, user.id, shiftId)}
+                                      onDragEnd={handleShiftDragEnd}
+                                      style={{ cursor: "grab" }}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="fw-semibold text-break">{user.name}</div>
+                                        <div className="small text-secondary text-break">{user.email || "No email"}</div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-danger d-inline-flex align-items-center justify-content-center p-0"
+                                        aria-label={`Remove ${user.name}`}
+                                        title="Remove from shift"
+                                        onClick={() => removeUserFromWorkingShift(user.id, shiftId)}
+                                        style={{ width: "20px", height: "21px", minWidth: "20px", borderRadius: "4px", lineHeight: 1, fontSize: "12px" }}
+                                      >
+                                        <i className="bi bi-x-lg small" aria-hidden="true" />
+                                      </button>
+                                    </div>
+                                  )) : (
+                                    <div className="small text-secondary border rounded-4 p-3 text-center h-100 d-flex align-items-center justify-content-center">
+                                      Drop users here
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     ) : (
-                      <div className="small text-secondary">Temporary address entry hidden because both addresses are same.</div>
+                      <div className="border rounded-4 p-4 text-center text-secondary">
+                        No shifts available. Add a shift first, then open this assignment workspace.
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
-            </>
-          ) : (
-            <div className="row g-3">
-              {config.fields.map((field) => renderHrField(field, "col-12 col-md-4"))}
-            </div>
-          )}
-          {activeTab === "attendance" && hasHrFullAccess ? (
-            <div className="d-flex flex-wrap align-items-center gap-2">
-              <span className="small text-secondary">User Login Attendance:</span>
-              <button
-                type="button"
-                className="btn btn-outline-success btn-sm"
-                disabled={!String(formValues.employee || "").trim()}
-                onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
-              >
-                Attendance In
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-info btn-sm"
-                disabled={!String(formValues.employee || "").trim()}
-                onClick={() => handleAttendancePunch("out", formValues.employee, "User Side")}
-              >
-                Attendance Out
-              </button>
-              <span className="small text-secondary">Selected employee + today date record will update.</span>
-            </div>
-          ) : null}
-          <div className="d-flex gap-2">
-            <button type="submit" className="btn btn-success btn-sm">
-              {editingId ? "Update" : "Create"}
-            </button>
-            {editingId ? (
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
-                Cancel
-              </button>
+            ) : (
+              <div className="row g-3">
+                <div className="col-12 col-xl-7">
+                  <div className="card p-3">
+                    <h6 className="mb-3">
+                      {editingId
+                        ? `Edit ${config.itemLabel}`
+                        : `Create ${config.itemLabel}`}
+                    </h6>
+                    <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+            {hrFormNotice ? (
+              <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
             ) : null}
-          </div>
-        </form>
-      </div>
+            {activeTab === "employees" ? (
+              <>
+                <div className="row g-3">
+                  {[
+                    "name",
+                    "gender",
+                    "department",
+                    "designation",
+                  ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+                </div>
+                <div className="row g-3">
+                  {[
+                    "dateOfJoining",
+                    "dateOfBirth",
+                    "bloodGroup",
+                    "fatherName",
+                    "motherName",
+                  ].map((fieldKey) => renderHrField(
+                    employeeFieldMap.get(fieldKey),
+                    ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
+                      ? "col-12 col-md-6 col-xl-2"
+                      : "col-12 col-md-6 col-xl-3"
+                  ))}
+                </div>
+                <div className="row g-3 hr-upload-divider">
+                  {[
+                    "photoDataUrl",
+                    "documentName",
+                  ].map((fieldKey) => renderHrField(
+                    employeeFieldMap.get(fieldKey),
+                    "col-12 col-xl-6"
+                  ))}
+                </div>
+                <div className="row g-3">
+                  {[
+                    "contactCountryCode",
+                    "secondaryContactCountryCode",
+                    "maritalStatus",
+                    "wifeName",
+                  ].map((fieldKey) => renderHrField(
+                    employeeFieldMap.get(fieldKey),
+                    "col-12 col-md-6 col-xl-3"
+                  ))}
+                </div>
+                <hr className="section-divider mt-1 mb-2" />
+                <div className="row g-3">
+                  <div className="col-12 col-xl-6">
+                    <div className="h-100">
+                      <h6 className="mb-3">Permanent Address</h6>
+                      <div className="row g-3">
+                        {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
+                          renderHrField(
+                            employeeFieldMap.get(fieldKey),
+                            fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-12 col-xl-6">
+                    <div className="h-100">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h6 className="mb-0">Temporary Address</h6>
+                        <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                          <input
+                            type="checkbox"
+                            className="form-check-input mt-0"
+                            checked={Boolean(formValues.temporarySameAsPermanent)}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setFormValues((prev) => {
+                                const next = { ...prev, temporarySameAsPermanent: checked };
+                                return checked ? syncTemporaryAddressFromPermanent(next) : next;
+                              });
+                            }}
+                          />
+                          Temporary same as permanent
+                        </label>
+                      </div>
+                      {!formValues.temporarySameAsPermanent ? (
+                        <div className="row g-3">
+                          {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
+                            renderHrField(
+                              employeeFieldMap.get(fieldKey),
+                              fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <div className="small text-secondary">Temporary address entry hidden because both addresses are same.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : activeTab === "attendance" ? (
+              <>
+                <div className="row g-3">
+                  {config.fields
+                    .filter((field) => String(field?.key || "") !== "notes")
+                    .map((field) => renderHrField(field, "col-12 col-md-4"))}
+                </div>
+                <div className="row g-3 align-items-end">
+                  <div className="col-12 col-md-4">
+                    {renderHrField(config.fields.find((field) => String(field?.key || "") === "notes"), "col-12")}
+                  </div>
+                  <div className="col-12 col-md-8">
+                    <div className="d-flex justify-content-md-end gap-2">
+                      <button type="submit" className="btn btn-success btn-sm">
+                        {editingId ? "Update" : "Create"}
+                      </button>
+                      {editingId ? (
+                        <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="row g-3">
+                {config.fields.map((field) => renderHrField(field, "col-12 col-md-4"))}
+              </div>
+            )}
+            {activeTab !== "attendance" ? (
+              <div className="d-flex gap-2">
+                <button type="submit" className="btn btn-success btn-sm">
+                  {editingId ? "Update" : "Create"}
+                </button>
+                {editingId ? (
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+                    </form>
+                  </div>
+                </div>
+                <div className="col-12 col-xl-5">
+                  <div className="card p-3 h-100">
+                    <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                      <div>
+                        <h6 className="mb-1 text-body">Attendance Settings</h6>
+                        <div className="small text-body-secondary">Manage working shifts for attendance & payroll.</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm"
+                        onClick={openAddWorkingShift}
+                      >
+                        <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+                        Add Shift
+                      </button>
+                    </div>
+                    <div className="table-responsive">
+                      <table className="table table-sm align-middle mb-0 wz-hr-shift-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Shift</th>
+                            <th scope="col">From</th>
+                            <th scope="col">To</th>
+                            <th scope="col">Hrs</th>
+                            <th scope="col" className="text-end table-actions">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {workingShiftRows.length ? workingShiftRows.map((row) => (
+                            <tr key={`shift-row-${row.id}`}>
+                              <td className="fw-semibold">{row.name}</td>
+                              <td>{formatTimeToAmPm(row.fromTime) || row.fromTime || "-"}</td>
+                              <td>{formatTimeToAmPm(row.toTime) || row.toTime || "-"}</td>
+                              <td>{formatWorkingShiftHours(row.fromTime, row.toTime)}</td>
+                              <td className="text-end table-actions">
+                                <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn"
+                                    data-wz-tooltip="Edit shift"
+                                    aria-label="Edit shift"
+                                    onClick={() => openEditWorkingShift(row)}
+                                  >
+                                    <i className="bi bi-pencil" aria-hidden="true" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn"
+                                    data-wz-tooltip="Assign users"
+                                    aria-label="Assign users"
+                                    onClick={() => openAssignWorkingShift(row)}
+                                  >
+                                    <i className="bi bi-person-plus" aria-hidden="true" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-danger btn-sm saas-org-icon-btn wz-table-action-btn"
+                                    data-wz-tooltip="Delete shift"
+                                    aria-label="Delete shift"
+                                    onClick={() => deleteWorkingShift(row)}
+                                  >
+                                    <i className="bi bi-trash" aria-hidden="true" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan={5} className="text-center text-secondary small py-4">
+                                No shifts yet. Add your first working shift.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="card p-3">
+              <h6 className="mb-3">
+                {editingId
+                  ? `Edit ${config.itemLabel}`
+                  : (showOnlyEmployeeForm && activeTab === "employees" ? config.itemLabel : `Create ${config.itemLabel}`)}
+              </h6>
+              <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+                {hrFormNotice ? (
+                  <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
+                ) : null}
+                {activeTab === "employees" ? (
+                  <>
+                    <div className="row g-3">
+                      {[
+                        "name",
+                        "gender",
+                        "department",
+                        "designation",
+                      ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+                    </div>
+                    <div className="row g-3">
+                      {[
+                        "dateOfJoining",
+                        "dateOfBirth",
+                        "bloodGroup",
+                        "fatherName",
+                        "motherName",
+                      ].map((fieldKey) => renderHrField(
+                        employeeFieldMap.get(fieldKey),
+                        ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
+                          ? "col-12 col-md-6 col-xl-2"
+                          : "col-12 col-md-6 col-xl-3"
+                      ))}
+                    </div>
+                    <div className="row g-3 hr-upload-divider">
+                      {[
+                        "photoDataUrl",
+                        "documentName",
+                      ].map((fieldKey) => renderHrField(
+                        employeeFieldMap.get(fieldKey),
+                        "col-12 col-xl-6"
+                      ))}
+                    </div>
+                    <div className="row g-3">
+                      {[
+                        "contactCountryCode",
+                        "secondaryContactCountryCode",
+                        "maritalStatus",
+                        "wifeName",
+                      ].map((fieldKey) => renderHrField(
+                        employeeFieldMap.get(fieldKey),
+                        "col-12 col-md-6 col-xl-3"
+                      ))}
+                    </div>
+                    <hr className="section-divider mt-1 mb-2" />
+                    <div className="row g-3">
+                      <div className="col-12 col-xl-6">
+                        <div className="h-100">
+                          <h6 className="mb-3">Permanent Address</h6>
+                          <div className="row g-3">
+                            {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
+                              renderHrField(
+                                employeeFieldMap.get(fieldKey),
+                                fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                              )
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-12 col-xl-6">
+                        <div className="h-100">
+                          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <h6 className="mb-0">Temporary Address</h6>
+                            <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                              <input
+                                type="checkbox"
+                                className="form-check-input mt-0"
+                                checked={Boolean(formValues.temporarySameAsPermanent)}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setFormValues((prev) => {
+                                    const next = { ...prev, temporarySameAsPermanent: checked };
+                                    return checked ? syncTemporaryAddressFromPermanent(next) : next;
+                                  });
+                                }}
+                              />
+                              Temporary same as permanent
+                            </label>
+                          </div>
+                          {!formValues.temporarySameAsPermanent ? (
+                            <div className="row g-3">
+                              {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
+                                renderHrField(
+                                  employeeFieldMap.get(fieldKey),
+                                  fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                                )
+                              )}
+                            </div>
+                          ) : (
+                            <div className="small text-secondary">Temporary address entry hidden.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                {activeTab !== "employees" ? (
+                  <div className="row g-3">
+                    {config.fields.map((field) => renderHrField(field, field?.colClassName || "col-12 col-md-6 col-xl-4"))}
+                  </div>
+                ) : null}
+                {activeTab === "attendance" && !editingId && !hasHrFullAccess ? (
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="small text-secondary">User Login Attendance:</span>
+                    <div className="d-inline-flex gap-2 flex-nowrap">
+                        <button
+                          type="button"
+                          className="btn btn-outline-success btn-sm"
+                          disabled={!String(formValues.employee || "").trim()}
+                          onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
+                        >
+                          Attendance In
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-info btn-sm"
+                          disabled={!String(formValues.employee || "").trim()}
+                          onClick={() => handleAttendancePunch("out", formValues.employee, "User Side")}
+                        >
+                          Attendance Out
+                        </button>
+                    </div>
+                    <span className="ms-auto small text-secondary text-truncate" style={{ minWidth: 0 }}>
+                      Selected employee + today date record will update.
+                    </span>
+                  </div>
+                ) : null}
+                <div className="d-flex gap-2">
+                  <button type="submit" className="btn btn-success btn-sm">
+                    {editingId ? "Update" : "Create"}
+                  </button>
+                  {editingId ? (
+                    <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </div>
+          )
       ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendance" ? (
+      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open ? (
         <div className="card p-3">
           <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <h6 className="mb-0">My Attendance (HR)</h6>
             {hasHrFullAccess ? (
               <div className="d-flex align-items-center gap-2">
                 <label className="small text-secondary mb-0">Employee</label>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ minWidth: "180px" }}
-                  value={myAttendanceEmployee}
-                  onChange={(e) => setMyAttendanceEmployee(e.target.value)}
-                >
-                  <option value="">Select Employee</option>
-                  {employeeNameOptions.map((name) => (
-                    <option key={`my-attendance-${name}`} value={name}>{name}</option>
-                  ))}
-                </select>
+                <div style={{ minWidth: "220px" }}>
+                  <AutocompleteSelectSm
+                    value={myAttendanceEmployee}
+                    onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
+                    options={employeeNameOptions}
+                    placeholder="Search employee"
+                    ariaLabel="Select employee"
+                  />
+                </div>
               </div>
             ) : (
               <div className="small text-secondary">
@@ -25632,16 +27177,195 @@ export function HrManagementModule({
         </div>
       ) : null}
 
-      {!showOnlyEmployeeForm || activeTab === "employees" ? (
-        <SearchablePaginatedTableCard
+	      {activeTab === "holidays" && hasHrFullAccess ? (
+	        <div className="p-3">
+	          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+	            <div>
+	              <h6 className="mb-1 d-flex align-items-center gap-2">
+	                <i className="bi bi-calendar2-week" aria-hidden="true" />
+	                Holiday Calendar
+	              </h6>
+	              <div className="small text-secondary">Manage holiday list and weekly off days for payroll.</div>
+	            </div>
+	            <div className="d-flex flex-wrap align-items-center gap-2">
+	              <div className="d-flex align-items-center gap-2">
+	                <span className="small text-secondary">Year</span>
+	                <select
+	                  className="form-select form-select-sm"
+	                  style={{ minWidth: 120 }}
+	                  value={holidayYear}
+	                  onChange={(e) => setHolidayYear(e.target.value)}
+	                >
+	                  {holidayYearOptions.map((year) => (
+	                    <option key={`holiday-year-${year}`} value={year}>{year}</option>
+	                  ))}
+	                </select>
+	              </div>
+	              <button
+	                type="button"
+	                className="btn btn-outline-light btn-sm"
+	                onClick={markAllSundaysForYear}
+	              >
+	                Mark all Sundays
+	              </button>
+	              <button
+	                type="button"
+	                className="btn btn-success btn-sm"
+	                onClick={openHolidayAddModal}
+	              >
+	                <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+	                Add Holiday
+	              </button>
+	            </div>
+	          </div>
+
+	          <div className="row g-3">
+	            <div className="col-12 col-lg-3">
+	              <div className="d-flex flex-column gap-2">
+	                {holidayMonthOptions.map((month) => {
+	                  const count = holidayMonthCounts.get(month.value) || 0;
+	                  const isActive = month.value === holidayMonth;
+	                  return (
+	                    <button
+	                      key={`holiday-month-${month.value}`}
+	                      type="button"
+	                      className={`btn btn-sm text-start d-flex align-items-center justify-content-between ${isActive ? "btn-success" : "btn-outline-light"}`}
+	                      onClick={() => setHolidayMonth(month.value)}
+	                    >
+	                      <span>{month.label}</span>
+	                      <span className={`badge ${isActive ? "bg-dark" : "bg-secondary"}`}>{count}</span>
+	                    </button>
+	                  );
+	                })}
+	              </div>
+	            </div>
+	            <div className="col-12 col-lg-9">
+	              <div className="table-responsive">
+	                <table className="table table-sm table-dark align-middle mb-0">
+	                  <thead>
+	                    <tr>
+	                      <th style={{ width: 60 }}>#</th>
+	                      <th style={{ whiteSpace: "nowrap" }}>Date</th>
+	                      <th>Occasion</th>
+	                      <th style={{ width: 90 }}>Day</th>
+	                      <th style={{ width: 120 }}>Type</th>
+	                      <th style={{ width: 90 }} className="table-actions">Action</th>
+	                    </tr>
+	                  </thead>
+	                  <tbody>
+	                    {selectedHolidayRows.length ? (
+	                      selectedHolidayRows.map((row) => (
+	                        <tr key={`holiday-row-${row.id}`}>
+	                          <td>{row.index}</td>
+	                          <td style={{ whiteSpace: "nowrap" }}>{formatDateTimeCellValue("date", row.date, row.date)}</td>
+	                          <td className="text-break">{row.occasion || "-"}</td>
+	                          <td>{row.day || "-"}</td>
+	                          <td>{row.type || "Holiday"}</td>
+	                          <td className="table-actions">
+	                            <div className="d-inline-flex align-items-center gap-2">
+	                              <button
+	                                type="button"
+	                                className="btn btn-sm btn-outline-info saas-org-icon-btn"
+	                                onClick={() => openHolidayEditModal(row)}
+	                                data-wz-tooltip="Edit holiday"
+	                                aria-label="Edit holiday"
+	                              >
+	                                <i className="bi bi-pencil-square" aria-hidden="true" />
+	                              </button>
+	                              <button
+	                                type="button"
+	                                className="btn btn-sm btn-outline-danger saas-org-icon-btn"
+	                                onClick={() => deleteHolidayRow(row.id)}
+	                                data-wz-tooltip="Delete holiday"
+	                                aria-label="Delete holiday"
+	                              >
+	                                <i className="bi bi-trash" aria-hidden="true" />
+	                              </button>
+	                            </div>
+	                          </td>
+	                        </tr>
+	                      ))
+	                    ) : (
+	                      <tr>
+	                        <td colSpan={6} className="text-center text-secondary py-4">
+	                          No holidays in {holidayMonthOptions.find((m) => m.value === holidayMonth)?.label || "this month"} {holidayYear}.
+	                        </td>
+	                      </tr>
+	                    )}
+	                  </tbody>
+	                </table>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
+	      {((!showOnlyEmployeeForm || activeTab === "employees") && activeTab !== "holidays" && !(activeTab === "attendance" && shiftAssignPage.open)) ? (
+	        <SearchablePaginatedTableCard
           title={
             showOnlyEmployeeForm && activeTab === "employees"
               ? "Employee List"
               : (activeTab === "attendance" && !hasHrFullAccess
                 ? "My Attendance"
-                : (activeTab === "leaves" && !hasHrFullAccess ? "My Leaves" : config.label))
+                : (activeTab === "attendance" && hasHrFullAccess
+                  ? (
+                    <span className="d-inline-flex align-items-baseline gap-2 flex-wrap" style={{ minWidth: 0 }}>
+                      <span>{config.label}</span>
+	                      {attendanceShiftSubject?.name ? (
+	                        <span className="small text-body-secondary" style={{ lineHeight: 1.2 }}>
+	                          (
+	                          <span>Your Shift: </span>
+	                          <span className="fw-semibold text-body">{attendanceShiftSubject.name}</span>
+	                          {attendanceShiftSubject.fromTime && attendanceShiftSubject.toTime ? (
+	                            <>
+	                              ,{" "}
+	                              <span>Time: </span>
+	                              <span className="fw-semibold text-body">
+	                                {formatTimeToAmPm(attendanceShiftSubject.fromTime) || attendanceShiftSubject.fromTime}
+	                                {" "}to{" "}
+	                                {formatTimeToAmPm(attendanceShiftSubject.toTime) || attendanceShiftSubject.toTime}
+	                              </span>
+	                            </>
+	                          ) : null}
+	                          {attendanceShiftSubject.hrsLabel ? (
+	                            <>
+	                              ,{" "}
+	                              <span>Working Hrs: </span>
+	                              <span className="fw-semibold text-body">{attendanceShiftSubject.hrsLabel}</span>
+	                            </>
+	                          ) : null}
+	                          )
+	                        </span>
+	                      ) : null}
+	                    </span>
+	                  )
+                  : (activeTab === "leaves" && !hasHrFullAccess ? "My Leaves" : config.label)))
           }
-          badgeLabel={`${(activeTab === "attendance" ? attendanceFilteredRows : activeTab === "leaves" ? hrLeaveRows : currentRows).length} items`}
+          badgeLabel={
+            activeTab === "attendance"
+              ? attendanceMonthSummaryLabel
+              : `${(activeTab === "leaves" ? hrLeaveRows : currentRows).length} items`
+          }
+          pageSize={
+            activeTab === "attendance"
+            && attendanceScope === "my"
+            && attendanceListMode !== "deleted"
+            && !attendanceFromDate
+            && !attendanceToDate
+            && /^\d{4}$/.test(String(attendanceYearFilter || ""))
+            && /^\d{2}$/.test(String(attendanceMonthFilter || ""))
+              ? Math.max(64, (attendanceFilteredRows || []).length)
+              : DEFAULT_TABLE_PAGE_SIZE
+          }
+          hidePagination={
+            activeTab === "attendance"
+            && attendanceScope === "my"
+            && attendanceListMode !== "deleted"
+            && !attendanceFromDate
+            && !attendanceToDate
+            && /^\d{4}$/.test(String(attendanceYearFilter || ""))
+            && /^\d{2}$/.test(String(attendanceMonthFilter || ""))
+          }
           toolbarPrefix={
             activeTab === "attendance" && hasHrFullAccess ? (
               <button
@@ -25706,7 +27430,7 @@ export function HrManagementModule({
                     />
                   </div>
 
-                  <div style={{ minWidth: 140 }}>
+                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">Year</label>
                     <select
                       className="form-select form-select-sm"
@@ -25720,7 +27444,7 @@ export function HrManagementModule({
                     </select>
                   </div>
 
-                  <div style={{ minWidth: 140 }}>
+                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">Month</label>
                     <select
                       className="form-select form-select-sm"
@@ -25734,26 +27458,28 @@ export function HrManagementModule({
                     </select>
                   </div>
 
-                  <div style={{ minWidth: 140 }}>
+                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">From</label>
                     <input
                       ref={attendanceFromInputRef}
                       type="date"
                       className="form-control form-control-sm"
                       value={attendanceFromDate}
+                      style={{ width: "100%" }}
                       min={attendanceDateMeta.minIso || undefined}
                       max={attendanceToDate || todayIso}
                       onChange={(e) => setAttendanceFromDate(e.target.value)}
                     />
                   </div>
 
-                  <div style={{ minWidth: 140 }}>
+                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
                     <label className="form-label small text-secondary mb-1">To</label>
                     <input
                       ref={attendanceToInputRef}
                       type="date"
                       className="form-control form-control-sm"
                       value={attendanceToDate}
+                      style={{ width: "100%" }}
                       min={attendanceFromDate || attendanceDateMeta.minIso || undefined}
                       max={todayIso}
                       onChange={(e) => {
@@ -25774,6 +27500,8 @@ export function HrManagementModule({
                       }}
                     />
                   </div>
+
+                  {/* Shift info is shown in the Attendance title (parentheses). */}
                 </div>
               </div>
             ) : (
@@ -25820,13 +27548,35 @@ export function HrManagementModule({
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
           renderCells={(row) => config.columns.map((column) => {
             if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
-              return formatTimeToAmPm(row[column.key]);
+              const text = formatTimeToAmPm(row[column.key]);
+              if (!text || text === "-") {
+                return <span className="text-secondary">-</span>;
+              }
+              return <span className="fw-semibold">{text}</span>;
             }
             if (activeTab === "attendance" && column.key === "workedHours") {
-              return row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
+              const text = row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
+              if (!text || text === "-") {
+                return <span className="text-secondary">-</span>;
+              }
+              return <span className="fw-semibold">{text}</span>;
             }
             if (activeTab === "attendance" && column.key === "status") {
               const status = String(row.status || "").trim();
+              if (status === "Holiday") {
+                const occasion = String(row?.holidayOccasion || "").trim();
+                const type = String(row?.holidayType || "").trim();
+                if (occasion) {
+                  const normalizedOccasion = occasion.toLowerCase();
+                  const normalizedType = type.toLowerCase();
+                  const shouldShowType = Boolean(type)
+                    && normalizedType !== "holiday"
+                    && normalizedType !== normalizedOccasion;
+                  const suffix = shouldShowType ? `${occasion} (${type})` : occasion;
+                  return <span className="wz-link-primary fw-semibold">{`Holiday (${suffix})`}</span>;
+                }
+                return <span className="wz-link-primary fw-semibold">Holiday</span>;
+              }
               const entryModeRaw = String(row.entryMode || "").trim();
               const entryModeToken = entryModeRaw.toLowerCase();
               const entryModeLabel = entryModeToken.includes("hr self") || entryModeToken === "self"
@@ -25838,16 +27588,55 @@ export function HrManagementModule({
                     : (entryModeRaw || "");
               if (status === "Permission" && String(row.permissionHours || "").trim()) {
                 const base = `Permission (${String(row.permissionHours).trim()} hrs)`;
-                return entryModeLabel ? `${base} (${entryModeLabel})` : base;
+                const text = entryModeLabel ? `${base} (${entryModeLabel})` : base;
+                return text;
               }
               const base = status || "-";
-              return entryModeLabel ? `${base} (${entryModeLabel})` : base;
+              const text = entryModeLabel ? `${base} (${entryModeLabel})` : base;
+              const holidayOccasion = String(row?.holidayOccasion || "").trim();
+              const holidayType = String(row?.holidayType || "").trim();
+              const hasHolidaySuffix = Boolean(holidayOccasion) && status !== "Holiday";
+              let holidaySuffix = "";
+              if (hasHolidaySuffix) {
+                const normalizedOccasion = holidayOccasion.toLowerCase();
+                const normalizedType = holidayType.toLowerCase();
+                const shouldShowType = Boolean(holidayType)
+                  && normalizedType !== "holiday"
+                  && normalizedType !== normalizedOccasion;
+                holidaySuffix = shouldShowType ? `${holidayOccasion} (${holidayType})` : holidayOccasion;
+              }
+              if (/^present\b/i.test(base)) {
+                return (
+                  <span className="fw-semibold">
+                    {text}
+                    {holidaySuffix ? (
+                      <>
+                        {" - "}
+                        <span className="wz-link-primary fw-semibold">{`Holiday (${holidaySuffix})`}</span>
+                      </>
+                    ) : null}
+                  </span>
+                );
+              }
+              if (holidaySuffix) {
+                return (
+                  <>
+                    {text}
+                    {" - "}
+                    <span className="wz-link-primary fw-semibold">{`Holiday (${holidaySuffix})`}</span>
+                  </>
+                );
+              }
+              return text;
             }
             return formatDateLikeCellValue(column.key, row[column.key], "-");
           })}
           renderActions={
             (row) => {
               if (activeTab === "attendance") {
+                if (row?.__placeholder) {
+                  return null;
+                }
                 const isDeletedRow = _isDeletedAttendanceRow(row);
                 const hasTaskList = Boolean(String(row?.completedTasks || "").trim());
                 const hasAdminNotes = Boolean(String(row?.notes || "").trim());
@@ -25861,7 +27650,7 @@ export function HrManagementModule({
 	                      <button
 	                        type="button"
 	                        className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
-	                        title="View completed tasks"
+	                        data-wz-tooltip="View completed tasks"
 	                        onClick={() => openAttendanceTaskModal(row)}
 	                        aria-label="View completed tasks"
 	                      >
@@ -25870,7 +27659,7 @@ export function HrManagementModule({
 	                      <button
 	                        type="button"
 	                        className={`btn btn-sm ${hasAdminNotes ? "btn-success" : "btn-outline-secondary"}`}
-	                        title={hasAdminNotes ? "View admin notes" : "No admin notes yet"}
+	                        data-wz-tooltip={hasAdminNotes ? "View admin notes" : "No admin notes yet"}
 	                        disabled={!hasAdminNotes}
 	                        onClick={() => openAttendanceNotesModal(row)}
 	                        aria-label={hasAdminNotes ? "View admin notes" : "No admin notes yet"}
@@ -25883,12 +27672,12 @@ export function HrManagementModule({
 
                 return (
                   <div className="d-inline-flex gap-2 flex-nowrap">
-	                    {!isDeletedRow ? (
-	                      <>
+                    {!isDeletedRow ? (
+                      <>
 	                        <button
 	                          type="button"
 	                          className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
-	                          title="Completed tasks"
+	                          data-wz-tooltip="Completed tasks"
 	                          onClick={() => openAttendanceTaskModal(row)}
 	                          aria-label="Completed tasks"
 	                        >
@@ -25897,14 +27686,23 @@ export function HrManagementModule({
 	                        <button
 	                          type="button"
 	                          className={`btn btn-sm ${hasAdminNotes ? "btn-success" : "btn-outline-success"}`}
-	                          title="Notes"
+	                          data-wz-tooltip="Notes"
 	                          onClick={() => openAttendanceNotesModal(row)}
 	                          aria-label="Notes"
 	                        >
-	                          <i className="bi bi-chat-left-text" aria-hidden="true" />
-	                        </button>
-	                      </>
-	                    ) : (
+                          <i className="bi bi-chat-left-text" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                          data-wz-tooltip="Edit History"
+                          aria-label="Edit History"
+                          onClick={() => openAttendanceHistoryPopup(row)}
+                        >
+                          <i className="bi bi-clock-history" aria-hidden="true" />
+                        </button>
+                      </>
+                    ) : (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-success"
@@ -25972,13 +27770,13 @@ export function HrManagementModule({
         />
       ) : null}
 
-      {activeTab === "employees" && employeeViewModal.open ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="modal-overlay wz-employee-view-overlay"
-          onClick={closeEmployeeViewModal}
-        >
+	      {activeTab === "employees" && employeeViewModal.open ? (
+	        <div
+	          role="dialog"
+	          aria-modal="true"
+	          className="modal-overlay wz-employee-view-overlay"
+	          onClick={closeEmployeeViewModal}
+	        >
           <div
             className="modal-panel wz-employee-view-modal"
             onClick={(event) => event.stopPropagation()}
@@ -26026,13 +27824,265 @@ export function HrManagementModule({
               ))}
             </div>
           </div>
-        </div>
-      ) : null}
+	        </div>
+		      ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceTaskModal.open ? (
-        <div
-          role="dialog"
-          aria-modal="true"
+		      {!showOnlyEmployeeForm && activeTab === "holidays" && holidayModal.open ? (
+		        <div
+		          role="dialog"
+		          aria-modal="true"
+		          className="modal-overlay wz-crm-popup-overlay"
+		          onClick={closeHolidayModal}
+		        >
+		          <div
+		            className="card p-3 wz-crm-popup"
+		            style={{ width: "min(640px, 96vw)" }}
+		            onClick={(event) => event.stopPropagation()}
+		          >
+		            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+		              <div>
+		                <h5 className="mb-1">{holidayModal.mode === "edit" ? "Edit Holiday" : "Add Holiday"}</h5>
+		                <div className="small text-secondary">Create holiday for payroll and attendance planning.</div>
+		              </div>
+		              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeHolidayModal}>
+		                <i className="bi bi-x-lg" aria-hidden="true" />
+		              </button>
+		            </div>
+		            {hrFormNotice ? (
+		              <div className="alert alert-danger py-2 mb-3">{hrFormNotice}</div>
+		            ) : null}
+		            <form className="d-flex flex-column gap-3" onSubmit={saveHolidayFromModal}>
+		              <div className="row g-3">
+		                <div className="col-12 col-md-6">
+		                  <label className="form-label small text-secondary mb-1">Date</label>
+		                  <input
+		                    type="date"
+		                    className="form-control"
+		                    value={holidayModal.date}
+		                    onChange={(e) => setHolidayModal((prev) => ({ ...prev, date: e.target.value }))}
+		                    required
+		                  />
+		                </div>
+		                <div className="col-12 col-md-6">
+		                  <label className="form-label small text-secondary mb-1">Type</label>
+		                  <select
+		                    className="form-select"
+		                    value={holidayModal.type}
+		                    onChange={(e) => setHolidayModal((prev) => ({ ...prev, type: e.target.value }))}
+		                  >
+		                    <option value="Holiday">Holiday</option>
+		                    <option value="Sunday">Sunday</option>
+		                    <option value="Optional">Optional</option>
+		                  </select>
+		                </div>
+		                <div className="col-12">
+		                  <label className="form-label small text-secondary mb-1">Occasion</label>
+		                  <input
+		                    type="text"
+		                    className="form-control"
+		                    placeholder="New Year / Republic Day / Company Holiday"
+		                    value={holidayModal.occasion}
+		                    onChange={(e) => setHolidayModal((prev) => ({ ...prev, occasion: e.target.value }))}
+		                    required
+		                  />
+		                </div>
+		              </div>
+		              <div className="d-flex justify-content-end gap-2">
+		                <button type="button" className="btn btn-outline-light" onClick={closeHolidayModal}>Cancel</button>
+		                <button type="submit" className="btn btn-success">{holidayModal.mode === "edit" ? "Update" : "Save"}</button>
+		              </div>
+		            </form>
+		          </div>
+		        </div>
+		      ) : null}
+
+		      {!showOnlyEmployeeForm && activeTab === "attendance" && shiftModal.open ? (
+		        <div
+		          role="dialog"
+		          aria-modal="true"
+		          className="modal-overlay wz-crm-popup-overlay"
+		          onClick={closeWorkingShiftModal}
+		        >
+		          <div
+		            className="card p-3 wz-crm-popup"
+		            style={{ width: "min(640px, 96vw)" }}
+		            onClick={(event) => event.stopPropagation()}
+		          >
+		            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+		              <div>
+		                <h5 className="mb-1">{shiftModal.mode === "edit" ? "Edit Working Shift" : "Add Working Shift"}</h5>
+		                <div className="small text-secondary">Create shifts for attendance & payroll settings.</div>
+		              </div>
+		              <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeWorkingShiftModal}>
+		                <i className="bi bi-x-lg" aria-hidden="true" />
+		              </button>
+		            </div>
+		            {hrFormNotice ? (
+		              <div className="alert alert-danger py-2 mb-3">{hrFormNotice}</div>
+		            ) : null}
+		            <form className="d-flex flex-column gap-3" onSubmit={saveWorkingShift}>
+		              <div className="row g-3">
+		                <div className="col-12">
+		                  <label className="form-label small text-secondary mb-1">Shift Name</label>
+		                  <input
+		                    type="text"
+		                    className="form-control"
+		                    placeholder="General / Night / Morning"
+		                    value={shiftModal.name}
+		                    maxLength={WORKING_SHIFT_NAME_MAX}
+		                    onChange={(e) => setShiftModal((prev) => ({ ...prev, name: e.target.value }))}
+		                    required
+		                  />
+		                  <div className="small text-secondary mt-1">
+		                    {`${Math.max(0, WORKING_SHIFT_NAME_MAX - String(shiftModal.name || "").length)} characters left`}
+		                  </div>
+		                </div>
+		                <div className="col-12 col-md-6">
+		                  <label className="form-label small text-secondary mb-1">From</label>
+		                  <input
+		                    type="time"
+		                    data-wz-time-enhance="off"
+		                    className="form-control"
+		                    value={shiftModal.fromTime}
+		                    onChange={(e) => setShiftModal((prev) => ({ ...prev, fromTime: e.target.value }))}
+		                    required
+		                  />
+		                </div>
+		                <div className="col-12 col-md-6">
+		                  <label className="form-label small text-secondary mb-1">To</label>
+		                  <input
+		                    type="time"
+		                    data-wz-time-enhance="off"
+		                    className="form-control"
+		                    value={shiftModal.toTime}
+		                    onChange={(e) => setShiftModal((prev) => ({ ...prev, toTime: e.target.value }))}
+		                    required
+		                  />
+		                </div>
+		              </div>
+		              <div className="d-flex justify-content-end gap-2">
+		                <button type="button" className="btn btn-outline-light" onClick={closeWorkingShiftModal}>Cancel</button>
+		                <button type="submit" className="btn btn-success">{shiftModal.mode === "edit" ? "Update" : "Save"}</button>
+		              </div>
+		            </form>
+		          </div>
+		        </div>
+		      ) : null}
+
+		      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceHistoryPopup ? (
+		        <div
+		          role="dialog"
+		          aria-modal="true"
+	          className="modal-overlay wz-crm-popup-overlay"
+	          onClick={closeAttendanceHistoryPopup}
+	        >
+	          <div
+	            className="card p-3 wz-crm-popup"
+	            style={{ width: "min(920px, 96vw)" }}
+	            onClick={(event) => event.stopPropagation()}
+	          >
+	            {(() => {
+	              const rowId = String(attendanceHistoryPopup?.rowId || "").trim();
+	              const matchedRow = (moduleData.attendance || []).find((row) => String(row?.id || "").trim() === rowId) || null;
+	              const historyRows = Array.isArray(matchedRow?.modificationHistory) ? matchedRow.modificationHistory : [];
+	              const headerSubtitle = [
+	                String(attendanceHistoryPopup?.employee || matchedRow?.employee || "").trim(),
+	                String(attendanceHistoryPopup?.date || matchedRow?.date || "").trim(),
+	              ].filter(Boolean).join(" • ") || "-";
+	              return (
+	                <>
+	                  <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+	                    <div>
+	                      <h5 className="mb-1">Attendance Edit History</h5>
+	                      <div className="small text-secondary">{headerSubtitle}</div>
+	                    </div>
+	                    <button type="button" className="btn btn-sm wz-crm-popup-close" onClick={closeAttendanceHistoryPopup}>
+	                      <i className="bi bi-x-lg" aria-hidden="true" />
+	                    </button>
+	                  </div>
+	                  {historyRows.length ? (
+	                    <div className="table-responsive">
+	                      <table className="table table-sm table-dark align-middle mb-0">
+	                        <thead>
+	                          <tr>
+	                            <th style={{ whiteSpace: "nowrap" }}>Date</th>
+	                            <th style={{ whiteSpace: "nowrap" }}>User</th>
+	                            <th style={{ whiteSpace: "nowrap" }}>Action</th>
+	                            <th>Changes</th>
+	                          </tr>
+	                        </thead>
+	                        <tbody>
+		                          {historyRows.map((entry) => {
+		                            const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+		                            const fieldLabelMap = {
+		                              entryMode: "Entry Mode",
+		                              inTime: "In Time",
+		                              outTime: "Out Time",
+		                              workedHours: "Worked",
+		                              status: "Status",
+		                              permissionHours: "Permission Hours",
+		                              notes: "Notes",
+		                              completedTasks: "Completed Tasks",
+		                              taskNotes: "Task Notes",
+		                              adminSatisfaction: "Admin Satisfaction",
+		                            };
+		                            const formatChangeValue = (fieldKey, value) => {
+		                              const raw = value === null || typeof value === "undefined" ? "" : String(value);
+		                              const trimmed = raw.trim();
+		                              if (!trimmed || trimmed === "-") {
+		                                return "-";
+		                              }
+		                              if (fieldKey === "inTime" || fieldKey === "outTime") {
+		                                const normalized = normalizeMeetingTimeValue(trimmed);
+		                                return normalized ? formatTimeToAmPm(normalized) : "-";
+		                              }
+		                              return trimmed;
+		                            };
+		                            const changeText = changes
+		                              .map((change) => {
+		                                const rawField = String(change?.field || "").trim() || "-";
+		                                const fieldLabel = fieldLabelMap[rawField] || rawField;
+		                                const oldValue = formatChangeValue(rawField, change?.old);
+		                                const newValue = formatChangeValue(rawField, change?.new);
+		                                return `${fieldLabel}: ${oldValue} → ${newValue}`;
+		                              })
+		                              .filter(Boolean);
+	                            return (
+	                              <tr key={`attendance-history-${entry?.id || entry?.created_at || Math.random()}`}>
+	                                <td style={{ whiteSpace: "nowrap" }}>{formatDateTimeCellValue("created_at", entry?.created_at, "-")}</td>
+	                                <td style={{ whiteSpace: "nowrap" }}>{String(entry?.changed_by_name || "").trim() || "-"}</td>
+	                                <td style={{ whiteSpace: "nowrap" }}>{String(entry?.action || "").trim() || "-"}</td>
+	                                <td className="small">
+	                                  {changeText.length ? (
+	                                    <div className="d-flex flex-column gap-1">
+	                                      {changeText.map((text, idx) => (
+	                                        <div key={`attendance-history-change-${entry?.id || "x"}-${idx}`} className="text-break">{text}</div>
+	                                      ))}
+	                                    </div>
+	                                  ) : (
+	                                    <span className="text-secondary">-</span>
+	                                  )}
+	                                </td>
+	                              </tr>
+	                            );
+	                          })}
+	                        </tbody>
+	                      </table>
+	                    </div>
+	                  ) : (
+	                    <div className="text-secondary small">No modifications yet.</div>
+	                  )}
+	                </>
+	              );
+	            })()}
+	          </div>
+	        </div>
+	      ) : null}
+
+	      {!showOnlyEmployeeForm && activeTab === "attendance" && attendanceTaskModal.open ? (
+	        <div
+	          role="dialog"
+	          aria-modal="true"
           className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
           style={{ background: "rgba(0,0,0,0.65)", zIndex: 1050, padding: "1rem" }}
           onClick={closeAttendanceTaskModal}
@@ -33884,7 +35934,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 	            <button
 	              type="button"
 	              className="btn btn-sm btn-outline-light"
-	              title="View"
+	              data-wz-tooltip="View"
               aria-label="View"
               onClick={() => openAccountsDocumentViewPopup(kind, row)}
             >
@@ -33893,7 +35943,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 	            <button
 	              type="button"
 	              className="btn btn-sm btn-outline-light"
-	              title="Download PDF"
+	              data-wz-tooltip="Download PDF"
 	              aria-label="Download PDF"
 	              onClick={() => downloadDocumentPdf(kind, row.id)}
 	            >

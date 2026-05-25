@@ -7349,6 +7349,11 @@ def profile_summary(request):
     if requested_product_slug == "monitor":
         requested_product_slug = "worksuite"
     requested_user_id = (request.GET.get("activity_user_id") or "").strip()
+    try:
+        activity_limit = int(request.GET.get("activity_limit") or 500)
+    except (TypeError, ValueError):
+        activity_limit = 500
+    activity_limit = min(max(activity_limit, 1), 100 if requested_user_id.isdigit() else 500)
 
     recent_actions_qs = (
         AdminActivity.objects
@@ -7367,9 +7372,9 @@ def profile_summary(request):
             models.Q(action__icontains=search_query) |
             models.Q(details__icontains=search_query)
         )
-    recent_actions_qs = recent_actions_qs.order_by("-created_at")[:500]
+    recent_actions_qs = recent_actions_qs.order_by("-created_at")[:activity_limit]
     page_num = request.GET.get("admin_page") or 1
-    paginator = Paginator(recent_actions_qs, 50)
+    paginator = Paginator(recent_actions_qs, min(50, activity_limit) if activity_limit else 50)
     page_obj = paginator.get_page(page_num)
     earnings = (
         ReferralEarning.objects

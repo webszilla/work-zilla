@@ -130,6 +130,85 @@ const USER_DETAIL_FIELDS = [
   { key: "employee_role", label: "Employee Role" },
   { key: "is_active", label: "Status" },
 ];
+const ROLE_ACCESS_SECTION_FEATURES = {
+  dashboard: [
+    { key: "overview", label: "Overview" },
+    { key: "widgets", label: "Widgets" },
+    { key: "analytics", label: "Analytics" },
+  ],
+  inbox: [
+    { key: "tickets", label: "Tickets" },
+    { key: "messages", label: "Messages" },
+    { key: "followups", label: "Follow Ups" },
+  ],
+  crm: [
+    { key: "leads", label: "Leads" },
+    { key: "contacts", label: "Contacts" },
+    { key: "deals", label: "Deals" },
+    { key: "sales_orders", label: "Sales Orders" },
+    { key: "meetings", label: "Meetings" },
+    { key: "reports", label: "Reports" },
+  ],
+  hr: [
+    { key: "employees", label: "Employees" },
+    { key: "attendance", label: "Attendance" },
+    { key: "payroll", label: "Payroll" },
+  ],
+  projects: [
+    { key: "projects", label: "Projects" },
+    { key: "tasks", label: "Tasks" },
+    { key: "timeline", label: "Timeline" },
+  ],
+  accounts: [
+    { key: "customers", label: "Customers" },
+    { key: "vendors", label: "Vendors" },
+    { key: "invoices", label: "Invoices" },
+  ],
+  subscriptions: [
+    { key: "plans", label: "Plans" },
+    { key: "renewals", label: "Renewals" },
+    { key: "alerts", label: "Alerts" },
+  ],
+  ticketing: [
+    { key: "tickets", label: "Tickets" },
+    { key: "categories", label: "Categories" },
+    { key: "assignments", label: "Assignments" },
+  ],
+  stocks: [
+    { key: "assets", label: "Assets" },
+    { key: "stock_entries", label: "Stock Entries" },
+    { key: "reports", label: "Reports" },
+  ],
+  users: [
+    { key: "directory", label: "Directory" },
+    { key: "roles", label: "Roles" },
+    { key: "permissions", label: "Permissions" },
+  ],
+  billing: [
+    { key: "summary", label: "Summary" },
+    { key: "transactions", label: "Transactions" },
+    { key: "addons", label: "Addons" },
+  ],
+  plans: [
+    { key: "plan_list", label: "Plan List" },
+    { key: "upgrades", label: "Upgrades" },
+    { key: "history", label: "History" },
+  ],
+  profile: [
+    { key: "account", label: "Account" },
+    { key: "security", label: "Security" },
+    { key: "activity", label: "Activity" },
+  ],
+};
+const USER_IMPORT_EXPORT_HEADERS = [
+  "First Name",
+  "Last Name",
+  "Official Email",
+  "Phone Number",
+  "Password",
+  "Department",
+  "Employee Role",
+];
 const TOP_TAB_KEYS = ["users", "create-employee", "role-access", "clients", "vendors"];
 const HR_EMPLOYEE_DETAIL_FIELDS = [
   { key: "name", label: "Employee Name" },
@@ -235,6 +314,18 @@ function normalizeRoleAccessMap(value) {
       ...safeRecord,
       sections: ROLE_ACCESS_SECTIONS.reduce((acc, section) => {
         acc[section.key] = normalizeRoleAccessLevel(sections[section.key] || "No Access");
+        return acc;
+      }, {}),
+      section_features: Object.entries(ROLE_ACCESS_SECTION_FEATURES).reduce((acc, [sectionKey, items]) => {
+        const rawFeatureRecord = safeRecord.section_features && typeof safeRecord.section_features === "object"
+          ? safeRecord.section_features[sectionKey]
+          : {};
+        acc[sectionKey] = (Array.isArray(items) ? items : []).reduce((featureAcc, item) => {
+          featureAcc[item.key] = rawFeatureRecord && typeof rawFeatureRecord === "object"
+            ? rawFeatureRecord[item.key] !== false
+            : true;
+          return featureAcc;
+        }, {});
         return acc;
       }, {}),
       user_sub_sections: normalizeUserSubSections(
@@ -390,11 +481,19 @@ function createEmptySharedPartyForm() {
 }
 
 function createDefaultRoleAccessRecord() {
+  const section_features = Object.entries(ROLE_ACCESS_SECTION_FEATURES).reduce((acc, [sectionKey, items]) => {
+    acc[sectionKey] = (Array.isArray(items) ? items : []).reduce((featureAcc, item) => {
+      featureAcc[item.key] = true;
+      return featureAcc;
+    }, {});
+    return acc;
+  }, {});
   return {
     sections: ROLE_ACCESS_SECTIONS.reduce((acc, item) => {
       acc[item.key] = "No Access";
       return acc;
     }, {}),
+    section_features,
     user_sub_sections: createDefaultUserSubSections(),
     can_export: false,
     can_delete: false,
@@ -810,6 +909,40 @@ function normalizeSpreadsheetRows(rows) {
         return acc;
       }, {})
     );
+}
+
+function buildUserImportRow(row = {}) {
+  const getValue = (...keys) => {
+    for (const key of keys) {
+      const match = Object.entries(row || {}).find(
+        ([header]) => normalizeImportHeader(header) === normalizeImportHeader(key)
+      );
+      if (match && String(match[1] || "").trim()) {
+        return String(match[1] || "").trim();
+      }
+    }
+    return "";
+  };
+  const firstName = getValue("First Name", "Firstname", "Given Name");
+  const lastName = getValue("Last Name", "Lastname", "Surname", "Family Name");
+  const email = getValue("Official Email", "Email", "Email Address");
+  const phoneNumber = getValue("Phone Number", "Mobile Number", "Contact Number", "Phone");
+  const password = getValue("Password", "Login Password");
+  const department = getValue("Department", "Dept");
+  const employeeRole = getValue("Employee Role", "Designation", "Role");
+  if (!firstName && !lastName && !email && !phoneNumber && !password && !department && !employeeRole) {
+    return null;
+  }
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    email,
+    phone_number: phoneNumber,
+    password,
+    department,
+    employee_role: employeeRole,
+    role: "org_user",
+  };
 }
 
 function readSharedHrEmployees() {
@@ -1297,6 +1430,15 @@ export default function BusinessAutopilotUsersPage() {
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
   const [viewClientModal, setViewClientModal] = useState({ open: false, client: null });
+  const [userActivityModal, setUserActivityModal] = useState({
+    open: false,
+    loading: false,
+    user: null,
+    rows: [],
+    error: "",
+  });
+  const [userActivitySearch, setUserActivitySearch] = useState("");
+  const [userActivityPage, setUserActivityPage] = useState(1);
   const [credentialModal, setCredentialModal] = useState({
     open: false,
     credentials: null,
@@ -1320,6 +1462,7 @@ export default function BusinessAutopilotUsersPage() {
   const actionDialogResolveRef = useRef(null);
   const emailCheckDebounceRef = useRef(null);
   const emailCheckRequestRef = useRef(0);
+  const userImportInputRef = useRef(null);
   const clientImportInputRef = useRef(null);
   const vendorImportInputRef = useRef(null);
   const clientFormCardRef = useRef(null);
@@ -1327,6 +1470,7 @@ export default function BusinessAutopilotUsersPage() {
   const createPasswordInputRef = useRef(null);
   const crmContactToClientDraftAppliedRef = useRef(false);
   const pageSize = 5;
+  const [importingUsers, setImportingUsers] = useState(false);
   const isEditingUser = Boolean(editForm.membership_id);
 
   function closeActionDialog(result) {
@@ -2066,6 +2210,57 @@ export default function BusinessAutopilotUsersPage() {
     });
   }
 
+  async function openUserActivityModal(user) {
+    const userId = String(user?.id || user?.user_id || "").trim();
+    const membershipId = String(user?.membership_id || "").trim();
+    const userLabel = buildDisplayName(user?.first_name, user?.last_name) || String(user?.name || user?.email || "User").trim() || "User";
+    setUserActivitySearch("");
+    setUserActivityPage(1);
+    setUserActivityModal({
+      open: true,
+      loading: true,
+      user: {
+        id: userId,
+        membershipId,
+        label: userLabel,
+        email: String(user?.email || "").trim(),
+      },
+      rows: [],
+      error: "",
+    });
+    if (!userId) {
+      setUserActivityModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: "User activity is not available for this record.",
+      }));
+      return;
+    }
+    try {
+      const params = new URLSearchParams();
+      params.set("activity_user_id", userId);
+      params.set("activity_limit", "100");
+      const data = await apiFetch(`/api/dashboard/profile?${params.toString()}`);
+      const rows = Array.isArray(data?.recent_actions) ? data.recent_actions.slice(0, 100) : [];
+      setUserActivityModal((prev) => ({
+        ...prev,
+        loading: false,
+        rows,
+        error: "",
+      }));
+    } catch (error) {
+      setUserActivityModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: error?.message || "Unable to load recent activity.",
+      }));
+    }
+  }
+
+  useEffect(() => {
+    setUserActivityPage(1);
+  }, [userActivitySearch, userActivityModal.user?.id]);
+
   useEffect(() => {
     loadUsers();
     loadRoleAccess();
@@ -2314,6 +2509,105 @@ export default function BusinessAutopilotUsersPage() {
       }
     } finally {
       setSavingDepartment(false);
+    }
+  }
+
+  function triggerUserImportPicker() {
+    if (importingUsers || !canManageUsersTab) {
+      return;
+    }
+    userImportInputRef.current?.click();
+  }
+
+  async function exportUsersAsExcel() {
+    try {
+      const [{ Workbook }] = await Promise.all([import("exceljs")]);
+      const workbook = new Workbook();
+      const worksheet = workbook.addWorksheet("Users");
+      worksheet.addRow(USER_IMPORT_EXPORT_HEADERS);
+      filteredUsers.forEach((user) => {
+        worksheet.addRow([
+          user.first_name || splitDisplayName(user.name || "").first_name || "",
+          user.last_name || splitDisplayName(user.name || "").last_name || "",
+          user.email || "",
+          user.phone_number || "",
+          "",
+          user.department || "",
+          user.employee_role || "",
+        ]);
+      });
+      worksheet.columns.forEach((column) => {
+        column.width = 24;
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "business-autopilot-users.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      await openAlertDialog("Unable to export users to Excel right now.", { title: "Export Failed" });
+    }
+  }
+
+  async function onUserImportFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !canManageUsersTab || importingUsers) {
+      return;
+    }
+    const fileName = String(file.name || "").toLowerCase();
+    if (!fileName.endsWith(".xlsx")) {
+      await openAlertDialog("Excel (.xlsx) files only are supported for user import.", { title: "Import Failed" });
+      return;
+    }
+    try {
+      const importedRows = normalizeSpreadsheetRows(await readSpreadsheetRows(file));
+      const rows = importedRows.map((row) => buildUserImportRow(row)).filter(Boolean);
+      if (!rows.length) {
+        await openAlertDialog("Imported file is empty or invalid.", { title: "Import Failed" });
+        return;
+      }
+      setImportingUsers(true);
+      const response = await apiFetch("/api/business-autopilot/users", {
+        method: "POST",
+        body: JSON.stringify({
+          bulk_import: true,
+          rows,
+        }),
+      });
+      applyUsersResponse(response, { preserveDeletedUsers: true });
+      const summary = response?.import_summary || {};
+      const failedRows = Array.isArray(summary.results)
+        ? summary.results.filter((row) => row.status === "failed")
+        : [];
+      const messageLines = [
+        `Total Rows: ${summary.total_rows ?? rows.length}`,
+        `Imported: ${summary.imported_count ?? 0}`,
+        `Failed: ${summary.failed_count ?? 0}`,
+      ];
+      if (failedRows.length) {
+        messageLines.push("");
+        messageLines.push("Failed Rows:");
+        failedRows.slice(0, 15).forEach((row) => {
+          messageLines.push(`Row ${row.row_number}: ${row.message || row.detail || "Import failed"}`);
+        });
+        if (failedRows.length > 15) {
+          messageLines.push(`...and ${failedRows.length - 15} more.`);
+        }
+      }
+      setNotice(`Imported ${summary.imported_count ?? 0} user(s) successfully.`);
+      await openAlertDialog(messageLines.join("\n"), { title: "User Import Summary" });
+    } catch (error) {
+      await openAlertDialog(error?.message || "Unable to import this Excel file.", { title: "Import Failed" });
+    } finally {
+      setImportingUsers(false);
     }
   }
 
@@ -2637,6 +2931,30 @@ export default function BusinessAutopilotUsersPage() {
   const paginatedUsers = currentUserListRows.slice((normalizedUserPage - 1) * pageSize, normalizedUserPage * pageSize);
   const userStartIndex = currentUserListRows.length ? (normalizedUserPage - 1) * pageSize + 1 : 0;
   const userEndIndex = Math.min(normalizedUserPage * pageSize, currentUserListRows.length);
+  const filteredUserActivityRows = useMemo(() => {
+    const q = userActivitySearch.trim().toLowerCase();
+    if (!q) {
+      return userActivityModal.rows;
+    }
+    return userActivityModal.rows.filter((row) =>
+      [row?.time, row?.action, row?.details]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [userActivityModal.rows, userActivitySearch]);
+  const userActivityPageSize = 20;
+  const totalUserActivityPages = Math.max(1, Math.ceil(filteredUserActivityRows.length / userActivityPageSize));
+  const normalizedUserActivityPage = Math.min(userActivityPage, totalUserActivityPages);
+  const paginatedUserActivityRows = filteredUserActivityRows.slice(
+    (normalizedUserActivityPage - 1) * userActivityPageSize,
+    normalizedUserActivityPage * userActivityPageSize
+  );
+  const userActivityStartIndex = filteredUserActivityRows.length
+    ? (normalizedUserActivityPage - 1) * userActivityPageSize + 1
+    : 0;
+  const userActivityEndIndex = Math.min(normalizedUserActivityPage * userActivityPageSize, filteredUserActivityRows.length);
   const totalEmployeeRolePages = Math.max(1, Math.ceil(filteredEmployeeRoles.length / pageSize));
   const normalizedEmployeeRolePage = Math.min(employeeRolePage, totalEmployeeRolePages);
   const paginatedEmployeeRoles = filteredEmployeeRoles.slice((normalizedEmployeeRolePage - 1) * pageSize, normalizedEmployeeRolePage * pageSize);
@@ -4654,6 +4972,31 @@ export default function BusinessAutopilotUsersPage() {
                 <h6 className="mb-0">User List (Available User Limit {availableUsersLabel} - Used {usedUsersLabel})</h6>
               </div>
               <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+                <input
+                  ref={userImportInputRef}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="d-none"
+                  onChange={onUserImportFileChange}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-success"
+                  onClick={triggerUserImportPicker}
+                  disabled={importingUsers || !canManageUsersTab}
+                >
+                  <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                  {importingUsers ? "Importing..." : "Import"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-success"
+                  onClick={exportUsersAsExcel}
+                  disabled={!filteredUsers.length}
+                >
+                  <i className="bi bi-file-earmark-excel me-1" aria-hidden="true" />
+                  Export
+                </button>
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
@@ -4694,26 +5037,40 @@ export default function BusinessAutopilotUsersPage() {
                       <th>First Name</th>
                       <th>Last Name</th>
                       <th>Official Email</th>
-                      <th>Department</th>
-                      <th>Employee Role</th>
+                      <th>Dept / Designation</th>
                       <th>Status</th>
                       <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={7}>Loading users...</td></tr>
+                      <tr><td colSpan={6}>Loading users...</td></tr>
                     ) : paginatedUsers.length ? (
                       paginatedUsers.map((user) => (
                         <tr key={user.membership_id || user.id}>
                           <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
-                          <td>{user.department || "-"}</td>
-                          <td>{user.employee_role || "-"}</td>
+                          <td>
+                            <div className="d-flex flex-column lh-sm">
+                              <span className="text-secondary small">Department</span>
+                              <span className="fw-semibold">{user.department || "-"}</span>
+                              <span className="text-secondary small mt-1">Designation</span>
+                              <span className="fw-semibold">{user.employee_role || "-"}</span>
+                            </div>
+                          </td>
                           <td>{user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive")}</td>
                           <td className="table-actions">
                             <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary saas-org-icon-btn"
+                                onClick={() => openViewUser(user)}
+                                title="View User"
+                                aria-label="View User"
+                              >
+                                <i className="bi bi-eye" aria-hidden="true" />
+                              </button>
                               <button
                                 type="button"
                                 className={`btn btn-sm saas-org-icon-btn wz-user-toggle-btn ${
@@ -4773,12 +5130,26 @@ export default function BusinessAutopilotUsersPage() {
                               </button>
                               <button
                                 type="button"
-                                className="btn btn-sm btn-outline-secondary saas-org-icon-btn"
-                                onClick={() => openViewUser(user)}
-                                title="View User"
-                                aria-label="View User"
+                                className={`btn btn-sm saas-org-icon-btn ${Boolean(user?.email_verified) ? "btn-outline-light" : "btn-outline-success"}`}
+                                onClick={() => handleVerifyUserEmail(user)}
+                                disabled={!user.membership_id || verifyingMembershipId === String(user.membership_id) || Boolean(user?.email_verified)}
+                                title={Boolean(user?.email_verified) ? "Email already verified" : "Approve Email Verification"}
+                                aria-label={Boolean(user?.email_verified) ? "Email already verified" : "Approve Email Verification"}
                               >
-                                <i className="bi bi-eye" aria-hidden="true" />
+                                {verifyingMembershipId === String(user.membership_id) ? (
+                                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                ) : (
+                                  <i className={`bi ${Boolean(user?.email_verified) ? "bi-envelope-check-fill" : "bi-envelope-check"}`} aria-hidden="true" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-light saas-org-icon-btn"
+                                onClick={() => openUserActivityModal(user)}
+                                title="Recent Activity"
+                                aria-label="Recent Activity"
+                              >
+                                <i className="bi bi-clock-history" aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -4811,7 +5182,7 @@ export default function BusinessAutopilotUsersPage() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={7}>No users found.</td></tr>
+                      <tr><td colSpan={6}>No users found.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -4822,23 +5193,28 @@ export default function BusinessAutopilotUsersPage() {
                       <th>First Name</th>
                       <th>Last Name</th>
                       <th>Official Email</th>
-                      <th>Department</th>
-                      <th>Employee Role</th>
+                      <th>Dept / Designation</th>
                       <th>Deleted At</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={7}>Loading users...</td></tr>
+                      <tr><td colSpan={6}>Loading users...</td></tr>
                     ) : paginatedUsers.length ? (
                       paginatedUsers.map((user) => (
                         <tr key={`deleted-${user.membership_id || user.id}`}>
                           <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
-                          <td>{user.department || "-"}</td>
-                          <td>{user.employee_role || "-"}</td>
+                          <td>
+                            <div className="d-flex flex-column lh-sm">
+                              <span className="text-secondary small">Department</span>
+                              <span className="fw-semibold">{user.department || "-"}</span>
+                              <span className="text-secondary small mt-1">Designation</span>
+                              <span className="fw-semibold">{user.employee_role || "-"}</span>
+                            </div>
+                          </td>
                           <td>{user.deleted_at ? new Date(user.deleted_at).toLocaleString() : "-"}</td>
                           <td>
                             <div className="d-inline-flex gap-2">
@@ -4866,7 +5242,7 @@ export default function BusinessAutopilotUsersPage() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={7}>No deleted users found.</td></tr>
+                      <tr><td colSpan={6}>No deleted users found.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -4877,23 +5253,28 @@ export default function BusinessAutopilotUsersPage() {
                       <th>First Name</th>
                       <th>Last Name</th>
                       <th>Official Email</th>
-                      <th>Department</th>
-                      <th>Employee Role</th>
+                      <th>Dept / Designation</th>
                       <th>Email Status</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={7}>Loading users...</td></tr>
+                      <tr><td colSpan={6}>Loading users...</td></tr>
                     ) : filteredPendingEmailVerificationUsers.length ? (
                       filteredPendingEmailVerificationUsers.map((user) => (
                         <tr key={`pending-${user.membership_id || user.id}`}>
                           <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
-                          <td>{user.department || "-"}</td>
-                          <td>{user.employee_role || "-"}</td>
+                          <td>
+                            <div className="d-flex flex-column lh-sm">
+                              <span className="text-secondary small">Department</span>
+                              <span className="fw-semibold">{user.department || "-"}</span>
+                              <span className="text-secondary small mt-1">Designation</span>
+                              <span className="fw-semibold">{user.employee_role || "-"}</span>
+                            </div>
+                          </td>
                           <td>Pending</td>
                           <td>
                             <button
@@ -4908,7 +5289,7 @@ export default function BusinessAutopilotUsersPage() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={7}>No pending email verification users.</td></tr>
+                      <tr><td colSpan={6}>No pending email verification users.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -4993,6 +5374,103 @@ export default function BusinessAutopilotUsersPage() {
             </div>
           ) : null}
 
+          {userActivityModal.open ? (
+            <div
+              className="modal-overlay"
+              onClick={() => {
+                setUserActivitySearch("");
+                setUserActivityPage(1);
+                setUserActivityModal({ open: false, loading: false, user: null, rows: [], error: "" });
+              }}
+            >
+              <div className="modal-panel" style={{ width: "min(980px, 96vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+                <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                  <div>
+                    <h5 className="mb-1">Recent User Activity</h5>
+                    <div className="text-secondary">
+                      {userActivityModal.user?.label || "User"}{userActivityModal.user?.email ? ` • ${userActivityModal.user.email}` : ""}
+                    </div>
+                    <div className="small text-secondary mt-1">
+                      Only the latest 100 records are shown here. Older records are automatically trimmed from this view.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() => {
+                      setUserActivitySearch("");
+                      setUserActivityPage(1);
+                      setUserActivityModal({ open: false, loading: false, user: null, rows: [], error: "" });
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {userActivityModal.loading ? (
+                  <div className="text-secondary">Loading recent activity...</div>
+                ) : userActivityModal.error ? (
+                  <div className="alert alert-danger py-2 mb-0">{userActivityModal.error}</div>
+                ) : (
+                  <>
+                    <div className="table-controls mb-2">
+                      <div className="table-length">Show {userActivityPageSize} entries</div>
+                      <div className="table-search">
+                        <i className="bi bi-search" aria-hidden="true" />
+                        <input
+                          type="search"
+                          className="form-control form-control-sm"
+                          placeholder="Search activity"
+                          value={userActivitySearch}
+                          onChange={(event) => setUserActivitySearch(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="table-responsive">
+                      <table className="table table-dark table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th style={{ whiteSpace: "nowrap" }}>Time</th>
+                            <th style={{ whiteSpace: "nowrap" }}>Action</th>
+                            <th>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedUserActivityRows.length ? (
+                            paginatedUserActivityRows.map((row, rowIndex) => (
+                              <tr key={`user-activity-${userActivityModal.user?.id || "user"}-${row.time || row.action || rowIndex}`}>
+                                <td style={{ whiteSpace: "nowrap" }}>{row.time || "-"}</td>
+                                <td style={{ whiteSpace: "nowrap" }}>{row.action || "-"}</td>
+                                <td>{row.details || "-"}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={3}>No recent activity.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="table-footer mt-2">
+                      <div className="table-info">
+                        Showing {userActivityStartIndex} to {userActivityEndIndex} of {filteredUserActivityRows.length} entries
+                      </div>
+                      <TablePagination
+                        page={normalizedUserActivityPage}
+                        totalPages={totalUserActivityPages}
+                        onPageChange={setUserActivityPage}
+                        showPageLinks
+                        showPageLabel={false}
+                        maxPageLinks={7}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : null}
+
           {credentialModal.open ? (
             <div className="modal-overlay" onClick={() => setCredentialModal((prev) => ({ ...prev, open: false, copyNotice: "" }))}>
               <div className="modal-panel" style={{ width: "min(560px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
@@ -5073,8 +5551,9 @@ export default function BusinessAutopilotUsersPage() {
             <table className="table table-dark table-hover align-middle mb-0">
               <thead>
                 <tr>
-                  <th>Section</th>
-                  <th>Access Level</th>
+                  <th style={{ width: "25%" }}>Section</th>
+                  <th style={{ width: "25%" }}>Access Level</th>
+                  <th style={{ width: "50%" }}>Access Section</th>
                 </tr>
               </thead>
               <tbody>
@@ -5104,6 +5583,37 @@ export default function BusinessAutopilotUsersPage() {
                       </select>
                         );
                       })()}
+                    </td>
+                    <td>
+                      <div className="d-flex flex-wrap gap-3">
+                        {(ROLE_ACCESS_SECTION_FEATURES[section.key] || []).map((feature) => (
+                          <label
+                            key={`rbac-feature-${section.key}-${feature.key}`}
+                            className="form-check d-inline-flex align-items-center gap-2 mb-0"
+                          >
+                            <input
+                              className="form-check-input mt-0"
+                              type="checkbox"
+                              checked={selectedRoleAccess.section_features?.[section.key]?.[feature.key] !== false}
+                              disabled={!canManageRoleAccessTab}
+                              onChange={(event) => {
+                                const checked = event.target.checked;
+                                updateRoleAccess((prev) => ({
+                                  ...prev,
+                                  section_features: {
+                                    ...(prev.section_features || {}),
+                                    [section.key]: {
+                                      ...(prev.section_features?.[section.key] || {}),
+                                      [feature.key]: checked,
+                                    },
+                                  },
+                                }));
+                              }}
+                            />
+                            <span className="small text-secondary">{feature.label}</span>
+                          </label>
+                        ))}
+                      </div>
                     </td>
                   </tr>
                 ))}

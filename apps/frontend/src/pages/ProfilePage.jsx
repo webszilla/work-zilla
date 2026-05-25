@@ -1825,8 +1825,8 @@ export default function ProfilePage() {
         <div className="col-12">
           <div className="card p-3 h-100 wz-profile-account-card">
             <h5>Account</h5>
-            <p>
-              <strong>Username:</strong> {user.username || "-"}
+            <p className="mb-0">
+              <strong>Account User Name:</strong> {user.username || "-"}
             </p>
             <div className="row g-3 align-items-stretch mt-1">
               <div className="col-12 col-xl-6">
