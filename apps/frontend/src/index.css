@@ -468,7 +468,15 @@ html[data-theme="light"] .app-btn-secondary:focus{
 .nav-link:hover{
   background: rgba(var(--color-accent-rgb, 56, 189, 248), 0.1);
   color: var(--color-text, #e5e7eb);
-  border-color: rgba(var(--color-accent-rgb, 56, 189, 248), 0.3);
+  border-color: transparent;
+  box-shadow: none;
+}
+.wz-sidebar .nav-link:hover,
+.wz-sidebar .nav-link.active,
+.wz-nav-link:hover,
+.wz-nav-link.active{
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 .nav-footer{
   margin-top:auto;
@@ -2406,6 +2414,32 @@ html[data-theme="light"] .wz-users-create-fieldset:disabled .btn-primary{
 }
 .wz-users-tabs-row{
   padding-top: 15px;
+}
+.wz-user-name-cell{
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  line-height: 1.15;
+}
+.wz-user-name-text{
+  display: block;
+}
+.wz-org-admin-badge{
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+.wz-org-admin-badge .bi{
+  font-size: 0.75rem;
+  line-height: 1;
 }
 .wz-access-preview-badge{
   background: rgba(var(--color-primary-rgb, 79, 70, 229), 0.14) !important;

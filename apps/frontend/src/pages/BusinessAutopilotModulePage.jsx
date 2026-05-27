@@ -8670,7 +8670,7 @@ function BillingDocumentEditor({
           </div>
 
           <div className="row g-3">
-            <div className="col-12 col-xl-7">
+            <div className="col-12 col-xl-3">
               <div className="h-100">
                 <label className="form-label small text-secondary mb-1">Customer Notes</label>
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
@@ -21337,6 +21337,7 @@ function CrmOnePageModule() {
 function ProjectManagementModule() {
   const navigate = useNavigate();
   const canDeleteProjectRows = useBusinessAutopilotDeleteAccess("projects");
+  const projectEntryFormRef = useRef(null);
   const [activeTab, setActiveTab] = useState("projects");
   const [moduleData, setModuleData] = useState(() => readProjectWorkspaceData());
   const [formValues, setFormValues] = useState(buildEmptyValues(PROJECT_TAB_CONFIG.projects.fields));
@@ -22748,7 +22749,7 @@ function ProjectManagementModule() {
         <>
       <div className="card p-3">
         <h6 className="mb-3">{editingId ? `Edit ${config.itemLabel}` : `Create ${config.itemLabel}`}</h6>
-        <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+        <form ref={projectEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
           {projectFormNotice ? (
             <div className="alert alert-danger py-2 mb-0">{projectFormNotice}</div>
           ) : null}
@@ -23461,7 +23462,7 @@ function ProjectDetailPage() {
                   </div>
                 </div>
                 {projectDetail.projectValueEnabled ? (
-                  <div className="col-12 col-md-6">
+                  <div className="col-12">
                     <label className="form-label small text-secondary mb-1">Project Value</label>
                     <input
                       type="number"
@@ -23488,7 +23489,7 @@ function ProjectDetailPage() {
               </div>
             </div>
           </div>
-            <div className="col-12 col-xl-5">
+            <div className="col-12 col-xl-4">
               <div className="card p-3 h-100">
                 <h6 className="mb-3">Financial Snapshot</h6>
                 <div className="d-flex flex-column gap-3">
@@ -23511,8 +23512,14 @@ function ProjectDetailPage() {
                       />
                     </div>
                   </div>
-                  <div className="row g-3">
-                    <div className="col-12 col-lg-6">
+                </div>
+              </div>
+            </div>
+            <div className="col-12 col-xl-5">
+              <div className="card p-3 h-100">
+                <h6 className="mb-3">Assigned Teams</h6>
+                <div className="row g-3">
+                  <div className="col-12 col-lg-6">
                       <div className="border rounded p-3 h-100">
                         <div className="text-secondary small mb-2">Assigned Teams</div>
                         <div className="crm-inline-suggestions-wrap mb-2">
@@ -23577,8 +23584,8 @@ function ProjectDetailPage() {
                           )) : <span className="text-secondary small">No teams assigned yet.</span>}
                         </div>
                       </div>
-                    </div>
-                    <div className="col-12 col-lg-6">
+                  </div>
+                  <div className="col-12 col-lg-6">
                       <div className="border rounded p-3 h-100">
                         <div className="text-secondary small mb-2">Assigned Employees</div>
                         <div className="crm-inline-suggestions-wrap mb-2">
@@ -23643,7 +23650,6 @@ function ProjectDetailPage() {
                           )) : <span className="text-secondary small">No employees assigned yet.</span>}
                         </div>
                       </div>
-                    </div>
                   </div>
                 </div>
               </div>

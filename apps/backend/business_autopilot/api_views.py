@@ -437,6 +437,7 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
     product = _get_business_autopilot_product()
     if not org or not product:
         return
+    _ensure_org_admin_memberships(org)
     memberships = list(
         OrganizationUser.objects
         .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES, is_deleted=False)
@@ -534,6 +535,51 @@ def _normalize_admin_role(value):
     if normalized:
         return normalized
     return raw_value.replace("-", "_").replace(" ", "_")
+
+
+def _ensure_org_admin_memberships(org: Organization):
+    if not org:
+        return
+    candidate_user_ids = set()
+    if getattr(org, "owner_id", None):
+        candidate_user_ids.add(org.owner_id)
+
+    admin_profiles = (
+        UserProfile.objects
+        .filter(organization=org)
+        .only("user_id", "role")
+    )
+    for profile in admin_profiles:
+        normalized_role = _normalize_admin_role(getattr(profile, "role", ""))
+        if normalized_role in {"company_admin", "org_admin", "owner"} and profile.user_id:
+            candidate_user_ids.add(profile.user_id)
+
+    for user_id in candidate_user_ids:
+        membership, created = OrganizationUser.objects.get_or_create(
+            organization=org,
+            user_id=user_id,
+            defaults={
+                "role": "company_admin",
+                "is_active": True,
+                "is_deleted": False,
+                "deleted_at": None,
+            },
+        )
+        if created:
+            continue
+        update_fields = []
+        if _normalize_admin_role(membership.role) != "company_admin":
+            membership.role = "company_admin"
+            update_fields.append("role")
+        if not membership.is_active:
+            membership.is_active = True
+            update_fields.append("is_active")
+        if membership.is_deleted:
+            membership.is_deleted = False
+            membership.deleted_at = None
+            update_fields.extend(["is_deleted", "deleted_at"])
+        if update_fields:
+            membership.save(update_fields=[*update_fields, "updated_at"])
 
 
 def _can_manage_modules(user: User):
@@ -1119,6 +1165,7 @@ def _normalize_org_user_taxonomy_assignments(org):
 
 def _serialize_org_users(org, *, include_deleted=False):
     _normalize_org_user_taxonomy_assignments(org)
+    _ensure_org_admin_memberships(org)
     _sync_business_autopilot_membership_access(org)
     queryset = (
         OrganizationUser.objects

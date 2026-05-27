@@ -120,6 +120,7 @@ const USER_SUB_ACCESS_OPTIONS = [
   { key: "vendors", label: "Vendor Registration" },
 ];
 const USER_DETAIL_FIELDS = [
+  { key: "account_type", label: "Account Type" },
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
   { key: "email", label: "Official Email" },
@@ -2205,7 +2206,10 @@ export default function BusinessAutopilotUsersPage() {
   function openViewUser(user) {
     setViewUserModal({
       open: true,
-      user,
+      user: {
+        ...user,
+        account_type: isOrgAdminAccountUser(user) ? "ORG Admin" : "User",
+      },
       employee: findHrEmployeeForUser(user, hrEmployees),
     });
   }
@@ -5048,7 +5052,19 @@ export default function BusinessAutopilotUsersPage() {
                     ) : paginatedUsers.length ? (
                       paginatedUsers.map((user) => (
                         <tr key={user.membership_id || user.id}>
-                          <td>{user.first_name || splitDisplayName(user.name || "").first_name || "-"}</td>
+                          <td>
+                            <div className="wz-user-name-cell">
+                              <span className="wz-user-name-text">
+                                {user.first_name || splitDisplayName(user.name || "").first_name || "-"}
+                              </span>
+                              {isOrgAdminAccountUser(user) ? (
+                                <span className="badge bg-success wz-org-admin-badge">
+                                  <i className="bi bi-shield-check me-1" aria-hidden="true" />
+                                  ORG Admin
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
                           <td>

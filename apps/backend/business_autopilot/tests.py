@@ -367,6 +367,38 @@ class BusinessAutopilotUserAccessTests(TestCase):
             ).exists()
         )
 
+    def test_users_list_auto_includes_owner_admin_without_membership(self):
+        self.assertFalse(
+            OrganizationUser.objects.filter(
+                organization=self.org,
+                user=self.admin,
+            ).exists()
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/business-autopilot/users")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        admin_row = next(
+            (row for row in payload.get("users", []) if str(row.get("email", "")).lower() == self.admin.email.lower()),
+            None,
+        )
+        self.assertIsNotNone(admin_row)
+        self.assertEqual(admin_row.get("role"), "company_admin")
+        self.assertTrue(admin_row.get("is_org_admin_account"))
+        self.assertFalse(admin_row.get("can_delete"))
+        self.assertFalse(admin_row.get("can_toggle_status"))
+        self.assertTrue(
+            OrganizationUser.objects.filter(
+                organization=self.org,
+                user=self.admin,
+                role="company_admin",
+                is_active=True,
+                is_deleted=False,
+            ).exists()
+        )
+
     def test_org_admin_account_cannot_be_deactivated_from_users(self):
         membership = OrganizationUser.objects.create(
             organization=self.org,
