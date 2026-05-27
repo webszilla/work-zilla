@@ -1101,6 +1101,12 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
 .app-shell :is(button, a, [role="button"]).wz-table-action-btn[aria-label]{
   position: relative;
 }
+.wz-attendance-alert-text{
+  color:#f87171 !important;
+}
+html[data-theme="light"] .wz-attendance-alert-text{
+  color:#b91c1c !important;
+}
 .table td.table-actions :is(button, a, [role="button"])[title]::after,
 .table td.table-actions :is(button, a, [role="button"])[aria-label]::after,
 .table td.table-actions :is(button, a, [role="button"])[data-tooltip]::after,
@@ -1406,6 +1412,61 @@ html:not([data-theme="light"]) .app-shell .wz-hr-shift-table tbody td:nth-child(
   font-size:0.875rem;
   line-height:1;
   border-radius:10px;
+}
+.wz-attendance-summary-badge{
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 18%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--wz-primary, #22c55e) 34%, transparent);
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 72%, white) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+html[data-theme="light"] .wz-attendance-summary-badge{
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 14%, white) !important;
+  border-color: color-mix(in srgb, var(--wz-primary, #22c55e) 28%, white);
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 82%, #0f172a) !important;
+}
+.attendance-logic-summary-item{
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255,255,255,0.03);
+}
+html[data-theme="light"] .attendance-logic-summary-item{
+  background: rgba(15, 23, 42, 0.025);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+.attendance-logic-form-card{
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 1rem;
+  background: rgba(255,255,255,0.025);
+}
+html[data-theme="light"] .attendance-logic-form-card{
+  background: rgba(15, 23, 42, 0.02);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+.wz-reset-default-btn{
+  border-radius: 8px !important;
+  border: 1px solid color-mix(in srgb, var(--wz-primary, #22c55e) 36%, transparent) !important;
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 16%, transparent) !important;
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 76%, white) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.wz-reset-default-btn:hover,
+.wz-reset-default-btn:focus{
+  border-color: color-mix(in srgb, var(--wz-primary, #22c55e) 52%, transparent) !important;
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 24%, transparent) !important;
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 84%, white) !important;
+}
+html[data-theme="light"] .wz-reset-default-btn{
+  border-color: color-mix(in srgb, var(--wz-primary, #22c55e) 30%, white) !important;
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 14%, white) !important;
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 74%, #0f172a) !important;
+}
+html[data-theme="light"] .wz-reset-default-btn:hover,
+html[data-theme="light"] .wz-reset-default-btn:focus{
+  border-color: color-mix(in srgb, var(--wz-primary, #22c55e) 42%, white) !important;
+  background: color-mix(in srgb, var(--wz-primary, #22c55e) 20%, white) !important;
+  color: color-mix(in srgb, var(--wz-primary, #22c55e) 82%, #0f172a) !important;
 }
 .single-row-form-submit-btn{
   width:auto !important;

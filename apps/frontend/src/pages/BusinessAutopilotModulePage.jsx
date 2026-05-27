@@ -595,6 +595,8 @@ const HR_TAB_CONFIG = {
       { key: "inTime", label: "In Time" },
       { key: "outTime", label: "Out Time" },
       { key: "workedHours", label: "Worked" },
+      { key: "overtimeHours", label: "OT" },
+      { key: "attendanceDebit", label: "Attendance Debit" },
       { key: "status", label: "Status" }
     ],
     fields: [
@@ -689,7 +691,210 @@ const DEFAULT_HR_DATA = {
   payslips: [],
   payrollSettings: [],
   holidays: [],
+  attendanceLogicRules: [],
 };
+
+const ATTENDANCE_LOGIC_RULE_TYPE_OPTIONS = [
+  { value: "late_penalty", label: "Late Entry Salary Debit" },
+  { value: "late_half_day", label: "Late Entry Half Day" },
+  { value: "worked_half_day", label: "Working Hours Half Day" },
+  { value: "worked_absent", label: "Working Hours Full Day Absent" },
+  { value: "overtime_credit", label: "Overtime Salary Credit" },
+  { value: "early_out_penalty", label: "Early Out Salary Debit" },
+];
+
+function createDefaultAttendanceLogicRules() {
+  return [
+    {
+      id: "attendance_logic_default_1",
+      name: "Late Entry 5 Min Debit Rule",
+      ruleType: "late_penalty",
+      graceMinutes: "0",
+      unitMinutes: "5",
+      debitMode: "hourly_salary",
+      debitValue: "5",
+      triggerMinutes: "",
+      thresholdHours: "",
+      deductionType: "salary_debit",
+      notes: "For every 5 minutes late check-in, deduct 5 minutes from hourly salary calculation.",
+      isDefault: true,
+    },
+    {
+      id: "attendance_logic_default_2",
+      name: "1 Hour Late Escalation",
+      ruleType: "late_penalty",
+      graceMinutes: "0",
+      unitMinutes: "60",
+      debitMode: "hourly_salary",
+      debitValue: "60",
+      triggerMinutes: "60",
+      thresholdHours: "",
+      deductionType: "salary_debit",
+      notes: "If employee is 1 hour late, deduct 1 hour salary based on per-day salary split.",
+      isDefault: true,
+    },
+    {
+      id: "attendance_logic_default_3",
+      name: "4 Hour Late Half Day",
+      ruleType: "late_half_day",
+      graceMinutes: "0",
+      unitMinutes: "",
+      debitMode: "half_day",
+      debitValue: "",
+      triggerMinutes: "240",
+      thresholdHours: "",
+      deductionType: "half_day",
+      notes: "If late entry reaches 4 hours or more, mark half day.",
+      isDefault: true,
+    },
+    {
+      id: "attendance_logic_default_4",
+      name: "Worked 6 Hours or Less Half Day",
+      ruleType: "worked_half_day",
+      graceMinutes: "0",
+      unitMinutes: "",
+      debitMode: "half_day",
+      debitValue: "",
+      triggerMinutes: "",
+      thresholdHours: "6",
+      deductionType: "half_day",
+      notes: "If total worked hours are 6 hours or less, mark half day.",
+      isDefault: true,
+    },
+    {
+      id: "attendance_logic_default_5",
+      name: "Worked Under 4 Hours Absent",
+      ruleType: "worked_absent",
+      graceMinutes: "0",
+      unitMinutes: "",
+      debitMode: "full_day",
+      debitValue: "",
+      triggerMinutes: "",
+      thresholdHours: "4",
+      deductionType: "absent",
+      notes: "If total worked hours are below 4 hours in a 9 hour shift, mark full day absent.",
+      isDefault: true,
+    },
+    {
+      id: "attendance_logic_default_6",
+      name: "1 Hour OT = 1 Hour Salary",
+      ruleType: "overtime_credit",
+      graceMinutes: "0",
+      unitMinutes: "60",
+      debitMode: "hourly_salary",
+      debitValue: "60",
+      triggerMinutes: "",
+      thresholdHours: "",
+      deductionType: "salary_credit",
+      notes: "For every 1 hour overtime worked, credit 1 hour salary calculation.",
+      isDefault: true,
+    },
+  ];
+}
+
+function createEmptyAttendanceLogicRuleForm() {
+  return {
+    id: "",
+    name: "",
+    ruleType: "late_penalty",
+    graceMinutes: "0",
+    unitMinutes: "5",
+    debitMode: "hourly_salary",
+    debitValue: "5",
+    triggerMinutes: "",
+    thresholdHours: "",
+    deductionType: "salary_debit",
+    notes: "",
+    isDefault: false,
+  };
+}
+
+function normalizeAttendanceLogicRule(rule = {}) {
+  const fallback = createEmptyAttendanceLogicRuleForm();
+  return {
+    ...fallback,
+    ...rule,
+    id: String(rule?.id || fallback.id || `attendance_logic_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`).trim(),
+    name: String(rule?.name || "").trim(),
+    ruleType: String(rule?.ruleType || fallback.ruleType).trim() || fallback.ruleType,
+    graceMinutes: String(rule?.graceMinutes ?? fallback.graceMinutes).trim(),
+    unitMinutes: String(rule?.unitMinutes ?? fallback.unitMinutes).trim(),
+    debitMode: String(rule?.debitMode || fallback.debitMode).trim() || fallback.debitMode,
+    debitValue: String(rule?.debitValue ?? fallback.debitValue).trim(),
+    triggerMinutes: String(rule?.triggerMinutes ?? fallback.triggerMinutes).trim(),
+    thresholdHours: String(rule?.thresholdHours ?? fallback.thresholdHours).trim(),
+    deductionType: String(rule?.deductionType || fallback.deductionType).trim() || fallback.deductionType,
+    notes: String(rule?.notes || "").trim(),
+    isDefault: Boolean(rule?.isDefault),
+  };
+}
+
+function summarizeAttendanceLogicRule(rule = {}) {
+  const normalized = normalizeAttendanceLogicRule(rule);
+  if (normalized.ruleType === "late_penalty") {
+    const everyText = normalized.unitMinutes ? `Every ${normalized.unitMinutes} min late` : "Late entry";
+    const debitText = normalized.debitMode === "hourly_salary"
+      ? `${normalized.debitValue || normalized.unitMinutes || "0"} min salary debit`
+      : "salary debit";
+    return `${everyText} -> ${debitText}`;
+  }
+  if (normalized.ruleType === "late_half_day") {
+    return `Late by ${normalized.triggerMinutes || "0"} min+ -> Half Day`;
+  }
+  if (normalized.ruleType === "worked_half_day") {
+    return `Worked ${normalized.thresholdHours || "0"} hrs or less -> Half Day`;
+  }
+  if (normalized.ruleType === "worked_absent") {
+    return `Worked under ${normalized.thresholdHours || "0"} hrs -> Absent`;
+  }
+  if (normalized.ruleType === "overtime_credit") {
+    return `Every ${normalized.unitMinutes || "0"} min OT -> ${normalized.debitValue || "0"} min salary credit`;
+  }
+  if (normalized.ruleType === "early_out_penalty") {
+    return `Early out -> ${normalized.debitValue || normalized.unitMinutes || "0"} min debit`;
+  }
+  return normalized.notes || normalized.name || "Attendance rule";
+}
+
+function formatAttendanceLogicRuleCode(index) {
+  const sequence = Number.isFinite(index) ? index + 1 : 1;
+  return `R${String(sequence).padStart(2, "0")}`;
+}
+
+function getAttendanceRuleWorkedThresholdMinutes(rule = {}) {
+  const thresholdHours = Number.parseFloat(String(rule?.thresholdHours || "0"));
+  return Number.isFinite(thresholdHours) ? Math.round(thresholdHours * 60) : 0;
+}
+
+function mergeAttendanceLogicRulesWithDefaults(rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => normalizeAttendanceLogicRule(row));
+  const defaultRuleMap = new Map(
+    createDefaultAttendanceLogicRules().map((rule) => [String(rule?.id || "").trim(), normalizeAttendanceLogicRule(rule)])
+  );
+  const mergedRows = normalizedRows.map((row) => {
+    const rowId = String(row?.id || "").trim();
+    const latestDefault = defaultRuleMap.get(rowId);
+    if (!latestDefault) {
+      return row;
+    }
+    return { ...latestDefault, ...row, ...{
+      name: latestDefault.name,
+      ruleType: latestDefault.ruleType,
+      graceMinutes: latestDefault.graceMinutes,
+      unitMinutes: latestDefault.unitMinutes,
+      debitMode: latestDefault.debitMode,
+      debitValue: latestDefault.debitValue,
+      triggerMinutes: latestDefault.triggerMinutes,
+      thresholdHours: latestDefault.thresholdHours,
+      deductionType: latestDefault.deductionType,
+      notes: latestDefault.notes,
+      isDefault: true,
+    } };
+  });
+  const existingIds = new Set(mergedRows.map((row) => String(row?.id || "").trim()).filter(Boolean));
+  const missingDefaults = createDefaultAttendanceLogicRules().filter((rule) => !existingIds.has(String(rule?.id || "").trim()));
+  return [...mergedRows, ...missingDefaults];
+}
 
 const TICKETING_TAB_CONFIG = {
   mainCategories: {
@@ -2879,7 +3084,7 @@ function _purgeOldDeletedAttendanceRows(rows, days = 60) {
 }
 
 function normalizeHrData(value) {
-  const dataKeys = [...Object.keys(HR_TAB_CONFIG), "workingShifts"];
+  const dataKeys = [...Object.keys(HR_TAB_CONFIG), "workingShifts", "attendanceLogicRules"];
   const base = Object.fromEntries(
     dataKeys.map((key) => [key, Array.isArray(DEFAULT_HR_DATA[key]) ? [...DEFAULT_HR_DATA[key]] : []])
   );
@@ -2903,8 +3108,17 @@ function normalizeHrData(value) {
       });
       return;
     }
+    if (key === "attendanceLogicRules") {
+      next[key] = rows.length ? mergeAttendanceLogicRulesWithDefaults(rows) : createDefaultAttendanceLogicRules();
+      return;
+    }
     next[key] = rows;
   });
+  if (!Array.isArray(next.attendanceLogicRules) || !next.attendanceLogicRules.length) {
+    next.attendanceLogicRules = createDefaultAttendanceLogicRules();
+  } else {
+    next.attendanceLogicRules = mergeAttendanceLogicRulesWithDefaults(next.attendanceLogicRules);
+  }
   return next;
 }
 
@@ -6875,6 +7089,34 @@ function computeWorkedDuration(inTime, outTime) {
   return `${hours}h ${minutes}m`;
 }
 
+function parseTimeToMinutes(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+  return (hours * 60) + minutes;
+}
+
+function parseWorkedDurationMinutes(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const hoursMatch = raw.match(/(\d+)\s*h/i);
+  const minutesMatch = raw.match(/(\d+)\s*m/i);
+  if (!hoursMatch && !minutesMatch) {
+    return null;
+  }
+  const hours = hoursMatch ? Number(hoursMatch[1]) : 0;
+  const minutes = minutesMatch ? Number(minutesMatch[1]) : 0;
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+  return (hours * 60) + minutes;
+}
+
 function normalizeImportHeader(value) {
   return String(value || "")
     .trim()
@@ -7053,6 +7295,7 @@ function normalizeSpreadsheetRows(rows) {
 function SearchablePaginatedTableCard({
   title,
   badgeLabel = "",
+  badgeClassName = "",
   toolbarPrefix = null,
   rows = [],
   columns = [],
@@ -7387,7 +7630,7 @@ function SearchablePaginatedTableCard({
   const toolbarControls = (
     <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
       {toolbarPrefix}
-      {badgeLabel ? <span className="badge bg-secondary table-count-badge">{badgeLabel}</span> : null}
+      {badgeLabel ? <span className={`badge bg-secondary table-count-badge ${badgeClassName}`.trim()}>{badgeLabel}</span> : null}
       {enableExport ? (
         <>
           {enableImport ? (
@@ -23775,7 +24018,7 @@ export function HrManagementModule({
 }) {
   const WORKING_SHIFT_NAME_MAX = 40;
   const [activeTab, setActiveTab] = useState("employees");
-  const [moduleData, setModuleData] = useState(DEFAULT_HR_DATA);
+  const [moduleData, setModuleData] = useState(() => normalizeHrData(DEFAULT_HR_DATA));
   const [hrFormNotice, setHrFormNotice] = useState("");
   const [hrFieldErrors, setHrFieldErrors] = useState({});
   const [formValues, setFormValues] = useState({
@@ -23821,6 +24064,13 @@ export function HrManagementModule({
     open: false,
     row: null,
   });
+  const [attendanceLogicPage, setAttendanceLogicPage] = useState({
+    open: false,
+    mode: "view",
+  });
+  const [attendanceLogicForm, setAttendanceLogicForm] = useState(createEmptyAttendanceLogicRuleForm());
+  const [attendanceLogicEditingId, setAttendanceLogicEditingId] = useState("");
+  const [attendanceLogicNotice, setAttendanceLogicNotice] = useState("");
   const [attendanceHistoryPopup, setAttendanceHistoryPopup] = useState(null);
   const [employeeViewModal, setEmployeeViewModal] = useState({ open: false, row: null });
   const [attendanceYearFilter, setAttendanceYearFilter] = useState("");
@@ -23911,6 +24161,13 @@ export function HrManagementModule({
     }),
     [moduleData.workingShifts]
   );
+  const attendanceLogicRules = useMemo(
+    () => (Array.isArray(moduleData.attendanceLogicRules) ? moduleData.attendanceLogicRules : []).map((row, index) => ({
+      ...normalizeAttendanceLogicRule(row),
+      ruleCode: formatAttendanceLogicRuleCode(index),
+    })),
+    [moduleData.attendanceLogicRules]
+  );
 
   const formatWorkingShiftHours = useCallback((fromTime, toTime) => {
     const fromRaw = String(fromTime || "").trim();
@@ -23980,6 +24237,83 @@ export function HrManagementModule({
     setShiftDropTargetId("");
   }, []);
 
+  const openAttendanceLogicPage = useCallback((mode = "view") => {
+    setAttendanceLogicPage({ open: true, mode: mode === "view" ? "view" : "edit" });
+    setAttendanceLogicEditingId("");
+    setAttendanceLogicForm(mode === "add" ? createEmptyAttendanceLogicRuleForm() : createEmptyAttendanceLogicRuleForm());
+    setAttendanceLogicNotice("");
+  }, []);
+
+  const closeAttendanceLogicPage = useCallback(() => {
+    setAttendanceLogicPage({ open: false, mode: "view" });
+    setAttendanceLogicEditingId("");
+    setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+    setAttendanceLogicNotice("");
+  }, []);
+
+  const startEditAttendanceLogicRule = useCallback((rule = {}) => {
+    setAttendanceLogicPage({ open: true, mode: "edit" });
+    setAttendanceLogicEditingId(String(rule?.id || "").trim());
+    setAttendanceLogicForm(normalizeAttendanceLogicRule(rule));
+    setAttendanceLogicNotice("");
+  }, []);
+
+  const resetAttendanceLogicDefaults = useCallback(() => {
+    setModuleData((prev) => ({
+      ...prev,
+      attendanceLogicRules: createDefaultAttendanceLogicRules(),
+    }));
+    setAttendanceLogicEditingId("");
+    setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+    setAttendanceLogicNotice("Default HR attendance rules restored.");
+  }, []);
+
+  const deleteAttendanceLogicRule = useCallback((ruleId) => {
+    const normalizedId = String(ruleId || "").trim();
+    if (!normalizedId) return;
+    setModuleData((prev) => ({
+      ...prev,
+      attendanceLogicRules: (prev.attendanceLogicRules || []).filter((rule) => String(rule?.id || "").trim() !== normalizedId),
+    }));
+    if (String(attendanceLogicEditingId || "").trim() === normalizedId) {
+      setAttendanceLogicEditingId("");
+      setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+    }
+    setAttendanceLogicNotice("Attendance logic rule deleted.");
+  }, [attendanceLogicEditingId]);
+
+  const saveAttendanceLogicRule = useCallback((event) => {
+    event.preventDefault();
+    const normalizedForm = normalizeAttendanceLogicRule({
+      ...attendanceLogicForm,
+      id: attendanceLogicEditingId || attendanceLogicForm.id,
+    });
+    if (!normalizedForm.name) {
+      setAttendanceLogicNotice("Rule name is required.");
+      return;
+    }
+    setModuleData((prev) => {
+      const existingRows = Array.isArray(prev.attendanceLogicRules) ? prev.attendanceLogicRules : [];
+      if (attendanceLogicEditingId) {
+        return {
+          ...prev,
+          attendanceLogicRules: existingRows.map((row) => (
+            String(row?.id || "").trim() === String(attendanceLogicEditingId).trim()
+              ? normalizedForm
+              : row
+          )),
+        };
+      }
+      return {
+        ...prev,
+        attendanceLogicRules: [normalizedForm, ...existingRows],
+      };
+    });
+    setAttendanceLogicNotice(attendanceLogicEditingId ? "Attendance logic rule updated." : "Attendance logic rule added.");
+    setAttendanceLogicEditingId("");
+    setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+  }, [attendanceLogicEditingId, attendanceLogicForm]);
+
   const shiftAssigneeDirectory = useMemo(() => {
     const rows = Array.isArray(hrUserDirectory) ? hrUserDirectory : [];
     return rows
@@ -24038,6 +24372,206 @@ export function HrManagementModule({
       hrsLabel: hrsLabel !== "-" ? hrsLabel : "",
     };
   }, [attendanceShiftSubjectUserId, formatWorkingShiftHours, workingShiftRows]);
+
+  const resolveAttendanceShiftForRow = useCallback((row = {}) => {
+    const directUserId = String(row?.sourceUserId || row?.userId || "").trim();
+    const fallbackIdentity = resolveHrRowOwnerIdentity(row?.employee || "");
+    const sourceUserId = directUserId || String(fallbackIdentity?.sourceUserId || "").trim();
+    if (!sourceUserId) {
+      return null;
+    }
+    const match = workingShiftRows.find((shiftRow) => (
+      Array.isArray(shiftRow?.assignedUserIds) && shiftRow.assignedUserIds.includes(sourceUserId)
+    )) || null;
+    if (!match) {
+      return null;
+    }
+    const fromTime = String(match?.fromTime || match?.from || "").trim();
+    const toTime = String(match?.toTime || match?.to || "").trim();
+    return {
+      name: String(match?.name || "").trim(),
+      fromTime,
+      toTime,
+      workedMinutes: (() => {
+        const fromMinutes = parseTimeToMinutes(fromTime);
+        const toMinutes = parseTimeToMinutes(toTime);
+        if (fromMinutes === null || toMinutes === null) {
+          return null;
+        }
+        return toMinutes >= fromMinutes ? (toMinutes - fromMinutes) : ((toMinutes + (24 * 60)) - fromMinutes);
+      })(),
+    };
+  }, [resolveHrRowOwnerIdentity, workingShiftRows]);
+
+  const getAttendanceTimingAlert = useCallback((row = {}, columnKey = "") => {
+    const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+    if (!["present", "present (self)", "present (admin)"].includes(normalizedStatus)) {
+      return false;
+    }
+    const shift = resolveAttendanceShiftForRow(row);
+    if (!shift) {
+      return false;
+    }
+    if (columnKey === "inTime") {
+      const actualInMinutes = parseTimeToMinutes(row?.inTime);
+      const shiftInMinutes = parseTimeToMinutes(shift.fromTime);
+      return actualInMinutes !== null && shiftInMinutes !== null && actualInMinutes > shiftInMinutes;
+    }
+    if (columnKey === "outTime") {
+      const actualOutMinutes = parseTimeToMinutes(row?.outTime);
+      const shiftOutMinutes = parseTimeToMinutes(shift.toTime);
+      return actualOutMinutes !== null && shiftOutMinutes !== null && actualOutMinutes < shiftOutMinutes;
+    }
+    if (columnKey === "workedHours") {
+      const workedMinutes = parseWorkedDurationMinutes(row?.workedHours || computeWorkedDuration(row?.inTime, row?.outTime));
+      return workedMinutes !== null && shift.workedMinutes !== null && workedMinutes < shift.workedMinutes;
+    }
+    return false;
+  }, [resolveAttendanceShiftForRow]);
+
+  const getAttendanceOvertimeDetails = useCallback((row = {}) => {
+    const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+    if (!["present", "present (self)", "present (admin)", "half day", "half day (self)", "half day (admin)"].includes(normalizedStatus)) {
+      return "";
+    }
+    const shift = resolveAttendanceShiftForRow(row);
+    if (!shift || !Number.isFinite(shift.workedMinutes)) {
+      return "";
+    }
+    const workedMinutes = parseWorkedDurationMinutes(row?.workedHours || computeWorkedDuration(row?.inTime, row?.outTime));
+    if (!Number.isFinite(workedMinutes) || workedMinutes <= shift.workedMinutes) {
+      return "";
+    }
+    const overtimeMinutes = workedMinutes - shift.workedMinutes;
+    const overtimeRules = attendanceLogicRules
+      .map((rule, index) => ({
+        ...normalizeAttendanceLogicRule(rule),
+        ruleCode: String(rule?.ruleCode || formatAttendanceLogicRuleCode(index)).trim(),
+      }))
+      .filter((rule) => rule.ruleType === "overtime_credit");
+    if (!overtimeRules.length) {
+      return "";
+    }
+    const appliedRule = overtimeRules[0];
+    const unitMinutes = Number.parseInt(String(appliedRule?.unitMinutes || "0"), 10) || 0;
+    const creditMinutesPerUnit = Number.parseInt(String(appliedRule?.debitValue || "0"), 10) || 0;
+    if (unitMinutes <= 0 || creditMinutesPerUnit <= 0 || overtimeMinutes < unitMinutes) {
+      return "";
+    }
+    const completedUnits = Math.floor(overtimeMinutes / unitMinutes);
+    const creditedMinutes = completedUnits * creditMinutesPerUnit;
+    const hours = Math.floor(creditedMinutes / 60);
+    const minutes = creditedMinutes % 60;
+    return `${hours}h ${minutes}m (${appliedRule.ruleCode || "R01"})`;
+  }, [attendanceLogicRules, resolveAttendanceShiftForRow]);
+
+  const getAttendanceRuleMatches = useCallback((row = {}) => {
+    const normalizedStatus = String(row?.status || "").trim().toLowerCase();
+    if (!["present", "present (self)", "present (admin)", "half day", "half day (self)", "half day (admin)"].includes(normalizedStatus)) {
+      return [];
+    }
+    const shift = resolveAttendanceShiftForRow(row);
+    if (!shift) {
+      return [];
+    }
+
+    const actualInMinutes = parseTimeToMinutes(row?.inTime);
+    const actualOutMinutes = parseTimeToMinutes(row?.outTime);
+    const shiftInMinutes = parseTimeToMinutes(shift?.fromTime);
+    const shiftOutMinutes = parseTimeToMinutes(shift?.toTime);
+    const workedMinutes = parseWorkedDurationMinutes(row?.workedHours || computeWorkedDuration(row?.inTime, row?.outTime));
+
+    const lateMinutes = actualInMinutes !== null && shiftInMinutes !== null
+      ? Math.max(0, actualInMinutes - shiftInMinutes)
+      : 0;
+    const earlyOutMinutes = actualOutMinutes !== null && shiftOutMinutes !== null
+      ? Math.max(0, shiftOutMinutes - actualOutMinutes)
+      : 0;
+    const shortfallMinutes = workedMinutes !== null && shift.workedMinutes !== null
+      ? Math.max(0, shift.workedMinutes - workedMinutes)
+      : 0;
+
+    return attendanceLogicRules
+      .map((rule, index) => ({
+        ...normalizeAttendanceLogicRule(rule),
+        ruleCode: String(rule?.ruleCode || formatAttendanceLogicRuleCode(index)).trim(),
+      }))
+      .filter((rule) => {
+        const graceMinutes = Number.parseInt(String(rule?.graceMinutes || "0"), 10) || 0;
+        if (rule.ruleType === "late_penalty") {
+          const unitMinutes = Number.parseInt(String(rule?.unitMinutes || "0"), 10) || 0;
+          return lateMinutes > graceMinutes && unitMinutes > 0 && lateMinutes >= (graceMinutes + unitMinutes);
+        }
+        if (rule.ruleType === "late_half_day") {
+          const triggerMinutes = Number.parseInt(String(rule?.triggerMinutes || "0"), 10) || 0;
+          return lateMinutes > graceMinutes && triggerMinutes > 0 && lateMinutes >= (graceMinutes + triggerMinutes);
+        }
+        if (rule.ruleType === "worked_half_day") {
+          const thresholdMinutes = getAttendanceRuleWorkedThresholdMinutes(rule);
+          return workedMinutes !== null && thresholdMinutes > 0 && workedMinutes <= thresholdMinutes;
+        }
+        if (rule.ruleType === "worked_absent") {
+          const thresholdMinutes = getAttendanceRuleWorkedThresholdMinutes(rule);
+          return workedMinutes !== null && thresholdMinutes > 0 && workedMinutes < thresholdMinutes;
+        }
+        if (rule.ruleType === "early_out_penalty") {
+          const unitMinutes = Number.parseInt(String(rule?.unitMinutes || "0"), 10) || 0;
+          return earlyOutMinutes > graceMinutes && unitMinutes > 0 && earlyOutMinutes >= (graceMinutes + unitMinutes);
+        }
+        return false;
+      });
+  }, [attendanceLogicRules, resolveAttendanceShiftForRow]);
+
+  const getAttendanceDebitDetails = useCallback((row = {}) => {
+    const matchedRules = getAttendanceRuleMatches(row);
+    if (!matchedRules.length) {
+      return "";
+    }
+
+    const shift = resolveAttendanceShiftForRow(row);
+    const actualInMinutes = parseTimeToMinutes(row?.inTime);
+    const actualOutMinutes = parseTimeToMinutes(row?.outTime);
+    const shiftInMinutes = parseTimeToMinutes(shift?.fromTime);
+    const shiftOutMinutes = parseTimeToMinutes(shift?.toTime);
+    const lateMinutes = actualInMinutes !== null && shiftInMinutes !== null
+      ? Math.max(0, actualInMinutes - shiftInMinutes)
+      : 0;
+    const earlyOutMinutes = actualOutMinutes !== null && shiftOutMinutes !== null
+      ? Math.max(0, shiftOutMinutes - actualOutMinutes)
+      : 0;
+
+    const labels = matchedRules.map((rule) => {
+      if (rule.ruleType === "worked_absent") {
+        return `Absent (${rule.ruleCode || "R01"})`;
+      }
+      if (matchedRules.some((item) => item.ruleType === "worked_absent") && rule.ruleType === "worked_half_day") {
+        return "";
+      }
+      if (rule.ruleType === "late_half_day") {
+        return `Half Day (${rule.ruleCode || "R01"})`;
+      }
+      if (rule.ruleType === "worked_half_day") {
+        return `Half Day (${rule.ruleCode || "R01"})`;
+      }
+      if (rule.ruleType === "early_out_penalty") {
+        return `Early Out ${earlyOutMinutes} min (${rule.ruleCode || "R01"})`;
+      }
+      return `Sign in Delay ${lateMinutes} min (${rule.ruleCode || "R01"})`;
+    });
+
+    return labels.filter(Boolean).join(", ");
+  }, [getAttendanceRuleMatches, resolveAttendanceShiftForRow]);
+
+  const getAttendanceStatusOverride = useCallback((row = {}) => {
+    const matchedRules = getAttendanceRuleMatches(row);
+    if (matchedRules.some((rule) => rule.ruleType === "worked_absent")) {
+      return "Absent";
+    }
+    if (matchedRules.some((rule) => rule.ruleType === "worked_half_day" || rule.ruleType === "late_half_day")) {
+      return "Half Day";
+    }
+    return "";
+  }, [getAttendanceRuleMatches]);
 
   const resolveShiftAssigneeId = useCallback((rawQuery) => {
     const query = String(rawQuery || "").trim();
@@ -26609,7 +27143,7 @@ export function HrManagementModule({
         <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
       ) : (
         <>
-	      {(activeTab !== "attendance" || hasHrFullAccess) && activeTab !== "holidays" ? (
+	      {(activeTab !== "attendance" || hasHrFullAccess) && activeTab !== "holidays" && !(activeTab === "attendance" && attendanceLogicPage.open) ? (
           activeTab === "attendance" && hasHrFullAccess && !showOnlyEmployeeForm ? (
             shiftAssignPage.open ? (
               <div>
@@ -27206,74 +27740,332 @@ export function HrManagementModule({
           )
       ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open ? (
-        <div className="card p-3">
-          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-            <h6 className="mb-0">My Attendance (HR)</h6>
-            {hasHrFullAccess ? (
-              <div className="d-flex align-items-center gap-2">
-                <label className="small text-secondary mb-0">Employee</label>
-                <div style={{ minWidth: "220px" }}>
-                  <AutocompleteSelectSm
-                    value={myAttendanceEmployee}
-                    onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
-                    options={employeeNameOptions}
-                    placeholder="Search employee"
-                    ariaLabel="Select employee"
-                  />
+      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open && !attendanceLogicPage.open ? (
+        <div className="row g-3">
+          <div className="col-12 col-xl-8">
+            <div className="card p-3 h-100">
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0">My Attendance (HR)</h6>
+                {hasHrFullAccess ? (
+                  <div className="d-flex align-items-center gap-2">
+                    <label className="small text-secondary mb-0">Employee</label>
+                    <div style={{ minWidth: "220px" }}>
+                      <AutocompleteSelectSm
+                        value={myAttendanceEmployee}
+                        onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
+                        options={employeeNameOptions}
+                        placeholder="Search employee"
+                        ariaLabel="Select employee"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="small text-secondary">
+                    Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
+                  </div>
+                )}
+              </div>
+              <div className="row g-3 align-items-end">
+                <div className="col-12 col-md-2">
+                  <div className="small text-secondary">Date</div>
+                  <div className="fw-semibold">{todayIso}</div>
+                </div>
+                <div className="col-12 col-md-2">
+                  <div className="small text-secondary">In Time</div>
+                  <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
+                </div>
+                <div className="col-12 col-md-2">
+                  <div className="small text-secondary">Out Time</div>
+                  <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
+                </div>
+                <div className="col-12 col-md-2">
+                  <div className="small text-secondary">Worked</div>
+                  <div className="fw-semibold">{myAttendanceToday?.workedHours || "-"}</div>
+                </div>
+                <div className="col-12 col-md-2">
+                  <div className="small text-secondary">Status</div>
+                  <div className="fw-semibold">
+                    {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
+                      ? `Permission (${myAttendanceToday.permissionHours} hrs)`
+                      : (myAttendanceToday?.status || "-")}
+                  </div>
+                </div>
+                <div className="col-12 col-md-2">
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-outline-success btn-sm w-100"
+                      disabled={!myAttendanceEmployee}
+                      onClick={() => handleAttendancePunch("in", myAttendanceEmployee, "HR Self")}
+                    >
+                      In
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-info btn-sm w-100"
+                      disabled={!myAttendanceEmployee}
+                      onClick={() => handleAttendancePunch("out", myAttendanceEmployee, "HR Self")}
+                    >
+                      Out
+                    </button>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="small text-secondary">
-                Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
+            </div>
+          </div>
+          <div className="col-12 col-xl-4">
+            <div className="card p-3 h-100">
+              <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+                <div>
+                  <h6 className="mb-1">Attendance Logic</h6>
+                  <div className="small text-secondary">Configure late entry, short-hours, and half-day deduction rules.</div>
+                </div>
+                <div className="d-flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-success btn-sm" onClick={() => openAttendanceLogicPage("add")}>
+                    <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() => openAttendanceLogicPage("edit")}
+                  >
+                    <i className="bi bi-pencil me-1" aria-hidden="true" />
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => openAttendanceLogicPage("view")}>
+                    <i className="bi bi-eye me-1" aria-hidden="true" />
+                    View
+                  </button>
+                  <span className="badge text-bg-light border d-inline-flex align-items-center">{attendanceLogicRules.length} active rule(s)</span>
+                </div>
+              </div>
+              {!attendanceLogicRules.length ? (
+                <div className="small text-secondary">No rules configured yet.</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open && attendanceLogicPage.open ? (
+        <div className="card p-3 mt-3">
+          <div className="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+            <div>
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceLogicPage}>
+                  <i className="bi bi-arrow-left me-1" aria-hidden="true" />
+                  Back to Attendance
+                </button>
+                <span className="badge text-bg-light border">Attendance Logic Workspace</span>
+              </div>
+              <h5 className="mb-1">Attendance Logic Rules</h5>
+              <div className="small text-secondary">Default HRM standards are provided. Org admins can add custom rules anytime.</div>
+            </div>
+            <div className="d-flex flex-wrap gap-2">
+              {attendanceLogicPage.mode === "view" ? null : (
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  onClick={() => {
+                    setAttendanceLogicEditingId("");
+                    setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+                    setAttendanceLogicNotice("");
+                  }}
+                >
+                  <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+                  Add Rule
+                </button>
+              )}
+              <button type="button" className="btn btn-sm wz-reset-default-btn" onClick={resetAttendanceLogicDefaults}>
+                Reset Default
+              </button>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceLogicPage}>
+                Back
+              </button>
+            </div>
+          </div>
+          {attendanceLogicNotice ? (
+            <div className={`alert py-2 mb-3 ${attendanceLogicNotice.toLowerCase().includes("required") ? "alert-danger" : "alert-success"}`}>
+              {attendanceLogicNotice}
+            </div>
+          ) : null}
+          <div className="row g-3">
+            <div className={attendanceLogicPage.mode === "view" ? "col-12" : "col-12 col-lg-9"}>
+              <SearchablePaginatedTableCard
+                title="Attendance Logic Table"
+                badgeLabel={`${attendanceLogicRules.length} rules`}
+                rows={attendanceLogicRules}
+                columns={[
+                  { key: "name", label: "Rule" },
+                  { key: "ruleType", label: "Rule Type" },
+                  { key: "ruleCode", label: "Code", thStyle: { width: "80px" }, tdStyle: { width: "80px", whiteSpace: "nowrap" } },
+                  { key: "summary", label: "Logic" },
+                  { key: "__actions", label: "Action", thStyle: { width: "110px" }, tdStyle: { width: "110px", whiteSpace: "nowrap" } },
+                ]}
+                pageSize={6}
+                withoutOuterCard
+                searchPlaceholder="Search rules"
+                noRowsText="No attendance logic rules yet."
+                searchBy={(row) => [row.name, row.ruleType, summarizeAttendanceLogicRule(row), row.notes].join(" ")}
+                renderCells={(row) => [
+                  <div>
+                    <div className="fw-semibold">{row.name || "-"}</div>
+                    {row.isDefault ? <div className="small text-secondary">Default Rule</div> : null}
+                  </div>,
+                  ATTENDANCE_LOGIC_RULE_TYPE_OPTIONS.find((item) => item.value === row.ruleType)?.label || row.ruleType || "-",
+                  <span className="small fw-semibold">{row.ruleCode || "-"}</span>,
+                  <span style={{ whiteSpace: "normal" }}>{summarizeAttendanceLogicRule(row)}</span>,
+                  (
+                    <div className="d-flex gap-2 justify-content-end">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-light"
+                        title="Edit rule"
+                        onClick={() => startEditAttendanceLogicRule(row)}
+                      >
+                        <i className="bi bi-pencil" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        title="Delete rule"
+                        onClick={() => deleteAttendanceLogicRule(row.id)}
+                      >
+                        <i className="bi bi-trash" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ),
+                ]}
+              />
+            </div>
+            {attendanceLogicPage.mode === "view" ? null : (
+              <div className="col-12 col-lg-3">
+                <div className="attendance-logic-form-card h-100">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                    <h6 className="mb-0">{attendanceLogicEditingId ? "Edit Rule" : "Add Rule"}</h6>
+                    {attendanceLogicEditingId ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        onClick={() => {
+                          setAttendanceLogicEditingId("");
+                          setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
+                          setAttendanceLogicNotice("");
+                        }}
+                      >
+                        Cancel Edit
+                      </button>
+                    ) : null}
+                  </div>
+                  <form className="d-flex flex-column gap-3" onSubmit={saveAttendanceLogicRule}>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Rule Preset</label>
+                      <select
+                        className="form-select"
+                        value={attendanceLogicForm.ruleType}
+                        onChange={(event) => {
+                          const nextType = event.target.value;
+                          const base = createEmptyAttendanceLogicRuleForm();
+                          setAttendanceLogicForm((prev) => ({
+                            ...base,
+                            ...prev,
+                            ruleType: nextType,
+                            debitMode: nextType === "worked_half_day" || nextType === "late_half_day"
+                              ? "half_day"
+                              : nextType === "worked_absent"
+                                ? "full_day"
+                                : "hourly_salary",
+                            deductionType: nextType === "worked_half_day" || nextType === "late_half_day"
+                              ? "half_day"
+                              : nextType === "worked_absent"
+                                ? "absent"
+                                : nextType === "overtime_credit"
+                                  ? "salary_credit"
+                                : "salary_debit",
+                            unitMinutes: nextType === "late_penalty"
+                              ? (prev.unitMinutes || "5")
+                              : nextType === "overtime_credit"
+                                ? (prev.unitMinutes || "60")
+                                : "",
+                            debitValue: nextType === "late_penalty" || nextType === "early_out_penalty"
+                              ? (prev.debitValue || "5")
+                              : nextType === "overtime_credit"
+                                ? (prev.debitValue || "60")
+                                : "",
+                            triggerMinutes: nextType === "late_half_day" ? (prev.triggerMinutes || "240") : "",
+                            thresholdHours: nextType === "worked_half_day" || nextType === "worked_absent" ? (prev.thresholdHours || "4") : "",
+                          }));
+                          setAttendanceLogicNotice("");
+                        }}
+                      >
+                        {ATTENDANCE_LOGIC_RULE_TYPE_OPTIONS.map((option) => (
+                          <option key={`attendance-logic-type-${option.value}`} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Rule Name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Late Entry Every 5 Minutes"
+                        value={attendanceLogicForm.name}
+                        onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, name: event.target.value }))}
+                      />
+                    </div>
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small text-secondary mb-1">Grace Minutes</label>
+                        <input type="number" min="0" className="form-control" value={attendanceLogicForm.graceMinutes} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, graceMinutes: event.target.value }))} />
+                      </div>
+                      {(attendanceLogicForm.ruleType === "late_penalty" || attendanceLogicForm.ruleType === "early_out_penalty" || attendanceLogicForm.ruleType === "overtime_credit") ? (
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-secondary mb-1">{attendanceLogicForm.ruleType === "overtime_credit" ? "Every OT Minutes" : "Every Minutes"}</label>
+                          <input type="number" min="1" className="form-control" value={attendanceLogicForm.unitMinutes} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, unitMinutes: event.target.value }))} />
+                        </div>
+                      ) : null}
+                      {attendanceLogicForm.ruleType === "late_half_day" ? (
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-secondary mb-1">Trigger Minutes</label>
+                          <input type="number" min="1" className="form-control" value={attendanceLogicForm.triggerMinutes} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, triggerMinutes: event.target.value }))} />
+                        </div>
+                      ) : null}
+                      {attendanceLogicForm.ruleType === "worked_half_day" || attendanceLogicForm.ruleType === "worked_absent" ? (
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-secondary mb-1">Minimum Worked Hours</label>
+                          <input type="number" min="1" step="0.5" className="form-control" value={attendanceLogicForm.thresholdHours} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, thresholdHours: event.target.value }))} />
+                        </div>
+                      ) : null}
+                      {(attendanceLogicForm.ruleType === "late_penalty" || attendanceLogicForm.ruleType === "early_out_penalty" || attendanceLogicForm.ruleType === "overtime_credit") ? (
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-secondary mb-1">{attendanceLogicForm.ruleType === "overtime_credit" ? "Salary Credit Minutes / Unit" : "Debit Minutes / Unit"}</label>
+                          <input type="number" min="1" className="form-control" value={attendanceLogicForm.debitValue} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, debitValue: event.target.value }))} />
+                        </div>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Deduction Result</label>
+                      <select className="form-select" value={attendanceLogicForm.deductionType} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, deductionType: event.target.value }))}>
+                        <option value="salary_debit">Salary Debit</option>
+                        <option value="salary_credit">Salary Credit</option>
+                        <option value="half_day">Half Day</option>
+                        <option value="absent">Full Day Absent</option>
+                        <option value="warning_only">Warning Only</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label small text-secondary mb-1">Notes</label>
+                      <textarea className="form-control" rows={4} placeholder="Explain how payroll team should apply this rule." value={attendanceLogicForm.notes} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, notes: event.target.value }))} />
+                    </div>
+                    <div className="d-flex justify-content-end gap-2">
+                      <button type="button" className="btn btn-outline-light" onClick={closeAttendanceLogicPage}>Back to Attendance</button>
+                      <button type="submit" className="btn btn-success">{attendanceLogicEditingId ? "Update Rule" : "Save Rule"}</button>
+                    </div>
+                  </form>
+                </div>
               </div>
             )}
-          </div>
-          <div className="row g-3 align-items-end">
-            <div className="col-12 col-md-2">
-              <div className="small text-secondary">Date</div>
-              <div className="fw-semibold">{todayIso}</div>
-            </div>
-            <div className="col-12 col-md-2">
-              <div className="small text-secondary">In Time</div>
-              <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
-            </div>
-            <div className="col-12 col-md-2">
-              <div className="small text-secondary">Out Time</div>
-              <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
-            </div>
-            <div className="col-12 col-md-2">
-              <div className="small text-secondary">Worked</div>
-              <div className="fw-semibold">{myAttendanceToday?.workedHours || "-"}</div>
-            </div>
-            <div className="col-12 col-md-2">
-              <div className="small text-secondary">Status</div>
-              <div className="fw-semibold">
-                {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
-                  ? `Permission (${myAttendanceToday.permissionHours} hrs)`
-                  : (myAttendanceToday?.status || "-")}
-              </div>
-            </div>
-            <div className="col-12 col-md-2">
-              <div className="d-flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-outline-success btn-sm w-100"
-                  disabled={!myAttendanceEmployee}
-                  onClick={() => handleAttendancePunch("in", myAttendanceEmployee, "HR Self")}
-                >
-                  In
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline-info btn-sm w-100"
-                  disabled={!myAttendanceEmployee}
-                  onClick={() => handleAttendancePunch("out", myAttendanceEmployee, "HR Self")}
-                >
-                  Out
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       ) : null}
@@ -27401,7 +28193,7 @@ export function HrManagementModule({
 	        </div>
 	      ) : null}
 
-	      {((!showOnlyEmployeeForm || activeTab === "employees") && activeTab !== "holidays" && !(activeTab === "attendance" && shiftAssignPage.open)) ? (
+	      {((!showOnlyEmployeeForm || activeTab === "employees") && activeTab !== "holidays" && !(activeTab === "attendance" && shiftAssignPage.open) && !(activeTab === "attendance" && attendanceLogicPage.open)) ? (
 	        <SearchablePaginatedTableCard
           title={
             showOnlyEmployeeForm && activeTab === "employees"
@@ -27447,6 +28239,7 @@ export function HrManagementModule({
               ? attendanceMonthSummaryLabel
               : `${(activeTab === "leaves" ? hrLeaveRows : currentRows).length} items`
           }
+          badgeClassName={activeTab === "attendance" ? "wz-attendance-summary-badge" : ""}
           pageSize={
             activeTab === "attendance"
             && attendanceScope === "my"
@@ -27653,17 +28446,40 @@ export function HrManagementModule({
               if (!text || text === "-") {
                 return <span className="text-secondary">-</span>;
               }
-              return <span className="fw-semibold">{text}</span>;
+              return (
+                <span className={`fw-semibold ${getAttendanceTimingAlert(row, column.key) ? "wz-attendance-alert-text" : ""}`.trim()}>
+                  {text}
+                </span>
+              );
             }
             if (activeTab === "attendance" && column.key === "workedHours") {
               const text = row.workedHours || computeWorkedDuration(row.inTime, row.outTime) || "-";
               if (!text || text === "-") {
                 return <span className="text-secondary">-</span>;
               }
-              return <span className="fw-semibold">{text}</span>;
+              return (
+                <span className={`fw-semibold ${getAttendanceTimingAlert(row, column.key) ? "wz-attendance-alert-text" : ""}`.trim()}>
+                  {text}
+                </span>
+              );
+            }
+            if (activeTab === "attendance" && column.key === "overtimeHours") {
+              const overtimeText = getAttendanceOvertimeDetails(row);
+              if (!overtimeText) {
+                return <span className="text-secondary">-</span>;
+              }
+              return <span className="small fw-semibold text-success">{overtimeText}</span>;
+            }
+            if (activeTab === "attendance" && column.key === "attendanceDebit") {
+              const debitDetails = getAttendanceDebitDetails(row);
+              if (!debitDetails) {
+                return <span className="text-secondary">-</span>;
+              }
+              return <span className="small fw-semibold">{debitDetails}</span>;
             }
             if (activeTab === "attendance" && column.key === "status") {
-              const status = String(row.status || "").trim();
+              const overriddenStatus = getAttendanceStatusOverride(row);
+              const status = String(overriddenStatus || row.status || "").trim();
               if (status === "Holiday") {
                 const occasion = String(row?.holidayOccasion || "").trim();
                 const type = String(row?.holidayType || "").trim();
