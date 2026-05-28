@@ -184,6 +184,14 @@
       }));
     }
 
+    function businessAutopilotTier(plan) {
+      const normalized = String(plan?.name || "").trim().toLowerCase();
+      if (normalized.includes("starter") || normalized.includes("basic")) return "starter";
+      if (normalized.includes("growth")) return "growth";
+      if (normalized.includes("pro")) return "pro";
+      return normalized;
+    }
+
     function updatePrices() {
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
         const priceTarget = card.querySelector("[data-price]");
@@ -225,6 +233,11 @@
         if (isBusinessAutopilot) {
           card.querySelectorAll("[data-user-type-price]").forEach((row) => {
             const userTypeKey = String(row.getAttribute("data-user-type-price") || "").trim().toLowerCase();
+            const tier = businessAutopilotTier(plan);
+            if (tier === "starter" && (userTypeKey === "hrm_user" || userTypeKey === "full_access_user")) {
+              row.textContent = "Nil";
+              return;
+            }
             const matched = businessAutopilotUserTypes(plan).find((item) => item.key === userTypeKey);
             if (!matched) {
               row.textContent = "Custom";
@@ -236,6 +249,12 @@
             row.textContent = formatPrice(value, pricingState.currency);
           });
           card.querySelectorAll("[data-user-type-suffix]").forEach((row) => {
+            const parent = row.closest(".erp-seat-pricing__amount");
+            const priceValue = parent?.querySelector("[data-user-type-price]")?.textContent?.trim().toLowerCase();
+            if (priceValue === "nil") {
+              row.textContent = "";
+              return;
+            }
             row.textContent = pricingState.billing === "monthly" ? "/month" : "/year";
           });
         }
