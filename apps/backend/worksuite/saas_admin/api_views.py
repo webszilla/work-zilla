@@ -108,6 +108,32 @@ from reportlab.pdfgen import canvas
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 User = get_user_model()
+BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS = [
+    {
+        "key": "crm_user",
+        "label": "CRM User",
+        "description": "CRM-focused sales and follow-up user",
+        "monthly_price_inr": 550,
+        "monthly_price_usd": 7,
+        "allowed_modules": ["dashboard", "inbox", "crm", "users", "profile"],
+    },
+    {
+        "key": "hrm_user",
+        "label": "HRM User",
+        "description": "HR operations user",
+        "monthly_price_inr": 50,
+        "monthly_price_usd": 1,
+        "allowed_modules": ["dashboard", "hr", "users", "profile"],
+    },
+    {
+        "key": "full_access_user",
+        "label": "Full Access User",
+        "description": "Full Business Autopilot access",
+        "monthly_price_inr": 650,
+        "monthly_price_usd": 8,
+        "allowed_modules": ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"],
+    },
+]
 
 
 def _delete_storage_keys(keys):
@@ -1765,7 +1791,7 @@ def _get_transfer_org_ids(slug, statuses=None):
     return product, set(org_ids) | pending_org_ids
 
 
-def _record_history(org, user, plan, status, start_date, end_date, billing_cycle):
+def _record_history(org, user, plan, status, start_date, end_date, billing_cycle, user_type_counts=None):
     if not plan or not start_date:
         return
     existing = SubscriptionHistory.objects.filter(
@@ -1779,6 +1805,8 @@ def _record_history(org, user, plan, status, start_date, end_date, billing_cycle
         existing.billing_cycle = billing_cycle
         if user:
             existing.user = user
+        if user_type_counts is not None:
+            existing.user_type_counts = user_type_counts or {}
         existing.save()
         return
     SubscriptionHistory.objects.create(
@@ -1789,6 +1817,7 @@ def _record_history(org, user, plan, status, start_date, end_date, billing_cycle
         start_date=start_date,
         end_date=end_date,
         billing_cycle=billing_cycle,
+        user_type_counts=user_type_counts or {},
     )
 
 
@@ -1800,6 +1829,7 @@ def _apply_transfer(transfer):
     if transfer.request_type in ("new", "renew") and transfer.plan:
         plan_product = transfer.plan.product if transfer.plan else None
         product_slug = plan_product.slug if plan_product else "monitor"
+        transfer_user_type_counts = getattr(transfer, "user_type_counts", {}) or {}
         product_filter = models.Q(plan__product__slug=product_slug)
         if product_slug == "monitor":
             product_filter |= models.Q(plan__product__isnull=True)
@@ -1824,6 +1854,7 @@ def _apply_transfer(transfer):
                 start_date=sub.start_date,
                 end_date=history_end,
                 billing_cycle=sub.billing_cycle,
+                user_type_counts=getattr(sub, "user_type_counts", {}) or {},
             )
 
         start_date = submitted_at
@@ -1848,6 +1879,10 @@ def _apply_transfer(transfer):
         if transfer.plan and transfer.plan.allow_addons and transfer.addon_count is not None:
             sub.addon_count = transfer.addon_count
             sub.addon_next_cycle_count = transfer.addon_count
+        if hasattr(sub, "user_type_counts"):
+            sub.user_type_counts = transfer_user_type_counts
+        if hasattr(sub, "user_type_next_cycle_counts"):
+            sub.user_type_next_cycle_counts = transfer_user_type_counts
         sub.save()
 
         _record_history(
@@ -1858,6 +1893,7 @@ def _apply_transfer(transfer):
             start_date=start_date,
             end_date=end_date,
             billing_cycle=transfer.billing_cycle,
+            user_type_counts=transfer_user_type_counts,
         )
 
         if product_slug == "storage":
@@ -3228,10 +3264,15 @@ def _plan_payload(plan):
     allow_live_activity = plan_features.get("allow_live_activity")
     if not isinstance(allow_live_activity, bool):
         allow_live_activity = True
+    product_slug = product.slug if product else "monitor"
+    if product_slug in {"business-autopilot-erp", "business-autopilot"}:
+        plan_features["business_autopilot_user_types"] = _normalize_business_autopilot_user_types(
+            plan_features.get("business_autopilot_user_types")
+        )
     return {
         "id": plan.id,
         "name": plan.name,
-        "product_slug": product.slug if product else "monitor",
+        "product_slug": product_slug,
         "product_name": product.name if product else "Work Suite",
         "monthly_price": plan.monthly_price,
         "yearly_price": plan.yearly_price,
@@ -3264,6 +3305,35 @@ def _parse_bool(value):
         return value.strip().lower() in ("true", "1", "yes", "on")
     return bool(value)
 
+
+def _normalize_business_autopilot_user_types(config):
+    rows = config if isinstance(config, list) else []
+    normalized = []
+    for default_row in BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS:
+        key = default_row["key"]
+        candidate = next(
+            (
+                row for row in rows
+                if isinstance(row, dict) and str(row.get("key") or "").strip().lower() == key
+            ),
+            {},
+        )
+        monthly_inr = float(candidate.get("monthly_price_inr") or default_row.get("monthly_price_inr") or 0)
+        monthly_usd = float(candidate.get("monthly_price_usd") or default_row.get("monthly_price_usd") or 0)
+        normalized.append(
+            {
+                "key": key,
+                "label": str(candidate.get("label") or default_row.get("label") or key).strip(),
+                "description": str(candidate.get("description") or default_row.get("description") or "").strip(),
+                "monthly_price_inr": round(monthly_inr, 2),
+                "yearly_price_inr": round(float(candidate.get("yearly_price_inr") or _derive_yearly_price_from_monthly(monthly_inr)), 2),
+                "monthly_price_usd": round(monthly_usd, 2),
+                "yearly_price_usd": round(float(candidate.get("yearly_price_usd") or _derive_yearly_price_from_monthly(monthly_usd)), 2),
+                "allowed_modules": list(candidate.get("allowed_modules") or default_row.get("allowed_modules") or []),
+            }
+        )
+    return normalized
+
 def _normalize_business_autopilot_plan_rules(plan):
     product_slug = str(getattr(getattr(plan, "product", None), "slug", "") or "").strip().lower()
     if product_slug not in {"business-autopilot-erp", "business-autopilot"}:
@@ -3287,6 +3357,18 @@ def _normalize_business_autopilot_plan_rules(plan):
         limits["included_users"] = 0
         limits["user_limit"] = 0
     plan.limits = limits
+
+
+def _derive_yearly_price_from_monthly(value):
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return round(parsed * 10, 2)
 
 
 def _update_plan_from_payload(plan, data):
@@ -3348,6 +3430,18 @@ def _update_plan_from_payload(plan, data):
         set_float("addon_agent_monthly_price", data.get("addon_agent_monthly_price"))
     if "addon_agent_yearly_price" in data:
         set_float("addon_agent_yearly_price", data.get("addon_agent_yearly_price"))
+    derived_pairs = (
+        ("monthly_price", "yearly_price"),
+        ("usd_monthly_price", "usd_yearly_price"),
+        ("addon_monthly_price", "addon_yearly_price"),
+        ("addon_usd_monthly_price", "addon_usd_yearly_price"),
+        ("addon_agent_monthly_price", "addon_agent_yearly_price"),
+    )
+    for monthly_field, yearly_field in derived_pairs:
+        if monthly_field in data:
+            derived_value = _derive_yearly_price_from_monthly(getattr(plan, monthly_field, None))
+            if derived_value is not None:
+                setattr(plan, yearly_field, derived_value)
     if "employee_limit" in data:
         set_int("employee_limit", data.get("employee_limit"))
     if "duration_months" in data:
@@ -3374,6 +3468,10 @@ def _update_plan_from_payload(plan, data):
     features = dict(plan.features or {})
     if isinstance(features_value, dict):
         features = features_value
+    if isinstance(data.get("business_autopilot_user_types"), list):
+        features["business_autopilot_user_types"] = _normalize_business_autopilot_user_types(
+            data.get("business_autopilot_user_types")
+        )
     if "allow_live_activity" in data:
         features["allow_live_activity"] = _parse_bool(data.get("allow_live_activity"))
     if isinstance(features, dict):

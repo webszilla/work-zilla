@@ -187,6 +187,25 @@ class CheckoutRenewalSeatGuardTests(TestCase):
         self.assertEqual(response.context["min_addon_count"], 7)
         self.assertEqual(response.context["selected_addon_count"], 7)
 
+    def test_checkout_view_populates_business_autopilot_user_type_rows(self):
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["selected_product_slug"] = "business-autopilot-erp"
+        session["selected_plan_id"] = self.plan.id
+        session["selected_currency"] = "inr"
+        session["selected_billing"] = "monthly"
+        session["selected_addon_count"] = 0
+        session["selected_user_type_counts"] = {}
+        session.save()
+
+        response = self.client.get("/checkout/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_business_autopilot_checkout"])
+        self.assertGreaterEqual(len(response.context["selected_user_type_rows"]), 1)
+        self.assertContains(response, "Business Autopilot User Types")
+        self.assertContains(response, 'name="user_type_count_crm_user"', html=False)
+
     def test_checkout_confirm_clamps_addons_to_minimum(self):
         self.client.force_login(self.owner)
         session = self.client.session

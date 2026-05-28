@@ -48,6 +48,7 @@ from core.models import (
     OrgSupportTicketAttachment,
 )
 from apps.backend.common_auth.models import User
+from apps.backend.business_autopilot.models import OrganizationUser
 from core.notification_emails import send_email_verification
 
 CANONICAL_DOWNLOAD_HOST = "getworkzilla.com"
@@ -55,6 +56,32 @@ CANONICAL_DOWNLOAD_BASE_URL = f"https://{CANONICAL_DOWNLOAD_HOST}"
 LOCAL_DOWNLOAD_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
 TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+BA_DEFAULT_USER_TYPES = [
+    {
+        "key": "crm_user",
+        "label": "CRM User",
+        "description": "CRM-focused sales and follow-up user",
+        "monthly_price_inr": 550,
+        "monthly_price_usd": 7,
+        "allowed_modules": ["dashboard", "inbox", "crm", "users", "profile"],
+    },
+    {
+        "key": "hrm_user",
+        "label": "HRM User",
+        "description": "HR operations user",
+        "monthly_price_inr": 50,
+        "monthly_price_usd": 1,
+        "allowed_modules": ["dashboard", "hr", "users", "profile"],
+    },
+    {
+        "key": "full_access_user",
+        "label": "Full Access User",
+        "description": "Full Business Autopilot access",
+        "monthly_price_inr": 650,
+        "monthly_price_usd": 8,
+        "allowed_modules": ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"],
+    },
+]
 
 
 def _resolve_latest_download(*candidates):
@@ -1314,6 +1341,84 @@ def home_view(request):
     return render(request, "public/home.html", _base_context(request))
 
 
+def _normalize_ba_user_types(config):
+    rows = config if isinstance(config, list) else []
+    normalized = []
+    seen = set()
+    for default_row in BA_DEFAULT_USER_TYPES:
+        key = default_row["key"]
+        candidate = next(
+            (
+                row for row in rows
+                if isinstance(row, dict) and str(row.get("key") or "").strip().lower() == key
+            ),
+            {},
+        )
+        monthly_inr = float(candidate.get("monthly_price_inr") or default_row.get("monthly_price_inr") or 0)
+        monthly_usd = float(candidate.get("monthly_price_usd") or default_row.get("monthly_price_usd") or 0)
+        normalized.append(
+            {
+                "key": key,
+                "label": str(candidate.get("label") or default_row.get("label") or key).strip(),
+                "description": str(candidate.get("description") or default_row.get("description") or "").strip(),
+                "monthly_price_inr": round(monthly_inr, 2),
+                "yearly_price_inr": round(float(candidate.get("yearly_price_inr") or (monthly_inr * 10)), 2),
+                "monthly_price_usd": round(monthly_usd, 2),
+                "yearly_price_usd": round(float(candidate.get("yearly_price_usd") or (monthly_usd * 10)), 2),
+                "allowed_modules": list(candidate.get("allowed_modules") or default_row.get("allowed_modules") or []),
+            }
+        )
+        seen.add(key)
+    return normalized
+
+
+def _plan_ba_user_types(plan):
+    features = dict(getattr(plan, "features", {}) or {})
+    return _normalize_ba_user_types(features.get("business_autopilot_user_types"))
+
+
+def _normalize_ba_user_type_counts(value, plan=None):
+    config = _plan_ba_user_types(plan) if plan else _normalize_ba_user_types(None)
+    source = value if isinstance(value, dict) else {}
+    counts = {}
+    for row in config:
+        key = row["key"]
+        try:
+            parsed = int(source.get(key) or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        counts[key] = max(0, parsed)
+    return counts
+
+
+def _ba_user_type_total_count(counts):
+    return sum(max(0, int(value or 0)) for value in (counts or {}).values())
+
+
+def _ba_user_type_rows_for_checkout(plan, counts, currency="inr", billing="monthly"):
+    billing = "yearly" if str(billing or "").strip().lower() == "yearly" else "monthly"
+    currency = "usd" if str(currency or "").strip().lower() == "usd" else "inr"
+    rows = []
+    for row in _plan_ba_user_types(plan):
+        key = row["key"]
+        quantity = max(0, int((counts or {}).get(key) or 0))
+        unit_price = row[f"{billing}_price_{currency}"]
+        rows.append(
+            {
+                **row,
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "line_total": round(quantity * unit_price, 2),
+            }
+        )
+    return rows
+
+
+def _ba_user_type_price_total(plan, counts, currency="inr", billing="monthly"):
+    rows = _ba_user_type_rows_for_checkout(plan, counts, currency=currency, billing=billing)
+    return round(sum(float(row.get("line_total") or 0) for row in rows), 2)
+
+
 def pricing_view(request):
     context = _base_context(request)
     try:
@@ -1501,12 +1606,24 @@ def checkout_select(request):
     except (TypeError, ValueError):
         addon_count = 0
     addon_count = max(0, addon_count)
+    plan = Plan.objects.filter(id=plan_id).select_related("product").first() if plan_id else None
+    user_type_counts = {}
+    if plan and _is_business_autopilot_alias(product_slug):
+        for row in _plan_ba_user_types(plan):
+            field_name = f"user_type_count_{row['key']}"
+            try:
+                parsed = int(request.POST.get(field_name) or 0)
+            except (TypeError, ValueError):
+                parsed = 0
+            user_type_counts[row["key"]] = max(0, parsed)
+        addon_count = _ba_user_type_total_count(user_type_counts)
 
     request.session["selected_product_slug"] = product_slug
     request.session["selected_plan_id"] = plan_id
     request.session["selected_currency"] = currency
     request.session["selected_billing"] = billing
     request.session["selected_addon_count"] = addon_count
+    request.session["selected_user_type_counts"] = user_type_counts
 
     if not request.user.is_authenticated:
         return redirect("/auth/signup/?next=/checkout/")
@@ -1559,6 +1676,7 @@ def checkout_view(request):
     except (TypeError, ValueError):
         addon_count = 0
     addon_count = max(0, addon_count)
+    user_type_counts = request.session.get("selected_user_type_counts") or {}
     plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
     selected_product_name = _display_product_name(slug=product_slug) if product_slug else ""
     price_suffix = "/user per month" if billing == "monthly" else "/user per year"
@@ -1578,8 +1696,14 @@ def checkout_view(request):
                 price_suffix = "/org per month" if billing == "monthly" else "/org per year"
         except Exception:
             pass
+    is_business_autopilot_checkout = bool(plan and _is_business_autopilot_alias(product_slug))
     if not getattr(plan, "allow_addons", False):
         addon_count = 0
+    if is_business_autopilot_checkout:
+        user_type_counts = _normalize_ba_user_type_counts(user_type_counts, plan=plan)
+        addon_count = _ba_user_type_total_count(user_type_counts)
+    else:
+        user_type_counts = {}
     base_amount_monthly = float(_plan_price(plan, currency, "monthly") or 0) if plan else 0.0
     base_amount_yearly = float(_plan_price(plan, currency, "yearly") or 0) if plan else 0.0
 
@@ -1644,6 +1768,16 @@ def checkout_view(request):
                 addon_count = int(existing_addons)
                 request.session["selected_addon_count"] = int(addon_count)
                 request.session.modified = True
+            existing_user_type_counts = _normalize_ba_user_type_counts(
+                getattr(existing_sub, "user_type_next_cycle_counts", None) or getattr(existing_sub, "user_type_counts", None),
+                plan=plan,
+            )
+            if _is_business_autopilot_alias(product_slug) and _ba_user_type_total_count(existing_user_type_counts) > 0:
+                user_type_counts = existing_user_type_counts
+                addon_count = _ba_user_type_total_count(user_type_counts)
+                request.session["selected_user_type_counts"] = user_type_counts
+                request.session["selected_addon_count"] = int(addon_count)
+                request.session.modified = True
 
     renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
     min_addon_count = int(renewal_guard.get("required_addon_count") or 0)
@@ -1651,12 +1785,22 @@ def checkout_view(request):
     existing_addon_count = int(renewal_guard.get("existing_addon_count") or 0)
     if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
         addon_count = min_addon_count
+    if is_business_autopilot_checkout:
+        user_type_rows = _ba_user_type_rows_for_checkout(plan, user_type_counts, currency=currency, billing=billing)
+        if not user_type_rows:
+            user_type_rows = _ba_user_type_rows_for_checkout(plan, {}, currency=currency, billing=billing)
+        addon_unit_price_monthly = 0.0
+        addon_unit_price_yearly = 0.0
+        addon_unit_price = 0.0
+        subtotal_amount = base_amount + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
+    else:
+        user_type_rows = []
+        subtotal_amount = base_amount + (addon_unit_price * addon_count)
     profile = BillingProfile.objects.filter(organization=org).first()
     user_profile = UserProfile.objects.filter(user=request.user).first()
     seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
     bank_account_details = _format_bank_details(seller.bank_account_details if seller else "")
     seller_upi_id = (seller.upi_id or "").strip() if seller else ""
-    subtotal_amount = base_amount + (addon_unit_price * addon_count)
     subtotal_amount, gst_amount, total_amount, tax_breakdown = _apply_invoice_tax(
         subtotal_amount,
         currency.upper(),
@@ -1683,7 +1827,10 @@ def checkout_view(request):
         "selected_currency": currency,
         "selected_billing": billing,
         "selected_plan": plan,
+        "is_business_autopilot_checkout": is_business_autopilot_checkout,
         "selected_addon_count": addon_count,
+        "selected_user_type_counts": user_type_counts,
+        "selected_user_type_rows": user_type_rows,
         "min_addon_count": min_addon_count,
         "existing_total_users": existing_total_users,
         "existing_addon_count": existing_addon_count,
@@ -2353,6 +2500,7 @@ def checkout_confirm(request):
     except (TypeError, ValueError):
         addon_count = 0
     addon_count = max(0, addon_count)
+    user_type_counts = request.session.get("selected_user_type_counts") or {}
     plan = Plan.objects.filter(id=plan_id).first()
     storage_plan = None
     if product_slug in ("storage", "online-storage"):
@@ -2372,6 +2520,20 @@ def checkout_confirm(request):
         return redirect("/pricing/")
     if not getattr(plan, "allow_addons", False):
         addon_count = 0
+    if _is_business_autopilot_alias(product_slug):
+        user_type_counts = {}
+        for row in _plan_ba_user_types(plan):
+            field_name = f"user_type_count_{row['key']}"
+            try:
+                parsed = int(request.POST.get(field_name) or request.session.get("selected_user_type_counts", {}).get(row["key"]) or 0)
+            except (TypeError, ValueError):
+                parsed = 0
+            user_type_counts[row["key"]] = max(0, parsed)
+        addon_count = _ba_user_type_total_count(user_type_counts)
+        if addon_count <= 0:
+            messages.error(request, "Select at least one Business Autopilot user seat to continue.")
+            return redirect("/checkout/")
+        request.session["selected_user_type_counts"] = user_type_counts
 
     org = _resolve_org_for_user(request.user)
     renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
@@ -2437,6 +2599,8 @@ def checkout_confirm(request):
             retention_days=plan.retention_days or 30,
             addon_count=addon_count if plan.allow_addons else 0,
             addon_next_cycle_count=addon_count if plan.allow_addons else 0,
+            user_type_counts=user_type_counts if _is_business_autopilot_alias(product_slug) else {},
+            user_type_next_cycle_counts=user_type_counts if _is_business_autopilot_alias(product_slug) else {},
         )
         if storage_plan:
             if currency.lower() == "usd":
@@ -2445,7 +2609,10 @@ def checkout_confirm(request):
                 amount = storage_plan.monthly_price_inr if billing == "monthly" else storage_plan.yearly_price_inr
         else:
             amount = _plan_price(plan, currency, billing) or 0
-            amount = float(amount or 0) + (float(_addon_price(plan, currency, billing) or 0) * addon_count)
+            if _is_business_autopilot_alias(product_slug):
+                amount = float(amount or 0) + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
+            else:
+                amount = float(amount or 0) + (float(_addon_price(plan, currency, billing) or 0) * addon_count)
         seller_profile = InvoiceSellerProfile.objects.order_by("-updated_at").first()
         _, _, amount, _ = _apply_invoice_tax(
             amount,
@@ -2461,6 +2628,7 @@ def checkout_confirm(request):
             billing_cycle=billing,
             retention_days=plan.retention_days or 30,
             addon_count=addon_count if plan.allow_addons else 0,
+            user_type_counts=user_type_counts if _is_business_autopilot_alias(product_slug) else {},
             currency=currency.upper(),
             amount=float(amount or 0),
             status="pending",
@@ -2476,6 +2644,7 @@ def checkout_confirm(request):
         "selected_currency",
         "selected_billing",
         "selected_addon_count",
+        "selected_user_type_counts",
     ):
         request.session.pop(key, None)
 
@@ -2547,6 +2716,8 @@ def billing_renew_start(request):
                             billing_cycle=history.billing_cycle or "monthly",
                             addon_count=0,
                             addon_next_cycle_count=0,
+                            user_type_counts=getattr(history, "user_type_counts", {}) if hasattr(history, "user_type_counts") else {},
+                            user_type_next_cycle_counts=getattr(history, "user_type_counts", {}) if hasattr(history, "user_type_counts") else {},
                         )
     if not latest:
         latest = _latest_subscription_for_product(org, product_slug)
@@ -2566,6 +2737,10 @@ def billing_renew_start(request):
     request.session["renew_currency"] = "inr"
     request.session["renew_billing"] = latest.billing_cycle or "monthly"
     request.session["renew_addon_count"] = _subscription_next_cycle_addon_count(latest)
+    request.session["renew_user_type_counts"] = _normalize_ba_user_type_counts(
+        getattr(latest, "user_type_next_cycle_counts", None) or getattr(latest, "user_type_counts", None),
+        plan=latest.plan,
+    )
     request.session.modified = True
     return redirect("/my-account/billing/renew/")
 
@@ -2589,6 +2764,7 @@ def billing_renew_view(request):
     currency = request.session.get("renew_currency") or "inr"
     billing = request.session.get("renew_billing") or "monthly"
     addon_count = int(request.session.get("renew_addon_count") or 0)
+    user_type_counts = request.session.get("renew_user_type_counts") or {}
 
     plan = Plan.objects.filter(id=plan_id).select_related("product").first() if plan_id else None
     if not plan:
@@ -2604,6 +2780,9 @@ def billing_renew_view(request):
     billing = billing if billing in ("monthly", "yearly") else "monthly"
     if not plan.allow_addons:
         addon_count = 0
+    if _is_business_autopilot_alias(product_slug):
+        user_type_counts = _normalize_ba_user_type_counts(user_type_counts, plan=plan)
+        addon_count = _ba_user_type_total_count(user_type_counts)
 
     included_users = _effective_included_users_for_renewal(plan)
     active_users = _org_active_user_count(org)
@@ -2635,7 +2814,13 @@ def billing_renew_view(request):
 
     base_price = base_price_monthly if billing == "monthly" else base_price_yearly
     addon_price = addon_price_monthly if billing == "monthly" else addon_price_yearly
-    subtotal_price = base_price + (addon_price * max(0, addon_count))
+    if _is_business_autopilot_alias(product_slug):
+        user_type_rows = _ba_user_type_rows_for_checkout(plan, user_type_counts, currency=currency, billing=billing)
+        subtotal_price = base_price + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
+        addon_price = 0
+    else:
+        user_type_rows = []
+        subtotal_price = base_price + (addon_price * max(0, addon_count))
     subtotal_price, gst_amount, total_price, tax_breakdown = _apply_invoice_tax(
         subtotal_price,
         currency.upper(),
@@ -2650,6 +2835,8 @@ def billing_renew_view(request):
         "selected_currency": currency,
         "selected_billing": billing,
         "addon_count": addon_count,
+        "user_type_counts": user_type_counts,
+        "user_type_rows": user_type_rows,
         "base_price": base_price,
         "addon_price": addon_price,
         "base_price_monthly": base_price_monthly,
@@ -2705,6 +2892,20 @@ def billing_renew_confirm(request):
     addon_count = max(0, addon_count)
     if not plan.allow_addons:
         addon_count = 0
+    user_type_counts = request.session.get("renew_user_type_counts") or {}
+    if _is_business_autopilot_alias(product_slug):
+        user_type_counts = {}
+        for row in _plan_ba_user_types(plan):
+            field_name = f"user_type_count_{row['key']}"
+            try:
+                parsed = int(request.POST.get(field_name) or request.session.get("renew_user_type_counts", {}).get(row["key"]) or 0)
+            except (TypeError, ValueError):
+                parsed = 0
+            user_type_counts[row["key"]] = max(0, parsed)
+        addon_count = _ba_user_type_total_count(user_type_counts)
+        if addon_count <= 0:
+            messages.error(request, "Select at least one Business Autopilot user seat to renew.")
+            return redirect("/my-account/billing/renew/")
 
     utr_number = (request.POST.get("utr_number") or "").strip()
     paid_on = request.POST.get("paid_on") or None
@@ -2746,6 +2947,7 @@ def billing_renew_confirm(request):
                     "plan_id": plan.id,
                     "billing_cycle": billing,
                     "addon_count": addon_count,
+                    "user_type_counts": user_type_counts if _is_business_autopilot_alias(product_slug) else {},
                 },
                 request=request,
             )
@@ -2772,7 +2974,10 @@ def billing_renew_confirm(request):
 
     amount = float(_plan_price(plan, currency, billing) or 0)
     addon_price = float(_addon_price(plan, currency, billing) or 0)
-    amount = amount + (addon_price * addon_count)
+    if _is_business_autopilot_alias(product_slug):
+        amount = amount + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
+    else:
+        amount = amount + (addon_price * addon_count)
     _, _, amount, _ = _apply_invoice_tax(
         amount,
         currency.upper(),
@@ -2794,6 +2999,7 @@ def billing_renew_confirm(request):
             billing_cycle=billing,
             retention_days=plan.retention_days or 30,
             addon_count=addon_count,
+            user_type_counts=user_type_counts if _is_business_autopilot_alias(product_slug) else {},
             currency=currency.upper(),
             amount=float(amount or 0),
             status="pending",
@@ -2813,6 +3019,7 @@ def billing_renew_confirm(request):
             "plan_id": plan.id,
             "billing_cycle": billing,
             "addon_count": addon_count,
+            "user_type_counts": user_type_counts if _is_business_autopilot_alias(product_slug) else {},
             "currency": currency.upper(),
             "amount": float(amount or 0),
             "subscription_id": latest.id if latest else None,
@@ -2827,6 +3034,7 @@ def billing_renew_confirm(request):
         "renew_currency",
         "renew_billing",
         "renew_addon_count",
+        "renew_user_type_counts",
     ):
         request.session.pop(key, None)
 

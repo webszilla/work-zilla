@@ -1080,6 +1080,8 @@ class Subscription(models.Model):
     retention_days = models.PositiveSmallIntegerField(default=30)
     addon_count = models.PositiveSmallIntegerField(default=0)
     addon_next_cycle_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    user_type_counts = models.JSONField(default=dict, blank=True)
+    user_type_next_cycle_counts = models.JSONField(default=dict, blank=True)
     addon_proration_amount = models.FloatField(default=0)
     addon_last_proration_at = models.DateTimeField(null=True, blank=True)
 
@@ -1108,6 +1110,7 @@ class SubscriptionHistory(models.Model):
         choices=(("monthly", "Monthly"), ("yearly", "Yearly")),
         default="monthly",
     )
+    user_type_counts = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -1236,6 +1239,7 @@ class PendingTransfer(models.Model):
     )
     retention_days = models.PositiveSmallIntegerField(default=30)
     addon_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    user_type_counts = models.JSONField(default=dict, blank=True)
     currency = models.CharField(max_length=10, default="INR")
     amount = models.FloatField(default=0)
     reference_no = models.CharField(max_length=100, blank=True)
@@ -1560,6 +1564,7 @@ class OrganizationSettings(models.Model):
     business_autopilot_ai_agent_name = models.CharField(max_length=120, blank=True, default="Work Zilla AI Assistant")
     business_autopilot_openai_enabled = models.BooleanField(default=False)
     business_autopilot_role_access_map = models.JSONField(default=dict, blank=True)
+    business_autopilot_user_type_access_map = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.organization.name} settings"

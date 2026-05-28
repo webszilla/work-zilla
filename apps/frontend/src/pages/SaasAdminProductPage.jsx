@@ -32,6 +32,33 @@ const ERP_MODULE_OPTIONS = [
   { slug: "ticketing", label: "Ticketing System" },
   { slug: "stocks", label: "Inventory" },
 ];
+const ROLE_ACCESS_SECTION_KEYS_ARRAY = ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"];
+const BA_USER_TYPE_OPTIONS = [
+  {
+    key: "crm_user",
+    label: "CRM User",
+    description: "CRM-focused user",
+    monthly_price_inr: 550,
+    monthly_price_usd: 7,
+    allowed_modules: ["dashboard", "inbox", "crm", "users", "profile"],
+  },
+  {
+    key: "hrm_user",
+    label: "HRM User",
+    description: "HR and attendance user",
+    monthly_price_inr: 50,
+    monthly_price_usd: 1,
+    allowed_modules: ["dashboard", "hr", "users", "profile"],
+  },
+  {
+    key: "full_access_user",
+    label: "Full Access User",
+    description: "All enabled modules",
+    monthly_price_inr: 650,
+    monthly_price_usd: 8,
+    allowed_modules: ERP_MODULE_OPTIONS.map((item) => item.slug === "hrm" ? "hr" : item.slug).concat(["billing", "plans", "profile"]),
+  },
+];
 
 function getDefaultErpModulesForPlanName(planName) {
   const key = String(planName || "").trim().toLowerCase();
@@ -62,6 +89,13 @@ function formatValue(value) {
   return formatDateLikeValue(value, "-");
 }
 
+function titleCase(value) {
+  if (!value) {
+    return "-";
+  }
+  return String(value).replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function formatLimitValue(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -71,15 +105,6 @@ function formatLimitValue(value) {
     return "Unlimited";
   }
   return value;
-}
-
-function titleCase(value) {
-  if (!value) {
-    return "-";
-  }
-  return String(value)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function getWhatsappKeywordRuleLimitDefault(planName) {
@@ -96,6 +121,37 @@ function getWhatsappKeywordRuleLimit(planName, features = {}) {
     return Math.floor(configured);
   }
   return getWhatsappKeywordRuleLimitDefault(planName);
+}
+
+function deriveYearlyPrice(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return "";
+  }
+  return (parsed * 10).toFixed(2);
+}
+
+function normalizeBusinessAutopilotUserTypes(values = []) {
+  return BA_USER_TYPE_OPTIONS.map((defaultRow) => {
+    const matched = Array.isArray(values)
+      ? values.find((row) => String(row?.key || "").trim().toLowerCase() === defaultRow.key)
+      : null;
+    return {
+      ...defaultRow,
+      label: matched?.label || defaultRow.label,
+      description: matched?.description || defaultRow.description,
+      monthly_price_inr: matched?.monthly_price_inr ?? defaultRow.monthly_price_inr,
+      yearly_price_inr: matched?.yearly_price_inr ?? deriveYearlyPrice(matched?.monthly_price_inr ?? defaultRow.monthly_price_inr),
+      monthly_price_usd: matched?.monthly_price_usd ?? defaultRow.monthly_price_usd,
+      yearly_price_usd: matched?.yearly_price_usd ?? deriveYearlyPrice(matched?.monthly_price_usd ?? defaultRow.monthly_price_usd),
+      allowed_modules: Array.isArray(matched?.allowed_modules)
+        ? matched.allowed_modules
+        : defaultRow.allowed_modules,
+    };
+  });
 }
 
 export default function SaasAdminProductPage() {
@@ -1542,6 +1598,7 @@ export default function SaasAdminProductPage() {
             erp_enabled_modules: Array.isArray(features.erp_enabled_modules)
               ? normalizeErpModuleSelection(features.erp_enabled_modules)
               : getDefaultErpModulesForPlanName(plan.name || ""),
+            business_autopilot_user_types: normalizeBusinessAutopilotUserTypes(features.business_autopilot_user_types),
           }
         : {
             name: "",
@@ -1560,6 +1617,7 @@ export default function SaasAdminProductPage() {
             allow_hr_view: false,
             role_based_access: true,
             erp_enabled_modules: getDefaultErpModulesForPlanName(""),
+            business_autopilot_user_types: normalizeBusinessAutopilotUserTypes(),
           })
       : isMonitorProduct
       ? (plan
@@ -1697,12 +1755,12 @@ export default function SaasAdminProductPage() {
     try {
       if (isStorageProduct) {
         const trimmedName = (planModal.form.name || "").trim();
+        const derivedYearlyPriceInr = deriveYearlyPrice(planModal.form.monthly_price_inr);
+        const derivedYearlyPriceUsd = deriveYearlyPrice(planModal.form.monthly_price_usd);
         const requiredFields = [
           "name",
           "monthly_price_inr",
-          "yearly_price_inr",
           "monthly_price_usd",
-          "yearly_price_usd",
           "storage_limit_gb",
           "bandwidth_limit_gb_monthly",
           "device_limit_per_user"
@@ -1728,9 +1786,9 @@ export default function SaasAdminProductPage() {
           id: planModal.mode === "edit" ? planModal.planId : undefined,
           name: trimmedName,
           monthly_price_inr: planModal.form.monthly_price_inr,
-          yearly_price_inr: planModal.form.yearly_price_inr,
+          yearly_price_inr: derivedYearlyPriceInr,
           monthly_price_usd: planModal.form.monthly_price_usd,
-          yearly_price_usd: planModal.form.yearly_price_usd,
+          yearly_price_usd: derivedYearlyPriceUsd,
           max_users: planModal.form.max_users === "" ? null : planModal.form.max_users,
           device_limit_per_user: planModal.form.device_limit_per_user === "" ? null : planModal.form.device_limit_per_user,
           storage_limit_gb: planModal.form.storage_limit_gb,
@@ -1748,12 +1806,12 @@ export default function SaasAdminProductPage() {
       }
       if (isDigitalAutomationProduct) {
         const trimmedName = (planModal.form.name || "").trim();
+        const derivedYearlyPrice = deriveYearlyPrice(planModal.form.monthly_price);
+        const derivedUsdYearlyPrice = deriveYearlyPrice(planModal.form.usd_monthly_price);
         const requiredFields = [
           "name",
           "monthly_price",
-          "yearly_price",
           "usd_monthly_price",
-          "usd_yearly_price",
           "company_count",
           "social_accounts",
           "scheduled_posts",
@@ -1801,9 +1859,9 @@ export default function SaasAdminProductPage() {
           product_slug: slug,
           duration_months: 1,
           monthly_price: planModal.form.monthly_price,
-          yearly_price: planModal.form.yearly_price,
+          yearly_price: derivedYearlyPrice,
           usd_monthly_price: planModal.form.usd_monthly_price,
-          usd_yearly_price: planModal.form.usd_yearly_price,
+          usd_yearly_price: derivedUsdYearlyPrice,
           addon_monthly_price: 0,
           addon_yearly_price: 0,
           addon_usd_monthly_price: 0,
@@ -1937,18 +1995,23 @@ export default function SaasAdminProductPage() {
       if (isBusinessAutopilotProduct) {
         features.role_based_access = Boolean(planModal.form.role_based_access ?? true);
         features.erp_enabled_modules = normalizeErpModuleSelection(planModal.form.erp_enabled_modules);
+        features.business_autopilot_user_types = normalizeBusinessAutopilotUserTypes(planModal.form.business_autopilot_user_types);
       }
+      const derivedYearlyPrice = deriveYearlyPrice(planModal.form.monthly_price);
+      const derivedUsdYearlyPrice = deriveYearlyPrice(planModal.form.usd_monthly_price);
+      const derivedAddonYearlyPrice = deriveYearlyPrice(planModal.form.addon_monthly_price);
+      const derivedAddonUsdYearlyPrice = deriveYearlyPrice(planModal.form.addon_usd_monthly_price);
       const payload = {
         name: trimmedName,
         product_slug: slug,
         monthly_price: planModal.form.monthly_price,
-        yearly_price: planModal.form.yearly_price,
+        yearly_price: derivedYearlyPrice,
         usd_monthly_price: planModal.form.usd_monthly_price,
-        usd_yearly_price: planModal.form.usd_yearly_price,
+        usd_yearly_price: derivedUsdYearlyPrice,
         addon_monthly_price: planModal.form.addon_monthly_price,
-        addon_yearly_price: planModal.form.addon_yearly_price,
+        addon_yearly_price: derivedAddonYearlyPrice,
         addon_usd_monthly_price: planModal.form.addon_usd_monthly_price,
-        addon_usd_yearly_price: planModal.form.addon_usd_yearly_price,
+        addon_usd_yearly_price: derivedAddonUsdYearlyPrice,
         allow_addons: Boolean(planModal.form.allow_addons),
         ...(isBusinessAutopilotProduct ? {
           employee_limit: planModal.form.employee_limit,
@@ -5046,13 +5109,8 @@ export default function SaasAdminProductPage() {
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={planModal.form.yearly_price_inr ?? ""}
-                    onChange={(event) =>
-                      setPlanModal((prev) => ({
-                        ...prev,
-                        form: { ...prev.form, yearly_price_inr: event.target.value }
-                      }))
-                    }
+                    value={deriveYearlyPrice(planModal.form.monthly_price_inr)}
+                    readOnly
                   />
                   {getFieldError("yearly_price_inr")}
                 </div>
@@ -5078,13 +5136,8 @@ export default function SaasAdminProductPage() {
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={planModal.form.yearly_price_usd ?? ""}
-                    onChange={(event) =>
-                      setPlanModal((prev) => ({
-                        ...prev,
-                        form: { ...prev.form, yearly_price_usd: event.target.value }
-                      }))
-                    }
+                    value={deriveYearlyPrice(planModal.form.monthly_price_usd)}
+                    readOnly
                   />
                   {getFieldError("yearly_price_usd")}
                 </div>
@@ -5385,13 +5438,8 @@ export default function SaasAdminProductPage() {
                       type="number"
                       step="0.01"
                       className="form-control"
-                      value={planModal.form.yearly_price ?? ""}
-                      onChange={(event) =>
-                        setPlanModal((prev) => ({
-                          ...prev,
-                          form: { ...prev.form, yearly_price: event.target.value }
-                        }))
-                      }
+                      value={deriveYearlyPrice(planModal.form.monthly_price)}
+                      readOnly
                     />
                     {getFieldError("yearly_price")}
                   </div>
@@ -5417,13 +5465,8 @@ export default function SaasAdminProductPage() {
                       type="number"
                       step="0.01"
                       className="form-control"
-                      value={planModal.form.usd_yearly_price ?? ""}
-                      onChange={(event) =>
-                        setPlanModal((prev) => ({
-                          ...prev,
-                          form: { ...prev.form, usd_yearly_price: event.target.value }
-                        }))
-                      }
+                      value={deriveYearlyPrice(planModal.form.usd_monthly_price)}
+                      readOnly
                     />
                     {getFieldError("usd_yearly_price")}
                   </div>
@@ -5655,8 +5698,8 @@ export default function SaasAdminProductPage() {
                   type="number"
                   step="0.01"
                   className="form-control"
-                  value={planModal.form.yearly_price ?? ""}
-                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, yearly_price: event.target.value } }))}
+                  value={deriveYearlyPrice(planModal.form.monthly_price)}
+                  readOnly
                 />
                 {getFieldError("yearly_price")}
               </div>
@@ -5677,8 +5720,8 @@ export default function SaasAdminProductPage() {
                   type="number"
                   step="0.01"
                   className="form-control"
-                  value={planModal.form.usd_yearly_price ?? ""}
-                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, usd_yearly_price: event.target.value } }))}
+                  value={deriveYearlyPrice(planModal.form.usd_monthly_price)}
+                  readOnly
                 />
                 {getFieldError("usd_yearly_price")}
               </div>
@@ -5703,8 +5746,8 @@ export default function SaasAdminProductPage() {
                   type="number"
                   step="0.01"
                   className="form-control"
-                  value={planModal.form.addon_yearly_price ?? ""}
-                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, addon_yearly_price: event.target.value } }))}
+                  value={deriveYearlyPrice(planModal.form.addon_monthly_price)}
+                  readOnly
                 />
                 {getFieldError("addon_yearly_price")}
               </div>
@@ -5729,8 +5772,8 @@ export default function SaasAdminProductPage() {
                   type="number"
                   step="0.01"
                   className="form-control"
-                  value={planModal.form.addon_usd_yearly_price ?? ""}
-                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, addon_usd_yearly_price: event.target.value } }))}
+                  value={deriveYearlyPrice(planModal.form.addon_usd_monthly_price)}
+                  readOnly
                 />
                 {getFieldError("addon_usd_yearly_price")}
               </div>
@@ -5987,6 +6030,97 @@ export default function SaasAdminProductPage() {
                           >
                             Select All
                           </button>
+                        </div>
+                      </div>
+                      <div className="modal-form-field" style={{ gridColumn: "1 / -1" }}>
+                        <label className="form-label">Business Autopilot User Types</label>
+                        <div className="text-secondary small mb-2">Configure per-user pricing and module access for CRM, HRM, and Full Access users.</div>
+                        <div className="d-flex flex-column gap-3">
+                          {normalizeBusinessAutopilotUserTypes(planModal.form.business_autopilot_user_types).map((userTypeRow) => (
+                            <div key={userTypeRow.key} className="border rounded-3 p-3">
+                              <div className="fw-semibold mb-2">{userTypeRow.label}</div>
+                              <div className="row g-2">
+                                <div className="col-12 col-md-3">
+                                  <label className="form-label">Monthly INR</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="form-control"
+                                    value={userTypeRow.monthly_price_inr ?? ""}
+                                    onChange={(event) =>
+                                      setPlanModal((prev) => ({
+                                        ...prev,
+                                        form: {
+                                          ...prev.form,
+                                          business_autopilot_user_types: normalizeBusinessAutopilotUserTypes(prev.form.business_autopilot_user_types).map((row) => row.key === userTypeRow.key ? { ...row, monthly_price_inr: event.target.value } : row),
+                                        },
+                                      }))
+                                    }
+                                  />
+                                </div>
+                                <div className="col-12 col-md-3">
+                                  <label className="form-label">Yearly INR</label>
+                                  <input type="number" step="0.01" className="form-control" readOnly value={deriveYearlyPrice(userTypeRow.monthly_price_inr)} />
+                                </div>
+                                <div className="col-12 col-md-3">
+                                  <label className="form-label">Monthly USD</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="form-control"
+                                    value={userTypeRow.monthly_price_usd ?? ""}
+                                    onChange={(event) =>
+                                      setPlanModal((prev) => ({
+                                        ...prev,
+                                        form: {
+                                          ...prev.form,
+                                          business_autopilot_user_types: normalizeBusinessAutopilotUserTypes(prev.form.business_autopilot_user_types).map((row) => row.key === userTypeRow.key ? { ...row, monthly_price_usd: event.target.value } : row),
+                                        },
+                                      }))
+                                    }
+                                  />
+                                </div>
+                                <div className="col-12 col-md-3">
+                                  <label className="form-label">Yearly USD</label>
+                                  <input type="number" step="0.01" className="form-control" readOnly value={deriveYearlyPrice(userTypeRow.monthly_price_usd)} />
+                                </div>
+                                <div className="col-12">
+                                  <label className="form-label">Allowed Modules</label>
+                                  <div className="row g-2">
+                                    {ROLE_ACCESS_SECTION_KEYS_ARRAY.map((sectionKey) => {
+                                      const checked = Array.isArray(userTypeRow.allowed_modules) ? userTypeRow.allowed_modules.includes(sectionKey) : false;
+                                      return (
+                                        <div className="col-6 col-md-4 col-xl-3" key={`${userTypeRow.key}-${sectionKey}`}>
+                                          <label className="d-flex align-items-center gap-2 border rounded px-2 py-2 h-100">
+                                            <input
+                                              type="checkbox"
+                                              checked={checked}
+                                              onChange={(event) =>
+                                                setPlanModal((prev) => ({
+                                                  ...prev,
+                                                  form: {
+                                                    ...prev.form,
+                                                    business_autopilot_user_types: normalizeBusinessAutopilotUserTypes(prev.form.business_autopilot_user_types).map((row) => {
+                                                      if (row.key !== userTypeRow.key) return row;
+                                                      const selected = new Set(Array.isArray(row.allowed_modules) ? row.allowed_modules : []);
+                                                      if (event.target.checked) selected.add(sectionKey);
+                                                      else selected.delete(sectionKey);
+                                                      return { ...row, allowed_modules: Array.from(selected) };
+                                                    }),
+                                                  },
+                                                }))
+                                              }
+                                            />
+                                            <span>{titleCase(sectionKey)}</span>
+                                          </label>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </>

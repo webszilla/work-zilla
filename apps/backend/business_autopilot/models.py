@@ -39,6 +39,24 @@ class OrganizationUser(models.Model):
         ("org_user", "Org User"),
         ("hr_view", "HR View"),
     )
+    STATUS_ACTIVE = "active"
+    STATUS_INACTIVE = "inactive"
+    STATUS_RESIGNED = "resigned"
+    STATUS_DELETED = "deleted"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_INACTIVE, "Inactive"),
+        (STATUS_RESIGNED, "Resigned"),
+        (STATUS_DELETED, "Deleted"),
+    )
+    USER_TYPE_CRM = "crm_user"
+    USER_TYPE_HRM = "hrm_user"
+    USER_TYPE_FULL = "full_access_user"
+    USER_TYPE_CHOICES = (
+        (USER_TYPE_CRM, "CRM User"),
+        (USER_TYPE_HRM, "HRM User"),
+        (USER_TYPE_FULL, "Full Access User"),
+    )
 
     organization = models.ForeignKey(
         "core.Organization",
@@ -53,9 +71,20 @@ class OrganizationUser(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="org_user")
     department = models.CharField(max_length=120, blank=True, default="")
     employee_role = models.CharField(max_length=120, blank=True, default="")
+    user_type = models.CharField(max_length=32, choices=USER_TYPE_CHOICES, default=USER_TYPE_FULL, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE, db_index=True)
     is_active = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
+    resigned_at = models.DateTimeField(null=True, blank=True)
+    resigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_resigned_users",
+    )
+    status_changed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -19,6 +19,7 @@ const defaultForm = {
   phone_country_code: "+91",
   phone_number_input: "",
   role: "org_user",
+  user_type: "full_access_user",
   department_id: "",
   employee_role_id: ""
 };
@@ -46,6 +47,7 @@ const defaultEditForm = {
   phone_country_code: "+91",
   phone_number_input: "",
   role: "org_user",
+  user_type: "full_access_user",
   department_id: "",
   employee_role_id: "",
   is_active: true
@@ -63,6 +65,14 @@ const DEFAULT_USER_META = {
   can_add_users: false,
   has_subscription: false,
   limit_message: "",
+  user_types: [],
+  user_type_seat_counts: {},
+  user_type_active_counts: {},
+};
+const BA_USER_TYPE_LABELS = {
+  crm_user: "CRM User",
+  hrm_user: "HRM User",
+  full_access_user: "Full Access User",
 };
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
@@ -129,7 +139,7 @@ const USER_DETAIL_FIELDS = [
   { key: "role", label: "Role" },
   { key: "department", label: "Department" },
   { key: "employee_role", label: "Employee Role" },
-  { key: "is_active", label: "Status" },
+  { key: "status", label: "Status" },
 ];
 const ROLE_ACCESS_SECTION_FEATURES = {
   dashboard: [
@@ -258,6 +268,15 @@ function limitedInput(fieldKey, value) {
 
 function limitedTextarea(fieldKey, value) {
   return clampBusinessAutopilotText(fieldKey, value, { isTextarea: true });
+}
+
+function titleCase(value) {
+  if (!value) {
+    return "-";
+  }
+  return String(value)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function normalizeRoleAccessLevel(level) {
@@ -412,24 +431,27 @@ function isOrgAdminAccountUser(row = {}) {
     || ["org_admin", "owner", "superadmin", "super_admin"].includes(normalizedProfileRole);
 }
 
-function resolveRoleAccessRecord(roleAccessMap, profileRole, employeeRole) {
+function resolveRoleAccessRecord(roleAccessMap, profileRole, employeeRole, userType = "full_access_user") {
   const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
   const normalizedProfileRole = normalizeRoleToken(profileRole);
   const normalizedEmployeeRole = normalizeRoleToken(employeeRole);
+  const normalizedUserType = normalizeBusinessAutopilotUserType(userType);
   const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
 
   if (normalizedEmployeeRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "employee_role" && normalizeRoleToken(rawRole) === normalizedEmployeeRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (scope === "employee_role" && normalizeRoleToken(rawRole) === normalizedEmployeeRole && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)) {
         return value;
       }
     }
   }
   if (normalizedProfileRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "system" && normalizeRoleToken(rawRole) === normalizedProfileRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (scope === "system" && normalizeRoleToken(rawRole) === normalizedProfileRole && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)) {
         return value;
       }
     }
@@ -1258,6 +1280,13 @@ function buildDisplayName(firstName, lastName) {
   return [String(firstName || "").trim(), String(lastName || "").trim()].filter(Boolean).join(" ").trim();
 }
 
+function normalizeBusinessAutopilotUserType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "crm_user") return "crm_user";
+  if (raw === "hrm_user") return "hrm_user";
+  return "full_access_user";
+}
+
 function splitCombinedPhoneValue(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -1295,6 +1324,9 @@ function findHrEmployeeForUser(user, hrEmployees = []) {
 }
 
 function formatDetailValue(key, value) {
+  if (key === "status") {
+    return String(value || "").trim() ? titleCase(String(value || "").trim()) : "-";
+  }
   if (typeof value === "boolean") {
     if (key === "is_active") {
       return value ? "Active" : "Inactive";
@@ -1333,6 +1365,7 @@ function normalizeUserMeta(meta, userRows = []) {
   const canAddUsers = typeof source.can_add_users === "boolean"
     ? source.can_add_users
     : (hasUnlimitedUsers || usedUsers < employeeLimit);
+  const userTypes = Array.isArray(source.user_types) ? source.user_types : [];
 
   return {
     employee_limit: employeeLimit,
@@ -1346,6 +1379,9 @@ function normalizeUserMeta(meta, userRows = []) {
     can_add_users: Boolean(canAddUsers),
     has_subscription: Boolean(source.has_subscription),
     limit_message: String(source.limit_message || ""),
+    user_types: userTypes,
+    user_type_seat_counts: source.user_type_seat_counts && typeof source.user_type_seat_counts === "object" ? source.user_type_seat_counts : {},
+    user_type_active_counts: source.user_type_active_counts && typeof source.user_type_active_counts === "object" ? source.user_type_active_counts : {},
   };
 }
 
@@ -1414,7 +1450,9 @@ export default function BusinessAutopilotUsersPage() {
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserEmployeeRole, setCurrentUserEmployeeRole] = useState("");
   const [currentUserMembershipRole, setCurrentUserMembershipRole] = useState("");
+  const [currentUserType, setCurrentUserType] = useState("full_access_user");
   const [selectedRoleAccessKey, setSelectedRoleAccessKey] = useState("system:org_user");
+  const [selectedRoleAccessUserType, setSelectedRoleAccessUserType] = useState("full_access_user");
   const [roleAccessSaving, setRoleAccessSaving] = useState(false);
   const [roleAccessDirty, setRoleAccessDirty] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
@@ -1772,6 +1810,7 @@ export default function BusinessAutopilotUsersPage() {
       phone_country_code: phoneParts.countryCode,
       phone_number_input: phoneParts.number,
       role: user.role || "org_user",
+      user_type: normalizeBusinessAutopilotUserType(user.user_type),
       department_id: matchedDepartment ? String(matchedDepartment.id) : "",
       employee_role_id: matchedRole ? String(matchedRole.id) : "",
       is_active: Boolean(user.is_active)
@@ -1814,6 +1853,7 @@ export default function BusinessAutopilotUsersPage() {
           password: editForm.password,
           phone_number: buildCombinedPhoneValue(editForm.phone_country_code, editForm.phone_number_input),
           role: editForm.role,
+          user_type: editForm.user_type,
           department_id: editForm.department_id || null,
           employee_role_id: editForm.employee_role_id || null,
           is_active: Boolean(editForm.is_active)
@@ -2121,6 +2161,74 @@ export default function BusinessAutopilotUsersPage() {
     }
   }
 
+  async function handleMarkResigned(user) {
+    if (!canManageUsersTab) {
+      return;
+    }
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || togglingMembershipId) {
+      return;
+    }
+    const confirmed = await openConfirmDialog(
+      `Mark ${String(user?.name || user?.email || "this user")} as resigned? This will disable login and free one active user slot.`,
+      { title: "Mark as Resigned", confirmText: "Yes", cancelText: "No" }
+    );
+    if (!confirmed) {
+      return;
+    }
+    setTogglingMembershipId(membershipId);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/mark-resigned`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      applyUsersResponse(data, { preserveDeletedUsers: true });
+      setUserListTab("resigned");
+      setNotice(String(data?.message || "User marked as resigned."));
+    } catch (error) {
+      setNotice(error?.message || "Unable to mark user as resigned.");
+    } finally {
+      setTogglingMembershipId("");
+    }
+  }
+
+  async function handleRestoreActiveUser(user) {
+    if (!canManageUsersTab) {
+      return;
+    }
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || togglingMembershipId) {
+      return;
+    }
+    const confirmed = await openConfirmDialog(
+      `Restore ${String(user?.name || user?.email || "this user")} to active status?`,
+      { title: "Restore Active User", confirmText: "Yes", cancelText: "No" }
+    );
+    if (!confirmed) {
+      return;
+    }
+    setTogglingMembershipId(membershipId);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/restore-active`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      applyUsersResponse(data, { preserveDeletedUsers: true });
+      setUserListTab("active");
+      setNotice(String(data?.message || "User restored to active status."));
+    } catch (error) {
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        setNotice(error?.message || "Unable to restore user to active status.");
+      }
+    } finally {
+      setTogglingMembershipId("");
+    }
+  }
+
   async function handleResendCredentials(user) {
     if (!canManageUsersTab) {
       return;
@@ -2370,6 +2478,7 @@ export default function BusinessAutopilotUsersPage() {
     }
     const basePayload = {
       ...form,
+      user_type: form.user_type,
       name: buildDisplayName(form.first_name, form.last_name),
       phone_number: buildCombinedPhoneValue(form.phone_country_code, form.phone_number_input),
       confirm_existing_user: Boolean(createEmailCheck.existingUser && createEmailCheck.samePasswordAllowed),
@@ -2845,10 +2954,18 @@ export default function BusinessAutopilotUsersPage() {
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
+    const statusFilteredUsers = users.filter((user) => {
+      const status = String(user?.status || (user?.is_active ? "active" : "inactive")).trim().toLowerCase();
+      if (userListTab === "active") return status === "active";
+      if (userListTab === "inactive") return status === "inactive";
+      if (userListTab === "resigned") return status === "resigned";
+      if (userListTab === "all" || userListTab === "email_verification") return true;
+      return true;
+    });
     if (!q) {
-      return users;
+      return statusFilteredUsers;
     }
-    return users.filter((user) =>
+    return statusFilteredUsers.filter((user) =>
       [
         user.name,
         user.first_name,
@@ -2857,6 +2974,7 @@ export default function BusinessAutopilotUsersPage() {
         user.department,
         user.role,
         user.employee_role,
+        user.status,
         user.is_active ? "active" : "inactive",
       ]
         .filter(Boolean)
@@ -2864,7 +2982,7 @@ export default function BusinessAutopilotUsersPage() {
         .toLowerCase()
         .includes(q)
     );
-  }, [users, userSearch]);
+  }, [users, userSearch, userListTab]);
   const filteredDeletedUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
     if (!q) {
@@ -2887,6 +3005,11 @@ export default function BusinessAutopilotUsersPage() {
         .includes(q)
     );
   }, [deletedUsers, userSearch]);
+  const selectedCreateUserType = normalizeBusinessAutopilotUserType(isEditingUser ? editForm.user_type : form.user_type);
+  const selectedCreateUserTypeMeta = useMemo(() => {
+    const rows = Array.isArray(userMeta.user_types) ? userMeta.user_types : [];
+    return rows.find((item) => item.key === selectedCreateUserType) || null;
+  }, [selectedCreateUserType, userMeta.user_types]);
   const pendingEmailVerificationUsers = useMemo(
     () => users.filter((user) => !Boolean(user?.email_verified)),
     [users]
@@ -2929,7 +3052,14 @@ export default function BusinessAutopilotUsersPage() {
     return departments.filter((item) => String(item.name || "").toLowerCase().includes(q));
   }, [departments, departmentSearch]);
 
-  const currentUserListRows = userListTab === "deleted" ? filteredDeletedUsers : filteredUsers;
+  const filteredActiveUsersCount = users.filter((user) => String(user?.status || "").trim().toLowerCase() === "active").length;
+  const filteredInactiveUsersCount = users.filter((user) => String(user?.status || "").trim().toLowerCase() === "inactive").length;
+  const filteredResignedUsersCount = users.filter((user) => String(user?.status || "").trim().toLowerCase() === "resigned").length;
+  const currentUserListRows = userListTab === "deleted"
+    ? filteredDeletedUsers
+    : userListTab === "email_verification"
+      ? filteredPendingEmailVerificationUsers
+      : filteredUsers;
   const totalUserPages = Math.max(1, Math.ceil(currentUserListRows.length / pageSize));
   const normalizedUserPage = Math.min(userPage, totalUserPages);
   const paginatedUsers = currentUserListRows.slice((normalizedUserPage - 1) * pageSize, normalizedUserPage * pageSize);
@@ -2993,8 +3123,14 @@ export default function BusinessAutopilotUsersPage() {
       return ROLE_ACCESS_SECTIONS.filter((section) => section.key !== "users");
     }
     const enabledSet = new Set(enabledModuleSlugs.map((slug) => String(slug || "").trim().toLowerCase()));
+    const selectedUserTypeModules = new Set(
+      (userMeta.user_types.find((item) => item.key === selectedRoleAccessUserType)?.allowed_modules || []).map((item) => String(item || "").trim().toLowerCase())
+    );
     return ROLE_ACCESS_SECTIONS.filter((section) => {
       if (section.key === "users") {
+        return false;
+      }
+      if (selectedUserTypeModules.size && !selectedUserTypeModules.has(section.key)) {
         return false;
       }
       const moduleSlug = ROLE_ACCESS_SECTION_MODULE_SLUG[section.key];
@@ -3003,7 +3139,7 @@ export default function BusinessAutopilotUsersPage() {
       }
       return enabledSet.has(moduleSlug);
     });
-  }, [enabledModuleSlugs, hasResolvedEnabledModules]);
+  }, [enabledModuleSlugs, hasResolvedEnabledModules, selectedRoleAccessUserType, userMeta.user_types]);
   const createUserFormDisabled = !isEditingUser && !userMeta.can_add_users;
   const shouldDisableCreatePassword = !isEditingUser && createEmailCheck.existingUser && createEmailCheck.samePasswordAllowed;
   const createEmailStatusClass = createEmailCheck.status === "error"
@@ -3086,6 +3222,14 @@ export default function BusinessAutopilotUsersPage() {
   }, [roleAccessRoleOptions, selectedRoleAccessKey]);
 
   useEffect(() => {
+    const availableTypes = Array.isArray(userMeta.user_types) ? userMeta.user_types : [];
+    if (availableTypes.some((item) => item.key === selectedRoleAccessUserType)) {
+      return;
+    }
+    setSelectedRoleAccessUserType(availableTypes[0]?.key || "full_access_user");
+  }, [selectedRoleAccessUserType, userMeta.user_types]);
+
+  useEffect(() => {
     const normalizedCurrentEmail = String(currentUserEmail || "").trim().toLowerCase();
     const normalizedCurrentId = String(currentUserId || "").trim();
     const normalizedCurrentName = String(currentUserDisplayName || "").trim().toLowerCase();
@@ -3125,9 +3269,11 @@ export default function BusinessAutopilotUsersPage() {
       String(matchedUser?.employee_role || fallbackEmployeeRole || "").trim()
     );
     setCurrentUserMembershipRole(String(matchedUser?.role || "").trim());
+    setCurrentUserType(normalizeBusinessAutopilotUserType(matchedUser?.user_type));
   }, [currentProfileRole, currentUserDisplayName, currentUserEmail, currentUserId, users]);
 
-  const selectedRoleAccess = roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
+  const selectedRoleAccessCompositeKey = `${selectedRoleAccessKey}__${selectedRoleAccessUserType}`;
+  const selectedRoleAccess = roleAccessMap[selectedRoleAccessCompositeKey] || roleAccessMap[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
   const normalizedCurrentProfileRole = normalizeRoleToken(currentProfileRole);
   const isOrgUserProfile = normalizedCurrentProfileRole === "org_user";
   const normalizedCurrentMembershipRole = normalizeRoleToken(currentUserMembershipRole);
@@ -3136,8 +3282,8 @@ export default function BusinessAutopilotUsersPage() {
     || normalizedCurrentMembershipRole === "company_admin"
     || (!hasResolvedMembershipRole && ["company_admin", "org_admin", "superadmin", "super_admin"].includes(normalizedCurrentProfileRole));
   const usersRoleAccessRecord = useMemo(
-    () => resolveRoleAccessRecord(roleAccessMap, currentProfileRole, currentUserEmployeeRole),
-    [roleAccessMap, currentProfileRole, currentUserEmployeeRole]
+    () => resolveRoleAccessRecord(roleAccessMap, currentProfileRole, currentUserEmployeeRole, currentUserType),
+    [roleAccessMap, currentProfileRole, currentUserEmployeeRole, currentUserType]
   );
   const usersSectionAccessLevel = isOrgAdminUser
     ? "Full Access"
@@ -3429,11 +3575,11 @@ export default function BusinessAutopilotUsersPage() {
       return;
     }
     setRoleAccessMap((prev) => {
-      const current = prev[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
+      const current = prev[selectedRoleAccessCompositeKey] || prev[selectedRoleAccessKey] || createDefaultRoleAccessRecord();
       const nextRecord = typeof updater === "function" ? updater(current) : current;
       return {
         ...prev,
-        [selectedRoleAccessKey]: nextRecord,
+        [selectedRoleAccessCompositeKey]: nextRecord,
       };
     });
     setRoleAccessDirty(true);
@@ -4818,7 +4964,33 @@ export default function BusinessAutopilotUsersPage() {
                     </div>
                   </div>
                   <div className="row g-2">
-                    <div className="col-12 col-md-6 col-xl-4">
+                    <div className="col-12 col-md-6 col-xl-3">
+                      <select
+                        className="form-select"
+                        value={isEditingUser ? editForm.user_type : form.user_type}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (isEditingUser) {
+                            setEditForm((prev) => ({ ...prev, user_type: value }));
+                            return;
+                          }
+                          setForm((prev) => ({ ...prev, user_type: value }));
+                        }}
+                        required
+                      >
+                        {(userMeta.user_types.length ? userMeta.user_types : Object.entries(BA_USER_TYPE_LABELS).map(([key, label]) => ({ key, label }))).map((item) => (
+                          <option key={item.key} value={item.key}>{item.label}</option>
+                        ))}
+                      </select>
+                      {selectedCreateUserTypeMeta ? (
+                        <small className="text-secondary d-block mt-2">
+                          Seats: {selectedCreateUserTypeMeta.active_count || 0}/{selectedCreateUserTypeMeta.seat_count || 0}
+                          {" · "}
+                          Remaining: {selectedCreateUserTypeMeta.remaining_count || 0}
+                        </small>
+                      ) : null}
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-3">
                       <div className="input-group">
                         <PhoneCountryCodePicker
                           value={isEditingUser ? editForm.phone_country_code : form.phone_country_code}
@@ -4851,7 +5023,7 @@ export default function BusinessAutopilotUsersPage() {
                         />
                       </div>
                     </div>
-                    <div className="col-12 col-md-6 col-xl-4">
+                    <div className="col-12 col-md-6 col-xl-3">
                       <input
                         type="password"
                         ref={createPasswordInputRef}
@@ -4900,7 +5072,7 @@ export default function BusinessAutopilotUsersPage() {
                         </div>
                       ) : null}
                     </div>
-                    <div className="col-12 col-md-6 col-xl-4">
+                    <div className="col-12 col-md-6 col-xl-3">
                       <div className="d-grid d-xl-flex gap-2 wz-form-actions">
                         <button
                           type="submit"
@@ -4951,7 +5123,28 @@ export default function BusinessAutopilotUsersPage() {
                 className={`btn btn-sm ${userListTab === "all" ? "btn-primary" : "btn-outline-light"}`}
                 onClick={() => setUserListTab("all")}
               >
-                All Users
+                All Users ({users.length})
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${userListTab === "active" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setUserListTab("active")}
+              >
+                Active Users ({filteredActiveUsersCount})
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${userListTab === "inactive" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setUserListTab("inactive")}
+              >
+                Inactive Users ({filteredInactiveUsersCount})
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${userListTab === "resigned" ? "btn-primary" : "btn-outline-light"}`}
+                onClick={() => setUserListTab("resigned")}
+              >
+                Resigned Users ({filteredResignedUsersCount})
               </button>
               <button
                 type="button"
@@ -4970,7 +5163,7 @@ export default function BusinessAutopilotUsersPage() {
                 </button>
               ) : null}
             </div>
-            {userListTab === "all" ? (
+            {["all", "active", "inactive", "resigned"].includes(userListTab) ? (
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <div className="d-flex flex-wrap align-items-center gap-2">
                 <h6 className="mb-0">User List (Available User Limit {availableUsersLabel} - Used {usedUsersLabel})</h6>
@@ -5034,13 +5227,14 @@ export default function BusinessAutopilotUsersPage() {
               </div>
             )}
             <div className="table-responsive">
-              {userListTab === "all" ? (
+              {["all", "active", "inactive", "resigned"].includes(userListTab) ? (
                 <table className="table table-dark table-hover align-middle mb-0">
                   <thead>
                     <tr>
                       <th>First Name</th>
                       <th>Last Name</th>
                       <th>Official Email</th>
+                      <th>User Type</th>
                       <th>Dept / Designation</th>
                       <th>Status</th>
                       <th className="table-actions text-end">Action</th>
@@ -5048,7 +5242,7 @@ export default function BusinessAutopilotUsersPage() {
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={6}>Loading users...</td></tr>
+                      <tr><td colSpan={7}>Loading users...</td></tr>
                     ) : paginatedUsers.length ? (
                       paginatedUsers.map((user) => (
                         <tr key={user.membership_id || user.id}>
@@ -5063,10 +5257,14 @@ export default function BusinessAutopilotUsersPage() {
                                   ORG Admin
                                 </span>
                               ) : null}
+                              <span className="badge bg-light text-dark border">
+                                {BA_USER_TYPE_LABELS[normalizeBusinessAutopilotUserType(user.user_type)] || "Full Access User"}
+                              </span>
                             </div>
                           </td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
+                          <td>{BA_USER_TYPE_LABELS[normalizeBusinessAutopilotUserType(user.user_type)] || "Full Access User"}</td>
                           <td>
                             <div className="d-flex flex-column lh-sm">
                               <span className="text-secondary small">Department</span>
@@ -5075,7 +5273,7 @@ export default function BusinessAutopilotUsersPage() {
                               <span className="fw-semibold">{user.employee_role || "-"}</span>
                             </div>
                           </td>
-                          <td>{user.is_locked ? "Locked" : (user.is_active ? "Active" : "Deactive")}</td>
+                          <td>{titleCase(user.status || (user.is_locked ? "inactive" : (user.is_active ? "active" : "inactive")))}</td>
                           <td className="table-actions text-end">
                             <div className="d-flex align-items-center justify-content-end gap-2 flex-nowrap">
                               <button
@@ -5130,6 +5328,38 @@ export default function BusinessAutopilotUsersPage() {
                                   />
                                 )}
                               </button>
+                              {!isOrgAdminAccountUser(user) && String(user?.status || "").trim().toLowerCase() === "active" ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-warning saas-org-icon-btn"
+                                  onClick={() => handleMarkResigned(user)}
+                                  disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
+                                  title="Mark as Resigned"
+                                  aria-label="Mark as Resigned"
+                                >
+                                  {togglingMembershipId === String(user.membership_id) ? (
+                                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                  ) : (
+                                    <i className="bi bi-person-dash" aria-hidden="true" />
+                                  )}
+                                </button>
+                              ) : null}
+                              {!isOrgAdminAccountUser(user) && ["inactive", "resigned"].includes(String(user?.status || "").trim().toLowerCase()) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-success saas-org-icon-btn"
+                                  onClick={() => handleRestoreActiveUser(user)}
+                                  disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
+                                  title="Restore Active"
+                                  aria-label="Restore Active"
+                                >
+                                  {togglingMembershipId === String(user.membership_id) ? (
+                                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                                  ) : (
+                                    <i className="bi bi-arrow-counterclockwise" aria-hidden="true" />
+                                  )}
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 className="btn btn-sm btn-outline-success saas-org-icon-btn"
@@ -5198,7 +5428,7 @@ export default function BusinessAutopilotUsersPage() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={6}>No users found.</td></tr>
+                      <tr><td colSpan={7}>No users found.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -5311,7 +5541,7 @@ export default function BusinessAutopilotUsersPage() {
                 </table>
               )}
             </div>
-            {!loading && (userListTab === "all" || userListTab === "deleted") ? (
+            {!loading && (["all", "active", "inactive", "resigned", "deleted"].includes(userListTab)) ? (
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
                 <div className="small text-secondary">
                   Showing {userStartIndex} to {userEndIndex} of {currentUserListRows.length} entries
@@ -5539,6 +5769,14 @@ export default function BusinessAutopilotUsersPage() {
               <select className="form-select form-select-sm" value={selectedRoleAccessKey} onChange={(event) => setSelectedRoleAccessKey(event.target.value)}>
                 {roleAccessRoleOptions.map((item) => (
                   <option key={item.key} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 220 }}>
+              <label className="form-label small text-secondary mb-1">User Type</label>
+              <select className="form-select form-select-sm" value={selectedRoleAccessUserType} onChange={(event) => setSelectedRoleAccessUserType(event.target.value)}>
+                {(userMeta.user_types.length ? userMeta.user_types : Object.entries(BA_USER_TYPE_LABELS).map(([key, label]) => ({ key, label }))).map((item) => (
+                  <option key={`role-access-type-${item.key}`} value={item.key}>{item.label}</option>
                 ))}
               </select>
             </div>
@@ -6057,6 +6295,30 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
               </div>
             </div>
+            {userMeta.user_types?.length ? (
+              <div className="row g-2 mb-3">
+                {userMeta.user_types.map((item) => (
+                  <div key={`user-type-summary-${item.key}`} className="col-12 col-md-6 col-xl-4">
+                    <div className="card h-100 border-0 shadow-sm" style={{ background: "linear-gradient(135deg, rgba(240, 253, 244, 0.92), rgba(255, 255, 255, 0.98))", borderRadius: "16px" }}>
+                      <div className="card-body py-3">
+                        <div className="d-flex align-items-start justify-content-between gap-3">
+                          <div>
+                            <div className="fw-semibold">{item.label}</div>
+                            <div className="text-secondary small">{item.description || "Business Autopilot seat pack"}</div>
+                          </div>
+                          <span className="badge bg-success-subtle text-success border">{item.key.replace(/_/g, " ").toUpperCase()}</span>
+                        </div>
+                        <div className="d-flex flex-wrap gap-3 mt-3 small">
+                          <span><strong>{item.seat_count || 0}</strong> purchased</span>
+                          <span><strong>{item.active_count || 0}</strong> active</span>
+                          <span><strong>{item.remaining_count || 0}</strong> remaining</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="table-responsive">
               <table className="table table-dark table-hover align-middle mb-0">
                 <thead>

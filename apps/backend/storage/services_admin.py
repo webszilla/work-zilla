@@ -19,6 +19,14 @@ from core.models import UserProfile
 from apps.backend.common_auth.models import User
 
 
+def _derive_yearly_price_from_monthly(value):
+    try:
+        parsed = float(value or 0)
+    except (TypeError, ValueError):
+        parsed = 0.0
+    return round(max(parsed, 0.0) * 10, 2)
+
+
 @transaction.atomic
 def upsert_product(*, product_id=None, name, is_active=True, description=""):
     if product_id:
@@ -66,12 +74,14 @@ def upsert_plan(
         plan = Plan.objects.filter(id=plan_id).first()
         if not plan:
             raise ValueError("plan_not_found")
+        monthly_inr = monthly_price_inr or monthly_price or 0
+        monthly_usd = monthly_price_usd or usd_monthly_price or 0
         plan.product = product
         plan.name = name
-        plan.monthly_price_inr = monthly_price_inr or monthly_price or 0
-        plan.yearly_price_inr = yearly_price_inr or yearly_price or 0
-        plan.monthly_price_usd = monthly_price_usd or usd_monthly_price or 0
-        plan.yearly_price_usd = yearly_price_usd or usd_yearly_price or 0
+        plan.monthly_price_inr = monthly_inr
+        plan.yearly_price_inr = _derive_yearly_price_from_monthly(monthly_inr)
+        plan.monthly_price_usd = monthly_usd
+        plan.yearly_price_usd = _derive_yearly_price_from_monthly(monthly_usd)
         plan.monthly_price = plan.monthly_price_inr
         plan.yearly_price = plan.yearly_price_inr
         plan.usd_monthly_price = plan.monthly_price_usd
@@ -101,17 +111,19 @@ def upsert_plan(
             "is_active",
         ])
         return plan
+    monthly_inr = monthly_price_inr or monthly_price or 0
+    monthly_usd = monthly_price_usd or usd_monthly_price or 0
     return Plan.objects.create(
         product=product,
         name=name,
-        monthly_price_inr=monthly_price_inr or monthly_price or 0,
-        yearly_price_inr=yearly_price_inr or yearly_price or 0,
-        monthly_price_usd=monthly_price_usd or usd_monthly_price or 0,
-        yearly_price_usd=yearly_price_usd or usd_yearly_price or 0,
-        monthly_price=monthly_price_inr or monthly_price or 0,
-        yearly_price=yearly_price_inr or yearly_price or 0,
-        usd_monthly_price=monthly_price_usd or usd_monthly_price or 0,
-        usd_yearly_price=yearly_price_usd or usd_yearly_price or 0,
+        monthly_price_inr=monthly_inr,
+        yearly_price_inr=_derive_yearly_price_from_monthly(monthly_inr),
+        monthly_price_usd=monthly_usd,
+        yearly_price_usd=_derive_yearly_price_from_monthly(monthly_usd),
+        monthly_price=monthly_inr,
+        yearly_price=_derive_yearly_price_from_monthly(monthly_inr),
+        usd_monthly_price=monthly_usd,
+        usd_yearly_price=_derive_yearly_price_from_monthly(monthly_usd),
         max_users=max_users,
         device_limit_per_user=max(1, int(device_limit_per_user or 1)),
         storage_limit_gb=int(storage_limit_gb or 0),

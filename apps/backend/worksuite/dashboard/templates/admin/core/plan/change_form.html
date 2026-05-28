@@ -9,6 +9,11 @@
   <div class="plan-col">
     <h2>Plan Details</h2>
     <div class="form-row">
+      {{ adminform.form.product.errors }}
+      <label for="{{ adminform.form.product.id_for_label }}">Product:</label>
+      {{ adminform.form.product }}
+    </div>
+    <div class="form-row">
       {{ adminform.form.name.errors }}
       <label for="{{ adminform.form.name.id_for_label }}">Name:</label>
       {{ adminform.form.name }}
@@ -63,6 +68,7 @@
       {{ adminform.form.yearly_price.errors }}
       <label for="{{ adminform.form.yearly_price.id_for_label }}">Yearly price:</label>
       {{ adminform.form.yearly_price }}
+      <p class="help">Auto calculated as 10 x monthly price. 2 months free is included.</p>
     </div>
     <div class="form-row">
       {{ adminform.form.usd_monthly_price.errors }}
@@ -73,6 +79,7 @@
       {{ adminform.form.usd_yearly_price.errors }}
       <label for="{{ adminform.form.usd_yearly_price.id_for_label }}">USD yearly price:</label>
       {{ adminform.form.usd_yearly_price }}
+      <p class="help">Auto calculated as 10 x monthly price. 2 months free is included.</p>
     </div>
     <div class="form-row">
       {{ adminform.form.addon_monthly_price.errors }}
@@ -83,6 +90,7 @@
       {{ adminform.form.addon_yearly_price.errors }}
       <label for="{{ adminform.form.addon_yearly_price.id_for_label }}">Addon yearly price:</label>
       {{ adminform.form.addon_yearly_price }}
+      <p class="help">Auto calculated as 10 x monthly price. 2 months free is included.</p>
     </div>
     <div class="form-row">
       {{ adminform.form.addon_usd_monthly_price.errors }}
@@ -93,8 +101,293 @@
       {{ adminform.form.addon_usd_yearly_price.errors }}
       <label for="{{ adminform.form.addon_usd_yearly_price.id_for_label }}">Addon USD yearly price:</label>
       {{ adminform.form.addon_usd_yearly_price }}
+      <p class="help">Auto calculated as 10 x monthly price. 2 months free is included.</p>
     </div>
   </div>
 </div>
+
+{{ adminform.form.features }}
+
+<div id="baUserTypesAdminCard" class="ba-user-types-admin" style="display:none;">
+  <h2>Business Autopilot User Types</h2>
+  <p class="help">Configure monthly pricing per user type and choose which modules each type can access. Yearly price is auto calculated as 10 months.</p>
+  <div id="baUserTypesAdminGrid" class="ba-user-types-admin__grid"></div>
+</div>
+{% endblock %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script>
+  (function() {
+    const baDefaults = {{ business_autopilot_user_type_defaults_json|safe }};
+    const baSections = {{ business_autopilot_role_section_keys_json|safe }};
+    const baPlanSlugs = {{ business_autopilot_plan_slugs_json|safe }};
+
+    function syncYearlyPrice(monthlyId, yearlyId) {
+      const monthlyInput = document.getElementById(monthlyId);
+      const yearlyInput = document.getElementById(yearlyId);
+      if (!monthlyInput || !yearlyInput) {
+        return;
+      }
+      yearlyInput.readOnly = true;
+      yearlyInput.style.backgroundColor = "#f8f8f8";
+      const updateValue = function() {
+        const rawValue = monthlyInput.value;
+        const parsed = Number.parseFloat(rawValue);
+        if (!rawValue || Number.isNaN(parsed)) {
+          yearlyInput.value = "";
+          return;
+        }
+        yearlyInput.value = (parsed * 10).toFixed(2);
+      };
+      monthlyInput.addEventListener("input", updateValue);
+      updateValue();
+    }
+
+    syncYearlyPrice("id_monthly_price", "id_yearly_price");
+    syncYearlyPrice("id_usd_monthly_price", "id_usd_yearly_price");
+    syncYearlyPrice("id_addon_monthly_price", "id_addon_yearly_price");
+    syncYearlyPrice("id_addon_usd_monthly_price", "id_addon_usd_yearly_price");
+    syncYearlyPrice("id_addon_agent_monthly_price", "id_addon_agent_yearly_price");
+
+    const productInput = document.getElementById("id_product");
+    const featuresInput = document.getElementById("id_features");
+    const userTypeCard = document.getElementById("baUserTypesAdminCard");
+    const userTypeGrid = document.getElementById("baUserTypesAdminGrid");
+
+    function titleCase(value) {
+      return String(value || "").replace(/_/g, " ").replace(/\b\w/g, function(char) {
+        return char.toUpperCase();
+      });
+    }
+
+    function deriveYearlyPrice(value) {
+      const parsed = Number.parseFloat(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return "";
+      }
+      return (parsed * 10).toFixed(2);
+    }
+
+    function parseFeatures() {
+      if (!featuresInput || !featuresInput.value) {
+        return {};
+      }
+      try {
+        const parsed = JSON.parse(featuresInput.value);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function normalizeUserTypes(rows) {
+      const provided = Array.isArray(rows) ? rows : [];
+      return baDefaults.map(function(defaultRow) {
+        const matched = provided.find(function(row) {
+          return String((row || {}).key || "").trim().toLowerCase() === defaultRow.key;
+        }) || {};
+        const allowedModules = Array.isArray(matched.allowed_modules) ? matched.allowed_modules : defaultRow.allowed_modules;
+        return {
+          key: defaultRow.key,
+          label: matched.label || defaultRow.label,
+          description: matched.description || defaultRow.description,
+          monthly_price_inr: matched.monthly_price_inr ?? defaultRow.monthly_price_inr,
+          yearly_price_inr: matched.yearly_price_inr || deriveYearlyPrice(matched.monthly_price_inr ?? defaultRow.monthly_price_inr),
+          monthly_price_usd: matched.monthly_price_usd ?? defaultRow.monthly_price_usd,
+          yearly_price_usd: matched.yearly_price_usd || deriveYearlyPrice(matched.monthly_price_usd ?? defaultRow.monthly_price_usd),
+          allowed_modules: allowedModules.filter(function(item) {
+            return baSections.indexOf(String(item || "").trim().toLowerCase()) !== -1;
+          }),
+        };
+      });
+    }
+
+    function serializeUserTypes() {
+      if (!featuresInput || !userTypeGrid) {
+        return;
+      }
+      const features = parseFeatures();
+      const rows = Array.from(userTypeGrid.querySelectorAll(".ba-user-type-card")).map(function(card) {
+        const key = card.getAttribute("data-key");
+        const allowedModules = Array.from(card.querySelectorAll(".ba-module-check input:checked")).map(function(input) {
+          return input.value;
+        });
+        const monthlyInr = card.querySelector("[data-field='monthly_price_inr']").value;
+        const monthlyUsd = card.querySelector("[data-field='monthly_price_usd']").value;
+        return {
+          key: key,
+          label: card.getAttribute("data-label") || titleCase(key),
+          description: card.getAttribute("data-description") || "",
+          monthly_price_inr: monthlyInr,
+          yearly_price_inr: deriveYearlyPrice(monthlyInr),
+          monthly_price_usd: monthlyUsd,
+          yearly_price_usd: deriveYearlyPrice(monthlyUsd),
+          allowed_modules: allowedModules,
+        };
+      });
+      features.business_autopilot_user_types = rows;
+      featuresInput.value = JSON.stringify(features);
+    }
+
+    function renderUserTypeCards() {
+      if (!userTypeGrid || !featuresInput) {
+        return;
+      }
+      const features = parseFeatures();
+      const rows = normalizeUserTypes(features.business_autopilot_user_types);
+      userTypeGrid.innerHTML = rows.map(function(row) {
+        return `
+          <div class="ba-user-type-card" data-key="${row.key}" data-label="${row.label}" data-description="${row.description}">
+            <div class="ba-user-type-card__header">
+              <div>
+                <h3>${row.label}</h3>
+                <p>${row.description}</p>
+              </div>
+              <span class="ba-user-type-card__code">${row.key}</span>
+            </div>
+            <div class="ba-user-type-card__prices">
+              <label>
+                <span>Monthly INR</span>
+                <input type="number" min="0" step="0.01" value="${row.monthly_price_inr}" data-field="monthly_price_inr" />
+              </label>
+              <label>
+                <span>Yearly INR</span>
+                <input type="text" value="${row.yearly_price_inr}" data-field="yearly_price_inr" readonly />
+              </label>
+              <label>
+                <span>Monthly USD</span>
+                <input type="number" min="0" step="0.01" value="${row.monthly_price_usd}" data-field="monthly_price_usd" />
+              </label>
+              <label>
+                <span>Yearly USD</span>
+                <input type="text" value="${row.yearly_price_usd}" data-field="yearly_price_usd" readonly />
+              </label>
+            </div>
+            <div class="ba-user-type-card__modules">
+              ${baSections.map(function(sectionKey) {
+                const checked = row.allowed_modules.indexOf(sectionKey) !== -1 ? "checked" : "";
+                return `
+                  <label class="ba-module-check">
+                    <input type="checkbox" value="${sectionKey}" ${checked} />
+                    <span>${titleCase(sectionKey)}</span>
+                  </label>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      userTypeGrid.querySelectorAll("[data-field='monthly_price_inr'], [data-field='monthly_price_usd']").forEach(function(input) {
+        input.addEventListener("input", function(event) {
+          const card = event.target.closest(".ba-user-type-card");
+          if (!card) {
+            return;
+          }
+          const monthlyInr = card.querySelector("[data-field='monthly_price_inr']").value;
+          const monthlyUsd = card.querySelector("[data-field='monthly_price_usd']").value;
+          card.querySelector("[data-field='yearly_price_inr']").value = deriveYearlyPrice(monthlyInr);
+          card.querySelector("[data-field='yearly_price_usd']").value = deriveYearlyPrice(monthlyUsd);
+          serializeUserTypes();
+        });
+      });
+      userTypeGrid.querySelectorAll(".ba-module-check input").forEach(function(input) {
+        input.addEventListener("change", serializeUserTypes);
+      });
+      serializeUserTypes();
+    }
+
+    function toggleBusinessAutopilotUserTypes() {
+      if (!productInput || !userTypeCard) {
+        return;
+      }
+      const selectedOption = productInput.options[productInput.selectedIndex];
+      const selectedLabel = String(selectedOption ? selectedOption.text : "").trim().toLowerCase();
+      const isBusinessAutopilot = baPlanSlugs.indexOf(selectedLabel) !== -1 || selectedLabel.indexOf("business autopilot") !== -1;
+      userTypeCard.style.display = isBusinessAutopilot ? "block" : "none";
+      if (isBusinessAutopilot) {
+        renderUserTypeCards();
+      }
+    }
+
+    if (productInput) {
+      productInput.addEventListener("change", toggleBusinessAutopilotUserTypes);
+    }
+    toggleBusinessAutopilotUserTypes();
+  })();
+</script>
+<style>
+  .ba-user-types-admin {
+    margin-top: 24px;
+    border: 1px solid #d4efe0;
+    border-radius: 18px;
+    padding: 24px;
+    background: linear-gradient(135deg, rgba(245, 255, 248, 0.95), rgba(255, 255, 255, 0.98));
+  }
+  .ba-user-types-admin__grid {
+    display: grid;
+    gap: 16px;
+  }
+  .ba-user-type-card {
+    border: 1px solid #d6eadc;
+    border-radius: 16px;
+    padding: 18px;
+    background: #fff;
+    box-shadow: 0 10px 30px rgba(34, 197, 94, 0.06);
+  }
+  .ba-user-type-card__header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .ba-user-type-card__header h3 {
+    margin: 0 0 4px;
+  }
+  .ba-user-type-card__header p {
+    margin: 0;
+    color: #4b5563;
+  }
+  .ba-user-type-card__code {
+    align-self: flex-start;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #ecfdf3;
+    color: #15803d;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .ba-user-type-card__prices {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .ba-user-type-card__prices label span {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .ba-user-type-card__prices input[readonly] {
+    background: #f4f7f5;
+  }
+  .ba-user-type-card__modules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+  }
+  .ba-module-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid #d9ebe0;
+    border-radius: 999px;
+    background: #f8fffb;
+  }
+</style>
 {% endblock %}
 

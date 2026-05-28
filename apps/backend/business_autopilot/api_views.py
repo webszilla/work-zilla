@@ -80,6 +80,36 @@ DEFAULT_ERP_MODULES = [
     {"name": "Inventory", "slug": "stocks", "sort_order": 7},
 ]
 
+BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS = [
+    {
+        "key": "crm_user",
+        "label": "CRM User",
+        "description": "CRM-focused sales and follow-up user",
+        "monthly_price_inr": 550,
+        "monthly_price_usd": 7,
+        "allowed_modules": ["dashboard", "inbox", "crm", "users", "profile"],
+    },
+    {
+        "key": "hrm_user",
+        "label": "HRM User",
+        "description": "HR operations user for employees, attendance and payroll",
+        "monthly_price_inr": 50,
+        "monthly_price_usd": 1,
+        "allowed_modules": ["dashboard", "hr", "users", "profile"],
+    },
+    {
+        "key": "full_access_user",
+        "label": "Full Access User",
+        "description": "Full Business Autopilot access across enabled modules",
+        "monthly_price_inr": 650,
+        "monthly_price_usd": 8,
+        "allowed_modules": ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"],
+    },
+]
+BUSINESS_AUTOPILOT_USER_TYPE_MAP = {
+    row["key"]: row for row in BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS
+}
+
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 DELETE_PROTECTED_PROFILE_ROLES = {"org_admin", "owner", "superadmin", "super_admin"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
@@ -445,7 +475,7 @@ def _sync_business_autopilot_membership_access(org: Organization, granted_by: Op
     )
     active_user_ids = set()
     for membership in memberships:
-        if membership.is_active and membership.user_id:
+        if _normalize_membership_status(membership) == OrganizationUser.STATUS_ACTIVE and membership.user_id:
             active_user_ids.add(membership.user_id)
             UserProductAccess.objects.update_or_create(
                 user=membership.user,
@@ -571,6 +601,12 @@ def _ensure_org_admin_memberships(org: Organization):
         if _normalize_admin_role(membership.role) != "company_admin":
             membership.role = "company_admin"
             update_fields.append("role")
+        if membership.status != OrganizationUser.STATUS_ACTIVE:
+            membership.status = OrganizationUser.STATUS_ACTIVE
+            membership.status_changed_at = timezone.now()
+            membership.resigned_at = None
+            membership.resigned_by = None
+            update_fields.extend(["status", "status_changed_at", "resigned_at", "resigned_by"])
         if not membership.is_active:
             membership.is_active = True
             update_fields.append("is_active")
@@ -578,6 +614,9 @@ def _ensure_org_admin_memberships(org: Organization):
             membership.is_deleted = False
             membership.deleted_at = None
             update_fields.extend(["is_deleted", "deleted_at"])
+        if not membership.user.is_active:
+            membership.user.is_active = True
+            membership.user.save(update_fields=["is_active"])
         if update_fields:
             membership.save(update_fields=[*update_fields, "updated_at"])
 
@@ -709,22 +748,215 @@ def _normalize_role_access_map(payload):
     return normalized
 
 
-def _crm_resolve_role_access_record(role_access_map, profile_role, employee_role):
+def _derive_yearly_from_monthly(value):
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if amount < 0:
+        return 0.0
+    return round(amount * 10, 2)
+
+
+def _normalize_business_autopilot_user_types(config):
+    rows = config if isinstance(config, list) else []
+    normalized = []
+    seen = set()
+    for default_row in BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS:
+        key = default_row["key"]
+        candidate = next(
+            (
+                row for row in rows
+                if isinstance(row, dict) and str(row.get("key") or "").strip().lower() == key
+            ),
+            {},
+        )
+        allowed_modules = [
+            section
+            for section in (
+                candidate.get("allowed_modules")
+                if isinstance(candidate.get("allowed_modules"), list)
+                else default_row.get("allowed_modules", [])
+            )
+            if str(section or "").strip().lower() in ROLE_ACCESS_SECTION_KEYS
+        ]
+        if not allowed_modules:
+            allowed_modules = list(default_row.get("allowed_modules", []))
+        monthly_inr = candidate.get("monthly_price_inr", default_row.get("monthly_price_inr", 0))
+        monthly_usd = candidate.get("monthly_price_usd", default_row.get("monthly_price_usd", 0))
+        normalized_row = {
+            "key": key,
+            "label": str(candidate.get("label") or default_row.get("label") or key).strip(),
+            "description": str(candidate.get("description") or default_row.get("description") or "").strip(),
+            "monthly_price_inr": round(float(monthly_inr or 0), 2),
+            "yearly_price_inr": round(float(candidate.get("yearly_price_inr") or _derive_yearly_from_monthly(monthly_inr)), 2),
+            "monthly_price_usd": round(float(monthly_usd or 0), 2),
+            "yearly_price_usd": round(float(candidate.get("yearly_price_usd") or _derive_yearly_from_monthly(monthly_usd)), 2),
+            "allowed_modules": list(dict.fromkeys(allowed_modules)),
+        }
+        normalized.append(normalized_row)
+        seen.add(key)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        allowed_modules = [
+            section for section in (row.get("allowed_modules") if isinstance(row.get("allowed_modules"), list) else [])
+            if str(section or "").strip().lower() in ROLE_ACCESS_SECTION_KEYS
+        ]
+        normalized.append(
+            {
+                "key": key,
+                "label": str(row.get("label") or key).strip(),
+                "description": str(row.get("description") or "").strip(),
+                "monthly_price_inr": round(float(row.get("monthly_price_inr") or 0), 2),
+                "yearly_price_inr": round(float(row.get("yearly_price_inr") or _derive_yearly_from_monthly(row.get("monthly_price_inr"))), 2),
+                "monthly_price_usd": round(float(row.get("monthly_price_usd") or 0), 2),
+                "yearly_price_usd": round(float(row.get("yearly_price_usd") or _derive_yearly_from_monthly(row.get("monthly_price_usd"))), 2),
+                "allowed_modules": list(dict.fromkeys(allowed_modules)),
+            }
+        )
+    return normalized
+
+
+def _get_plan_user_type_config(plan):
+    features = dict(getattr(plan, "features", {}) or {})
+    return _normalize_business_autopilot_user_types(features.get("business_autopilot_user_types"))
+
+
+def _get_subscription_user_types(subscription):
+    plan = getattr(subscription, "plan", None)
+    if not subscription or not plan:
+        return _normalize_business_autopilot_user_types(None)
+    return _get_plan_user_type_config(plan)
+
+
+def _user_type_allowed_sections(user_type, *, org=None, plan=None):
+    config_rows = _get_subscription_user_types(_get_active_erp_subscription(org)) if org is not None else _get_plan_user_type_config(plan)
+    normalized_key = _normalize_user_type_key(user_type)
+    row = next((item for item in config_rows if item["key"] == normalized_key), None)
+    if not row:
+        return set()
+    return {str(section or "").strip().lower() for section in row.get("allowed_modules", [])}
+
+
+def _normalize_user_type_key(value):
+    raw = str(value or "").strip().lower()
+    if raw in BUSINESS_AUTOPILOT_USER_TYPE_MAP:
+        return raw
+    if raw in {"crm", "crmuser"}:
+        return "crm_user"
+    if raw in {"hrm", "hrmuser", "hr"}:
+        return "hrm_user"
+    if raw in {"full", "fullaccess", "full_access"}:
+        return "full_access_user"
+    return "full_access_user"
+
+
+def _normalize_user_type_counts(value, *, config_rows=None):
+    config_rows = config_rows or _normalize_business_autopilot_user_types(None)
+    allowed_keys = {row["key"] for row in config_rows}
+    source = value if isinstance(value, dict) else {}
+    normalized = {}
+    for key in allowed_keys:
+        try:
+            count = int(source.get(key) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        normalized[key] = max(0, count)
+    return normalized
+
+
+def _empty_user_type_counts(config_rows=None):
+    config_rows = config_rows or _normalize_business_autopilot_user_types(None)
+    return {row["key"]: 0 for row in config_rows}
+
+
+def _get_org_subscription_user_type_seats(org):
+    active_sub = _get_active_erp_subscription(org)
+    config_rows = _get_subscription_user_types(active_sub)
+    if not active_sub or not getattr(active_sub, "plan", None):
+        return {
+            "config": config_rows,
+            "counts": _empty_user_type_counts(config_rows),
+            "total": 0,
+        }
+    counts = _normalize_user_type_counts(getattr(active_sub, "user_type_counts", {}), config_rows=config_rows)
+    return {
+        "config": config_rows,
+        "counts": counts,
+        "total": sum(counts.values()),
+    }
+
+
+def _get_org_user_type_usage(org, *, memberships=None):
+    config_rows = _get_org_subscription_user_type_seats(org)["config"]
+    counts = _empty_user_type_counts(config_rows)
+    rows = memberships if isinstance(memberships, list) else _list_org_user_memberships(org)
+    for membership in rows:
+        if _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
+            continue
+        user_type = _normalize_user_type_key(getattr(membership, "user_type", ""))
+        counts[user_type] = counts.get(user_type, 0) + 1
+    return counts
+
+
+def _serialize_user_type_pricing_rows(config_rows, *, seat_counts=None, active_counts=None):
+    seat_counts = seat_counts or _empty_user_type_counts(config_rows)
+    active_counts = active_counts or _empty_user_type_counts(config_rows)
+    rows = []
+    for row in config_rows:
+        key = row["key"]
+        seats = max(0, int(seat_counts.get(key) or 0))
+        active = max(0, int(active_counts.get(key) or 0))
+        rows.append(
+            {
+                **row,
+                "seat_count": seats,
+                "active_count": active,
+                "remaining_count": max(0, seats - active),
+            }
+        )
+    return rows
+
+
+def _crm_resolve_role_access_record(role_access_map, profile_role, employee_role, user_type=""):
     safe_map = role_access_map if isinstance(role_access_map, dict) else {}
     normalized_profile_role = _normalize_admin_role(profile_role)
     normalized_employee_role = _normalize_admin_role(employee_role)
+    normalized_user_type = _normalize_user_type_key(user_type)
     entries = [(key, value) for key, value in safe_map.items() if isinstance(value, dict)]
 
     if normalized_employee_role:
         for raw_key, value in entries:
-            scope, raw_role = (str(raw_key or "").strip().split(":", 1) + [""])[:2]
-            if scope == "employee_role" and _normalize_admin_role(raw_role) == normalized_employee_role:
+            composite_key = str(raw_key or "").strip()
+            key_without_user_type, _, raw_user_type = composite_key.partition("__")
+            scope, raw_role = (key_without_user_type.split(":", 1) + [""])[:2]
+            if (
+                scope == "employee_role"
+                and _normalize_admin_role(raw_role) == normalized_employee_role
+                and (
+                    (raw_user_type and _normalize_user_type_key(raw_user_type) == normalized_user_type)
+                    or not raw_user_type
+                )
+            ):
                 return value
 
     if normalized_profile_role:
         for raw_key, value in entries:
-            scope, raw_role = (str(raw_key or "").strip().split(":", 1) + [""])[:2]
-            if scope == "system" and _normalize_admin_role(raw_role) == normalized_profile_role:
+            composite_key = str(raw_key or "").strip()
+            key_without_user_type, _, raw_user_type = composite_key.partition("__")
+            scope, raw_role = (key_without_user_type.split(":", 1) + [""])[:2]
+            if (
+                scope == "system"
+                and _normalize_admin_role(raw_role) == normalized_profile_role
+                and (
+                    (raw_user_type and _normalize_user_type_key(raw_user_type) == normalized_user_type)
+                    or not raw_user_type
+                )
+            ):
                 return value
 
     return None
@@ -743,8 +975,12 @@ def _crm_section_access_level(user: User, org: Organization, section_key: str = 
         role_access_map,
         getattr(profile, "role", ""),
         getattr(membership, "employee_role", ""),
+        getattr(membership, "user_type", ""),
     )
     if not role_access_record:
+        return "No Access"
+    allowed_sections = _user_type_allowed_sections(getattr(membership, "user_type", ""), org=org)
+    if section_key not in allowed_sections:
         return "No Access"
     sections = role_access_record.get("sections") if isinstance(role_access_record.get("sections"), dict) else {}
     return ROLE_ACCESS_LEVEL_ALIASES.get(str(sections.get(section_key) or "No Access").strip(), "No Access")
@@ -858,8 +1094,12 @@ def _hr_section_access_level(user: User, org: Organization, section_key: str = "
         role_access_map,
         getattr(profile, "role", ""),
         getattr(membership, "employee_role", ""),
+        getattr(membership, "user_type", ""),
     )
     if not role_access_record:
+        return "No Access"
+    allowed_sections = _user_type_allowed_sections(getattr(membership, "user_type", ""), org=org)
+    if section_key not in allowed_sections:
         return "No Access"
     sections = role_access_record.get("sections") if isinstance(role_access_record.get("sections"), dict) else {}
     return ROLE_ACCESS_LEVEL_ALIASES.get(str(sections.get(section_key) or "No Access").strip(), "No Access")
@@ -1133,6 +1373,72 @@ def _serialize_departments(org):
     return [{"id": row.id, "name": row.name} for row in rows]
 
 
+def _normalize_membership_status(member: OrganizationUser):
+    if not member:
+        return OrganizationUser.STATUS_DELETED
+    if getattr(member, "is_deleted", False):
+        return OrganizationUser.STATUS_DELETED
+    raw_status = str(getattr(member, "status", "") or "").strip().lower()
+    if raw_status == OrganizationUser.STATUS_RESIGNED or getattr(member, "resigned_at", None):
+        return OrganizationUser.STATUS_RESIGNED
+    if not getattr(member, "is_active", False) or not getattr(getattr(member, "user", None), "is_active", True):
+        return OrganizationUser.STATUS_INACTIVE
+    if raw_status in {
+        OrganizationUser.STATUS_ACTIVE,
+        OrganizationUser.STATUS_INACTIVE,
+        OrganizationUser.STATUS_RESIGNED,
+        OrganizationUser.STATUS_DELETED,
+    }:
+        return raw_status
+    return OrganizationUser.STATUS_ACTIVE if getattr(member, "is_active", False) else OrganizationUser.STATUS_INACTIVE
+
+
+def _set_membership_status(member: OrganizationUser, status: str, *, changed_by: Optional[User] = None, commit: bool = True):
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in {
+        OrganizationUser.STATUS_ACTIVE,
+        OrganizationUser.STATUS_INACTIVE,
+        OrganizationUser.STATUS_RESIGNED,
+        OrganizationUser.STATUS_DELETED,
+    }:
+        normalized_status = OrganizationUser.STATUS_INACTIVE
+    now = timezone.now()
+    member.status = normalized_status
+    member.status_changed_at = now
+    member.is_deleted = normalized_status == OrganizationUser.STATUS_DELETED
+    member.deleted_at = now if normalized_status == OrganizationUser.STATUS_DELETED else None
+    member.is_active = normalized_status == OrganizationUser.STATUS_ACTIVE
+    if normalized_status == OrganizationUser.STATUS_RESIGNED:
+        member.resigned_at = member.resigned_at or now
+        member.resigned_by = changed_by
+    elif normalized_status != OrganizationUser.STATUS_DELETED:
+        member.resigned_at = None
+        member.resigned_by = None
+    member.user.is_active = normalized_status == OrganizationUser.STATUS_ACTIVE
+    if commit:
+        member.save(
+            update_fields=[
+                "status",
+                "status_changed_at",
+                "is_deleted",
+                "deleted_at",
+                "is_active",
+                "resigned_at",
+                "resigned_by",
+                "updated_at",
+            ]
+        )
+        member.user.save(update_fields=["is_active"])
+    return member
+
+
+def _active_billable_memberships(memberships):
+    return [
+        row for row in (memberships or [])
+        if _normalize_membership_status(row) == OrganizationUser.STATUS_ACTIVE
+    ]
+
+
 def _normalize_org_user_taxonomy_assignments(org):
     active_role_names = {
         str(name or "").strip().lower()
@@ -1170,7 +1476,7 @@ def _serialize_org_users(org, *, include_deleted=False):
     queryset = (
         OrganizationUser.objects
         .filter(organization=org, role__in=ERP_EMPLOYEE_ROLES)
-        .select_related("user", "user__userprofile")
+        .select_related("user", "user__userprofile", "resigned_by")
         .order_by("-id")
     )
     memberships = queryset.filter(is_deleted=bool(include_deleted))
@@ -1194,6 +1500,7 @@ def _serialize_org_user_member(org: Organization, member: OrganizationUser):
     profile_role = _normalize_admin_role(getattr(getattr(member.user, "userprofile", None), "role", ""))
     is_org_admin_account = _is_org_admin_account_member(org, member)
     last_login = getattr(member.user, "last_login", None)
+    status = _normalize_membership_status(member)
     return {
         "id": member.user_id,
         "membership_id": member.id,
@@ -1207,17 +1514,24 @@ def _serialize_org_user_member(org: Organization, member: OrganizationUser):
             getattr(getattr(member.user, "userprofile", None), "phone_number", "") or ""
         ).strip(),
         "role": member.role or "org_user",
+        "user_type": _normalize_user_type_key(getattr(member, "user_type", "")),
         "profile_role": profile_role,
         "is_org_admin_account": is_org_admin_account,
         "can_delete": not is_org_admin_account,
         "can_toggle_status": not is_org_admin_account,
         "department": member.department or "",
         "employee_role": member.employee_role or "",
-        "is_active": bool(member.is_active and member.user.is_active),
+        "status": status,
+        "is_active": status == OrganizationUser.STATUS_ACTIVE,
         "is_deleted": bool(member.is_deleted),
+        "can_mark_resigned": (not is_org_admin_account) and status not in {OrganizationUser.STATUS_RESIGNED, OrganizationUser.STATUS_DELETED},
+        "can_restore_active": (not is_org_admin_account) and status in {OrganizationUser.STATUS_INACTIVE, OrganizationUser.STATUS_RESIGNED},
         "last_login": last_login.isoformat() if last_login else "",
         "created_at": member.created_at.isoformat() if member.created_at else "",
         "deleted_at": member.deleted_at.isoformat() if member.deleted_at else "",
+        "resigned_at": member.resigned_at.isoformat() if member.resigned_at else "",
+        "resigned_by": _get_org_user_display_name(member.resigned_by) if getattr(member, "resigned_by", None) else "",
+        "status_changed_at": member.status_changed_at.isoformat() if member.status_changed_at else "",
     }
 
 
@@ -1279,6 +1593,8 @@ def _compute_org_user_lock_ids(employee_limit, memberships=None, org: Organizati
     protected_ids = []
     regular_rows = []
     for row in rows:
+        if _normalize_membership_status(row) != OrganizationUser.STATUS_ACTIVE:
+            continue
         current_org = resolved_org if resolved_org else getattr(row, "organization", None)
         if current_org and _is_org_admin_account_member(current_org, row):
             protected_ids.append(row.id)
@@ -1290,7 +1606,7 @@ def _compute_org_user_lock_ids(employee_limit, memberships=None, org: Organizati
     return {
         "unlocked_ids": set(unlocked_ids),
         "locked_ids": set(locked_ids),
-        "total_users": len(rows),
+        "total_users": len([row for row in rows if _normalize_membership_status(row) == OrganizationUser.STATUS_ACTIVE]),
     }
 
 
@@ -1303,6 +1619,7 @@ def _attach_locked_state(users, locked_ids):
         next_row = dict(row)
         next_row["is_locked"] = is_locked
         if is_locked:
+            next_row["status"] = OrganizationUser.STATUS_INACTIVE
             next_row["is_active"] = False
         normalized.append(next_row)
     return normalized
@@ -1331,16 +1648,18 @@ def _build_org_user_meta(org, users=None):
 
     employee_limit = max(0, base_limit + max(0, addon_count))
     memberships = _list_org_user_memberships(org)
+    seat_summary = _get_org_subscription_user_type_seats(org)
+    active_user_type_counts = _get_org_user_type_usage(org, memberships=memberships)
     lock_state = _compute_org_user_lock_ids(employee_limit, memberships=memberships, org=org)
-    total_users = lock_state["total_users"]
-    used_users = min(total_users, employee_limit)
-    remaining_users = max(0, employee_limit - lock_state["total_users"])
-    can_add_users = bool(has_subscription and total_users < employee_limit)
+    active_users = len(_active_billable_memberships(memberships))
+    used_users = min(active_users, employee_limit)
+    remaining_users = max(0, employee_limit - active_users)
+    can_add_users = bool(has_subscription and active_users < employee_limit)
     limit_message = ""
     if not has_subscription:
         limit_message = "Free trial ended. Upgrade your plan to add users."
     elif not can_add_users:
-        limit_message = "User limit reached. Add-on users required to add or enable more users."
+        limit_message = "User limit reached. Please increase user limit or mark inactive/resigned users."
 
     if has_subscription and (_is_business_autopilot_free_plan(active_sub.plan) or is_ba_trial):
         base_included_users = 1
@@ -1361,6 +1680,17 @@ def _build_org_user_meta(org, users=None):
         "limit_message": limit_message,
         "base_included_users": base_included_users,
         "extra_included_users": extra_included_users,
+        "active_users": active_users,
+        "inactive_users": len([row for row in memberships if _normalize_membership_status(row) == OrganizationUser.STATUS_INACTIVE]),
+        "resigned_users": len([row for row in memberships if _normalize_membership_status(row) == OrganizationUser.STATUS_RESIGNED]),
+        "deleted_users": OrganizationUser.objects.filter(organization=org, role__in=ERP_EMPLOYEE_ROLES, is_deleted=True).count(),
+        "user_types": _serialize_user_type_pricing_rows(
+            seat_summary.get("config", []),
+            seat_counts=seat_summary.get("counts"),
+            active_counts=active_user_type_counts,
+        ),
+        "user_type_seat_counts": seat_summary.get("counts", {}),
+        "user_type_active_counts": active_user_type_counts,
     }
 
 
@@ -1374,11 +1704,19 @@ def _build_org_users_response_payload(org, can_manage_users, *, created_user_cre
         org=org,
     )
     users = _attach_locked_state(users, lock_state["locked_ids"])
+    user_counts = {
+        "all": len(users),
+        "active": len([row for row in users if str(row.get("status") or "").strip().lower() == OrganizationUser.STATUS_ACTIVE]),
+        "inactive": len([row for row in users if str(row.get("status") or "").strip().lower() == OrganizationUser.STATUS_INACTIVE]),
+        "resigned": len([row for row in users if str(row.get("status") or "").strip().lower() == OrganizationUser.STATUS_RESIGNED]),
+        "deleted": len(deleted_users),
+    }
     return {
         "authenticated": True,
         "organization_id": getattr(org, "id", None),
         "users": users,
         "deleted_users": deleted_users,
+        "counts": user_counts,
         "employee_roles": _safe_serialize_employee_roles(org),
         "departments": _safe_serialize_departments(org),
         "can_manage_users": can_manage_users,
@@ -1561,6 +1899,35 @@ def _resolve_org_employee_role_from_payload(org, payload):
     return role_row.name, None
 
 
+def _resolve_org_user_type_from_payload(org, payload):
+    active_sub = _get_active_erp_subscription(org)
+    config_rows = _get_subscription_user_types(active_sub)
+    allowed_keys = {row["key"] for row in config_rows}
+    requested_key = _normalize_user_type_key(payload.get("user_type"))
+    if requested_key not in allowed_keys:
+        if "full_access_user" in allowed_keys:
+            requested_key = "full_access_user"
+        elif allowed_keys:
+            requested_key = next(iter(allowed_keys))
+    return requested_key, config_rows
+
+
+def _user_type_has_available_seat(org, user_type, *, memberships=None, exclude_membership_id=None):
+    seat_summary = _get_org_subscription_user_type_seats(org)
+    config_rows = seat_summary.get("config", [])
+    seat_counts = seat_summary.get("counts", {})
+    rows = memberships if isinstance(memberships, list) else _list_org_user_memberships(org)
+    active_counts = _empty_user_type_counts(config_rows)
+    for membership in rows:
+        if exclude_membership_id and int(getattr(membership, "id", 0) or 0) == int(exclude_membership_id):
+            continue
+        if _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
+            continue
+        key = _normalize_user_type_key(getattr(membership, "user_type", ""))
+        active_counts[key] = active_counts.get(key, 0) + 1
+    return int(active_counts.get(user_type, 0)) < int(seat_counts.get(user_type, 0))
+
+
 def _create_or_attach_org_user(org, payload, *, requested_by):
     first_name, last_name = _extract_person_name(payload)
     name = " ".join([first_name, last_name]).strip()
@@ -1579,6 +1946,18 @@ def _create_or_attach_org_user(org, payload, *, requested_by):
     employee_role, employee_role_error = _resolve_org_employee_role_from_payload(org, payload)
     if employee_role_error:
         return {"ok": False, "response": employee_role_error}
+    user_type, _ = _resolve_org_user_type_from_payload(org, payload)
+    if not _user_type_has_available_seat(org, user_type):
+        return {
+            "ok": False,
+            "response": JsonResponse(
+                {
+                    "detail": "user_type_limit_reached",
+                    "message": "Selected user type limit reached. Increase seats or choose another available user type.",
+                },
+                status=403,
+            ),
+        }
     existing_user = User.objects.filter(email__iexact=email).first()
     if not name or not email:
         return {"ok": False, "response": JsonResponse({"detail": "name_email_required"}, status=400)}
@@ -1657,9 +2036,14 @@ def _create_or_attach_org_user(org, payload, *, requested_by):
                 "role": role,
                 "employee_role": employee_role,
                 "department": department,
+                "user_type": user_type,
+                "status": OrganizationUser.STATUS_ACTIVE,
                 "is_active": True,
                 "is_deleted": False,
                 "deleted_at": None,
+                "resigned_at": None,
+                "resigned_by": None,
+                "status_changed_at": timezone.now(),
             },
         )
         _grant_business_autopilot_access(user, requested_by, role)
@@ -2772,7 +3156,7 @@ def org_users(request):
             return JsonResponse(
                 {
                     "detail": "employee_limit_reached",
-                    "message": current_meta.get("limit_message") or "User limit reached. Add-on users required.",
+                    "message": current_meta.get("limit_message") or "User limit reached. Please increase user limit or mark inactive/resigned users.",
                     "meta": current_meta,
                 },
                 status=403,
@@ -2790,6 +3174,16 @@ def org_users(request):
         created_user_credentials=created_user_credentials,
         credential_delivery=credential_delivery,
     )
+    requested_status = str(request.GET.get("status") or "all").strip().lower()
+    if requested_status in {OrganizationUser.STATUS_ACTIVE, OrganizationUser.STATUS_INACTIVE, OrganizationUser.STATUS_RESIGNED}:
+        payload["users"] = [
+            row for row in payload.get("users", [])
+            if str(row.get("status") or "").strip().lower() == requested_status
+        ]
+    elif requested_status == OrganizationUser.STATUS_DELETED:
+        payload["users"] = []
+        payload["deleted_users"] = payload.get("deleted_users", [])
+    payload["selected_status"] = requested_status or "all"
     payload["organization"] = {
         "id": org.id,
         "name": org.name,
@@ -2916,6 +3310,7 @@ def org_user_detail(request, membership_id: int):
                 "password",
                 "phone_number",
                 "role",
+                "user_type",
                 "department",
                 "department_id",
                 "employee_role",
@@ -2967,15 +3362,13 @@ def org_user_detail(request, membership_id: int):
                     logger.exception("Failed to reassign CRM records for deleted membership_id=%s", membership_id)
                     crm_reassign_result = None
 
-            _revoke_business_autopilot_access(membership.user)
             if permanent:
+                _revoke_business_autopilot_access(membership.user)
                 membership.delete()
                 message = "User permanently deleted."
             else:
-                membership.is_deleted = True
-                membership.is_active = False
-                membership.deleted_at = timezone.now()
-                membership.save(update_fields=["is_deleted", "is_active", "deleted_at", "updated_at"])
+                _set_membership_status(membership, OrganizationUser.STATUS_DELETED, changed_by=request.user)
+                _revoke_business_autopilot_access(membership.user)
                 message = "User moved to deleted items."
 
             _sync_org_users_to_plan_limit(org, requested_by=request.user)
@@ -3030,10 +3423,7 @@ def org_user_detail(request, membership_id: int):
         if isinstance(payload, dict):
             should_restore_crm = str(payload.get("restore_crm_assignments") or "").strip().lower() in {"1", "true", "yes"}
 
-        membership.is_deleted = False
-        membership.deleted_at = None
-        membership.is_active = True
-        membership.save(update_fields=["is_deleted", "deleted_at", "is_active", "updated_at"])
+        _set_membership_status(membership, OrganizationUser.STATUS_ACTIVE, changed_by=request.user)
         _sync_org_users_to_plan_limit(org, requested_by=request.user)
         membership.refresh_from_db()
         if membership.is_active:
@@ -3067,6 +3457,7 @@ def org_user_detail(request, membership_id: int):
     phone_number = str(payload.get("phone_number") or "").strip()
     employee_role = (payload.get("employee_role") or "").strip()
     employee_role_id = payload.get("employee_role_id")
+    user_type, _ = _resolve_org_user_type_from_payload(org, {"user_type": payload.get("user_type") or getattr(membership, "user_type", "")})
     department = (payload.get("department") or membership.department or "").strip()
     department_id = payload.get("department_id")
     is_active = payload.get("is_active")
@@ -3109,6 +3500,7 @@ def org_user_detail(request, membership_id: int):
         employee_role = selected_role.name
 
     with transaction.atomic():
+        previous_user_type = _normalize_user_type_key(getattr(membership, "user_type", ""))
         if name:
             membership.user.first_name = first_name
             membership.user.last_name = last_name
@@ -3137,6 +3529,7 @@ def org_user_detail(request, membership_id: int):
         membership.role = role
         membership.department = department
         membership.employee_role = employee_role
+        membership.user_type = user_type
         if isinstance(is_active, bool) and is_active and not membership.is_active:
             _sync_org_users_to_plan_limit(org, requested_by=request.user)
             preview_meta = _build_org_user_meta(org, users=None)
@@ -3154,6 +3547,24 @@ def org_user_detail(request, membership_id: int):
                     },
                     status=403,
                 )
+            if not _user_type_has_available_seat(org, user_type, exclude_membership_id=membership.id):
+                return JsonResponse(
+                    {
+                        "detail": "user_type_limit_reached",
+                        "message": "Selected user type limit reached. Increase seats or choose another available user type.",
+                        "meta": preview_meta,
+                    },
+                    status=403,
+                )
+        elif user_type != previous_user_type and _normalize_membership_status(membership) == OrganizationUser.STATUS_ACTIVE:
+            if not _user_type_has_available_seat(org, user_type, exclude_membership_id=membership.id):
+                return JsonResponse(
+                    {
+                        "detail": "user_type_limit_reached",
+                        "message": "Selected user type limit reached. Increase seats or choose another available user type.",
+                    },
+                    status=403,
+                )
 
         if isinstance(is_active, bool):
             if not is_active and _is_org_admin_account_member(org, membership):
@@ -3164,11 +3575,33 @@ def org_user_detail(request, membership_id: int):
                     },
                     status=403,
                 )
-            membership.is_active = is_active
+            _set_membership_status(
+                membership,
+                OrganizationUser.STATUS_ACTIVE if is_active else OrganizationUser.STATUS_INACTIVE,
+                changed_by=request.user,
+                commit=False,
+            )
         elif _is_org_admin_account_member(org, membership):
-            membership.is_active = True
-        membership.save(update_fields=["role", "department", "employee_role", "is_active", "updated_at"])
-        if membership.is_active:
+            _set_membership_status(membership, OrganizationUser.STATUS_ACTIVE, changed_by=request.user, commit=False)
+        membership.save(
+            update_fields=[
+                "role",
+                "department",
+                "employee_role",
+                "user_type",
+                "status",
+                "status_changed_at",
+                "is_active",
+                "is_deleted",
+                "deleted_at",
+                "resigned_at",
+                "resigned_by",
+                "updated_at",
+            ]
+        )
+        membership.user.is_active = _normalize_membership_status(membership) == OrganizationUser.STATUS_ACTIVE
+        membership.user.save(update_fields=["is_active"])
+        if _normalize_membership_status(membership) == OrganizationUser.STATUS_ACTIVE:
             _grant_business_autopilot_access(membership.user, request.user, role)
         else:
             _revoke_business_autopilot_access(membership.user)
@@ -3212,7 +3645,7 @@ def org_user_toggle_status(request, membership_id: int):
         )
 
     _sync_org_users_to_plan_limit(org, requested_by=request.user)
-    if enabled and not membership.is_active:
+    if enabled and _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
         preview_meta = _build_org_user_meta(org, users=None)
         preview_lock_state = _compute_org_user_lock_ids(
             preview_meta.get("employee_limit"),
@@ -3228,9 +3661,18 @@ def org_user_toggle_status(request, membership_id: int):
                 },
                 status=403,
             )
+        if not _user_type_has_available_seat(org, _normalize_user_type_key(getattr(membership, "user_type", "")), exclude_membership_id=membership.id):
+            return JsonResponse(
+                {
+                    "detail": "user_type_limit_reached",
+                    "message": "Selected user type limit reached. Increase seats or choose another available user type.",
+                    "meta": preview_meta,
+                },
+                status=403,
+            )
 
-    membership.is_active = enabled
-    membership.save(update_fields=["is_active", "updated_at"])
+    next_status = OrganizationUser.STATUS_ACTIVE if enabled else OrganizationUser.STATUS_INACTIVE
+    _set_membership_status(membership, next_status, changed_by=request.user)
     if enabled:
         _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
     else:
@@ -3245,7 +3687,7 @@ def org_user_toggle_status(request, membership_id: int):
         org=org,
     )
     users = _attach_locked_state(users, lock_state["locked_ids"])
-    message = "User activated." if enabled else "User deactivated."
+    message = "User activated." if enabled else "User marked inactive."
 
     return JsonResponse(
         {
@@ -3259,6 +3701,86 @@ def org_user_toggle_status(request, membership_id: int):
             "message": message,
         }
     )
+
+
+@require_http_methods(["POST"])
+def org_user_mark_resigned(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
+    can_manage_users = _can_manage_users(request.user, org)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id, is_deleted=False).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+    if _is_org_admin_account_member(org, membership):
+        return JsonResponse({"detail": "org_admin_resign_forbidden", "message": "ORG admin account cannot be marked as resigned."}, status=403)
+    _set_membership_status(membership, OrganizationUser.STATUS_RESIGNED, changed_by=request.user)
+    _revoke_business_autopilot_access(membership.user)
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User marked as resigned."))
+
+
+@require_http_methods(["POST"])
+def org_user_mark_inactive(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
+    can_manage_users = _can_manage_users(request.user, org)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id, is_deleted=False).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+    if _is_org_admin_account_member(org, membership):
+        return JsonResponse({"detail": "org_admin_deactivate_forbidden", "message": "ORG admin account cannot be marked inactive."}, status=403)
+    _set_membership_status(membership, OrganizationUser.STATUS_INACTIVE, changed_by=request.user)
+    _revoke_business_autopilot_access(membership.user)
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User marked as inactive."))
+
+
+@require_http_methods(["POST"])
+def org_user_restore_active(request, membership_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"authenticated": True, "organization": None, "users": [], "meta": {}})
+    can_manage_users = _can_manage_users(request.user, org)
+    if not can_manage_users:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    membership = OrganizationUser.objects.filter(organization=org, id=membership_id, is_deleted=False).select_related("user").first()
+    if not membership or not membership.user:
+        return JsonResponse({"detail": "user_not_found"}, status=404)
+    preview_meta = _build_org_user_meta(org, users=None)
+    if not preview_meta.get("can_add_users"):
+        return JsonResponse(
+            {
+                "detail": "employee_limit_reached",
+                "message": preview_meta.get("limit_message") or "User limit reached. Please increase user limit or mark inactive/resigned users.",
+                "meta": preview_meta,
+            },
+            status=403,
+        )
+    if not _user_type_has_available_seat(org, _normalize_user_type_key(getattr(membership, "user_type", "")), exclude_membership_id=membership.id):
+        return JsonResponse(
+            {
+                "detail": "user_type_limit_reached",
+                "message": "Selected user type limit reached. Increase seats or choose another available user type.",
+                "meta": preview_meta,
+            },
+            status=403,
+        )
+    _set_membership_status(membership, OrganizationUser.STATUS_ACTIVE, changed_by=request.user)
+    _grant_business_autopilot_access(membership.user, request.user, membership.role or "org_user")
+    _sync_org_users_to_plan_limit(org, requested_by=request.user)
+    return JsonResponse(_build_org_users_response_payload(org, can_manage_users, message="User restored to active status."))
 
 
 @require_http_methods(["POST"])

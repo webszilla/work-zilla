@@ -1,3 +1,5 @@
+import json
+
 from django import forms
 from django.contrib import admin, messages
 from django.template.response import TemplateResponse
@@ -17,6 +19,66 @@ from .referral_utils import record_referral_earning, record_dealer_org_referral_
 from .email_utils import send_templated_email
 from core.observability import log_event
 from apps.backend.worksuite.admin_views import monitor_products_hub
+
+BUSINESS_AUTOPILOT_PLAN_SLUGS = {"business-autopilot", "business-autopilot-erp"}
+BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS = [
+    {
+        "key": "crm_user",
+        "label": "CRM User",
+        "description": "CRM-focused sales and follow-up user",
+        "monthly_price_inr": 550,
+        "monthly_price_usd": 7,
+        "allowed_modules": ["dashboard", "inbox", "crm", "users", "profile"],
+    },
+    {
+        "key": "hrm_user",
+        "label": "HRM User",
+        "description": "HR operations user for employees, attendance and payroll",
+        "monthly_price_inr": 50,
+        "monthly_price_usd": 1,
+        "allowed_modules": ["dashboard", "hr", "users", "profile"],
+    },
+    {
+        "key": "full_access_user",
+        "label": "Full Access User",
+        "description": "Full Business Autopilot access across enabled modules",
+        "monthly_price_inr": 650,
+        "monthly_price_usd": 8,
+        "allowed_modules": ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"],
+    },
+]
+ROLE_ACCESS_SECTION_KEYS_ARRAY = ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"]
+
+
+def _derive_yearly_price_from_monthly(value):
+    if value in (None, ""):
+        return ""
+    try:
+        parsed = Decimal(str(value))
+    except Exception:
+        return ""
+    return f"{(parsed * Decimal('10')).quantize(Decimal('0.01'))}"
+
+
+def _normalize_business_autopilot_user_types(config):
+    normalized = []
+    rows = config if isinstance(config, list) else []
+    for default in BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS:
+        matched = next((row for row in rows if str((row or {}).get("key") or "").strip().lower() == default["key"]), {})
+        allowed_modules = matched.get("allowed_modules")
+        if not isinstance(allowed_modules, list):
+            allowed_modules = default["allowed_modules"]
+        normalized.append({
+            "key": default["key"],
+            "label": str(matched.get("label") or default["label"]).strip() or default["label"],
+            "description": str(matched.get("description") or default["description"]).strip() or default["description"],
+            "monthly_price_inr": matched.get("monthly_price_inr", default["monthly_price_inr"]),
+            "yearly_price_inr": matched.get("yearly_price_inr") or _derive_yearly_price_from_monthly(matched.get("monthly_price_inr", default["monthly_price_inr"])),
+            "monthly_price_usd": matched.get("monthly_price_usd", default["monthly_price_usd"]),
+            "yearly_price_usd": matched.get("yearly_price_usd") or _derive_yearly_price_from_monthly(matched.get("monthly_price_usd", default["monthly_price_usd"])),
+            "allowed_modules": [str(item or "").strip().lower() for item in allowed_modules if str(item or "").strip().lower() in ROLE_ACCESS_SECTION_KEYS_ARRAY],
+        })
+    return normalized
 
 
 class PlanFilter(SimpleListFilter):
@@ -41,8 +103,55 @@ class PlanFilter(SimpleListFilter):
             return queryset.filter(org_id__in=org_ids)
         return queryset
 
+
+class PlanAdminForm(forms.ModelForm):
+    class Meta:
+        model = Plan
+        fields = "__all__"
+        widgets = {
+            "features": forms.HiddenInput(),
+        }
+
+    @staticmethod
+    def _derive_yearly_price(monthly_value):
+        if monthly_value in (None, ""):
+            return monthly_value
+        return Decimal(monthly_value) * Decimal("10")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        derived_pairs = (
+            ("monthly_price", "yearly_price"),
+            ("usd_monthly_price", "usd_yearly_price"),
+            ("addon_monthly_price", "addon_yearly_price"),
+            ("addon_usd_monthly_price", "addon_usd_yearly_price"),
+            ("addon_agent_monthly_price", "addon_agent_yearly_price"),
+        )
+        for monthly_field, yearly_field in derived_pairs:
+            if monthly_field in cleaned_data:
+                derived_value = self._derive_yearly_price(cleaned_data.get(monthly_field))
+                if derived_value not in (None, ""):
+                    cleaned_data[yearly_field] = derived_value
+        features = cleaned_data.get("features")
+        if isinstance(features, str):
+            try:
+                features = json.loads(features or "{}")
+            except json.JSONDecodeError:
+                features = {}
+        if not isinstance(features, dict):
+            features = {}
+        product = cleaned_data.get("product") or getattr(self.instance, "product", None)
+        if product and getattr(product, "slug", "") in BUSINESS_AUTOPILOT_PLAN_SLUGS:
+            features["business_autopilot_user_types"] = _normalize_business_autopilot_user_types(
+                features.get("business_autopilot_user_types")
+            )
+        cleaned_data["features"] = features
+        return cleaned_data
+
+
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
+    form = PlanAdminForm
     exclude = ("price", "duration_months")
     change_form_template = "admin/core/plan/change_form.html"
     list_display = ("name", "product", "monthly_price", "yearly_price", "usd_monthly_price", "usd_yearly_price", "addon_monthly_price", "addon_yearly_price", "addon_usd_monthly_price", "addon_usd_yearly_price", "employee_limit", "device_limit", "retention_days", "screenshot_min_minutes", "allow_addons", "allow_app_usage", "allow_gaming_ott_usage", "allow_hr_view")
@@ -57,6 +166,13 @@ class PlanAdmin(admin.ModelAdmin):
 
     def log_deletion(self, request, object, message):
         return
+
+    def render_change_form(self, request, context, *args, **kwargs):
+        context = dict(context or {})
+        context["business_autopilot_user_type_defaults_json"] = json.dumps(BUSINESS_AUTOPILOT_USER_TYPE_DEFAULTS)
+        context["business_autopilot_role_section_keys_json"] = json.dumps(ROLE_ACCESS_SECTION_KEYS_ARRAY)
+        context["business_autopilot_plan_slugs_json"] = json.dumps(sorted(BUSINESS_AUTOPILOT_PLAN_SLUGS))
+        return super().render_change_form(request, context, *args, **kwargs)
 
 
 @admin.register(Device)

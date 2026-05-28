@@ -2408,6 +2408,10 @@ body.checkout-page .checkout-top-row {
   align-items: stretch;
 }
 
+body.checkout-page .checkout-top-row--business-autopilot {
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
+}
+
 body.checkout-page .checkout-plan-card__meta {
   flex: 1 1 auto;
   min-width: 0;
@@ -2424,9 +2428,9 @@ body.checkout-page .checkout-plan-card__top {
 body.checkout-page .checkout-plan-card__billing-row {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 body.checkout-page .checkout-plan-card__billing-label {
@@ -2437,12 +2441,13 @@ body.checkout-page .checkout-plan-card__billing-label {
 }
 
 body.checkout-page .checkout-plan-card__billing-control {
-  width: 150px;
+  width: 100%;
   max-width: 100%;
 }
 
 body.checkout-page .checkout-top-row .checkout-plan-card,
-body.checkout-page .checkout-top-row .checkout-addon-card {
+body.checkout-page .checkout-top-row .checkout-addon-card,
+body.checkout-page .checkout-top-row .checkout-billing-cycle-card {
   margin-top: 0;
   height: 100%;
 }
@@ -2469,20 +2474,14 @@ body.checkout-page .checkout-plan-card__top {
 
 body.checkout-page .checkout-plan-card__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
   align-items: start;
 }
 
 body.checkout-page .checkout-plan-card__left,
-body.checkout-page .checkout-plan-card__billing,
 body.checkout-page .checkout-plan-card__price-block {
   min-width: 0;
-}
-
-body.checkout-page .checkout-plan-card__billing {
-  display: flex;
-  justify-content: flex-end;
 }
 
 body.checkout-page .checkout-plan-card__badge {
@@ -2537,10 +2536,22 @@ body.checkout-page .checkout-plan-card__total {
 }
 
 body.checkout-page .checkout-plan-card__price-block {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+}
+
+body.checkout-page .checkout-billing-cycle-card {
+  padding: 22px;
+}
+
+body.checkout-page .checkout-plan-card__billing-row--card {
+  min-height: calc(100% - 52px);
+  justify-content: center;
+}
+
+body.checkout-page .checkout-addon-card--full {
+  margin-top: 18px;
 }
 
 body.checkout-page .checkout-plan-card__badge span {
@@ -2666,10 +2677,6 @@ body.checkout-page .checkout-side .checkout-payment-instructions {
     grid-template-columns: 1fr;
   }
 
-  body.checkout-page .checkout-plan-card__billing-control {
-    width: 100%;
-  }
-
   body.checkout-page .checkout-plan-card__billing-row {
     width: 100%;
     gap: 6px;
@@ -2696,10 +2703,6 @@ body.checkout-page .checkout-side .checkout-payment-instructions {
 
   body.checkout-page .checkout-plan-card__grid {
     grid-template-columns: 1fr;
-  }
-
-  body.checkout-page .checkout-plan-card__billing {
-    justify-content: flex-start;
   }
 
   body.checkout-page .checkout-plan-card__price-line {

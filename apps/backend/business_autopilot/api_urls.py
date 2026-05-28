@@ -39,6 +39,9 @@ urlpatterns = [
     path("users/check-email", api_views.org_user_email_check, name="business_autopilot_user_email_check"),
     path("users/<int:membership_id>", api_views.org_user_detail, name="business_autopilot_user_detail"),
     path("users/<int:membership_id>/toggle-status", api_views.org_user_toggle_status, name="business_autopilot_user_toggle_status"),
+    path("users/<int:membership_id>/mark-resigned", api_views.org_user_mark_resigned, name="business_autopilot_user_mark_resigned"),
+    path("users/<int:membership_id>/mark-inactive", api_views.org_user_mark_inactive, name="business_autopilot_user_mark_inactive"),
+    path("users/<int:membership_id>/restore-active", api_views.org_user_restore_active, name="business_autopilot_user_restore_active"),
     path("users/<int:membership_id>/verify-email", api_views.org_user_verify_email, name="business_autopilot_user_verify_email"),
     path(
         "users/<int:membership_id>/resend-credentials",

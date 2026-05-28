@@ -220,7 +220,7 @@ def get_active_subscription(org):
     return sub
 
 
-def record_subscription_history(org, user, plan, status, start_date, end_date, billing_cycle):
+def record_subscription_history(org, user, plan, status, start_date, end_date, billing_cycle, user_type_counts=None):
     existing = SubscriptionHistory.objects.filter(
         organization=org,
         plan=plan,
@@ -232,6 +232,8 @@ def record_subscription_history(org, user, plan, status, start_date, end_date, b
         existing.billing_cycle = billing_cycle
         if user:
             existing.user = user
+        if user_type_counts is not None:
+            existing.user_type_counts = user_type_counts or {}
         existing.save()
         return existing
     return SubscriptionHistory.objects.create(
@@ -242,6 +244,7 @@ def record_subscription_history(org, user, plan, status, start_date, end_date, b
         start_date=start_date,
         end_date=end_date,
         billing_cycle=billing_cycle,
+        user_type_counts=user_type_counts or {},
     )
 
 
@@ -270,6 +273,7 @@ def ensure_active_subscription(org):
     duration_months = 12 if latest_approved.billing_cycle == "yearly" else 1
     end_date = start_date + timedelta(days=30 * duration_months)
     retention_days = latest_approved.retention_days or (latest_approved.plan.retention_days if latest_approved.plan else 30)
+    approved_user_type_counts = getattr(latest_approved, "user_type_counts", {}) or {}
     if sub:
         sub.user = latest_approved.user
         sub.plan = latest_approved.plan
@@ -281,6 +285,10 @@ def ensure_active_subscription(org):
         if latest_approved.plan and latest_approved.plan.allow_addons and latest_approved.addon_count is not None:
             sub.addon_count = latest_approved.addon_count
             sub.addon_next_cycle_count = latest_approved.addon_count
+        if hasattr(sub, "user_type_counts"):
+            sub.user_type_counts = approved_user_type_counts
+        if hasattr(sub, "user_type_next_cycle_counts"):
+            sub.user_type_next_cycle_counts = approved_user_type_counts
         sub.save()
     else:
         sub = Subscription.objects.create(
@@ -294,6 +302,8 @@ def ensure_active_subscription(org):
             retention_days=retention_days,
             addon_count=latest_approved.addon_count or 0,
             addon_next_cycle_count=latest_approved.addon_count or 0,
+            user_type_counts=approved_user_type_counts,
+            user_type_next_cycle_counts=approved_user_type_counts,
         )
     record_subscription_history(
         org=org,
@@ -303,6 +313,7 @@ def ensure_active_subscription(org):
         start_date=start_date,
         end_date=end_date,
         billing_cycle=latest_approved.billing_cycle,
+        user_type_counts=approved_user_type_counts,
     )
     return sub
 
@@ -2627,6 +2638,10 @@ def approve_transfer(request, transfer_id):
             if transfer.plan and transfer.plan.allow_addons and transfer.addon_count is not None:
                 sub.addon_count = transfer.addon_count
                 sub.addon_next_cycle_count = transfer.addon_count
+            if hasattr(sub, "user_type_counts"):
+                sub.user_type_counts = getattr(transfer, "user_type_counts", {}) or {}
+            if hasattr(sub, "user_type_next_cycle_counts"):
+                sub.user_type_next_cycle_counts = getattr(transfer, "user_type_counts", {}) or {}
             sub.save()
             record_subscription_history(
                 org=org,
@@ -2636,6 +2651,7 @@ def approve_transfer(request, transfer_id):
                 start_date=start_date,
                 end_date=end_date,
                 billing_cycle=transfer.billing_cycle,
+                user_type_counts=getattr(transfer, "user_type_counts", {}) or {},
             )
             if transfer.plan:
                 settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
