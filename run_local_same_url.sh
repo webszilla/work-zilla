@@ -47,8 +47,12 @@ fi
 . "$VENV_DIR/bin/activate"
 
 cd "$BACKEND_DIR"
-echo "Applying Django migrations"
-python3 manage.py migrate --noinput
+if [ "${SKIP_MIGRATIONS:-0}" = "1" ]; then
+  echo "Skipping Django migrations (SKIP_MIGRATIONS=1)"
+else
+  echo "Applying Django migrations (set SKIP_MIGRATIONS=1 to skip)"
+  python3 manage.py migrate --noinput
+fi
 echo "Starting WorkZilla local app at http://127.0.0.1:$PORT"
 # Autoreload helps templates/CSS update instantly.
 # If you want to avoid file watching (faster/less CPU), run with: DJANGO_RELOAD=0 ./run_local_same_url.sh

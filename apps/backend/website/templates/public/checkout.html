@@ -105,9 +105,13 @@
 			                        </span>
 			                          <span><i class="bi bi-currency-exchange" aria-hidden="true"></i> {{ selected_currency|upper }}</span>
 			                        </div>
+                                  {% if is_business_autopilot_checkout %}
+                                    <div class="checkout-plan-card__included-note">Plan includes one Org Admin account.</div>
+                                  {% endif %}
 			                    </div>
 
 			                    <div class="checkout-plan-card__price-block">
+			                      <div class="checkout-plan-card__meta-label" id="checkoutPlanPriceSuffix">Price details</div>
 			                      <div class="checkout-plan-card__price-line">
 			                        <span class="checkout-plan-card__currency">{{ selected_currency|upper }}</span>
 			                        <span class="checkout-plan-card__value" id="checkoutPlanPriceValue">
@@ -125,7 +129,6 @@
 			                            {% endif %}
 			                          {% endif %}
 			                        </span>
-			                        <span class="checkout-plan-card__suffix" id="checkoutPlanPriceSuffix">{{ price_suffix|default:"/user per month" }}</span>
 			                      </div>
 			                      <div class="checkout-plan-card__total small text-secondary">
 			                        <strong>Total:</strong> {{ selected_currency|upper }} <span id="checkoutPlanTotalAmount">{{ selected_total_amount }}</span>
@@ -181,16 +184,11 @@
                                     </span>
                                   </div>
                                 </div>
-                                <div class="ba-user-type-card__modules">
-                                  {% for module_name in row.allowed_modules %}
-                                    <span>{{ module_name|title }}</span>
-                                  {% endfor %}
-                                </div>
-                                <div class="form-group mb-0 mt-3">
-                                  <label for="checkout-user-type-{{ row.key }}">Seats</label>
+                                <div class="form-group mb-0 mt-3 ba-user-type-card__seat-row">
+                                  <label for="checkout-user-type-{{ row.key }}" class="ba-user-type-card__seat-label">Seats</label>
                                   <input
                                     id="checkout-user-type-{{ row.key }}"
-                                    class="form-control checkoutUserTypeCountInput"
+                                    class="form-control checkoutUserTypeCountInput ba-user-type-card__seat-input"
                                     type="number"
                                     min="0"
                                     step="1"
@@ -354,6 +352,9 @@
 	              <span class="text-secondary">Base</span>
               <strong>{{ selected_currency|upper }} <span id="checkoutBaseAmount">{{ selected_base_amount }}</span></strong>
 	            </div>
+            {% if is_business_autopilot_checkout %}
+              <div class="small text-secondary mt-1">Plan includes one Org Admin account.</div>
+            {% endif %}
             {% if selected_plan.allow_addons %}
               <div class="d-flex justify-content-between mt-1">
                 <span class="text-secondary">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}User Seats{% else %}Add-ons{% endif %}</span>
@@ -412,6 +413,9 @@
               .ba-user-type-card__title { font-weight:700; color:#0f172a; }
               .ba-user-type-card__desc { color:#64748b; font-size:13px; margin-top:3px; }
               .ba-user-type-card__price { color:#16a34a; font-weight:700; white-space:nowrap; }
+              .ba-user-type-card__seat-row { display:flex; align-items:center; gap:12px; }
+              .ba-user-type-card__seat-label { flex:0 0 33.3333%; margin:0; }
+              .ba-user-type-card__seat-input { flex:0 0 66.6667%; max-width:66.6667%; }
               .ba-user-type-card__modules { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
               .ba-user-type-card__modules span { padding:4px 8px; border-radius:999px; background:rgba(34,197,94,.10); color:#166534; font-size:12px; }
               .ba-user-type-card__line-total { display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px dashed rgba(34,197,94,.18); color:#475569; font-size:13px; }
@@ -481,7 +485,7 @@
 	                summary.setAttribute("data-addon-unit", String(billing === "yearly" ? addonYearly : addonMonthly));
 	                if (billingText) billingText.textContent = billing === "yearly" ? "Yearly" : "Monthly";
 	                if (planBillingText) planBillingText.textContent = billing === "yearly" ? "Yearly" : "Monthly";
-	                if (planSuffix) planSuffix.textContent = billing === "yearly" ? "/user per year" : "/user per month";
+	                if (planSuffix) planSuffix.textContent = "Price details";
 	                if (planPriceValue) planPriceValue.textContent = formatAmount(planBase);
 	                if (addonPriceSelect) addonPriceSelect.value = billing === "yearly" ? "yearly" : "monthly";
 	              }

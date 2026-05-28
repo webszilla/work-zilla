@@ -58,20 +58,20 @@ TICKET_MAX_ATTACHMENTS = 5
 TICKET_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 BA_DEFAULT_USER_TYPES = [
     {
+        "key": "hrm_user",
+        "label": "HRM User",
+        "description": "Employee attendance and payroll user",
+        "monthly_price_inr": 50,
+        "monthly_price_usd": 1,
+        "allowed_modules": ["dashboard", "hr", "users", "profile"],
+    },
+    {
         "key": "crm_user",
         "label": "CRM User",
         "description": "CRM-focused sales and follow-up user",
         "monthly_price_inr": 550,
         "monthly_price_usd": 7,
         "allowed_modules": ["dashboard", "inbox", "crm", "users", "profile"],
-    },
-    {
-        "key": "hrm_user",
-        "label": "HRM User",
-        "description": "HR operations user",
-        "monthly_price_inr": 50,
-        "monthly_price_usd": 1,
-        "allowed_modules": ["dashboard", "hr", "users", "profile"],
     },
     {
         "key": "full_access_user",
@@ -1954,6 +1954,8 @@ def _plan_base_user_limit(plan):
         return None
     product = getattr(plan, "product", None)
     product_slug = (getattr(product, "slug", "") or "monitor").strip().lower()
+    if _is_business_autopilot_alias(product_slug):
+        return 1
     limits = getattr(plan, "limits", None) or {}
     try:
         if product_slug in ("storage", "online-storage"):
@@ -2530,9 +2532,6 @@ def checkout_confirm(request):
                 parsed = 0
             user_type_counts[row["key"]] = max(0, parsed)
         addon_count = _ba_user_type_total_count(user_type_counts)
-        if addon_count <= 0:
-            messages.error(request, "Select at least one Business Autopilot user seat to continue.")
-            return redirect("/checkout/")
         request.session["selected_user_type_counts"] = user_type_counts
 
     org = _resolve_org_for_user(request.user)
