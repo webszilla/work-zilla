@@ -611,9 +611,9 @@
       const allowPrioritySupport = !(trialPro || isTrialPlan);
 
       const defaultsByTier = {
-        free: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-        starter: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: false, invoice: true, expense: true, gst: true, reports: true, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
-        growth: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: false, audit: false, priority: false },
+        free: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: false },
+        starter: { crm: true, hrm: false, projects: false, accounts: false, subscriptions: true, ticketing: false, stocks: false, invoice: false, expense: false, gst: false, reports: false, purchase: false, vendor: false, api: false, dashboards: false, audit: false, priority: false },
+        growth: { crm: true, hrm: true, projects: false, accounts: true, subscriptions: true, ticketing: false, stocks: true, invoice: true, expense: false, gst: true, reports: false, purchase: false, vendor: true, api: false, dashboards: false, audit: false, priority: false },
         pro: { crm: true, hrm: true, projects: true, accounts: true, subscriptions: true, ticketing: true, stocks: true, invoice: true, expense: true, gst: true, reports: true, purchase: true, vendor: true, api: true, dashboards: true, audit: true, priority: true },
       };
       const defaults = defaultsByTier[trialPro ? "pro" : tier] || defaultsByTier.free;
@@ -640,7 +640,7 @@
         { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
         { text: "Subscriptions Management", ok: hasModule("subscriptions", defaults.subscriptions) },
         { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
-        { text: "Vendor Management", ok: true },
+        { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
         { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
         { text: "Project Management", ok: hasModule("projects", defaults.projects) },
         { text: "Accounts", ok: hasAccountsModule },
