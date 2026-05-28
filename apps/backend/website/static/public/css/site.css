@@ -1406,20 +1406,21 @@ img {
 
 .erp-seat-pricing {
   margin: 8px 0 18px;
-  padding: 14px 14px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 4%, #ffffff), #ffffff);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .erp-seat-pricing__title {
   font-size: 0.84rem;
   font-weight: 800;
   color: #334155;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 10px;
+  background: #f1f2f2;
+  padding: 5px 10px;
 }
 
 .erp-seat-pricing__grid {
@@ -1442,8 +1443,8 @@ img {
 }
 
 .erp-seat-pricing__label {
-  font-size: 0.93rem;
-  font-weight: 600;
+  font-size: 0.85rem;
+  font-weight: 100;
   color: #475569;
 }
 
@@ -1522,12 +1523,15 @@ img {
 
 .erp-base-price .price-suffix-inline {
   display: block;
-  margin-top: -10px;
-  font-size: 0.95rem;
+  margin-top: 5px;
+  font-size: 0.80rem;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.25;
   white-space: normal;
+  border-bottom: 1px solid #16a34a;
+  padding-bottom: 10px;
+  width: 100%;
 }
 
 .currency-toggle {
