@@ -400,6 +400,9 @@
       if (isBusinessAutopilotSlug(productSlug)) {
         return title.replace(/\s+ERP$/i, "");
       }
+      if (productSlug === "monitor" || productSlug === "worksuite" || productSlug === "work-suite") {
+        return title.replace(/^Professional$/i, "Pro");
+      }
       return title;
     }
 

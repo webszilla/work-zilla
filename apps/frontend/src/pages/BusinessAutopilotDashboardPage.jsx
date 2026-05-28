@@ -1124,32 +1124,19 @@ export default function BusinessAutopilotDashboardPage({
                     </div>
                   </div>
                   <div className="small text-secondary mb-2">{meetingCalendar.monthLabel}</div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                      gap: "6px",
-                    }}
-                  >
+                  <div className="ba-dashboard-calendar-grid">
                     {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayLabel) => (
-                      <div key={`head-${dayLabel}`} className="small text-secondary text-center fw-semibold">
+                      <div key={`head-${dayLabel}`} className="small text-secondary fw-semibold ba-dashboard-calendar-head">
                         {dayLabel}
                       </div>
                     ))}
                     {meetingCalendar.cells.map((cell) => (
                       <div
                         key={cell.isoDate}
-                        className="rounded"
-                        style={{
-                          minHeight: "56px",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                          padding: "4px",
-                          background: cell.isToday ? "rgba(var(--bs-primary-rgb),0.12)" : "rgba(255,255,255,0.02)",
-                          opacity: cell.inMonth ? 1 : 0.45,
-                        }}
+                        className={`rounded ba-dashboard-calendar-cell ${cell.isToday ? "ba-dashboard-calendar-cell--today" : ""} ${cell.inMonth ? "ba-dashboard-calendar-cell--in-month" : "ba-dashboard-calendar-cell--out-month"}` }
                         title={cell.meetings.length ? `${cell.meetings.length} meeting(s)` : ""}
                       >
-                        <div className="small fw-semibold" style={{ lineHeight: 1.1 }}>{cell.day}</div>
+                        <div className="small fw-semibold ba-dashboard-calendar-day">{cell.day}</div>
                         {cell.meetings.length ? (
                           <div className="mt-1">
                             <span className="badge bg-success" style={{ fontSize: "0.65rem" }}>

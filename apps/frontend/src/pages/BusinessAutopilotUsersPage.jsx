@@ -3005,11 +3005,27 @@ export default function BusinessAutopilotUsersPage() {
         .includes(q)
     );
   }, [deletedUsers, userSearch]);
-  const selectedCreateUserType = normalizeBusinessAutopilotUserType(isEditingUser ? editForm.user_type : form.user_type);
-  const selectedCreateUserTypeMeta = useMemo(() => {
-    const rows = Array.isArray(userMeta.user_types) ? userMeta.user_types : [];
-    return rows.find((item) => item.key === selectedCreateUserType) || null;
-  }, [selectedCreateUserType, userMeta.user_types]);
+  const createUserTypeSummaryRows = useMemo(() => {
+    const sourceRows = Array.isArray(userMeta.user_types) && userMeta.user_types.length
+      ? userMeta.user_types
+      : Object.entries(BA_USER_TYPE_LABELS).map(([key, label]) => ({ key, label }));
+    const byKey = new Map(
+      sourceRows.map((item) => [item.key, {
+        key: item.key,
+        label: item.label || BA_USER_TYPE_LABELS[item.key] || "User Type",
+        seatCount: Number(item.seat_count || 0),
+        activeCount: Number(item.active_count || 0),
+        remainingCount: Number(item.remaining_count || 0),
+      }])
+    );
+    const orderedRows = [
+      { key: "org_admin", label: "ORG Admin", seatCount: 1, activeCount: 1, remainingCount: 0 },
+      byKey.get("hrm_user") ? { ...byKey.get("hrm_user"), label: "HRM" } : { key: "hrm_user", label: "HRM", seatCount: 0, activeCount: 0, remainingCount: 0 },
+      byKey.get("crm_user") ? { ...byKey.get("crm_user"), label: "CRM" } : { key: "crm_user", label: "CRM", seatCount: 0, activeCount: 0, remainingCount: 0 },
+      byKey.get("full_access_user") ? { ...byKey.get("full_access_user"), label: "Full Access" } : { key: "full_access_user", label: "Full Access", seatCount: 0, activeCount: 0, remainingCount: 0 },
+    ];
+    return orderedRows;
+  }, [userMeta.user_types]);
   const pendingEmailVerificationUsers = useMemo(
     () => users.filter((user) => !Boolean(user?.email_verified)),
     [users]
@@ -4856,14 +4872,16 @@ export default function BusinessAutopilotUsersPage() {
           </div>
               </div>
 
-              <div className="card p-3">
-                <h6 className="mb-3">
-                  {createUserFormDisabled
-                    ? "Create User (Need to Buy Addon Users)"
-                    : "Create User"}
-                </h6>
-                <form ref={userFormRef} className="d-flex flex-column gap-3 wz-users-create-form" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
-                  <fieldset disabled={createUserFormDisabled} className="m-0 p-0 border-0 d-flex flex-column gap-3 wz-users-create-fieldset">
+              <div className="row g-3 align-items-stretch">
+                <div className="col-12 col-xl-10">
+                  <div className="card p-3 h-100">
+                    <h6 className="mb-3">
+                      {createUserFormDisabled
+                        ? "Create User (Need to Buy Addon Users)"
+                        : "Create User"}
+                    </h6>
+                    <form ref={userFormRef} className="d-flex flex-column gap-3 wz-users-create-form" onSubmit={isEditingUser ? handleUpdateUser : handleCreate}>
+                      <fieldset disabled={createUserFormDisabled} className="m-0 p-0 border-0 d-flex flex-column gap-3 wz-users-create-fieldset">
                   <div className="row g-2">
                     <div className="col-12 col-md-6 col-xl-2">
                       <input
@@ -4982,13 +5000,6 @@ export default function BusinessAutopilotUsersPage() {
                           <option key={item.key} value={item.key}>{item.label}</option>
                         ))}
                       </select>
-                      {selectedCreateUserTypeMeta ? (
-                        <small className="text-secondary d-block mt-2">
-                          Seats: {selectedCreateUserTypeMeta.active_count || 0}/{selectedCreateUserTypeMeta.seat_count || 0}
-                          {" · "}
-                          Remaining: {selectedCreateUserTypeMeta.remaining_count || 0}
-                        </small>
-                      ) : null}
                     </div>
                     <div className="col-12 col-md-6 col-xl-3">
                       <div className="input-group">
@@ -5104,10 +5115,30 @@ export default function BusinessAutopilotUsersPage() {
                           </button>
                         )}
                       </div>
+                      </div>
+                    </div>
+                      </fieldset>
+                    </form>
+                  </div>
+                </div>
+                <div className="col-12 col-xl-2">
+                  <div className="card p-3 h-100">
+                    <div className="wz-user-type-summary wz-user-type-summary--standalone">
+                      <h6 className="mb-3">User Types</h6>
+                      <div className="wz-user-type-summary__list">
+                        {createUserTypeSummaryRows.map((item) => (
+                          <div key={item.key} className="wz-user-type-summary__item">
+                            <div className="wz-user-type-summary__line">
+                              <span className="wz-user-type-summary__name">{item.label}</span>
+                              <span className="wz-user-type-summary__count">{item.activeCount}/{item.seatCount}</span>
+                            </div>
+                            <div className="wz-user-type-summary__meta">Remaining {item.remainingCount}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                  </fieldset>
-                </form>
+                </div>
               </div>
             </>
           ) : (
