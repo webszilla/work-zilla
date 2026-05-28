@@ -214,7 +214,13 @@
             : isWhatsAppAutomation
             ? (pricingState.billing === "monthly" ? "/month" : "/yearly")
             : (pricingState.billing === "monthly" ? "/user per month" : "/user per year");
-          suffixTarget.textContent = `${cycleText}${extra}`;
+          if (isBusinessAutopilot) {
+            suffixTarget.textContent = pricingState.billing === "monthly"
+              ? "per month with one ORG admin user"
+              : "per year with one ORG admin user";
+          } else {
+            suffixTarget.textContent = `${cycleText}${extra}`;
+          }
         }
         if (isBusinessAutopilot) {
           card.querySelectorAll("[data-user-type-price]").forEach((row) => {
