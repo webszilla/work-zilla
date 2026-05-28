@@ -170,12 +170,24 @@
       return activePlans[slug]?.plan_id ?? null;
     }
 
+    function businessAutopilotUserTypes(plan) {
+      const rows = Array.isArray(plan?.features?.business_autopilot_user_types)
+        ? plan.features.business_autopilot_user_types
+        : [];
+      return rows.map((row) => ({
+        key: String(row?.key || "").trim().toLowerCase(),
+        label: String(row?.label || "").trim() || "User Type",
+        monthlyInr: Number(row?.monthly_price_inr || 0),
+        yearlyInr: Number(row?.yearly_price_inr || 0),
+        monthlyUsd: Number(row?.monthly_price_usd || 0),
+        yearlyUsd: Number(row?.yearly_price_usd || 0),
+      }));
+    }
+
     function updatePrices() {
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
         const priceTarget = card.querySelector("[data-price]");
         const suffixTarget = card.querySelector("[data-suffix]");
-        const userPriceTarget = card.querySelector("[data-user-price]");
-        const userSuffixTarget = card.querySelector("[data-user-suffix]");
         const planId = card.getAttribute("data-plan-id");
         const plan = pricingCache[planId];
         if (!plan) return;
@@ -204,13 +216,22 @@
             : (pricingState.billing === "monthly" ? "/user per month" : "/user per year");
           suffixTarget.textContent = `${cycleText}${extra}`;
         }
-        if (isBusinessAutopilot && userPriceTarget && userSuffixTarget) {
-          const limits = plan.limits || {};
-          const userValue = pricingState.billing === "yearly"
-            ? (pricingState.currency === "usd" ? limits.user_price_usdt_year : limits.user_price_inr_year)
-            : (pricingState.currency === "usd" ? limits.user_price_usdt_month : limits.user_price_inr_month);
-          userPriceTarget.textContent = formatPrice(userValue, pricingState.currency);
-          userSuffixTarget.textContent = pricingState.billing === "monthly" ? "/user per month" : "/user per year";
+        if (isBusinessAutopilot) {
+          card.querySelectorAll("[data-user-type-price]").forEach((row) => {
+            const userTypeKey = String(row.getAttribute("data-user-type-price") || "").trim().toLowerCase();
+            const matched = businessAutopilotUserTypes(plan).find((item) => item.key === userTypeKey);
+            if (!matched) {
+              row.textContent = "Custom";
+              return;
+            }
+            const value = pricingState.currency === "usd"
+              ? (pricingState.billing === "yearly" ? matched.yearlyUsd : matched.monthlyUsd)
+              : (pricingState.billing === "yearly" ? matched.yearlyInr : matched.monthlyInr);
+            row.textContent = formatPrice(value, pricingState.currency);
+          });
+          card.querySelectorAll("[data-user-type-suffix]").forEach((row) => {
+            row.textContent = pricingState.billing === "monthly" ? "/month" : "/year";
+          });
         }
       });
       updateAddonPrices();
@@ -639,14 +660,14 @@
         { text: "CRM Module", ok: hasModule("crm", defaults.crm) },
         { text: "Role Based Access", ok: boolFrom(["role_based_access"], true) },
         { text: "Subscriptions Management", ok: hasModule("subscriptions", defaults.subscriptions) },
-        { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
         { text: "Vendor Management", ok: boolFrom(["vendor_management"], defaults.vendor) },
         { text: "HR Management", ok: hasModule("hrm", defaults.hrm) },
-        { text: "Project Management", ok: hasModule("projects", defaults.projects) },
         { text: "Accounts", ok: hasAccountsModule },
         { text: "Invoice & Billing", ok: hasAccountsModule && boolFrom(["invoice_billing", "invoice_and_billing"], defaults.invoice) },
         { text: "GST Ready (India)", ok: hasAccountsModule && boolFrom(["gst_ready_india", "gst_ready"], defaults.gst) },
         { text: "Inventory Management", ok: hasModule("stocks", defaults.stocks) },
+        { text: "Ticketing System", ok: hasModule("ticketing", defaults.ticketing) },
+        { text: "Project Management", ok: hasModule("projects", defaults.projects) },
         { text: "Whatsapp & Open Ai API", ok: boolFrom(["api_access"], defaults.api) },
         { text: "Priority Support", ok: allowPrioritySupport && boolFrom(["priority_support"], defaults.priority) },
       ];
@@ -1089,10 +1110,22 @@
             <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
           </div>
           ${isBusinessAutopilot && !isFreePlan ? `
-            <div class="erp-user-price">
-              <span class="erp-plus">+</span>
-              <span data-user-price>Custom</span>
-              <span class="price-suffix-inline" data-user-suffix>/user per month</span>
+            <div class="erp-seat-pricing">
+              <div class="erp-seat-pricing__title">Additional user pricing</div>
+              <div class="erp-seat-pricing__grid">
+                <div class="erp-seat-pricing__item">
+                  <div class="erp-seat-pricing__label">HRM User</div>
+                  <div class="erp-seat-pricing__amount"><span data-user-type-price="hrm_user">Custom</span> <span class="price-suffix-inline" data-user-type-suffix>/month</span></div>
+                </div>
+                <div class="erp-seat-pricing__item">
+                  <div class="erp-seat-pricing__label">CRM User</div>
+                  <div class="erp-seat-pricing__amount"><span data-user-type-price="crm_user">Custom</span> <span class="price-suffix-inline" data-user-type-suffix>/month</span></div>
+                </div>
+                <div class="erp-seat-pricing__item">
+                  <div class="erp-seat-pricing__label">Full Access User</div>
+                  <div class="erp-seat-pricing__amount"><span data-user-type-price="full_access_user">Custom</span> <span class="price-suffix-inline" data-user-type-suffix>/month</span></div>
+                </div>
+              </div>
             </div>
           ` : ""}
           ${isMonitor ? `
