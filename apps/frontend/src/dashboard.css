@@ -1384,14 +1384,16 @@ html[data-theme="light"] .admin-feature-card{
   padding:12px 16px;
   color:inherit;
   cursor:pointer;
-  transition:background 0.2s ease;
+  transition:border-color 0.2s ease, color 0.2s ease;
 }
 .inbox-item:hover{
-  background:#111827;
+  background:transparent;
+  border-bottom-color:#22c55e;
 }
 .inbox-item.active{
-  background:#0b1020;
-  box-shadow:inset 0 0 0 1px #1f2937;
+  background:transparent;
+  border-bottom-color:#22c55e;
+  box-shadow:none;
 }
 .inbox-item.unread .inbox-item-title{
   font-weight:600;
@@ -1456,6 +1458,59 @@ html[data-theme="light"] .admin-feature-card{
   border-color: rgba(239, 68, 68, 0.34) !important;
   color: #ef4444 !important;
   background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.wz-accordion-card{
+  height:auto !important;
+  min-height:0 !important;
+}
+
+.wz-accordion-card--collapsed{
+  padding-bottom:12px !important;
+}
+
+.wz-accordion-card--expanded{
+  padding-bottom:16px !important;
+}
+
+.wz-accordion-toggle{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:0;
+  margin:0;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+  text-align:left;
+  color:inherit;
+}
+
+.wz-accordion-toggle:hover,
+.wz-accordion-toggle:focus,
+.wz-accordion-toggle:active{
+  background:transparent;
+  color:inherit;
+  box-shadow:none;
+}
+
+.wz-accordion-toggle__icon{
+  width:32px;
+  height:32px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(34, 197, 94, 0.26);
+  border-radius:999px;
+  color:#22c55e;
+  flex:0 0 auto;
+  background:transparent;
+}
+
+.wz-accordion-body{
+  margin-bottom:0;
 }
 .app-shell .inbox-detail-btn--danger:hover,
 .app-shell .inbox-detail-btn--danger:focus{
@@ -1858,14 +1913,16 @@ html[data-theme="light"] .inbox-list-footer{
   border-top-color:#e2e8f0;
 }
 html[data-theme="light"] .inbox-item{
-  border-bottom-color:#e2e8f0;
+  border-bottom-color:#d7eedd;
 }
 html[data-theme="light"] .inbox-item:hover{
-  background:#f8fafc;
+  background:transparent;
+  border-bottom-color:#22c55e;
 }
 html[data-theme="light"] .inbox-item.active{
-  background:#eef4ff;
-  box-shadow:inset 0 0 0 1px #cbd5e1;
+  background:transparent;
+  border-bottom-color:#22c55e;
+  box-shadow:none;
 }
 html[data-theme="light"] .inbox-item-date{
   color:#64748b;
@@ -1878,8 +1935,8 @@ html[data-theme="light"] .inbox-item-message{
   color:#334155;
 }
 html[data-theme="light"] .inbox-detail-body{
-  background:#f8fafc;
-  border-color:#dbe2ef;
+  background:#f7fff8;
+  border-color:#cfead5;
   color:#0f172a;
 }
 html[data-theme="light"] .app-shell .inbox-detail-btn--danger{

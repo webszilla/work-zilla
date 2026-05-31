@@ -392,7 +392,7 @@ const CRM_SECTION_CONFIG = {
 	      { key: "meetingMode", label: "Meeting Mode", type: "select", options: ["Online", "Offline", "Phone"], defaultValue: "" },
       { key: "reminderChannel", label: "Reminder Channel", type: "multiselect", options: CRM_MEETING_REMINDER_CHANNEL_OPTIONS, defaultValue: [] },
       { key: "reminderDays", label: "Remind Before Days", type: "multiselect", defaultValue: [] },
-      { key: "reminderMinutes", label: "Reminder Before (Minutes)", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: [] },
+      { key: "reminderMinutes", label: "Reminder Before", type: "multiselect", options: CRM_MEETING_REMINDER_MINUTE_OPTIONS.map((option) => option.value), defaultValue: [] },
       { key: "status", label: "Status", type: "select", options: ["Scheduled", "Completed", "Rescheduled", "Cancelled", "Missed"], defaultValue: "" }
     ]
   },
@@ -596,8 +596,18 @@ const HR_TAB_CONFIG = {
       { key: "outTime", label: "Out Time" },
       { key: "workedHours", label: "Worked" },
       { key: "overtimeHours", label: "OT" },
-      { key: "attendanceDebit", label: "Attendance Debit" },
-      { key: "status", label: "Status" }
+      {
+        key: "attendanceDebit",
+        label: "Attendance Debit",
+        thStyle: { width: 150, minWidth: 150 },
+        tdStyle: { width: 150, minWidth: 150, whiteSpace: "normal" }
+      },
+      {
+        key: "status",
+        label: "Status",
+        thStyle: { width: 190, minWidth: 190 },
+        tdStyle: { width: 190, minWidth: 190, whiteSpace: "normal" }
+      }
     ],
     fields: [
       { key: "employee", label: "Employee", placeholder: "Enter employee name" },
@@ -4995,6 +5005,19 @@ function normalizeAccountsDocumentItems(rows = []) {
   return normalized.length ? normalized : [createEmptyDocLine()];
 }
 
+function hasMeaningfulDocumentItems(rows = []) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return sourceRows.some((item) => {
+    const description = String(item?.description || item?.customText || item?.custom_text || "").trim();
+    const hsn = String(item?.hsnSacCode || item?.hsn_sac_code || item?.hsnCode || item?.sacCode || "").trim();
+    const rate = String(item?.rate ?? item?.price ?? item?.unitPrice ?? item?.unit_price ?? "").trim();
+    const qty = String(item?.qty ?? item?.quantity ?? "").trim();
+    const itemMasterId = String(item?.itemMasterId || item?.item_master_id || item?.item_id || "").trim();
+    const inventoryItemId = String(item?.inventoryItemId || item?.inventory_item_id || item?.inventoryId || item?.inventory_id || "").trim();
+    return Boolean(description || hsn || rate || itemMasterId || inventoryItemId || (qty && qty !== "1"));
+  });
+}
+
 function normalizeAccountsBillingDocumentRecord(row = {}, kind = "invoice") {
   const safeRow = row && typeof row === "object" ? row : {};
   const sourceItems = Array.isArray(safeRow.items)
@@ -7308,6 +7331,8 @@ function SearchablePaginatedTableCard({
   hidePagination = false,
   withoutOuterCard = false,
   headerBottom = null,
+  headerBottomTop = null,
+  headerBottomBottom = null,
   initialSearchTerm = "",
   enableExport = false,
   enableImport = false,
@@ -7672,11 +7697,19 @@ function SearchablePaginatedTableCard({
 
   return (
     <div className={withoutOuterCard ? "" : "card p-3"}>
-      <div className={`d-flex flex-wrap align-items-center justify-content-between gap-2 ${headerBottom ? "mb-2" : "mb-3"}`}>
+      <div className={`d-flex flex-wrap align-items-center justify-content-between gap-2 ${headerBottom || headerBottomTop || headerBottomBottom ? "mb-2" : "mb-3"}`}>
         <h6 className="mb-0">{title}</h6>
-        {headerBottom ? null : toolbarControls}
+        {headerBottom || headerBottomTop || headerBottomBottom ? null : toolbarControls}
       </div>
-      {headerBottom ? (
+      {headerBottomTop || headerBottomBottom ? (
+        <div className="d-flex flex-column gap-2 mb-3">
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div className="flex-grow-1" style={{ minWidth: "320px" }}>{headerBottomTop}</div>
+            {toolbarControls}
+          </div>
+          {headerBottomBottom ? <div>{headerBottomBottom}</div> : null}
+        </div>
+      ) : headerBottom ? (
         <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
           <div className="flex-grow-1" style={{ minWidth: "320px" }}>{headerBottom}</div>
           {toolbarControls}
@@ -8670,7 +8703,7 @@ function BillingDocumentEditor({
           </div>
 
           <div className="row g-3">
-            <div className="col-12 col-xl-3">
+            <div className="col-12 col-xl-6">
               <div className="h-100">
                 <label className="form-label small text-secondary mb-1">Customer Notes</label>
                 <textarea className="form-control mb-3" rows="2" value={form.notes || ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Notes visible on document" />
@@ -8694,7 +8727,8 @@ function BillingDocumentEditor({
                 </div>
               </div>
             </div>
-            <div className="col-12 col-xl-5">
+            <div className="d-none d-xl-block col-xl-2" aria-hidden="true" />
+            <div className="col-12 col-xl-4">
               <div className="card p-3 border">
                 <h6 className="mb-3">Summary</h6>
                 <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(totals.subtotal)}</strong></div>
@@ -10420,6 +10454,23 @@ function CrmOnePageModule() {
 
   function buildBillingDocumentFromSalesOrder(sourceRow, kind = "estimate", linkedCustomerOverride = null) {
     const normalizedRow = normalizeCrmSalesOrderRecord(sourceRow || {});
+    const linkedSourceOrder = (moduleData?.salesOrders || [])
+      .map((row) => normalizeCrmSalesOrderRecord(row))
+      .find((row) => {
+        const rowId = String(row?.id || "").trim();
+        const rowOrderNo = String(row?.orderId || row?.docNo || "").trim();
+        const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+        const sourceRowId = String(normalizedRow?.id || "").trim();
+        const sourceOrderNo = String(normalizedRow?.orderId || normalizedRow?.docNo || "").trim();
+        const sourceReferenceId = String(normalizedRow?.crmReferenceId || normalizedRow?.crm_reference_id || "").trim();
+        if (sourceRowId && rowId && sourceRowId === rowId) {
+          return true;
+        }
+        if (sourceOrderNo && rowOrderNo && sourceOrderNo === rowOrderNo) {
+          return true;
+        }
+        return Boolean(sourceReferenceId && rowReferenceId && sourceReferenceId === rowReferenceId);
+      }) || null;
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(crmAccountsWorkspace?.[listKey]) ? crmAccountsWorkspace[listKey] : [];
     const baseDocument = createEmptyBillingDocument(
@@ -10428,6 +10479,11 @@ function CrmOnePageModule() {
       crmAccountsWorkspace?.gstTemplates || moduleData?.gstTemplates || [],
       crmAccountsWorkspace?.billingTemplates || moduleData?.billingTemplates || []
     );
+    const resolvedSourceItems = hasMeaningfulDocumentItems(normalizedRow.items)
+      ? normalizedRow.items
+      : hasMeaningfulDocumentItems(linkedSourceOrder?.items)
+        ? linkedSourceOrder.items
+        : baseDocument.items;
     const todayIso = new Date().toISOString().slice(0, 10);
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
@@ -10503,7 +10559,7 @@ function CrmOnePageModule() {
       paymentStatus: String(normalizedRow.paymentStatus || "Pending").trim() || "Pending",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
-      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => {
+      items: resolvedSourceItems.map((item) => {
         const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
         return {
           ...createEmptyDocLine(),
@@ -12834,7 +12890,24 @@ function CrmOnePageModule() {
   }
 
   async function convertCrmSalesOrderToBillingDocument(kind = "estimate", sourceRowOverride = null) {
-    const sourceRow = sourceRowOverride ? normalizeCrmSalesOrderRecord(sourceRowOverride) : crmSalesOrderConvertPopup?.row;
+    const popupSourceRow = sourceRowOverride ? normalizeCrmSalesOrderRecord(sourceRowOverride) : crmSalesOrderConvertPopup?.row;
+    const sourceRow = (moduleData.salesOrders || [])
+      .map((row) => normalizeCrmSalesOrderRecord(row))
+      .find((row) => {
+        const popupId = String(popupSourceRow?.id || "").trim();
+        const popupOrderNo = String(popupSourceRow?.orderId || popupSourceRow?.docNo || "").trim();
+        const popupReferenceId = String(popupSourceRow?.crmReferenceId || popupSourceRow?.crm_reference_id || "").trim();
+        const rowId = String(row?.id || "").trim();
+        const rowOrderNo = String(row?.orderId || row?.docNo || "").trim();
+        const rowReferenceId = String(row?.crmReferenceId || row?.crm_reference_id || "").trim();
+        if (popupId && rowId && popupId === rowId) {
+          return true;
+        }
+        if (popupOrderNo && rowOrderNo && popupOrderNo === rowOrderNo) {
+          return true;
+        }
+        return Boolean(popupReferenceId && rowReferenceId && popupReferenceId === rowReferenceId);
+      }) || popupSourceRow;
     if (!sourceRow || crmSalesOrderConvertBusy) {
       return;
     }
@@ -13026,9 +13099,13 @@ function CrmOnePageModule() {
           openAccountsDocumentEdit("estimate", String(existingConverted.id || "").trim());
           return;
         }
-        // For estimate conversion, open a prefilled draft and create the row only on Save.
-        writePendingAccountsBillingDraft(kind, normalizedRow, "", "");
-        openAccountsDocumentDraft("estimate");
+        const convertedEstimate = buildBillingDocumentFromSalesOrder(normalizedRow, "estimate", normalizedMatchedCustomer);
+        await persistCrmAccountsWorkspace({
+          ...crmAccountsWorkspace,
+          [listKey]: [convertedEstimate, ...existingRows],
+        });
+        upsertConvertedDocIntoModuleData(listKey, convertedEstimate);
+        openAccountsDocumentEdit("estimate", String(convertedEstimate.id || "").trim());
         return;
       }
       if (kind === "invoice") {
@@ -13070,9 +13147,13 @@ function CrmOnePageModule() {
           openAccountsDocumentEdit("invoice", String(existingConverted.id || "").trim());
           return;
         }
-        // For invoice conversion, open a prefilled draft and create the row only on Save.
-        writePendingAccountsBillingDraft(kind, normalizedRow, "", "");
-        openAccountsDocumentDraft("invoice");
+        const convertedInvoice = buildBillingDocumentFromSalesOrder(normalizedRow, "invoice", normalizedMatchedCustomer);
+        await persistCrmAccountsWorkspace({
+          ...crmAccountsWorkspace,
+          [listKey]: [convertedInvoice, ...existingRows],
+        });
+        upsertConvertedDocIntoModuleData(listKey, convertedInvoice);
+        openAccountsDocumentEdit("invoice", String(convertedInvoice.id || "").trim());
         return;
       }
       const listKey = "invoices";
@@ -19061,9 +19142,12 @@ function CrmOnePageModule() {
                     const amount = parseNumber(row[column.key]);
                     return amount ? formatCurrencyAmount(amount, crmCurrencyCode) : "-";
                   }
+                  if (sectionKey === "leads" && column.key === "name") {
+                    return truncateTableCellText(formatDateLikeCellValue(column.key, row[column.key], "-"), 8);
+                  }
                   if (
                     sectionKey === "leads"
-                    && ["name", "company", "status", "priority"].includes(column.key)
+                    && ["company", "status", "priority"].includes(column.key)
                   ) {
                     return truncateTableCellText(formatDateLikeCellValue(column.key, row[column.key], "-"), 20);
                   }
@@ -23072,6 +23156,8 @@ function ProjectDetailPage() {
   const [projectEmployeeSearchText, setProjectEmployeeSearchText] = useState("");
   const [projectEmployeeSearchOpen, setProjectEmployeeSearchOpen] = useState(false);
   const [expensePayeeSearchOpen, setExpensePayeeSearchOpen] = useState(false);
+  const [projectSetupOpen, setProjectSetupOpen] = useState(true);
+  const [projectAssignmentsOpen, setProjectAssignmentsOpen] = useState(true);
 
   useEffect(() => {
     setModuleData(readProjectWorkspaceData());
@@ -23174,11 +23260,12 @@ function ProjectDetailPage() {
     [employeeOptions, projectEmployeeSearchText, selectedProjectEmployees]
   );
   const vendorOptions = useMemo(
-    () => Array.from(new Set([
-      ...accountsVendors.map((item) => String(item || "").trim()),
-      ...(projectDetail.expenses || []).map((row) => String(row?.payee || "").trim()),
-    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [accountsVendors, projectDetail.expenses]
+    () => Array.from(new Set(
+      accountsVendors
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b)),
+    [accountsVendors]
   );
   const normalizedExpensePayeeSearch = String(expenseForm.payee || "").trim().toLowerCase();
   const filteredExpenseVendorOptions = useMemo(
@@ -23345,6 +23432,171 @@ function ProjectDetailPage() {
     },
   ];
 
+  const projectExpensesSection = (
+    <div className="d-flex flex-column gap-3">
+      <div className="card p-3">
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <h6 className="mb-0">{editingExpenseId ? "Edit Expense" : "Add Expense"}</h6>
+          <span className="text-secondary small">Every expense updates the top summary instantly.</span>
+        </div>
+        <form className="row g-3" onSubmit={saveExpense}>
+          <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">Expense Title</label>
+            <input className="form-control" maxLength={getBusinessAutopilotMaxLength("title")} value={expenseForm.title || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, title: clampBusinessAutopilotText("title", event.target.value) }))} placeholder="Travel, hosting, consultation..." />
+          </div>
+          <div className="col-12 col-md-3">
+            <label className="form-label small text-secondary mb-1">Category</label>
+            <select className="form-select" value={expenseForm.category || "Operations"} onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}>
+              {["Operations", "Travel", "Infrastructure", "Consulting", "Salary", "Software", "Other"].map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-12 col-md-2">
+            <label className="form-label small text-secondary mb-1">Amount</label>
+            <input type="number" min="0" max={AMOUNT_MAX_NUMERIC_VALUE} step="0.01" className="form-control" value={expenseForm.amount || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, amount: sanitizeCurrencyInput(event.target.value) }))} placeholder="0" />
+          </div>
+          <div className="col-12 col-md-3">
+            <label className="form-label small text-secondary mb-1">Date</label>
+            <input type="date" className="form-control" value={expenseForm.date || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, date: event.target.value }))} />
+          </div>
+          <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">Payee / Vendor</label>
+            <div className="crm-inline-suggestions-wrap">
+              <input
+                className="form-control"
+                value={expenseForm.payee || ""}
+                maxLength={getBusinessAutopilotMaxLength("payee")}
+                onFocus={() => setExpensePayeeSearchOpen(true)}
+                onBlur={() => window.setTimeout(() => setExpensePayeeSearchOpen(false), 120)}
+                onChange={(event) => {
+                  const value = clampBusinessAutopilotText("payee", event.target.value);
+                  setExpenseForm((prev) => ({ ...prev, payee: value }));
+                  setExpensePayeeSearchOpen(true);
+                }}
+                placeholder="Vendor or employee name"
+              />
+              {expensePayeeSearchOpen ? (
+                <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
+                  {filteredExpenseVendorOptions.length ? (
+                    <div className="crm-inline-suggestions__group">
+                      <div className="crm-inline-suggestions__title">Vendors</div>
+                      {filteredExpenseVendorOptions.map((vendor) => (
+                        <button
+                          key={`project-expense-payee-vendor-${vendor}`}
+                          type="button"
+                          className="crm-inline-suggestions__item"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setExpenseForm((prev) => ({ ...prev, payee: vendor }));
+                            setExpensePayeeSearchOpen(false);
+                          }}
+                        >
+                          <span className="crm-inline-suggestions__item-main">{vendor}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {filteredExpenseEmployeeOptions.length ? (
+                    <div className="crm-inline-suggestions__group">
+                      <div className="crm-inline-suggestions__title">Employees</div>
+                      {filteredExpenseEmployeeOptions.map((employee) => (
+                        <button
+                          key={`project-expense-payee-employee-${employee}`}
+                          type="button"
+                          className="crm-inline-suggestions__item"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setExpenseForm((prev) => ({ ...prev, payee: employee }));
+                            setExpensePayeeSearchOpen(false);
+                          }}
+                        >
+                          <span className="crm-inline-suggestions__item-main">{employee}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {(!filteredExpenseVendorOptions.length && !filteredExpenseEmployeeOptions.length) ? (
+                    <div className="crm-inline-suggestions__group">
+                      <div className="crm-inline-suggestions__item">
+                        <span className="crm-inline-suggestions__item-main">No vendor or employee found</span>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">Notes</label>
+            <input className="form-control" maxLength={getBusinessAutopilotMaxLength("notes")} value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: clampBusinessAutopilotText("notes", event.target.value) }))} placeholder="Optional expense note" />
+          </div>
+          <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">File Upload</label>
+            <input
+              type="file"
+              className="form-control"
+              accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+              onChange={(event) => {
+                handleExpenseAttachmentChange(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            {expenseForm.attachmentName ? (
+              <div className="small text-secondary mt-2">
+                <i className="bi bi-paperclip me-1" aria-hidden="true" />
+                {expenseForm.attachmentName}
+                {expenseForm.attachmentSizeLabel ? ` (${expenseForm.attachmentSizeLabel})` : ""}
+              </div>
+            ) : null}
+          </div>
+          <div className="col-12 d-flex gap-2">
+            <button type="submit" className="btn btn-success btn-sm">{editingExpenseId ? "Update Expense" : "Add Expense"}</button>
+            {editingExpenseId ? (
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => {
+                setEditingExpenseId("");
+                setExpenseForm(createEmptyProjectExpense());
+              }}>
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </form>
+      </div>
+
+      <SearchablePaginatedTableCard
+        title="Project Expenses"
+        badgeLabel={`${expenseRows.length} items`}
+        rows={expenseRows}
+        columns={[
+          { key: "date", label: "Date" },
+          { key: "title", label: "Expense" },
+          { key: "category", label: "Category" },
+          { key: "payee", label: "Payee / Vendor" },
+          { key: "amount", label: "Amount" },
+        ]}
+        searchPlaceholder="Search expenses"
+        noRowsText="No expenses added yet."
+        withoutOuterCard
+        searchBy={(row) => [row.date, row.title, row.category, row.payee, row.notes, row.amount].join(" ")}
+        renderCells={(row) => [
+          formatDateLikeCellValue("date", row.date, "-"),
+          <span className="fw-semibold">{row.title || "-"}</span>,
+          row.category || "-",
+          row.payee || "-",
+          formatInr(row.amount),
+        ]}
+        renderActions={(row) => (
+          <div className="d-inline-flex gap-2">
+            <button type="button" className="btn btn-sm btn-success" onClick={() => openExpenseViewModal(row)}>View</button>
+            <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editExpense(row)}>Edit</button>
+            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteExpense(row.id)}>Delete</button>
+          </div>
+        )}
+      />
+    </div>
+  );
+
   if (!project) {
     return (
       <div className="card p-4">
@@ -23363,11 +23615,11 @@ function ProjectDetailPage() {
 
   return (
     <div className="d-flex flex-column gap-3">
-      <div className="card p-3 p-lg-4">
+      <div className="p-0 p-lg-1">
         <div className="d-flex flex-column gap-3">
           <div className="d-flex flex-column flex-xl-row align-items-xl-start justify-content-between gap-3">
             <div>
-              <h4 className="mb-1">{project.name || "Project Details"}</h4>
+              <h4 className="mb-1">Project Overview</h4>
               <p className="text-secondary mb-0">Manage project value, expenses, teams, and employees from one focused workspace.</p>
             </div>
             <div className="d-flex flex-wrap gap-2 justify-content-xl-end">
@@ -23417,7 +23669,7 @@ function ProjectDetailPage() {
         <>
           <div className="row g-3">
             {summaryCards.map((item) => (
-              <div className="col-12 col-sm-6 col-xl-3" key={item.label}>
+              <div className="col-12 col-sm-6 col-xl-2" key={item.label}>
                 <button
                   type="button"
                   className="card p-3 h-100 w-100 d-flex flex-column align-items-center justify-content-center text-center border-0"
@@ -23436,59 +23688,6 @@ function ProjectDetailPage() {
                 </button>
               </div>
             ))}
-          </div>
-          <div className="row g-3">
-            <div className="col-12 col-xl-7">
-            <div className="card p-3 h-100">
-              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-                <h6 className="mb-0">Project Setup</h6>
-                <span className="text-secondary small">Optional project value with live expense tracking</span>
-              </div>
-              <div className="row g-3">
-                <div className="col-12">
-                  <div className="form-check form-switch">
-                    <input
-                      id="project-value-toggle"
-                      className="form-check-input"
-                      type="checkbox"
-                      checked={Boolean(projectDetail.projectValueEnabled)}
-                      onChange={(event) => updateProjectDetails((prev) => ({
-                        ...prev,
-                        projectValueEnabled: event.target.checked,
-                        projectValue: event.target.checked ? prev.projectValue : "",
-                      }))}
-                    />
-                    <label className="form-check-label" htmlFor="project-value-toggle">Track project value</label>
-                  </div>
-                </div>
-                {projectDetail.projectValueEnabled ? (
-                  <div className="col-12">
-                    <label className="form-label small text-secondary mb-1">Project Value</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={AMOUNT_MAX_NUMERIC_VALUE}
-                      step="0.01"
-                      className="form-control"
-                      value={projectDetail.projectValue || ""}
-                      placeholder="Enter project value"
-                      onChange={(event) => updateProjectDetails((prev) => ({ ...prev, projectValue: sanitizeCurrencyInput(event.target.value) }))}
-                    />
-                  </div>
-                ) : null}
-                <div className="col-12">
-                  <label className="form-label small text-secondary mb-1">Project Notes</label>
-                  <textarea
-                    className="form-control"
-                    rows="4"
-                    placeholder="Add project scope, approvals, or delivery notes"
-                    value={projectDetail.notes || ""}
-                    onChange={(event) => updateProjectDetails((prev) => ({ ...prev, notes: event.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
             <div className="col-12 col-xl-4">
               <div className="card p-3 h-100">
                 <h6 className="mb-3">Financial Snapshot</h6>
@@ -23515,10 +23714,85 @@ function ProjectDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="col-12 col-xl-5">
-              <div className="card p-3 h-100">
-                <h6 className="mb-3">Assigned Teams</h6>
-                <div className="row g-3">
+          </div>
+          <div className="row g-3 align-items-start">
+            <div className="col-12 col-xl-6">
+            <div className={`card p-3 wz-accordion-card ${projectSetupOpen ? "wz-accordion-card--expanded" : "wz-accordion-card--collapsed"}`}>
+              <button
+                type="button"
+                className={`wz-accordion-toggle ${projectSetupOpen ? "mb-3" : "mb-0"}`}
+                onClick={() => setProjectSetupOpen((prev) => !prev)}
+                aria-expanded={projectSetupOpen}
+              >
+                <h6 className="mb-0">Project Setup</h6>
+                <span className="wz-accordion-toggle__icon">
+                  <i className={`bi ${projectSetupOpen ? "bi-dash-lg" : "bi-plus-lg"}`} aria-hidden="true" />
+                </span>
+              </button>
+              {projectSetupOpen ? (
+              <div className="row g-3 wz-accordion-body">
+                {projectDetail.projectValueEnabled ? (
+                  <div className="col-12 col-xl-8">
+                    <label className="form-label small text-secondary mb-1">Project Value</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={AMOUNT_MAX_NUMERIC_VALUE}
+                      step="0.01"
+                      className="form-control"
+                      value={projectDetail.projectValue || ""}
+                      placeholder="Enter project value"
+                      onChange={(event) => updateProjectDetails((prev) => ({ ...prev, projectValue: sanitizeCurrencyInput(event.target.value) }))}
+                    />
+                  </div>
+                ) : null}
+                <div className={projectDetail.projectValueEnabled ? "col-12 col-xl-4" : "col-12"}>
+                  <div className="d-flex flex-column gap-2 h-100 justify-content-end">
+                    <label className="form-label small text-secondary mb-0" htmlFor="project-value-toggle">Track Project Value</label>
+                    <div className="form-check form-switch m-0">
+                      <input
+                        id="project-value-toggle"
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={Boolean(projectDetail.projectValueEnabled)}
+                        onChange={(event) => updateProjectDetails((prev) => ({
+                          ...prev,
+                          projectValueEnabled: event.target.checked,
+                          projectValue: event.target.checked ? prev.projectValue : "",
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="col-12">
+                  <label className="form-label small text-secondary mb-1">Project Notes</label>
+                  <textarea
+                    className="form-control"
+                    rows="3"
+                    placeholder="Add project scope, approvals, or delivery notes"
+                    value={projectDetail.notes || ""}
+                    onChange={(event) => updateProjectDetails((prev) => ({ ...prev, notes: event.target.value }))}
+                  />
+                </div>
+              </div>
+              ) : null}
+            </div>
+          </div>
+            <div className="col-12 col-xl-6">
+              <div className={`card p-3 wz-accordion-card ${projectAssignmentsOpen ? "wz-accordion-card--expanded" : "wz-accordion-card--collapsed"}`}>
+                <button
+                  type="button"
+                  className={`wz-accordion-toggle ${projectAssignmentsOpen ? "mb-3" : "mb-0"}`}
+                  onClick={() => setProjectAssignmentsOpen((prev) => !prev)}
+                  aria-expanded={projectAssignmentsOpen}
+                >
+                  <h6 className="mb-0">Assigned Teams</h6>
+                  <span className="wz-accordion-toggle__icon">
+                    <i className={`bi ${projectAssignmentsOpen ? "bi-dash-lg" : "bi-plus-lg"}`} aria-hidden="true" />
+                  </span>
+                </button>
+                {projectAssignmentsOpen ? (
+                <div className="row g-3 wz-accordion-body">
                   <div className="col-12 col-lg-6">
                       <div className="border rounded p-3 h-100">
                         <div className="text-secondary small mb-2">Assigned Teams</div>
@@ -23652,175 +23926,18 @@ function ProjectDetailPage() {
                       </div>
                   </div>
                 </div>
+                ) : null}
               </div>
             </div>
+          </div>
+          <div>
+            {projectExpensesSection}
           </div>
         </>
       ) : null}
 
       {activeSection === "expenses" ? (
-        <>
-          <div className="card p-3">
-            <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-              <h6 className="mb-0">{editingExpenseId ? "Edit Expense" : "Add Expense"}</h6>
-              <span className="text-secondary small">Every expense updates the top summary instantly.</span>
-            </div>
-            <form className="row g-3" onSubmit={saveExpense}>
-              <div className="col-12 col-md-4">
-                <label className="form-label small text-secondary mb-1">Expense Title</label>
-                <input className="form-control" maxLength={getBusinessAutopilotMaxLength("title")} value={expenseForm.title || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, title: clampBusinessAutopilotText("title", event.target.value) }))} placeholder="Travel, hosting, consultation..." />
-              </div>
-              <div className="col-12 col-md-3">
-                <label className="form-label small text-secondary mb-1">Category</label>
-                <select className="form-select" value={expenseForm.category || "Operations"} onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}>
-                  {["Operations", "Travel", "Infrastructure", "Consulting", "Salary", "Software", "Other"].map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-12 col-md-2">
-                <label className="form-label small text-secondary mb-1">Amount</label>
-                <input type="number" min="0" max={AMOUNT_MAX_NUMERIC_VALUE} step="0.01" className="form-control" value={expenseForm.amount || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, amount: sanitizeCurrencyInput(event.target.value) }))} placeholder="0" />
-              </div>
-              <div className="col-12 col-md-3">
-                <label className="form-label small text-secondary mb-1">Date</label>
-                <input type="date" className="form-control" value={expenseForm.date || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, date: event.target.value }))} />
-              </div>
-              <div className="col-12 col-md-4">
-                <label className="form-label small text-secondary mb-1">Payee / Vendor</label>
-                <div className="crm-inline-suggestions-wrap">
-                  <input
-                    className="form-control"
-                    value={expenseForm.payee || ""}
-                    maxLength={getBusinessAutopilotMaxLength("payee")}
-                    onFocus={() => setExpensePayeeSearchOpen(true)}
-                    onBlur={() => window.setTimeout(() => setExpensePayeeSearchOpen(false), 120)}
-                    onChange={(event) => {
-                      const value = clampBusinessAutopilotText("payee", event.target.value);
-                      setExpenseForm((prev) => ({ ...prev, payee: value }));
-                      setExpensePayeeSearchOpen(true);
-                    }}
-                    placeholder="Vendor or employee name"
-                  />
-                  {expensePayeeSearchOpen ? (
-                    <div className="crm-inline-suggestions" style={{ maxHeight: "280px", overflowY: "auto" }}>
-                      {filteredExpenseVendorOptions.length ? (
-                        <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Vendors</div>
-                          {filteredExpenseVendorOptions.map((vendor) => (
-                            <button
-                              key={`project-expense-payee-vendor-${vendor}`}
-                              type="button"
-                              className="crm-inline-suggestions__item"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
-                                setExpenseForm((prev) => ({ ...prev, payee: vendor }));
-                                setExpensePayeeSearchOpen(false);
-                              }}
-                            >
-                              <span className="crm-inline-suggestions__item-main">{vendor}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                      {filteredExpenseEmployeeOptions.length ? (
-                        <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__title">Employees</div>
-                          {filteredExpenseEmployeeOptions.map((employee) => (
-                            <button
-                              key={`project-expense-payee-employee-${employee}`}
-                              type="button"
-                              className="crm-inline-suggestions__item"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
-                                setExpenseForm((prev) => ({ ...prev, payee: employee }));
-                                setExpensePayeeSearchOpen(false);
-                              }}
-                            >
-                              <span className="crm-inline-suggestions__item-main">{employee}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                      {(!filteredExpenseVendorOptions.length && !filteredExpenseEmployeeOptions.length) ? (
-                        <div className="crm-inline-suggestions__group">
-                          <div className="crm-inline-suggestions__item">
-                            <span className="crm-inline-suggestions__item-main">No vendor or employee found</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="col-12 col-md-4">
-                <label className="form-label small text-secondary mb-1">Notes</label>
-                <input className="form-control" maxLength={getBusinessAutopilotMaxLength("notes")} value={expenseForm.notes || ""} onChange={(event) => setExpenseForm((prev) => ({ ...prev, notes: clampBusinessAutopilotText("notes", event.target.value) }))} placeholder="Optional expense note" />
-              </div>
-              <div className="col-12 col-md-4">
-                <label className="form-label small text-secondary mb-1">File Upload</label>
-                <input
-                  type="file"
-                  className="form-control"
-                  accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-                  onChange={(event) => {
-                    handleExpenseAttachmentChange(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-                {expenseForm.attachmentName ? (
-                  <div className="small text-secondary mt-2">
-                    <i className="bi bi-paperclip me-1" aria-hidden="true" />
-                    {expenseForm.attachmentName}
-                    {expenseForm.attachmentSizeLabel ? ` (${expenseForm.attachmentSizeLabel})` : ""}
-                  </div>
-                ) : null}
-              </div>
-              <div className="col-12 d-flex gap-2">
-                <button type="submit" className="btn btn-success btn-sm">{editingExpenseId ? "Update Expense" : "Add Expense"}</button>
-                {editingExpenseId ? (
-                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => {
-                    setEditingExpenseId("");
-                    setExpenseForm(createEmptyProjectExpense());
-                  }}>
-                    Cancel
-                  </button>
-                ) : null}
-              </div>
-            </form>
-          </div>
-
-          <SearchablePaginatedTableCard
-            title="Project Expenses"
-            badgeLabel={`${expenseRows.length} items`}
-            rows={expenseRows}
-            columns={[
-              { key: "date", label: "Date" },
-              { key: "title", label: "Expense" },
-              { key: "category", label: "Category" },
-              { key: "payee", label: "Payee / Vendor" },
-              { key: "amount", label: "Amount" },
-            ]}
-            searchPlaceholder="Search expenses"
-            noRowsText="No expenses added yet."
-            withoutOuterCard
-            searchBy={(row) => [row.date, row.title, row.category, row.payee, row.notes, row.amount].join(" ")}
-            renderCells={(row) => [
-              formatDateLikeCellValue("date", row.date, "-"),
-              <span className="fw-semibold">{row.title || "-"}</span>,
-              row.category || "-",
-              row.payee || "-",
-              formatInr(row.amount),
-            ]}
-            renderActions={(row) => (
-              <div className="d-inline-flex gap-2">
-                <button type="button" className="btn btn-sm btn-success" onClick={() => openExpenseViewModal(row)}>View</button>
-                <button type="button" className="btn btn-sm btn-outline-info" onClick={() => editExpense(row)}>Edit</button>
-                <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteExpense(row.id)}>Delete</button>
-              </div>
-            )}
-          />
-        </>
+        projectExpensesSection
       ) : null}
 
       {expenseViewModal.open ? (
@@ -26601,6 +26718,7 @@ export function HrManagementModule({
     const hasExistingTaskDetails = Boolean(String(row?.completedTasks || "").trim() || String(row?.taskNotes || "").trim());
     setAttendanceTaskModal({
       open: true,
+      rowId: String(row?.id || "").trim(),
       employee: String(row?.employee || "").trim(),
       date: String(row?.date || todayIso).trim() || todayIso,
       source: String(row?.entryMode || "HR Side").trim() || "HR Side",
@@ -26618,6 +26736,663 @@ export function HrManagementModule({
 
   function closeAttendanceTaskModal() {
     setAttendanceTaskModal((prev) => ({ ...prev, open: false }));
+  }
+
+  function openAttendanceTaskBlankPage() {
+    const rowId = String(attendanceTaskModal.rowId || "").trim();
+    const employee = String(attendanceTaskModal.employee || "").trim();
+    const date = String(attendanceTaskModal.date || todayIso).trim() || todayIso;
+    const canEdit = Boolean(hasHrFullAccess);
+    const payload = {
+      rowId,
+      employee,
+      date,
+      canEdit,
+      storageKey: HR_STORAGE_KEY,
+    };
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attendance Task Details</title>
+    <style>
+      :root {
+        --line: rgba(34, 197, 94, 0.22);
+        --line-strong: rgba(34, 197, 94, 0.42);
+        --line-soft: rgba(34, 197, 94, 0.14);
+        --bg: #f7fcf7;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #607089;
+        --field-bg: #ffffff;
+        --field-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.04);
+        --focus-ring: 0 0 0 4px rgba(34, 197, 94, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(34, 197, 94, 0.14), transparent 30%),
+          linear-gradient(180deg, #fbfefb 0%, var(--bg) 100%);
+      }
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+      .header {
+        padding: 24px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .title {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.1;
+      }
+      .subtitle {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        font-size: 14px;
+        white-space: nowrap;
+      }
+      .content {
+        padding: 24px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 18px;
+        align-items: end;
+      }
+      .toolbar-group {
+        min-width: 180px;
+        position: relative;
+      }
+      .toolbar-group.is-employee {
+        min-width: 340px;
+      }
+      .toolbar-label {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .toolbar-control {
+        width: 100%;
+        min-height: 42px;
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: var(--field-bg);
+        color: var(--text);
+        padding: 0 12px;
+        font: inherit;
+        box-shadow: var(--field-shadow);
+        outline: none;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: linear-gradient(45deg, transparent 50%, #607089 50%), linear-gradient(135deg, #607089 50%, transparent 50%);
+        background-position: calc(100% - 20px) calc(50% - 3px), calc(100% - 14px) calc(50% - 3px);
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+      }
+      .toolbar-control:focus {
+        border-color: rgba(34, 197, 94, 0.7);
+        box-shadow: var(--focus-ring);
+      }
+      .employee-picker {
+        position: relative;
+      }
+      .employee-input {
+        width: 100%;
+        min-height: 42px;
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: var(--field-bg);
+        color: var(--text);
+        padding: 0 40px 0 14px;
+        font: inherit;
+        box-shadow: var(--field-shadow);
+      }
+      .employee-input:focus {
+        outline: none;
+        border-color: rgba(34, 197, 94, 0.7);
+        box-shadow: var(--focus-ring);
+      }
+      .employee-toggle {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        transform: translateY(-50%);
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .employee-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        background: #fff;
+        border: 1px solid var(--line-strong);
+        border-radius: 14px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.10);
+        max-height: 360px;
+        overflow: hidden;
+        padding: 0;
+      }
+      .employee-menu-title {
+        padding: 14px 18px 10px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text);
+        border-bottom: 1px solid rgba(34, 197, 94, 0.14);
+        background: rgba(34, 197, 94, 0.04);
+      }
+      .employee-menu-body {
+        max-height: 292px;
+        overflow: auto;
+        padding: 10px;
+      }
+      .employee-option {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        color: var(--text);
+        padding: 12px 14px;
+        border-radius: 12px;
+        font: inherit;
+        cursor: pointer;
+        line-height: 1.25;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .employee-option:hover,
+      .employee-option.active {
+        background: rgba(34, 197, 94, 0.10);
+      }
+      .employee-option-indicator {
+        width: 18px;
+        height: 18px;
+        border-radius: 6px;
+        border: 1px solid rgba(34, 197, 94, 0.28);
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 18px;
+        margin-top: 2px;
+      }
+      .employee-option.active .employee-option-indicator {
+        background: rgba(34, 197, 94, 0.16);
+        border-color: rgba(34, 197, 94, 0.6);
+      }
+      .employee-option-indicator::after {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 4px;
+        background: transparent;
+      }
+      .employee-option.active .employee-option-indicator::after {
+        background: #22c55e;
+      }
+      .employee-option-copy {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .employee-option-title {
+        display: block;
+        font-weight: 600;
+      }
+      .employee-option-sub {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .employee-empty {
+        padding: 12px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .table-shell {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #fff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border: 1px solid var(--line);
+        vertical-align: top;
+        padding: 12px 14px;
+      }
+      th {
+        background: rgba(34, 197, 94, 0.07);
+        text-align: left;
+        font-size: 14px;
+        white-space: nowrap;
+      }
+      td {
+        background: #fff;
+        font-size: 15px;
+      }
+      .editable {
+        min-height: 44px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        padding: 8px 10px;
+        outline: none;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+      .editable.editable-enabled {
+        cursor: text;
+      }
+      .editable.editable-enabled:hover {
+        border-color: var(--line);
+        background: rgba(34, 197, 94, 0.03);
+      }
+      .editable.editable-enabled:focus {
+        border-color: var(--line-strong);
+        background: #fff;
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.10);
+      }
+      .placeholder {
+        color: #94a3b8;
+      }
+      .footnote {
+        padding: 0 24px 24px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      @media (max-width: 720px) {
+        .page { padding: 12px; }
+        .header, .content { padding: 16px; }
+        .footnote { padding: 0 16px 16px; }
+        .header { flex-direction: column; }
+        .toolbar-group,
+        .toolbar-group.is-employee { min-width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="header">
+          <div>
+            <h1 class="title">Attendance Task Details</h1>
+            <p class="subtitle" id="subtitle">Loading...</p>
+          </div>
+          <div class="status" id="saveStatus">Preparing...</div>
+        </div>
+        <div class="content">
+          <div class="toolbar">
+            <div class="toolbar-group is-employee">
+              <label class="toolbar-label" for="employeeInput">Employee</label>
+              <div class="employee-picker">
+                <input id="employeeInput" class="employee-input" type="text" autocomplete="off" placeholder="Search employee" />
+                <button id="employeeToggle" class="employee-toggle" type="button" aria-label="Toggle employee list">⌄</button>
+                <div id="employeeMenu" class="employee-menu" hidden></div>
+              </div>
+            </div>
+            <div class="toolbar-group">
+              <label class="toolbar-label" for="yearSelect">Year</label>
+              <select id="yearSelect" class="toolbar-control"></select>
+            </div>
+            <div class="toolbar-group">
+              <label class="toolbar-label" for="monthSelect">Month</label>
+              <select id="monthSelect" class="toolbar-control"></select>
+            </div>
+          </div>
+          <div class="table-shell">
+            <table id="detailsTable">
+              <thead>
+                <tr>
+                  <th style="width: 150px;">Date</th>
+                  <th style="width: 220px;">Employee Name</th>
+                  <th>Completed Task Data</th>
+                  <th>Notes Data</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="footnote" id="footnote"></div>
+      </div>
+    </div>
+    <script>
+      const config = ${JSON.stringify(payload)};
+      const subtitleEl = document.getElementById("subtitle");
+      const saveStatusEl = document.getElementById("saveStatus");
+      const employeeInput = document.getElementById("employeeInput");
+      const employeeToggle = document.getElementById("employeeToggle");
+      const employeeMenu = document.getElementById("employeeMenu");
+      const yearSelect = document.getElementById("yearSelect");
+      const monthSelect = document.getElementById("monthSelect");
+      const detailsTableBody = document.querySelector("#detailsTable tbody");
+      const footnoteEl = document.getElementById("footnote");
+      const MONTH_LABELS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+      let saveTimer = null;
+      let employeeOptions = [];
+      let selectedEmployee = "";
+      let isEmployeeMenuOpen = false;
+
+      function readWorkspace() {
+        try {
+          const raw = window.localStorage.getItem(config.storageKey);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function writeWorkspace(workspace) {
+        window.localStorage.setItem(config.storageKey, JSON.stringify(workspace));
+      }
+
+      function getRows(workspace) {
+        return Array.isArray(workspace && workspace.attendance) ? workspace.attendance : [];
+      }
+
+      function findRow(workspace) {
+        return getRows(workspace).find((row) => String((row && row.id) || "").trim() === config.rowId) || null;
+      }
+
+      function toText(value, fallback = "-") {
+        const text = String(value || "").trim();
+        return text || fallback;
+      }
+
+      function normalizeIso(value) {
+        const text = String(value || "").trim();
+        return /^\\d{4}-\\d{2}-\\d{2}$/.test(text) ? text : "";
+      }
+
+      function setStatus(text) {
+        saveStatusEl.textContent = text;
+      }
+
+      function buildSelectableData(rows) {
+        const employees = Array.from(new Set(rows.map((row) => toText(row.employee, "")).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const years = Array.from(new Set(rows.map((row) => normalizeIso(row.date).slice(0, 4)).filter(Boolean))).sort();
+        return { employees, years };
+      }
+
+      function getFilteredEmployeeOptions() {
+        const query = String(employeeInput.value || "").trim().toLowerCase();
+        if (!query) {
+          return employeeOptions;
+        }
+        return employeeOptions.filter((option) => option.toLowerCase().includes(query));
+      }
+
+      function closeEmployeeMenu() {
+        isEmployeeMenuOpen = false;
+        employeeMenu.hidden = true;
+      }
+
+      function openEmployeeMenu() {
+        isEmployeeMenuOpen = true;
+        employeeMenu.hidden = false;
+        renderEmployeeMenu();
+      }
+
+      function chooseEmployee(value) {
+        selectedEmployee = String(value || "").trim();
+        employeeInput.value = selectedEmployee;
+        closeEmployeeMenu();
+        hydrate();
+      }
+
+      function renderEmployeeMenu() {
+        const options = getFilteredEmployeeOptions();
+        if (!options.length) {
+          employeeMenu.innerHTML = '<div class="employee-menu-title">Employee List</div><div class="employee-menu-body"><div class="employee-empty">No employee found</div></div>';
+          employeeMenu.hidden = false;
+          return;
+        }
+        employeeMenu.innerHTML = '<div class="employee-menu-title">Employee List</div><div class="employee-menu-body">' + options.map((option) => {
+          const activeClass = option === selectedEmployee ? " active" : "";
+          const safeOption = option.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          return '<button type="button" class="employee-option' + activeClass + '" data-employee="' + option.replace(/"/g, "&quot;") + '"><span class="employee-option-indicator" aria-hidden="true"></span><span class="employee-option-copy"><span class="employee-option-title">' + safeOption + '</span><span class="employee-option-sub">Select this employee</span></span></button>';
+        }).join("") + '</div>';
+        employeeMenu.querySelectorAll(".employee-option").forEach((button) => {
+          button.addEventListener("click", () => chooseEmployee(button.getAttribute("data-employee") || ""));
+        });
+        employeeMenu.hidden = false;
+      }
+
+      function fillSelect(select, values, currentValue, labelForValue) {
+        select.innerHTML = values.map((value) => {
+          const selected = String(value) === String(currentValue) ? " selected" : "";
+          const label = labelForValue ? labelForValue(value) : value;
+          return '<option value="' + value + '"' + selected + '>' + label + '</option>';
+        }).join("");
+      }
+
+      function renderEditableCell(fieldName, rawValue) {
+        const safeValue = String(rawValue || "").trim();
+        const placeholder = fieldName === "completedTasks" ? "Click to add completed task data" : "Click to add notes data";
+        const text = safeValue || placeholder;
+        const classes = ["editable"];
+        if (config.canEdit) classes.push("editable-enabled");
+        if (!safeValue) classes.push("placeholder");
+        return '<div class="' + classes.join(" ") + '" data-field="' + fieldName + '" contenteditable="' + (config.canEdit ? "true" : "false") + '">' + text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
+      }
+
+      function renderTableRows(rows) {
+        if (!rows.length) {
+          detailsTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
+          return;
+        }
+        detailsTableBody.innerHTML = rows.map((row) => {
+          const notesValue = String(row && (row.taskNotes || row.notes) || "").trim();
+          return '<tr data-row-id="' + String(row && row.id || "") + '">' +
+            '<td>' + toText(row && row.date) + '</td>' +
+            '<td>' + toText(row && row.employee) + '</td>' +
+            '<td>' + renderEditableCell("completedTasks", row && row.completedTasks) + '</td>' +
+            '<td>' + renderEditableCell("taskNotes", notesValue) + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+
+      function getCurrentSelection() {
+        return {
+          employee: String(selectedEmployee || employeeInput.value || "").trim(),
+          year: String(yearSelect.value || "").trim(),
+          month: String(monthSelect.value || "").trim(),
+        };
+      }
+
+      function saveChanges(targetNode) {
+        if (!config.canEdit || !targetNode) return;
+        const rowElement = targetNode.closest("tr[data-row-id]");
+        if (!rowElement) return;
+        const rowId = String(rowElement.getAttribute("data-row-id") || "").trim();
+        const fieldName = String(targetNode.getAttribute("data-field") || "").trim();
+        if (!rowId || !fieldName) return;
+        const value = targetNode.classList.contains("placeholder") ? "" : String(targetNode.textContent || "").trim();
+        const workspace = readWorkspace();
+        const nextRows = getRows(workspace).map((row) => (
+          String((row && row.id) || "").trim() === rowId
+            ? { ...row, [fieldName]: value }
+            : row
+        ));
+        writeWorkspace({ ...workspace, attendance: nextRows });
+        setStatus("Saved");
+      }
+
+      function queueSave(targetNode) {
+        if (!config.canEdit) return;
+        setStatus("Saving...");
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(() => saveChanges(targetNode), 350);
+      }
+
+      function wireEditableCells() {
+        if (!config.canEdit) return;
+        detailsTableBody.querySelectorAll(".editable").forEach((node) => {
+          const fieldName = String(node.getAttribute("data-field") || "").trim();
+          const placeholder = fieldName === "completedTasks" ? "Click to add completed task data" : "Click to add notes data";
+          node.addEventListener("focus", () => {
+            if (node.classList.contains("placeholder")) {
+              node.textContent = "";
+              node.classList.remove("placeholder");
+            }
+          });
+          node.addEventListener("blur", () => {
+            const text = String(node.textContent || "").trim();
+            if (!text) {
+              node.textContent = placeholder;
+              node.classList.add("placeholder");
+            }
+            queueSave(node);
+          });
+          node.addEventListener("input", () => queueSave(node));
+        });
+      }
+
+      function hydrate() {
+        const workspace = readWorkspace();
+        const rows = getRows(workspace);
+        const selectedRow = findRow(workspace);
+        if (!selectedRow) {
+          subtitleEl.textContent = "Attendance row not found";
+          detailsTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#607089;">Attendance row not found.</td></tr>';
+          footnoteEl.textContent = "";
+          setStatus("Record not found");
+          return;
+        }
+
+        const isoDate = normalizeIso(selectedRow.date) || config.date;
+        const defaults = {
+          employee: getCurrentSelection().employee || toText(selectedRow.employee, config.employee),
+          year: getCurrentSelection().year || isoDate.slice(0, 4),
+          month: getCurrentSelection().month || isoDate.slice(5, 7),
+        };
+
+        const selectable = buildSelectableData(rows);
+        employeeOptions = selectable.employees;
+        selectedEmployee = defaults.employee;
+        employeeInput.value = selectedEmployee;
+        fillSelect(yearSelect, selectable.years, defaults.year);
+        fillSelect(
+          monthSelect,
+          Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")),
+          defaults.month,
+          (value) => MONTH_LABELS[Number(value) - 1] || value
+        );
+
+        employeeInput.disabled = !config.canEdit;
+        employeeToggle.disabled = !config.canEdit;
+        yearSelect.disabled = false;
+        monthSelect.disabled = false;
+
+        const selection = getCurrentSelection();
+        const filteredRows = rows
+          .filter((row) => toText(row && row.employee, "") === selection.employee)
+          .filter((row) => {
+            const iso = normalizeIso(row && row.date);
+            return iso && iso.slice(0, 4) === selection.year && iso.slice(5, 7) === selection.month;
+          })
+          .sort((left, right) => String(left && left.date || "").localeCompare(String(right && right.date || "")));
+
+        subtitleEl.textContent = selection.employee + " • " + selection.year + "-" + selection.month;
+        renderTableRows(filteredRows);
+        wireEditableCells();
+        footnoteEl.textContent = config.canEdit
+          ? "Admin / Full Access users can view any employee full-month working data here, click the task or notes cells to edit, and changes auto-save."
+          : "View only mode.";
+        setStatus(config.canEdit ? "Auto-save ready" : "View only");
+      }
+
+      employeeInput.addEventListener("focus", () => {
+        if (!config.canEdit) return;
+        openEmployeeMenu();
+      });
+      employeeInput.addEventListener("input", () => {
+        if (!config.canEdit) return;
+        openEmployeeMenu();
+      });
+      employeeInput.addEventListener("blur", () => {
+        window.setTimeout(() => {
+          if (!employeeMenu.matches(":hover")) {
+            employeeInput.value = selectedEmployee;
+            closeEmployeeMenu();
+          }
+        }, 120);
+      });
+      employeeToggle.addEventListener("click", () => {
+        if (!config.canEdit) return;
+        if (isEmployeeMenuOpen) {
+          closeEmployeeMenu();
+          return;
+        }
+        openEmployeeMenu();
+      });
+      yearSelect.addEventListener("change", hydrate);
+      monthSelect.addEventListener("change", hydrate);
+      window.addEventListener("storage", hydrate);
+      window.addEventListener("beforeunload", () => {
+        const activeNode = document.activeElement;
+        if (activeNode && activeNode.classList && activeNode.classList.contains("editable")) {
+          saveChanges(activeNode);
+        }
+      });
+      hydrate();
+    <\/script>
+  </body>
+</html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const blobUrl = URL.createObjectURL(blob);
+    const blankWindow = window.open(blobUrl, "_blank");
+    if (!blankWindow) {
+      URL.revokeObjectURL(blobUrl);
+      return;
+    }
+    window.setTimeout(() => {
+      URL.revokeObjectURL(blobUrl);
+    }, 60000);
   }
 
   function requestDeleteAttendanceRow(row) {
@@ -27536,17 +28311,17 @@ export function HrManagementModule({
                             <th scope="col">Shift</th>
                             <th scope="col">From</th>
                             <th scope="col">To</th>
-                            <th scope="col">Hrs</th>
                             <th scope="col" className="text-end table-actions">Action</th>
                           </tr>
                         </thead>
                         <tbody>
                           {workingShiftRows.length ? workingShiftRows.map((row) => (
                             <tr key={`shift-row-${row.id}`}>
-                              <td className="fw-semibold">{row.name}</td>
+                              <td className="fw-semibold" title={row.name}>
+                                {String(row.name || "").length > 8 ? `${String(row.name).slice(0, 8)}...` : (row.name || "-")}
+                              </td>
                               <td>{formatTimeToAmPm(row.fromTime) || row.fromTime || "-"}</td>
                               <td>{formatTimeToAmPm(row.toTime) || row.toTime || "-"}</td>
-                              <td>{formatWorkingShiftHours(row.fromTime, row.toTime)}</td>
                               <td className="text-end table-actions">
                                 <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
                                   <button
@@ -27581,7 +28356,7 @@ export function HrManagementModule({
                             </tr>
                           )) : (
                             <tr>
-                              <td colSpan={5} className="text-center text-secondary small py-4">
+                              <td colSpan={4} className="text-center text-secondary small py-4">
                                 No shifts yet. Add your first working shift.
                               </td>
                             </tr>
@@ -27771,6 +28546,7 @@ export function HrManagementModule({
                   </div>
                 )}
               </div>
+              <hr className="my-2" style={{ borderColor: "rgba(25, 135, 84, 0.2)", opacity: 1 }} />
               <div className="row g-3 align-items-end">
                 <div className="col-12 col-md-2">
                   <div className="small text-secondary">Date</div>
@@ -27823,7 +28599,7 @@ export function HrManagementModule({
             <div className="card p-3 h-100">
               <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
                 <div>
-                  <h6 className="mb-1">Attendance Logic</h6>
+                  <h6 className="mb-1">Attendance Logic - {attendanceLogicRules.length} active rule(s)</h6>
                   <div className="small text-secondary">Configure late entry, short-hours, and half-day deduction rules.</div>
                 </div>
                 <div className="d-flex flex-wrap gap-2">
@@ -27843,7 +28619,6 @@ export function HrManagementModule({
                     <i className="bi bi-eye me-1" aria-hidden="true" />
                     View
                   </button>
-                  <span className="badge text-bg-light border d-inline-flex align-items-center">{attendanceLogicRules.length} active rule(s)</span>
                 </div>
               </div>
               {!attendanceLogicRules.length ? (
@@ -28281,130 +29056,7 @@ export function HrManagementModule({
           rows={activeTab === "attendance" ? attendanceFilteredRows : activeTab === "leaves" ? hrLeaveRows : currentRows}
           columns={hrTableColumns}
           withoutOuterCard={["attendance", "leaves", "payroll"].includes(activeTab)}
-          headerBottom={activeTab === "attendance" ? (
-            hasHrFullAccess ? (
-              <div className="d-flex flex-column gap-2">
-                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
-                  <div className="btn-group" role="group" aria-label="Attendance scope">
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${attendanceScope === "my" ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => {
-                        setAttendanceScope("my");
-                        setAttendanceUserFilter("");
-                        setAttendanceFromDate("");
-                        setAttendanceToDate("");
-                        setAttendanceListMode("active");
-                      }}
-                    >
-                      My Attendance
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${attendanceScope === "all" ? "btn-success" : "btn-outline-light"}`}
-                      onClick={() => {
-                        setAttendanceScope("all");
-                        setAttendanceFromDate("");
-                        setAttendanceToDate("");
-                        setAttendanceListMode("active");
-                      }}
-                    >
-                      All Members
-                    </button>
-                  </div>
-                </div>
-
-                <div className="d-flex align-items-end gap-2 flex-nowrap" style={{ overflowX: "auto" }}>
-                  <div style={{ minWidth: 160 }}>
-                    <label className="form-label small text-secondary mb-1">User</label>
-                    <AutocompleteSelectSm
-                      value={attendanceScope === "all" ? attendanceUserFilter : ""}
-                      placeholder={attendanceScope === "all" ? "All Members" : "My Attendance"}
-                      disabled={attendanceScope !== "all"}
-                      options={attendanceAvailableEmployees}
-                      onChange={(nextValue) => {
-                        // Keep it as plain text filter; empty means all members.
-                        setAttendanceUserFilter(nextValue);
-                      }}
-                      ariaLabel="Filter attendance by user"
-                    />
-                  </div>
-
-                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
-                    <label className="form-label small text-secondary mb-1">Year</label>
-                    <select
-                      className="form-select form-select-sm"
-                      value={attendanceYearFilter}
-                      disabled={Boolean(attendanceFromDate || attendanceToDate)}
-                      onChange={(e) => setAttendanceYearFilter(e.target.value)}
-                    >
-                      {attendanceYearOptions.map((year) => (
-                        <option key={`attendance-year-${year}`} value={year}>{year}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
-                    <label className="form-label small text-secondary mb-1">Month</label>
-                    <select
-                      className="form-select form-select-sm"
-                      value={attendanceMonthFilter}
-                      disabled={Boolean(attendanceFromDate || attendanceToDate)}
-                      onChange={(e) => setAttendanceMonthFilter(e.target.value)}
-                    >
-                      {attendanceMonthOptions.map((month) => (
-                        <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
-                    <label className="form-label small text-secondary mb-1">From</label>
-                    <input
-                      ref={attendanceFromInputRef}
-                      type="date"
-                      className="form-control form-control-sm"
-                      value={attendanceFromDate}
-                      style={{ width: "100%" }}
-                      min={attendanceDateMeta.minIso || undefined}
-                      max={attendanceToDate || todayIso}
-                      onChange={(e) => setAttendanceFromDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
-                    <label className="form-label small text-secondary mb-1">To</label>
-                    <input
-                      ref={attendanceToInputRef}
-                      type="date"
-                      className="form-control form-control-sm"
-                      value={attendanceToDate}
-                      style={{ width: "100%" }}
-                      min={attendanceFromDate || attendanceDateMeta.minIso || undefined}
-                      max={todayIso}
-                      onChange={(e) => {
-                        const nextRaw = e.target.value;
-                        const nextIso = normalizeIsoDateValue(nextRaw);
-                        const fromIso = normalizeIsoDateValue(attendanceFromDate || attendanceDateMeta.minIso);
-                        if (
-                          nextIso
-                          && fromIso
-                          && /^\d{4}-\d{2}-\d{2}$/.test(nextIso)
-                          && /^\d{4}-\d{2}-\d{2}$/.test(fromIso)
-                          && nextIso < fromIso
-                        ) {
-                          setAttendanceToDate("");
-                          return;
-                        }
-                        setAttendanceToDate(nextRaw);
-                      }}
-                    />
-                  </div>
-
-                  {/* Shift info is shown in the Attendance title (parentheses). */}
-                </div>
-              </div>
-            ) : (
+          headerBottom={activeTab === "attendance" && !hasHrFullAccess ? (
               <div className="d-flex flex-wrap align-items-end justify-content-end gap-2">
                 <div>
                   <label className="form-label small text-secondary mb-1">Year</label>
@@ -28433,7 +29085,123 @@ export function HrManagementModule({
                   </select>
                 </div>
               </div>
-            )
+          ) : null}
+          headerBottomTop={activeTab === "attendance" && hasHrFullAccess ? (
+            <div className="btn-group" role="group" aria-label="Attendance scope">
+              <button
+                type="button"
+                className={`btn btn-sm ${attendanceScope === "my" ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => {
+                  setAttendanceScope("my");
+                  setAttendanceUserFilter("");
+                  setAttendanceFromDate("");
+                  setAttendanceToDate("");
+                  setAttendanceListMode("active");
+                }}
+              >
+                My Attendance
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${attendanceScope === "all" ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => {
+                  setAttendanceScope("all");
+                  setAttendanceFromDate("");
+                  setAttendanceToDate("");
+                  setAttendanceListMode("active");
+                }}
+              >
+                All Members
+              </button>
+            </div>
+          ) : null}
+          headerBottomBottom={activeTab === "attendance" && hasHrFullAccess ? (
+            <div className="d-flex align-items-end gap-2 flex-nowrap" style={{ overflowX: "auto" }}>
+              <div style={{ minWidth: 160 }}>
+                <label className="form-label small text-secondary mb-1">User</label>
+                <AutocompleteSelectSm
+                  value={attendanceScope === "all" ? attendanceUserFilter : ""}
+                  placeholder={attendanceScope === "all" ? "All Members" : "My Attendance"}
+                  disabled={attendanceScope !== "all"}
+                  options={attendanceAvailableEmployees}
+                  onChange={(nextValue) => {
+                    setAttendanceUserFilter(nextValue);
+                  }}
+                  ariaLabel="Filter attendance by user"
+                />
+              </div>
+
+              <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
+                <label className="form-label small text-secondary mb-1">Year</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={attendanceYearFilter}
+                  disabled={Boolean(attendanceFromDate || attendanceToDate)}
+                  onChange={(e) => setAttendanceYearFilter(e.target.value)}
+                >
+                  {attendanceYearOptions.map((year) => (
+                    <option key={`attendance-year-${year}`} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
+                <label className="form-label small text-secondary mb-1">Month</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={attendanceMonthFilter}
+                  disabled={Boolean(attendanceFromDate || attendanceToDate)}
+                  onChange={(e) => setAttendanceMonthFilter(e.target.value)}
+                >
+                  {attendanceMonthOptions.map((month) => (
+                    <option key={`attendance-month-${month.value}`} value={month.value}>{month.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
+                <label className="form-label small text-secondary mb-1">From</label>
+                <input
+                  ref={attendanceFromInputRef}
+                  type="date"
+                  className="form-control form-control-sm"
+                  value={attendanceFromDate}
+                  style={{ width: "100%" }}
+                  min={attendanceDateMeta.minIso || undefined}
+                  max={attendanceToDate || todayIso}
+                  onChange={(e) => setAttendanceFromDate(e.target.value)}
+                />
+              </div>
+
+              <div style={{ flex: "0 0 140px", maxWidth: 140 }}>
+                <label className="form-label small text-secondary mb-1">To</label>
+                <input
+                  ref={attendanceToInputRef}
+                  type="date"
+                  className="form-control form-control-sm"
+                  value={attendanceToDate}
+                  style={{ width: "100%" }}
+                  min={attendanceFromDate || attendanceDateMeta.minIso || undefined}
+                  max={todayIso}
+                  onChange={(e) => {
+                    const nextRaw = e.target.value;
+                    const nextIso = normalizeIsoDateValue(nextRaw);
+                    const fromIso = normalizeIsoDateValue(attendanceFromDate || attendanceDateMeta.minIso);
+                    if (
+                      nextIso
+                      && fromIso
+                      && /^\d{4}-\d{2}-\d{2}$/.test(nextIso)
+                      && /^\d{4}-\d{2}-\d{2}$/.test(fromIso)
+                      && nextIso < fromIso
+                    ) {
+                      setAttendanceToDate("");
+                      return;
+                    }
+                    setAttendanceToDate(nextRaw);
+                  }}
+                />
+              </div>
+            </div>
           ) : null}
           actionHeaderStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
           actionCellStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
@@ -28447,6 +29215,17 @@ export function HrManagementModule({
           }
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
           renderCells={(row) => config.columns.map((column) => {
+            if (activeTab === "attendance" && column.key === "employee") {
+              const employeeName = String(row[column.key] || "").trim();
+              if (!employeeName) {
+                return <span className="text-secondary">-</span>;
+              }
+              return (
+                <span title={employeeName}>
+                  {employeeName.length > 8 ? `${employeeName.slice(0, 8)}...` : employeeName}
+                </span>
+              );
+            }
             if (activeTab === "attendance" && (column.key === "inTime" || column.key === "outTime")) {
               const text = formatTimeToAmPm(row[column.key]);
               if (!text || text === "-") {
@@ -28481,7 +29260,20 @@ export function HrManagementModule({
               if (!debitDetails) {
                 return <span className="text-secondary">-</span>;
               }
-              return <span className="small fw-semibold">{debitDetails}</span>;
+              const match = String(debitDetails).match(/^(Sign in Delay)(.+)$/i);
+              return (
+                <span className="small fw-semibold d-inline-block" style={{ maxWidth: 150, lineHeight: 1.3, whiteSpace: "normal" }}>
+                  {match ? (
+                    <>
+                      <span>{match[1]}</span>
+                      <br />
+                      <span>{String(match[2] || "").trim()}</span>
+                    </>
+                  ) : (
+                    debitDetails
+                  )}
+                </span>
+              );
             }
             if (activeTab === "attendance" && column.key === "status") {
               const overriddenStatus = getAttendanceStatusOverride(row);
@@ -28530,11 +29322,11 @@ export function HrManagementModule({
               }
               if (/^present\b/i.test(base)) {
                 return (
-                  <span className="fw-semibold">
-                    {text}
+                  <span className="fw-semibold d-inline-block" style={{ maxWidth: 190, lineHeight: 1.3, whiteSpace: "normal" }}>
+                    <span>{text}</span>
                     {holidaySuffix ? (
                       <>
-                        {" - "}
+                        <br />
                         <span className="wz-link-primary fw-semibold">{`Holiday (${holidaySuffix})`}</span>
                       </>
                     ) : null}
@@ -28543,11 +29335,11 @@ export function HrManagementModule({
               }
               if (holidaySuffix) {
                 return (
-                  <>
-                    {text}
-                    {" - "}
+                  <span className="d-inline-block" style={{ maxWidth: 190, lineHeight: 1.3, whiteSpace: "normal" }}>
+                    <span>{text}</span>
+                    <br />
                     <span className="wz-link-primary fw-semibold">{`Holiday (${holidaySuffix})`}</span>
-                  </>
+                  </span>
                 );
               }
               return text;
@@ -28570,6 +29362,15 @@ export function HrManagementModule({
                   }
 	                  return (
 	                    <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
+	                      <button
+	                        type="button"
+	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                        data-wz-tooltip="Open task details"
+	                        onClick={() => openAttendanceTaskModal(row)}
+	                        aria-label="Open task details"
+	                      >
+	                        <i className="bi bi-eye" aria-hidden="true" />
+	                      </button>
 	                      <button
 	                        type="button"
 	                        className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
@@ -28597,6 +29398,15 @@ export function HrManagementModule({
                   <div className="d-inline-flex gap-2 flex-nowrap">
                     {!isDeletedRow ? (
                       <>
+	                        <button
+	                          type="button"
+	                          className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+	                          data-wz-tooltip="Open task details"
+	                          aria-label="Open task details"
+	                          onClick={() => openAttendanceTaskModal(row)}
+	                        >
+	                          <i className="bi bi-eye" aria-hidden="true" />
+	                        </button>
 	                        <button
 	                          type="button"
 	                          className={`btn btn-sm ${hasTaskList ? "btn-success" : "btn-outline-success"}`}
@@ -29026,9 +29836,20 @@ export function HrManagementModule({
                   {attendanceTaskModal.mode === "punchOut" && attendanceTaskModal.outTime ? ` • Out Time ${formatTimeToAmPm(attendanceTaskModal.outTime)}` : ""}
                 </div>
               </div>
-              <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceTaskModal}>
-                <i className="bi bi-x-lg" aria-hidden="true" />
-              </button>
+              <div className="d-inline-flex align-items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-light"
+                  onClick={openAttendanceTaskBlankPage}
+                  aria-label="Open blank page"
+                  title="Open blank page"
+                >
+                  <i className="bi bi-eye" aria-hidden="true" />
+                </button>
+                <button type="button" className="btn btn-sm btn-outline-light" onClick={closeAttendanceTaskModal}>
+                  <i className="bi bi-x-lg" aria-hidden="true" />
+                </button>
+              </div>
             </div>
             <form className="d-flex flex-column gap-3" onSubmit={submitAttendanceTaskModal}>
               {attendanceTaskModal.readOnly && !hasHrFullAccess ? (
@@ -32212,6 +33033,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const listKey = kind === "estimate" ? "estimates" : "invoices";
     const existingRows = Array.isArray(moduleData?.[listKey]) ? moduleData[listKey] : [];
     const baseDocument = createEmptyBillingDocument(kind, existingRows, moduleData?.gstTemplates || [], moduleData?.billingTemplates || []);
+    const resolvedSourceItems = hasMeaningfulDocumentItems(normalizedRow.items)
+      ? normalizedRow.items
+      : hasMeaningfulDocumentItems(linkedSourceOrder?.items)
+        ? linkedSourceOrder.items
+        : baseDocument.items;
     const todayIso = new Date().toISOString().slice(0, 10);
     const issueDate = String(normalizedRow.issueDate || baseDocument.issueDate || todayIso).trim() || todayIso;
     const dueDate = String(normalizedRow.dueDate || issueDate).trim() || issueDate;
@@ -32306,7 +33132,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       paymentStatus: String(normalizedRow.paymentStatus || "Pending").trim() || "Pending",
       deliveryStatus: kind === "invoice" ? "Pending" : "",
       status: "Draft",
-      items: (normalizedRow.items && normalizedRow.items.length ? normalizedRow.items : baseDocument.items).map((item) => {
+      items: resolvedSourceItems.map((item) => {
         const normalizedTaxOverride = resolveDocumentLineTaxOverride(item);
         return {
           ...createEmptyDocLine(),
