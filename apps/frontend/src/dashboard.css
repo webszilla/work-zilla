@@ -6598,6 +6598,9 @@ html[data-theme="dark"] .wz-item-picker-modal .crm-inline-suggestions__title--pr
   font-size: 0.8rem;
   font-weight: 700;
   color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
 }
 
 .app-shell .wz-user-type-summary__count {
@@ -6611,6 +6614,12 @@ html[data-theme="dark"] .wz-item-picker-modal .crm-inline-suggestions__title--pr
   font-size: 0.76rem;
   color: #64748b;
   margin-top: 4px;
+}
+
+.app-shell .wz-user-name-cell .badge.bg-light {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.9rem;
 }
 
 

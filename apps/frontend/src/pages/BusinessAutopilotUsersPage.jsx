@@ -3009,13 +3009,53 @@ export default function BusinessAutopilotUsersPage() {
     const sourceRows = Array.isArray(userMeta.user_types) && userMeta.user_types.length
       ? userMeta.user_types
       : Object.entries(BA_USER_TYPE_LABELS).map(([key, label]) => ({ key, label }));
+    const normalizedUsers = Array.isArray(users) ? users : [];
+    const activeTypeCounts = normalizedUsers.reduce((acc, user) => {
+      if (isOrgAdminAccountUser(user)) {
+        return acc;
+      }
+      const status = String(user?.status || (user?.is_locked ? "inactive" : (user?.is_active ? "active" : "inactive"))).trim().toLowerCase();
+      if (status !== "active") {
+        return acc;
+      }
+      const userTypeKey = normalizeBusinessAutopilotUserType(user?.user_type);
+      acc[userTypeKey] = Number(acc[userTypeKey] || 0) + 1;
+      return acc;
+    }, {});
+    const seatCountMap = userMeta.user_type_seat_counts && typeof userMeta.user_type_seat_counts === "object"
+      ? userMeta.user_type_seat_counts
+      : {};
+    const activeCountMap = userMeta.user_type_active_counts && typeof userMeta.user_type_active_counts === "object"
+      ? userMeta.user_type_active_counts
+      : {};
     const byKey = new Map(
       sourceRows.map((item) => [item.key, {
         key: item.key,
         label: item.label || BA_USER_TYPE_LABELS[item.key] || "User Type",
-        seatCount: Number(item.seat_count || 0),
-        activeCount: Number(item.active_count || 0),
-        remainingCount: Number(item.remaining_count || 0),
+        seatCount: Math.max(
+          0,
+          Number(item.seat_count ?? seatCountMap[item.key] ?? (item.key === "full_access_user" ? userMeta.employee_limit : 0)) || 0
+        ),
+        activeCount: Math.max(
+          0,
+          Number(item.active_count ?? activeCountMap[item.key] ?? activeTypeCounts[item.key] ?? 0) || 0
+        ),
+        remainingCount: Math.max(
+          0,
+          Number(
+            item.remaining_count
+            ?? (
+              Math.max(
+                0,
+                Number(item.seat_count ?? seatCountMap[item.key] ?? (item.key === "full_access_user" ? userMeta.employee_limit : 0)) || 0
+              )
+              - Math.max(
+                0,
+                Number(item.active_count ?? activeCountMap[item.key] ?? activeTypeCounts[item.key] ?? 0) || 0
+              )
+            )
+          ) || 0
+        ),
       }])
     );
     const orderedRows = [
@@ -3025,7 +3065,7 @@ export default function BusinessAutopilotUsersPage() {
       byKey.get("full_access_user") ? { ...byKey.get("full_access_user"), label: "Full Access" } : { key: "full_access_user", label: "Full Access", seatCount: 0, activeCount: 0, remainingCount: 0 },
     ];
     return orderedRows;
-  }, [userMeta.user_types]);
+  }, [userMeta.employee_limit, userMeta.user_type_active_counts, userMeta.user_type_seat_counts, userMeta.user_types, users]);
   const pendingEmailVerificationUsers = useMemo(
     () => users.filter((user) => !Boolean(user?.email_verified)),
     [users]
@@ -5362,7 +5402,7 @@ export default function BusinessAutopilotUsersPage() {
                               {!isOrgAdminAccountUser(user) && String(user?.status || "").trim().toLowerCase() === "active" ? (
                                 <button
                                   type="button"
-                                  className="btn btn-sm btn-outline-warning saas-org-icon-btn"
+                                  className="btn btn-sm btn-outline-primary saas-org-icon-btn"
                                   onClick={() => handleMarkResigned(user)}
                                   disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
                                   title="Mark as Resigned"
