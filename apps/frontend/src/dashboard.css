@@ -2237,6 +2237,14 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
 .saas-org-table .table-responsive{
   margin-top:0 !important;
 }
+.app-shell .table-responsive{
+  overflow-x:auto;
+  overflow-y:visible;
+  -webkit-overflow-scrolling:touch;
+}
+.app-shell .table-responsive > .table{
+  min-width:max-content;
+}
 .saas-org-table .table{
   margin-top:0 !important;
 }
@@ -2275,6 +2283,20 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   border-color: var(--color-primary, #22c55e);
   background: color-mix(in srgb, var(--color-primary, #22c55e) 26%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #22c55e) 24%, transparent);
+}
+
+.wz-user-resign-btn{
+  color: var(--color-primary, #22c55e);
+  border-color: color-mix(in srgb, var(--color-primary, #22c55e) 70%, transparent);
+  background: color-mix(in srgb, var(--color-primary, #22c55e) 12%, transparent);
+}
+
+.wz-user-resign-btn:hover,
+.wz-user-resign-btn:focus-visible{
+  color: #ffffff;
+  border-color: var(--color-primary, #22c55e);
+  background: var(--color-primary, #22c55e);
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, var(--color-primary, #22c55e) 22%, transparent);
 }
 .wz-user-toggle-btn.is-inactive{
   color:#94a3b8;

@@ -27935,7 +27935,6 @@ export function HrManagementModule({
                         <i className="bi bi-arrow-left me-1" aria-hidden="true" />
                         Back to Attendance
                       </button>
-                      <span className="badge text-bg-light border">Shift Assignment Workspace</span>
                     </div>
                     <h6 className="mb-1">Assign Users to Shifts</h6>
                     <div className="small text-secondary">Search, assign, move, and rebalance users across shifts in one screen.</div>

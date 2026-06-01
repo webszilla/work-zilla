@@ -72,7 +72,7 @@ const DEFAULT_USER_META = {
 const BA_USER_TYPE_LABELS = {
   crm_user: "CRM User",
   hrm_user: "HRM User",
-  full_access_user: "Full Access User",
+  full_access_user: "Full Access",
 };
 
 const ROLE_ACCESS_STORAGE_KEY = "wz_business_autopilot_role_access";
@@ -5402,7 +5402,7 @@ export default function BusinessAutopilotUsersPage() {
                               {!isOrgAdminAccountUser(user) && String(user?.status || "").trim().toLowerCase() === "active" ? (
                                 <button
                                   type="button"
-                                  className="btn btn-sm btn-outline-primary saas-org-icon-btn"
+                                  className="btn btn-sm saas-org-icon-btn wz-user-resign-btn"
                                   onClick={() => handleMarkResigned(user)}
                                   disabled={!user.membership_id || togglingMembershipId === String(user.membership_id)}
                                   title="Mark as Resigned"
