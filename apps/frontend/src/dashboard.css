@@ -2243,7 +2243,10 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   -webkit-overflow-scrolling:touch;
 }
 .app-shell .table-responsive > .table{
-  min-width:max-content;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  table-layout: auto;
 }
 .saas-org-table .table{
   margin-top:0 !important;

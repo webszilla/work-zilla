@@ -1084,7 +1084,8 @@ html[data-theme="light"] .pagination .page-item.disabled .page-link{
   white-space: nowrap;
   overflow: visible;
   text-overflow: clip;
-  min-width: 240px;
+  width: 1%;
+  min-width: 0;
 }
 .wz-hr-shift-table td.table-actions,
 .wz-hr-shift-table th.table-actions{
