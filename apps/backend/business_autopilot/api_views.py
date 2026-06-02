@@ -3,6 +3,7 @@ import base64
 import binascii
 import json
 import logging
+import math
 import re
 import secrets
 import string
@@ -49,6 +50,8 @@ from .models import (
     CrmSalesOrder,
     AccountsWorkspace,
     EmployeeSalaryHistory,
+    AttendanceEntry,
+    AttendanceGeoSetting,
     PayrollEntry,
     PayrollSettings,
     Payslip,
@@ -154,6 +157,8 @@ ROLE_ACCESS_LEVEL_ALIASES = {
     "Full Access": "Full Access",
 }
 logger = logging.getLogger(__name__)
+MIN_GEO_RADIUS_METERS = 20
+MAX_GPS_ACCURACY_METERS = 200
 
 TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
 TEMP_PASSWORD_LENGTH = 10
@@ -1163,6 +1168,106 @@ def _can_view_salary_history(user: User, org: Organization = None):
     membership_role = str(membership.role or "").strip().lower()
     employee_role = str(membership.employee_role or "").strip().lower()
     return membership_role == "company_admin" or employee_role == "hr manager"
+
+
+def _can_manage_attendance_geo_settings(user: User, org: Organization = None):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    if org and _hr_section_access_level(user, org, "hr") == "Full Access":
+        return True
+    membership = _get_org_membership(user, org)
+    return bool(membership and _normalize_admin_role(getattr(membership, "role", "")) in {"company_admin", "org_admin", "owner"})
+
+
+def _serialize_attendance_geo_setting(setting):
+    return {
+        "enabled": bool(getattr(setting, "enabled", False)),
+        "location_name": str(getattr(setting, "location_name", "") or "").strip(),
+        "latitude": float(setting.latitude) if getattr(setting, "latitude", None) is not None else None,
+        "longitude": float(setting.longitude) if getattr(setting, "longitude", None) is not None else None,
+        "radius_meters": int(getattr(setting, "radius_meters", 0) or 0),
+        "allow_outside_fence": bool(getattr(setting, "allow_outside_fence", False)),
+        "require_gps": bool(getattr(setting, "require_gps", True)),
+        "google_maps_url": (
+            f"https://www.google.com/maps?q={float(setting.latitude)},{float(setting.longitude)}"
+            if getattr(setting, "latitude", None) is not None and getattr(setting, "longitude", None) is not None
+            else ""
+        ),
+        "created_at": getattr(setting, "created_at", None).isoformat() if getattr(setting, "created_at", None) else None,
+        "updated_at": getattr(setting, "updated_at", None).isoformat() if getattr(setting, "updated_at", None) else None,
+    }
+
+
+def _attendance_float(payload, key):
+    raw = payload.get(key, None)
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"invalid_{key}")
+
+
+def _attendance_haversine_distance_meters(lat1, lon1, lat2, lon2):
+    radius = 6371000.0
+    phi1 = math.radians(float(lat1))
+    phi2 = math.radians(float(lat2))
+    delta_phi = math.radians(float(lat2) - float(lat1))
+    delta_lambda = math.radians(float(lon2) - float(lon1))
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return round(radius * c, 2)
+
+
+def _attendance_validate_geo_payload(payload, *, require_reason=False):
+    latitude = _attendance_float(payload, "latitude")
+    longitude = _attendance_float(payload, "longitude")
+    accuracy = _attendance_float(payload, "accuracy")
+    outside_reason = str(payload.get("outside_reason") or "").strip()
+
+    if latitude is None or longitude is None:
+        raise ValueError("gps_coordinates_required")
+    if latitude < -90 or latitude > 90:
+        raise ValueError("invalid_latitude")
+    if longitude < -180 or longitude > 180:
+        raise ValueError("invalid_longitude")
+    if accuracy is None:
+        raise ValueError("gps_accuracy_required")
+    if accuracy < 0:
+        raise ValueError("invalid_accuracy")
+    if require_reason and not outside_reason:
+        raise ValueError("outside_reason_required")
+    return latitude, longitude, accuracy, outside_reason
+
+
+def _attendance_geo_response(entry, *, action, message):
+    return {
+        "ok": True,
+        "action": action,
+        "message": message,
+        "attendance": {
+            "id": entry.id,
+            "employee_name": entry.employee_name,
+            "attendance_date": entry.attendance_date.isoformat(),
+            "checkin_time": entry.checkin_time.isoformat() if entry.checkin_time else None,
+            "checkout_time": entry.checkout_time.isoformat() if entry.checkout_time else None,
+            "checkin_latitude": float(entry.checkin_latitude) if entry.checkin_latitude is not None else None,
+            "checkin_longitude": float(entry.checkin_longitude) if entry.checkin_longitude is not None else None,
+            "checkin_accuracy": float(entry.checkin_accuracy) if entry.checkin_accuracy is not None else None,
+            "checkout_latitude": float(entry.checkout_latitude) if entry.checkout_latitude is not None else None,
+            "checkout_longitude": float(entry.checkout_longitude) if entry.checkout_longitude is not None else None,
+            "checkout_accuracy": float(entry.checkout_accuracy) if entry.checkout_accuracy is not None else None,
+            "checkin_distance_meters": float(entry.checkin_distance_meters) if entry.checkin_distance_meters is not None else None,
+            "checkout_distance_meters": float(entry.checkout_distance_meters) if entry.checkout_distance_meters is not None else None,
+            "checkin_inside_geofence": entry.checkin_inside_geofence,
+            "checkout_inside_geofence": entry.checkout_inside_geofence,
+            "geo_status": entry.geo_status,
+            "outside_reason": entry.outside_reason,
+            "device_info": entry.device_info,
+        },
+    }
 
 
 def _ensure_default_module_catalog():
@@ -4563,6 +4668,170 @@ def employees_search(request):
 
     matches.sort(key=lambda row: (str(row.get("name") or "").lower(), row.get("id") or 0))
     return JsonResponse(matches[:20], safe=False)
+
+
+@require_http_methods(["GET", "POST", "PATCH"])
+def attendance_geo_settings(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _get_active_erp_subscription(org):
+        return JsonResponse({"detail": "active_subscription_required"}, status=403)
+
+    setting, _ = AttendanceGeoSetting.objects.get_or_create(
+        organization=org,
+        defaults={"radius_meters": 100, "require_gps": True},
+    )
+    if request.method == "GET":
+        return JsonResponse({"setting": _serialize_attendance_geo_setting(setting)})
+    if not _can_manage_attendance_geo_settings(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    location_name = str(payload.get("location_name", setting.location_name) or "").strip()
+    enabled = bool(payload.get("enabled", setting.enabled))
+    allow_outside_fence = bool(payload.get("allow_outside_fence", setting.allow_outside_fence))
+    require_gps = bool(payload.get("require_gps", setting.require_gps))
+    try:
+        latitude = _attendance_float(payload, "latitude") if "latitude" in payload else (float(setting.latitude) if setting.latitude is not None else None)
+        longitude = _attendance_float(payload, "longitude") if "longitude" in payload else (float(setting.longitude) if setting.longitude is not None else None)
+        radius_meters = int(payload.get("radius_meters", setting.radius_meters or 0) or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "invalid_geo_settings"}, status=400)
+
+    if latitude is not None and (latitude < -90 or latitude > 90):
+        return JsonResponse({"detail": "Latitude must be -90 to 90"}, status=400)
+    if longitude is not None and (longitude < -180 or longitude > 180):
+        return JsonResponse({"detail": "Longitude must be -180 to 180"}, status=400)
+    if radius_meters and radius_meters < MIN_GEO_RADIUS_METERS:
+        return JsonResponse({"detail": "Radius minimum is 20 meters"}, status=400)
+    if enabled and (latitude is None or longitude is None or radius_meters < MIN_GEO_RADIUS_METERS):
+        return JsonResponse({"detail": "Geo attendance requires office location and valid radius"}, status=400)
+
+    setting.location_name = location_name
+    setting.enabled = enabled
+    setting.latitude = latitude
+    setting.longitude = longitude
+    setting.radius_meters = radius_meters or setting.radius_meters or 100
+    setting.allow_outside_fence = allow_outside_fence
+    setting.require_gps = require_gps
+    setting.save()
+    return JsonResponse({"setting": _serialize_attendance_geo_setting(setting)})
+
+
+def _attendance_geo_punch(request, *, action):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _get_active_erp_subscription(org):
+        return JsonResponse({"detail": "active_subscription_required"}, status=403)
+    membership = _get_org_membership(request.user, org)
+    if not membership or _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
+        return JsonResponse({"detail": "employee_not_found"}, status=403)
+
+    setting = AttendanceGeoSetting.objects.filter(organization=org).first()
+    if not setting or not setting.enabled:
+        return JsonResponse({"detail": "geo_attendance_not_enabled"}, status=400)
+    if setting.latitude is None or setting.longitude is None:
+        return JsonResponse({"detail": "office_location_not_configured"}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    try:
+        latitude, longitude, accuracy, outside_reason = _attendance_validate_geo_payload(payload)
+    except ValueError as exc:
+        detail = str(exc)
+        message = {
+            "gps_coordinates_required": "Location permission denied. Please enable GPS permission.",
+            "gps_accuracy_required": "GPS accuracy is too low. Please try again.",
+            "invalid_accuracy": "GPS accuracy is too low. Please try again.",
+            "invalid_latitude": "Latitude must be -90 to 90",
+            "invalid_longitude": "Longitude must be -180 to 180",
+            "outside_reason_required": "Outside reason is required.",
+        }.get(detail, "Invalid geo payload")
+        return JsonResponse({"detail": detail, "message": message}, status=400)
+
+    if accuracy > MAX_GPS_ACCURACY_METERS:
+        return JsonResponse({"detail": "low_gps_accuracy", "message": "GPS accuracy is too low. Please try again."}, status=400)
+
+    distance_meters = _attendance_haversine_distance_meters(latitude, longitude, float(setting.latitude), float(setting.longitude))
+    inside_geofence = distance_meters <= float(setting.radius_meters or 0)
+    if action == "checkin" and not inside_geofence and not setting.allow_outside_fence:
+        return JsonResponse({"detail": "outside_office_radius", "message": "You are outside the allowed office radius.", "distance_meters": distance_meters, "inside_geofence": False}, status=400)
+    if action == "checkin" and not inside_geofence and setting.allow_outside_fence and not outside_reason:
+        return JsonResponse({"detail": "outside_reason_required", "message": "Outside reason is required.", "distance_meters": distance_meters, "inside_geofence": False}, status=400)
+
+    now = timezone.now()
+    today = timezone.localdate()
+    employee_name = _get_org_user_display_name(request.user)
+    geo_status = AttendanceEntry.GEO_STATUS_INSIDE if inside_geofence else AttendanceEntry.GEO_STATUS_OUTSIDE
+    device_info = str(request.META.get("HTTP_USER_AGENT") or "").strip()[:1000]
+
+    with transaction.atomic():
+        entry, _ = AttendanceEntry.objects.select_for_update().get_or_create(
+            organization=org,
+            employee_membership=membership,
+            attendance_date=today,
+            defaults={"employee_name": employee_name, "geo_status": geo_status, "device_info": device_info},
+        )
+        entry.employee_name = employee_name
+        entry.geo_status = geo_status
+        entry.device_info = device_info
+        if action == "checkin":
+            if entry.checkin_time:
+                return JsonResponse({"detail": "duplicate_checkin", "message": "Check-in already exists for today."}, status=400)
+            entry.checkin_time = now
+            entry.checkin_latitude = latitude
+            entry.checkin_longitude = longitude
+            entry.checkin_accuracy = accuracy
+            entry.checkin_distance_meters = distance_meters
+            entry.checkin_inside_geofence = inside_geofence
+            entry.outside_reason = outside_reason
+        else:
+            if not entry.checkin_time:
+                return JsonResponse({"detail": "missing_checkin", "message": "Prevent checkout without check-in"}, status=400)
+            if entry.checkout_time:
+                return JsonResponse({"detail": "duplicate_checkout", "message": "Check-out already exists for today."}, status=400)
+            entry.checkout_time = now
+            entry.checkout_latitude = latitude
+            entry.checkout_longitude = longitude
+            entry.checkout_accuracy = accuracy
+            entry.checkout_distance_meters = distance_meters
+            entry.checkout_inside_geofence = inside_geofence
+            if outside_reason:
+                entry.outside_reason = outside_reason
+        entry.save()
+
+    if action == "checkin":
+        message = "Check-in saved successfully. You are inside office location." if inside_geofence else "Check-in saved successfully."
+    else:
+        message = "Check-out saved successfully."
+    response = _attendance_geo_response(entry, action=action, message=message)
+    response["distance_meters"] = distance_meters
+    response["inside_geofence"] = inside_geofence
+    response["gps_accuracy_warning"] = accuracy > 100
+    return JsonResponse(response)
+
+
+@require_http_methods(["POST"])
+def attendance_geo_checkin(request):
+    return _attendance_geo_punch(request, action="checkin")
+
+
+@require_http_methods(["POST"])
+def attendance_geo_checkout(request):
+    return _attendance_geo_punch(request, action="checkout")
 
 
 @require_http_methods(["GET"])

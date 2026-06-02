@@ -12,6 +12,7 @@ import { bindGlobalRequiredFieldValidation } from "./lib/requiredFieldValidation
 import { bindGlobalDatePickerEnhancer } from "./lib/datePickerEnhancer.js";
 import { bindGlobalSelectPlaceholderShortener } from "./lib/selectPlaceholderShortener.js";
 import { bindGlobalTableActionTooltipEnhancer } from "./lib/tableActionTooltipEnhancer.js";
+import { bindGlobalTableOverflowEnhancer } from "./lib/tableOverflowEnhancer.js";
 
 // Debug build marker (helps verify the browser is running the latest frontend bundle).
 window.__WZ_FRONTEND_BUILD_ID = "2026-05-21T08:53+05:30";
@@ -22,6 +23,7 @@ bindGlobalRequiredFieldValidation();
 bindGlobalDatePickerEnhancer();
 bindGlobalSelectPlaceholderShortener();
 bindGlobalTableActionTooltipEnhancer();
+bindGlobalTableOverflowEnhancer();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

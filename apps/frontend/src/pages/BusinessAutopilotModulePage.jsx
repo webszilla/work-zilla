@@ -596,6 +596,10 @@ const HR_TAB_CONFIG = {
       { key: "outTime", label: "Out Time" },
       { key: "workedHours", label: "Worked" },
       { key: "overtimeHours", label: "OT" },
+      { key: "locationStatus", label: "Location Status" },
+      { key: "distanceMeters", label: "Distance" },
+      { key: "gpsAccuracy", label: "GPS Accuracy" },
+      { key: "viewMap", label: "View Map" },
       {
         key: "attendanceDebit",
         label: "Attendance Debit",
@@ -619,6 +623,12 @@ const HR_TAB_CONFIG = {
       { key: "permissionHours", label: "Permission Hours", placeholder: "e.g. 2", conditionalOn: { key: "status", value: "Permission" } },
       { key: "notes", label: "Notes", placeholder: "Optional notes", optional: true }
     ]
+  },
+  attendanceSettings: {
+    label: "Attendance Settings",
+    itemLabel: "Attendance Settings",
+    columns: [],
+    fields: [],
   },
   leaves: {
     label: "Leaves",
@@ -689,6 +699,7 @@ const DEFAULT_HR_DATA = {
     { id: "a1", employee: "Guru", date: "2026-02-19", entryMode: "HR Side", inTime: "09:10", outTime: "18:05", workedHours: "8h 55m", status: "Present", notes: "" },
     { id: "a2", employee: "Nithya", date: "2026-02-19", entryMode: "User Side", inTime: "09:25", outTime: "17:48", workedHours: "8h 23m", status: "Present", notes: "" }
   ],
+  attendanceSettings: [],
   leaves: [
     { id: "l1", employee: "Arun", leaveType: "Sick", status: "Pending" },
     { id: "l2", employee: "Kiran", leaveType: "Casual", status: "Approved" }
@@ -3130,6 +3141,23 @@ function normalizeHrData(value) {
     next.attendanceLogicRules = mergeAttendanceLogicRulesWithDefaults(next.attendanceLogicRules);
   }
   return next;
+}
+
+function formatDistanceMeters(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return "-";
+  }
+  return `${Math.round(amount)} m`;
+}
+
+function buildGoogleMapsLink(lat, lng) {
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return "";
+  }
+  return `https://www.google.com/maps?q=${latitude},${longitude}`;
 }
 
 function isValidCrmData(value) {
@@ -24139,11 +24167,25 @@ export function HrManagementModule({
   currentUserEmployeeRole = "",
   roleAccessMap = {},
 }) {
-  const WORKING_SHIFT_NAME_MAX = 40;
+  const WORKING_SHIFT_NAME_MAX = 15;
   const [activeTab, setActiveTab] = useState("employees");
   const [moduleData, setModuleData] = useState(() => normalizeHrData(DEFAULT_HR_DATA));
   const [hrFormNotice, setHrFormNotice] = useState("");
   const [hrFieldErrors, setHrFieldErrors] = useState({});
+  const [geoAttendanceSettings, setGeoAttendanceSettings] = useState({
+    enabled: false,
+    location_name: "",
+    latitude: "",
+    longitude: "",
+    radius_meters: "100",
+    allow_outside_fence: false,
+    require_gps: true,
+    google_maps_url: "",
+  });
+  const [geoSettingsNotice, setGeoSettingsNotice] = useState("");
+  const [geoPunchNotice, setGeoPunchNotice] = useState("");
+  const [geoPunchLoading, setGeoPunchLoading] = useState(false);
+  const [myAttendanceGeoMeta, setMyAttendanceGeoMeta] = useState(null);
   const [formValues, setFormValues] = useState({
     ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
     temporarySameAsPermanent: false,
@@ -24232,6 +24274,7 @@ export function HrManagementModule({
     pendingUserId: "",
     targetShiftId: "",
   });
+  const [shiftAssignReturnTab, setShiftAssignReturnTab] = useState("attendance");
   const [draggingShiftUserId, setDraggingShiftUserId] = useState("");
   const [shiftDropTargetId, setShiftDropTargetId] = useState("");
   const [draggingShiftColumnId, setDraggingShiftColumnId] = useState("");
@@ -24323,6 +24366,7 @@ export function HrManagementModule({
 
   const openAssignWorkingShift = useCallback((row) => {
     const shiftId = String(row?.id || "").trim();
+    setShiftAssignReturnTab(activeTab === "attendanceSettings" ? "attendanceSettings" : "attendance");
     setShiftAssignPage({
       open: true,
       focusShiftId: shiftId,
@@ -24331,7 +24375,7 @@ export function HrManagementModule({
       pendingUserId: "",
       targetShiftId: shiftId,
     });
-  }, []);
+  }, [activeTab]);
 
   const openEditWorkingShift = useCallback((row) => {
     setShiftModal({
@@ -24358,7 +24402,8 @@ export function HrManagementModule({
     }));
     setDraggingShiftUserId("");
     setShiftDropTargetId("");
-  }, []);
+    setActiveTab(shiftAssignReturnTab === "attendanceSettings" ? "attendanceSettings" : "attendance");
+  }, [shiftAssignReturnTab]);
 
   const openAttendanceLogicPage = useCallback((mode = "view") => {
     setAttendanceLogicPage({ open: true, mode: mode === "view" ? "view" : "edit" });
@@ -25147,6 +25192,7 @@ export function HrManagementModule({
       const tabByHash = {
         employees: "employees",
         attendance: "attendance",
+        attendancesettings: "attendanceSettings",
         leaves: "leaves",
         payroll: "payroll",
         salarystructures: "salaryStructures",
@@ -25208,6 +25254,35 @@ export function HrManagementModule({
     return () => {
       cancelled = true;
       window.removeEventListener("focus", loadHrUserDirectory);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadGeoAttendanceSettings() {
+      try {
+        const data = await apiFetch("/api/hr/attendance/geo-settings");
+        if (cancelled) return;
+        const setting = data?.setting || {};
+        setGeoAttendanceSettings({
+          enabled: Boolean(setting.enabled),
+          location_name: String(setting.location_name || "").trim(),
+          latitude: setting.latitude ?? "",
+          longitude: setting.longitude ?? "",
+          radius_meters: String(setting.radius_meters ?? "100").trim() || "100",
+          allow_outside_fence: Boolean(setting.allow_outside_fence),
+          require_gps: setting.require_gps !== false,
+          google_maps_url: String(setting.google_maps_url || "").trim(),
+        });
+      } catch (_error) {
+        if (!cancelled) {
+          setGeoAttendanceSettings((prev) => ({ ...prev, google_maps_url: "" }));
+        }
+      }
+    }
+    loadGeoAttendanceSettings();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -26631,6 +26706,153 @@ export function HrManagementModule({
     });
   }
 
+  async function saveGeoAttendanceSettings(event) {
+    event?.preventDefault?.();
+    const latitude = geoAttendanceSettings.latitude === "" ? "" : Number(geoAttendanceSettings.latitude);
+    const longitude = geoAttendanceSettings.longitude === "" ? "" : Number(geoAttendanceSettings.longitude);
+    const radiusMeters = Number(geoAttendanceSettings.radius_meters);
+    if (geoAttendanceSettings.enabled) {
+      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+        setGeoSettingsNotice("Latitude must be -90 to 90");
+        return;
+      }
+      if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        setGeoSettingsNotice("Longitude must be -180 to 180");
+        return;
+      }
+      if (!Number.isFinite(radiusMeters) || radiusMeters < 20) {
+        setGeoSettingsNotice("Radius minimum is 20 meters");
+        return;
+      }
+    }
+    try {
+      const data = await apiFetch("/api/hr/attendance/geo-settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: geoAttendanceSettings.enabled,
+          location_name: geoAttendanceSettings.location_name,
+          latitude: geoAttendanceSettings.latitude === "" ? null : latitude,
+          longitude: geoAttendanceSettings.longitude === "" ? null : longitude,
+          radius_meters: geoAttendanceSettings.radius_meters,
+          allow_outside_fence: geoAttendanceSettings.allow_outside_fence,
+          require_gps: geoAttendanceSettings.require_gps,
+        }),
+      });
+      const setting = data?.setting || {};
+      setGeoAttendanceSettings({
+        enabled: Boolean(setting.enabled),
+        location_name: String(setting.location_name || "").trim(),
+        latitude: setting.latitude ?? "",
+        longitude: setting.longitude ?? "",
+        radius_meters: String(setting.radius_meters ?? "100").trim() || "100",
+        allow_outside_fence: Boolean(setting.allow_outside_fence),
+        require_gps: setting.require_gps !== false,
+        google_maps_url: String(setting.google_maps_url || "").trim(),
+      });
+      setGeoSettingsNotice("Geo attendance settings saved.");
+    } catch (error) {
+      setGeoSettingsNotice(String(error?.message || "Unable to save geo attendance settings."));
+    }
+  }
+
+  function syncGeoAttendanceRowFromApi(attendance = {}) {
+    const attendanceDate = String(attendance.attendance_date || todayIso).trim() || todayIso;
+    const employee = String(myAttendanceEmployee || currentHrEmployeeName || "").trim();
+    if (!employee) return;
+    const checkinLat = attendance.checkin_latitude;
+    const checkinLng = attendance.checkin_longitude;
+    const checkoutLat = attendance.checkout_latitude;
+    const checkoutLng = attendance.checkout_longitude;
+    upsertAttendanceRecord({
+      employee,
+      date: attendanceDate,
+      patch: {
+        entryMode: "User Side",
+        inTime: attendance.checkin_time ? new Date(attendance.checkin_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : undefined,
+        outTime: attendance.checkout_time ? new Date(attendance.checkout_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : undefined,
+        status: attendance.geo_status === "OUTSIDE" ? "Present" : "Present",
+        locationStatus: attendance.geo_status === "OUTSIDE" ? "Outside Fence" : attendance.geo_status === "INSIDE" ? "Inside Fence" : "Manual",
+        distanceMeters: attendance.checkout_distance_meters ?? attendance.checkin_distance_meters ?? "",
+        gpsAccuracy: attendance.checkout_accuracy ?? attendance.checkin_accuracy ?? "",
+        mapUrl: buildGoogleMapsLink(checkoutLat ?? checkinLat, checkoutLng ?? checkinLng),
+        checkinLat,
+        checkinLng,
+        checkoutLat,
+        checkoutLng,
+        geoStatus: attendance.geo_status || "",
+        outsideReason: attendance.outside_reason || "",
+      },
+      action: "Geo Attendance",
+    });
+    setMyAttendanceGeoMeta({
+      locationStatus: attendance.geo_status === "OUTSIDE" ? "Outside Fence" : attendance.geo_status === "INSIDE" ? "Inside Fence" : "Manual",
+      distanceMeters: attendance.checkout_distance_meters ?? attendance.checkin_distance_meters ?? "",
+      gpsAccuracy: attendance.checkout_accuracy ?? attendance.checkin_accuracy ?? "",
+    });
+  }
+
+  async function handleGeoAttendancePunch(action) {
+    const selectedEmployee = String(myAttendanceEmployee || "").trim();
+    const selfEmployee = String(currentHrEmployeeName || "").trim();
+    if (!selectedEmployee) return;
+    if (selfEmployee && selectedEmployee !== selfEmployee) {
+      setGeoPunchNotice("Employees can only check-in/out for themselves.");
+      return;
+    }
+    if (!navigator.geolocation) {
+      setGeoPunchNotice("Location permission denied. Please enable GPS permission.");
+      return;
+    }
+    setGeoPunchLoading(true);
+    setGeoPunchNotice("Getting GPS location...");
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      const payloadBase = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      };
+      if (Number(position.coords.accuracy) > 200) {
+        setGeoPunchLoading(false);
+        setGeoPunchNotice("Low GPS accuracy");
+        return;
+      }
+      async function submitGeoPunch(outsideReason = "") {
+        const endpoint = action === "in" ? "/api/hr/attendance/geo-checkin" : "/api/hr/attendance/geo-checkout";
+        const data = await apiFetch(endpoint, {
+          method: "POST",
+          body: JSON.stringify({ ...payloadBase, outside_reason: outsideReason }),
+        });
+        syncGeoAttendanceRowFromApi(data?.attendance || {});
+        setGeoPunchNotice(String(data?.message || "").trim() || (action === "in" ? "Check-in saved successfully." : "Check-out saved successfully."));
+      }
+      try {
+        await submitGeoPunch("");
+      } catch (error) {
+        const errorMessage = String(error?.message || "").trim();
+        if (errorMessage.toLowerCase().includes("outside reason is required")) {
+          const reason = window.prompt("You are outside allowed office location. Enter reason:");
+          if (!reason) {
+            setGeoPunchNotice("You are outside allowed office location.");
+            setGeoPunchLoading(false);
+            return;
+          }
+          try {
+            await submitGeoPunch(reason);
+          } catch (retryError) {
+            setGeoPunchNotice(String(retryError?.message || "Unable to save geo attendance."));
+          }
+        } else {
+          setGeoPunchNotice(errorMessage || "Unable to save geo attendance.");
+        }
+      } finally {
+        setGeoPunchLoading(false);
+      }
+    }, () => {
+      setGeoPunchLoading(false);
+      setGeoPunchNotice("Location permission denied. Please enable GPS permission.");
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  }
+
   function handleAttendancePunch(action, employeeName, source = "User Side") {
     const name = String(employeeName || "").trim();
     if (!name) {
@@ -27924,8 +28146,8 @@ export function HrManagementModule({
         <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
       ) : (
         <>
-	      {(activeTab !== "attendance" || hasHrFullAccess) && activeTab !== "holidays" && !(activeTab === "attendance" && attendanceLogicPage.open) ? (
-          activeTab === "attendance" && hasHrFullAccess && !showOnlyEmployeeForm ? (
+	      {(activeTab !== "attendance" || hasHrFullAccess) && !(activeTab === "attendanceSettings" && !shiftAssignPage.open) && activeTab !== "holidays" && !(activeTab === "attendance" && attendanceLogicPage.open) ? (
+          (activeTab === "attendance" || activeTab === "attendanceSettings") && hasHrFullAccess && !showOnlyEmployeeForm ? (
             shiftAssignPage.open ? (
               <div>
                 <div className="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
@@ -27933,7 +28155,7 @@ export function HrManagementModule({
                     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                       <button type="button" className="btn btn-outline-light btn-sm" onClick={closeShiftAssignPage}>
                         <i className="bi bi-arrow-left me-1" aria-hidden="true" />
-                        Back to Attendance
+                        {shiftAssignReturnTab === "attendanceSettings" ? "Back to Attendance Setting" : "Back to Attendance"}
                       </button>
                     </div>
                     <h6 className="mb-1">Assign Users to Shifts</h6>
@@ -28135,15 +28357,15 @@ export function HrManagementModule({
                 </div>
               </div>
             ) : (
-              <div className="row g-3">
+              <div className="row g-3 align-items-stretch">
                 <div className="col-12 col-xl-7">
-                  <div className="card p-3">
+                  <div className="card p-3 h-100">
                     <h6 className="mb-3">
                       {editingId
                         ? `Edit ${config.itemLabel}`
                         : `Create ${config.itemLabel}`}
                     </h6>
-                    <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+                    <form ref={hrEntryFormRef} className="d-flex flex-column gap-3 h-100" onSubmit={onSubmit}>
             {hrFormNotice ? (
               <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
             ) : null}
@@ -28287,319 +28509,528 @@ export function HrManagementModule({
                     </form>
                   </div>
                 </div>
-                <div className="col-12 col-xl-5">
-                  <div className="card p-3 h-100">
-                    <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
-                      <div>
-                        <h6 className="mb-1 text-body">Attendance Settings</h6>
-                        <div className="small text-body-secondary">Manage working shifts for attendance & payroll.</div>
+                {activeTab === "attendance" ? (
+                  <div className="col-12 col-xl-5">
+                    <div className="card p-3 h-100">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <h6 className="mb-0">My Attendance (HR)</h6>
+                        {hasHrFullAccess ? (
+                          <div className="d-flex align-items-center gap-2">
+                            <label className="small text-secondary mb-0">Employee</label>
+                            <div style={{ minWidth: "220px", maxWidth: "260px" }}>
+                              <AutocompleteSelectSm
+                                value={myAttendanceEmployee}
+                                onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
+                                options={employeeNameOptions}
+                                placeholder="Search employee"
+                                ariaLabel="Select employee"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="small text-secondary">
+                            Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        className="btn btn-success btn-sm"
-                        onClick={openAddWorkingShift}
-                      >
-                        <i className="bi bi-plus-lg me-1" aria-hidden="true" />
-                        Add Shift
-                      </button>
-                    </div>
-                    <div className="table-responsive">
-                      <table className="table table-sm align-middle mb-0 wz-hr-shift-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">Shift</th>
-                            <th scope="col">From</th>
-                            <th scope="col">To</th>
-                            <th scope="col" className="text-end table-actions">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {workingShiftRows.length ? workingShiftRows.map((row) => (
-                            <tr key={`shift-row-${row.id}`}>
-                              <td className="fw-semibold" title={row.name}>
-                                {String(row.name || "").length > 8 ? `${String(row.name).slice(0, 8)}...` : (row.name || "-")}
-                              </td>
-                              <td>{formatTimeToAmPm(row.fromTime) || row.fromTime || "-"}</td>
-                              <td>{formatTimeToAmPm(row.toTime) || row.toTime || "-"}</td>
-                              <td className="text-end table-actions">
-                                <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn"
-                                    data-wz-tooltip="Edit shift"
-                                    aria-label="Edit shift"
-                                    onClick={() => openEditWorkingShift(row)}
-                                  >
-                                    <i className="bi bi-pencil" aria-hidden="true" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn"
-                                    data-wz-tooltip="Assign users"
-                                    aria-label="Assign users"
-                                    onClick={() => openAssignWorkingShift(row)}
-                                  >
-                                    <i className="bi bi-person-plus" aria-hidden="true" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-danger btn-sm saas-org-icon-btn wz-table-action-btn"
-                                    data-wz-tooltip="Delete shift"
-                                    aria-label="Delete shift"
-                                    onClick={() => deleteWorkingShift(row)}
-                                  >
-                                    <i className="bi bi-trash" aria-hidden="true" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan={4} className="text-center text-secondary small py-4">
-                                No shifts yet. Add your first working shift.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                      <div className="row g-3">
+                        <div className="col-6 col-lg-3">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">Date</div>
+                            <div className="fw-semibold mt-1">{todayIso}</div>
+                          </div>
+                        </div>
+                        <div className="col-6 col-lg-3">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">In Time</div>
+                            <div className="fw-semibold mt-1">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
+                          </div>
+                        </div>
+                        <div className="col-6 col-lg-3">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">Out Time</div>
+                            <div className="fw-semibold mt-1">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
+                          </div>
+                        </div>
+                        <div className="col-6 col-lg-3">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">Worked</div>
+                            <div className="fw-semibold mt-1">{myAttendanceToday?.workedHours || "-"}</div>
+                          </div>
+                        </div>
+                        <div className="col-6 col-lg-4">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">Status</div>
+                            <div className="fw-semibold mt-1">
+                              {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
+                                ? `Permission (${myAttendanceToday.permissionHours} hrs)`
+                                : (myAttendanceToday?.status || "-")}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-6 col-lg-4">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="small text-secondary">GPS</div>
+                            <div className="fw-semibold mt-1">{geoAttendanceSettings.require_gps ? "Required" : "Not Required"}</div>
+                          </div>
+                        </div>
+                        <div className="col-12 col-lg-4">
+                          <div className="border rounded-3 p-3 h-100 d-flex flex-column justify-content-center">
+                            <div className="small text-secondary">Quick Action</div>
+                            <div className="d-grid gap-2 mt-2">
+                              <button
+                                type="button"
+                                className="btn btn-outline-success btn-sm"
+                                disabled={!myAttendanceEmployee || geoPunchLoading}
+                                onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
+                              >
+                                {geoPunchLoading ? "Getting GPS..." : "In"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-info btn-sm"
+                                disabled={!myAttendanceEmployee || geoPunchLoading}
+                                onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("out") : handleAttendancePunch("out", myAttendanceEmployee, "HR Self"))}
+                              >
+                                Out
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-12">
+                          <div className="border rounded-3 p-3 h-100">
+                            <div className="row g-3">
+                              <div className="col-12 col-md-7">
+                                <div className="small text-secondary">Last Location</div>
+                                <div className="fw-semibold mt-1">{myAttendanceGeoMeta?.locationStatus || myAttendanceToday?.locationStatus || "-"}</div>
+                              </div>
+                              <div className="col-12 col-md-5">
+                                <div className="small text-secondary">Distance</div>
+                                <div className="fw-semibold mt-1">{formatDistanceMeters(myAttendanceGeoMeta?.distanceMeters ?? myAttendanceToday?.distanceMeters)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {geoPunchNotice ? <div className="small mt-3 text-secondary">{geoPunchNotice}</div> : null}
                     </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             )
           ) : (
-            <div className="card p-3">
-              <h6 className="mb-3">
-                {editingId
-                  ? `Edit ${config.itemLabel}`
-                  : (showOnlyEmployeeForm && activeTab === "employees" ? config.itemLabel : `Create ${config.itemLabel}`)}
-              </h6>
-              <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
-                {hrFormNotice ? (
-                  <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
-                ) : null}
-                {activeTab === "employees" ? (
-                  <>
-                    <div className="row g-3">
-                      {[
-                        "name",
-                        "gender",
-                        "department",
-                        "designation",
-                      ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+            activeTab === "attendance" ? (
+              <div className="row g-3 align-items-stretch">
+                <div className="col-12 col-xl-7">
+                  <div className="card p-3 h-100">
+                    <h6 className="mb-3">
+                      {editingId ? `Edit ${config.itemLabel}` : "Create Attendance Entry"}
+                    </h6>
+                    <form ref={hrEntryFormRef} className="d-flex flex-column gap-3 h-100" onSubmit={onSubmit}>
+                      {hrFormNotice ? (
+                        <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
+                      ) : null}
+                      <div className="row g-3">
+                        {config.fields
+                          .filter((field) => String(field?.key || "") !== "notes")
+                          .map((field) => renderHrField(field, "col-12 col-md-6"))}
+                      </div>
+                      <div className="row g-3 align-items-end">
+                        <div className="col-12">
+                          {renderHrField(config.fields.find((field) => String(field?.key || "") === "notes"), "col-12")}
+                        </div>
+                      </div>
+                      {!editingId && !hasHrFullAccess ? (
+                        <div className="d-flex flex-wrap align-items-center gap-2">
+                          <span className="small text-secondary">User Login Attendance:</span>
+                          <div className="d-inline-flex gap-2 flex-nowrap">
+                            <button
+                              type="button"
+                              className="btn btn-outline-success btn-sm"
+                              disabled={!String(formValues.employee || "").trim()}
+                              onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
+                            >
+                              Attendance In
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline-info btn-sm"
+                              disabled={!String(formValues.employee || "").trim()}
+                              onClick={() => handleAttendancePunch("out", formValues.employee, "User Side")}
+                            >
+                              Attendance Out
+                            </button>
+                          </div>
+                          <span className="ms-auto small text-secondary text-truncate" style={{ minWidth: 0 }}>
+                            Selected employee + today date record will update.
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="d-flex justify-content-end gap-2 mt-auto">
+                        <button type="submit" className="btn btn-success btn-sm">
+                          {editingId ? "Update" : "Create"}
+                        </button>
+                        {editingId ? (
+                          <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    </form>
+                  </div>
+                </div>
+                <div className="col-12 col-xl-5">
+                  <div className="card p-3 h-100">
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                      <h6 className="mb-0">My Attendance (HR)</h6>
+                      {hasHrFullAccess ? (
+                        <div className="d-flex align-items-center gap-2">
+                          <label className="small text-secondary mb-0">Employee</label>
+                          <div style={{ minWidth: "220px", maxWidth: "260px" }}>
+                            <AutocompleteSelectSm
+                              value={myAttendanceEmployee}
+                              onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
+                              options={employeeNameOptions}
+                              placeholder="Search employee"
+                              ariaLabel="Select employee"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="small text-secondary">
+                          Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="row g-3">
-                      {[
-                        "dateOfJoining",
-                        "dateOfBirth",
-                        "bloodGroup",
-                        "fatherName",
-                        "motherName",
-                      ].map((fieldKey) => renderHrField(
-                        employeeFieldMap.get(fieldKey),
-                        ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
-                          ? "col-12 col-md-6 col-xl-2"
-                          : "col-12 col-md-6 col-xl-3"
-                      ))}
-                    </div>
-                    <div className="row g-3 hr-upload-divider">
-                      {[
-                        "photoDataUrl",
-                        "documentName",
-                      ].map((fieldKey) => renderHrField(
-                        employeeFieldMap.get(fieldKey),
-                        "col-12 col-xl-6"
-                      ))}
-                    </div>
-                    <div className="row g-3">
-                      {[
-                        "contactCountryCode",
-                        "secondaryContactCountryCode",
-                        "maritalStatus",
-                        "wifeName",
-                      ].map((fieldKey) => renderHrField(
-                        employeeFieldMap.get(fieldKey),
-                        "col-12 col-md-6 col-xl-3"
-                      ))}
-                    </div>
-                    <hr className="section-divider mt-1 mb-2" />
-                    <div className="row g-3">
-                      <div className="col-12 col-xl-6">
-                        <div className="h-100">
-                          <h6 className="mb-3">Permanent Address</h6>
+                      <div className="col-6 col-lg-3">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">Date</div>
+                          <div className="fw-semibold mt-1">{todayIso}</div>
+                        </div>
+                      </div>
+                      <div className="col-6 col-lg-3">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">In Time</div>
+                          <div className="fw-semibold mt-1">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
+                        </div>
+                      </div>
+                      <div className="col-6 col-lg-3">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">Out Time</div>
+                          <div className="fw-semibold mt-1">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
+                        </div>
+                      </div>
+                      <div className="col-6 col-lg-3">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">Worked</div>
+                          <div className="fw-semibold mt-1">{myAttendanceToday?.workedHours || "-"}</div>
+                        </div>
+                      </div>
+                      <div className="col-6 col-lg-4">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">Status</div>
+                          <div className="fw-semibold mt-1">
+                            {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
+                              ? `Permission (${myAttendanceToday.permissionHours} hrs)`
+                              : (myAttendanceToday?.status || "-")}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-6 col-lg-4">
+                        <div className="border rounded-3 p-3 h-100">
+                          <div className="small text-secondary">GPS</div>
+                          <div className="fw-semibold mt-1">{geoAttendanceSettings.require_gps ? "Required" : "Not Required"}</div>
+                        </div>
+                      </div>
+                      <div className="col-12 col-lg-4">
+                        <div className="border rounded-3 p-3 h-100 d-flex flex-column justify-content-center">
+                          <div className="small text-secondary">Quick Action</div>
+                          <div className="d-grid gap-2 mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-outline-success btn-sm"
+                              disabled={!myAttendanceEmployee || geoPunchLoading}
+                              onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
+                            >
+                              {geoPunchLoading ? "Getting GPS..." : "In"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline-info btn-sm"
+                              disabled={!myAttendanceEmployee || geoPunchLoading}
+                              onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("out") : handleAttendancePunch("out", myAttendanceEmployee, "HR Self"))}
+                            >
+                              Out
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-12">
+                        <div className="border rounded-3 p-3 h-100">
                           <div className="row g-3">
-                            {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
-                              renderHrField(
-                                employeeFieldMap.get(fieldKey),
-                                fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
-                              )
+                            <div className="col-12 col-md-7">
+                              <div className="small text-secondary">Last Location</div>
+                              <div className="fw-semibold mt-1">{myAttendanceGeoMeta?.locationStatus || myAttendanceToday?.locationStatus || "-"}</div>
+                            </div>
+                            <div className="col-12 col-md-5">
+                              <div className="small text-secondary">Distance</div>
+                              <div className="fw-semibold mt-1">{formatDistanceMeters(myAttendanceGeoMeta?.distanceMeters ?? myAttendanceToday?.distanceMeters)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {geoPunchNotice ? <div className="small mt-3 text-secondary">{geoPunchNotice}</div> : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="card p-3">
+                <h6 className="mb-3">
+                  {editingId
+                    ? `Edit ${config.itemLabel}`
+                    : (showOnlyEmployeeForm && activeTab === "employees" ? config.itemLabel : `Create ${config.itemLabel}`)}
+                </h6>
+                <form ref={hrEntryFormRef} className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+                  {hrFormNotice ? (
+                    <div className="alert alert-danger py-2 mb-0">{hrFormNotice}</div>
+                  ) : null}
+                  {activeTab === "employees" ? (
+                    <>
+                      <div className="row g-3">
+                        {[
+                          "name",
+                          "gender",
+                          "department",
+                          "designation",
+                        ].map((fieldKey) => renderHrField(employeeFieldMap.get(fieldKey), "col-12 col-md-6 col-xl-3"))}
+                      </div>
+                      <div className="row g-3">
+                        {[
+                          "dateOfJoining",
+                          "dateOfBirth",
+                          "bloodGroup",
+                          "fatherName",
+                          "motherName",
+                        ].map((fieldKey) => renderHrField(
+                          employeeFieldMap.get(fieldKey),
+                          ["dateOfJoining", "dateOfBirth", "bloodGroup"].includes(fieldKey)
+                            ? "col-12 col-md-6 col-xl-2"
+                            : "col-12 col-md-6 col-xl-3"
+                        ))}
+                      </div>
+                      <div className="row g-3 hr-upload-divider">
+                        {[
+                          "photoDataUrl",
+                          "documentName",
+                        ].map((fieldKey) => renderHrField(
+                          employeeFieldMap.get(fieldKey),
+                          "col-12 col-xl-6"
+                        ))}
+                      </div>
+                      <div className="row g-3">
+                        {[
+                          "contactCountryCode",
+                          "secondaryContactCountryCode",
+                          "maritalStatus",
+                          "wifeName",
+                        ].map((fieldKey) => renderHrField(
+                          employeeFieldMap.get(fieldKey),
+                          "col-12 col-md-6 col-xl-3"
+                        ))}
+                      </div>
+                      <hr className="section-divider mt-1 mb-2" />
+                      <div className="row g-3">
+                        <div className="col-12 col-xl-6">
+                          <div className="h-100">
+                            <h6 className="mb-3">Permanent Address</h6>
+                            <div className="row g-3">
+                              {["permanentAddress", "permanentCountry", "permanentState", "permanentCity", "permanentPincode"].map((fieldKey) =>
+                                renderHrField(
+                                  employeeFieldMap.get(fieldKey),
+                                  fieldKey === "permanentAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                                )
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-12 col-xl-6">
+                          <div className="h-100">
+                            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                              <h6 className="mb-0">Temporary Address</h6>
+                              <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input mt-0"
+                                  checked={Boolean(formValues.temporarySameAsPermanent)}
+                                  onChange={(event) => {
+                                    const checked = event.target.checked;
+                                    setFormValues((prev) => {
+                                      const next = { ...prev, temporarySameAsPermanent: checked };
+                                      return checked ? syncTemporaryAddressFromPermanent(next) : next;
+                                    });
+                                  }}
+                                />
+                                Temporary same as permanent
+                              </label>
+                            </div>
+                            {!formValues.temporarySameAsPermanent ? (
+                              <div className="row g-3">
+                                {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
+                                  renderHrField(
+                                    employeeFieldMap.get(fieldKey),
+                                    fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <div className="small text-secondary">Temporary address entry hidden.</div>
                             )}
                           </div>
                         </div>
                       </div>
-                      <div className="col-12 col-xl-6">
-                        <div className="h-100">
-                          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                            <h6 className="mb-0">Temporary Address</h6>
-                            <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
-                              <input
-                                type="checkbox"
-                                className="form-check-input mt-0"
-                                checked={Boolean(formValues.temporarySameAsPermanent)}
-                                onChange={(event) => {
-                                  const checked = event.target.checked;
-                                  setFormValues((prev) => {
-                                    const next = { ...prev, temporarySameAsPermanent: checked };
-                                    return checked ? syncTemporaryAddressFromPermanent(next) : next;
-                                  });
-                                }}
-                              />
-                              Temporary same as permanent
-                            </label>
-                          </div>
-                          {!formValues.temporarySameAsPermanent ? (
-                            <div className="row g-3">
-                              {["temporaryAddress", "temporaryCountry", "temporaryState", "temporaryCity", "temporaryPincode"].map((fieldKey) =>
-                                renderHrField(
-                                  employeeFieldMap.get(fieldKey),
-                                  fieldKey === "temporaryAddress" ? "col-12" : "col-12 col-md-6 col-xl-3"
-                                )
-                              )}
-                            </div>
-                          ) : (
-                            <div className="small text-secondary">Temporary address entry hidden.</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-                {activeTab !== "employees" ? (
-                  <div className="row g-3">
-                    {config.fields.map((field) => renderHrField(field, field?.colClassName || "col-12 col-md-6 col-xl-4"))}
-                  </div>
-                ) : null}
-                {activeTab === "attendance" && !editingId && !hasHrFullAccess ? (
-                  <div className="d-flex align-items-center gap-2">
-                    <span className="small text-secondary">User Login Attendance:</span>
-                    <div className="d-inline-flex gap-2 flex-nowrap">
-                        <button
-                          type="button"
-                          className="btn btn-outline-success btn-sm"
-                          disabled={!String(formValues.employee || "").trim()}
-                          onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
-                        >
-                          Attendance In
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-outline-info btn-sm"
-                          disabled={!String(formValues.employee || "").trim()}
-                          onClick={() => handleAttendancePunch("out", formValues.employee, "User Side")}
-                        >
-                          Attendance Out
-                        </button>
-                    </div>
-                    <span className="ms-auto small text-secondary text-truncate" style={{ minWidth: 0 }}>
-                      Selected employee + today date record will update.
-                    </span>
-                  </div>
-                ) : null}
-                <div className="d-flex gap-2">
-                  <button type="submit" className="btn btn-success btn-sm">
-                    {editingId ? "Update" : "Create"}
-                  </button>
-                  {editingId ? (
-                    <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
-                      Cancel
-                    </button>
+                    </>
                   ) : null}
-                </div>
-              </form>
-            </div>
+                  {activeTab !== "employees" ? (
+                    <div className="row g-3">
+                      {config.fields.map((field) => renderHrField(field, field?.colClassName || "col-12 col-md-6 col-xl-4"))}
+                    </div>
+                  ) : null}
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-success btn-sm">
+                      {editingId ? "Update" : "Create"}
+                    </button>
+                    {editingId ? (
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={onCancelEdit}>
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              </div>
+            )
           )
       ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open && !attendanceLogicPage.open ? (
+      {!showOnlyEmployeeForm && activeTab === "attendanceSettings" && hasHrFullAccess ? (
         <div className="row g-3">
-          <div className="col-12 col-xl-8">
+          <div className="col-12">
             <div className="card p-3 h-100">
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                <h6 className="mb-0">My Attendance (HR)</h6>
-                {hasHrFullAccess ? (
-                  <div className="d-flex align-items-center gap-2">
-                    <label className="small text-secondary mb-0">Employee</label>
-                    <div style={{ minWidth: "220px" }}>
-                      <AutocompleteSelectSm
-                        value={myAttendanceEmployee}
-                        onChange={(nextValue) => setMyAttendanceEmployee(nextValue)}
-                        options={employeeNameOptions}
-                        placeholder="Search employee"
-                        ariaLabel="Select employee"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="small text-secondary">
-                    Employee: <span className="text-body fw-semibold">{myAttendanceEmployee || currentHrEmployeeName || "-"}</span>
-                  </div>
-                )}
-              </div>
-              <hr className="my-2" style={{ borderColor: "rgba(25, 135, 84, 0.2)", opacity: 1 }} />
-              <div className="row g-3 align-items-end">
-                <div className="col-12 col-md-2">
-                  <div className="small text-secondary">Date</div>
-                  <div className="fw-semibold">{todayIso}</div>
+              <div className="row g-3 align-items-start mb-3">
+                <div className="col-12 col-lg-5">
+                  <h6 className="mb-1 text-body">Geo Attendance Settings</h6>
+                  <div className="small text-body-secondary">Configure GPS check-in, office radius, and fence rules.</div>
                 </div>
-                <div className="col-12 col-md-2">
-                  <div className="small text-secondary">In Time</div>
-                  <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.inTime)}</div>
-                </div>
-                <div className="col-12 col-md-2">
-                  <div className="small text-secondary">Out Time</div>
-                  <div className="fw-semibold">{formatTimeToAmPm(myAttendanceToday?.outTime)}</div>
-                </div>
-                <div className="col-12 col-md-2">
-                  <div className="small text-secondary">Worked</div>
-                  <div className="fw-semibold">{myAttendanceToday?.workedHours || "-"}</div>
-                </div>
-                <div className="col-12 col-md-2">
-                  <div className="small text-secondary">Status</div>
-                  <div className="fw-semibold">
-                    {myAttendanceToday?.status === "Permission" && myAttendanceToday?.permissionHours
-                      ? `Permission (${myAttendanceToday.permissionHours} hrs)`
-                      : (myAttendanceToday?.status || "-")}
-                  </div>
-                </div>
-                <div className="col-12 col-md-2">
-                  <div className="d-flex gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-outline-success btn-sm w-100"
-                      disabled={!myAttendanceEmployee}
-                      onClick={() => handleAttendancePunch("in", myAttendanceEmployee, "HR Self")}
-                    >
-                      In
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-info btn-sm w-100"
-                      disabled={!myAttendanceEmployee}
-                      onClick={() => handleAttendancePunch("out", myAttendanceEmployee, "HR Self")}
-                    >
-                      Out
-                    </button>
+                <div className="col-12 col-lg-7">
+                  <div className="d-flex flex-wrap justify-content-lg-end align-items-center gap-3">
+                    {[
+                      ["enabled", "Enable Geo Attendance"],
+                      ["allow_outside_fence", "Allow Check-In Outside Fence"],
+                      ["require_gps", "Require GPS For In/Out"],
+                    ].map(([key, label]) => (
+                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0" key={`geo-settings-header-${key}`}>
+                        <input type="checkbox" className="form-check-input mt-0" checked={Boolean(geoAttendanceSettings[key])} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, [key]: event.target.checked }))} />
+                        {label}
+                      </label>
+                    ))}
+                    {geoAttendanceSettings.google_maps_url ? (
+                      <button type="button" className="btn btn-outline-light btn-sm" onClick={() => window.open(geoAttendanceSettings.google_maps_url, "_blank", "noopener,noreferrer")}>
+                        Open Location in Google Maps
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
+              {geoSettingsNotice ? <div className="alert alert-secondary py-2 small">{geoSettingsNotice}</div> : null}
+              <form className="row g-3 align-items-end" onSubmit={saveGeoAttendanceSettings}>
+                <div className="col-12 col-lg-3">
+                  <label className="form-label small text-secondary mb-1">Office Location Name</label>
+                  <input className="form-control form-control-sm" value={geoAttendanceSettings.location_name} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, location_name: event.target.value }))} placeholder="Head Office" />
+                </div>
+                <div className="col-6 col-lg-2">
+                  <label className="form-label small text-secondary mb-1">Latitude</label>
+                  <input className="form-control form-control-sm" value={geoAttendanceSettings.latitude} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, latitude: event.target.value }))} placeholder="13.0827" />
+                </div>
+                <div className="col-6 col-lg-2">
+                  <label className="form-label small text-secondary mb-1">Longitude</label>
+                  <input className="form-control form-control-sm" value={geoAttendanceSettings.longitude} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, longitude: event.target.value }))} placeholder="80.2707" />
+                </div>
+                <div className="col-12 col-lg-3">
+                  <label className="form-label small text-secondary mb-1">Allowed Radius in meters</label>
+                  <input className="form-control form-control-sm" value={geoAttendanceSettings.radius_meters} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, radius_meters: event.target.value }))} placeholder="100" />
+                </div>
+                <div className="col-12 col-lg-2 d-flex align-items-end justify-content-lg-end">
+                  <button type="submit" className="btn btn-success btn-sm">Save Geo Settings</button>
+                </div>
+              </form>
             </div>
           </div>
-          <div className="col-12 col-xl-4">
+          <div className="col-12 col-xl-8">
             <div className="card p-3 h-100">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                <div>
+                  <h6 className="mb-1 text-body">Attendance Settings</h6>
+                  <div className="small text-body-secondary">Manage working shifts for attendance & payroll.</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  onClick={openAddWorkingShift}
+                >
+                  <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+                  Add Shift
+                </button>
+              </div>
+              <table className="table table-sm align-middle mb-0 wz-hr-shift-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Shift</th>
+                    <th scope="col">From</th>
+                    <th scope="col">To</th>
+                    <th scope="col" className="text-end table-actions">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workingShiftRows.length ? workingShiftRows.map((row) => (
+                    <tr key={`attendance-settings-shift-row-${row.id}`}>
+                      <td className="fw-semibold" title={row.name}>
+                        {String(row.name || "").length > WORKING_SHIFT_NAME_MAX ? `${String(row.name).slice(0, WORKING_SHIFT_NAME_MAX)}...` : (row.name || "-")}
+                      </td>
+                      <td>{formatTimeToAmPm(row.fromTime) || row.fromTime || "-"}</td>
+                      <td>{formatTimeToAmPm(row.toTime) || row.toTime || "-"}</td>
+                      <td className="text-end table-actions">
+                        <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
+                          <button type="button" className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn" data-wz-tooltip="Edit shift" aria-label="Edit shift" onClick={() => openEditWorkingShift(row)}>
+                            <i className="bi bi-pencil" aria-hidden="true" />
+                          </button>
+                          <button type="button" className="btn btn-outline-success btn-sm saas-org-icon-btn wz-table-action-btn" data-wz-tooltip="Assign users" aria-label="Assign users" onClick={() => openAssignWorkingShift(row)}>
+                            <i className="bi bi-person-plus" aria-hidden="true" />
+                          </button>
+                          <button type="button" className="btn btn-outline-danger btn-sm saas-org-icon-btn wz-table-action-btn" data-wz-tooltip="Delete shift" aria-label="Delete shift" onClick={() => deleteWorkingShift(row)}>
+                            <i className="bi bi-trash" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={4} className="text-center text-secondary small py-4">
+                        No shifts yet. Add your first working shift.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="col-12 col-xl-4 align-self-start">
+            <div className="card p-3">
               <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
                 <div>
                   <h6 className="mb-1">Attendance Logic - {attendanceLogicRules.length} active rule(s)</h6>
                   <div className="small text-secondary">Configure late entry, short-hours, and half-day deduction rules.</div>
+                  <hr className="my-2" style={{ borderColor: "rgba(25, 135, 84, 0.2)", opacity: 1 }} />
                 </div>
                 <div className="d-flex flex-wrap gap-2">
                   <button type="button" className="btn btn-success btn-sm" onClick={() => openAttendanceLogicPage("add")}>
@@ -28973,7 +29404,7 @@ export function HrManagementModule({
 	        </div>
 	      ) : null}
 
-	      {((!showOnlyEmployeeForm || activeTab === "employees") && activeTab !== "holidays" && !(activeTab === "attendance" && shiftAssignPage.open) && !(activeTab === "attendance" && attendanceLogicPage.open)) ? (
+	      {((!showOnlyEmployeeForm || activeTab === "employees") && activeTab !== "attendanceSettings" && activeTab !== "holidays" && !(activeTab === "attendance" && shiftAssignPage.open) && !(activeTab === "attendance" && attendanceLogicPage.open)) ? (
 	        <SearchablePaginatedTableCard
           title={
             showOnlyEmployeeForm && activeTab === "employees"
@@ -29253,6 +29684,28 @@ export function HrManagementModule({
                 return <span className="text-secondary">-</span>;
               }
               return <span className="small fw-semibold text-success">{overtimeText}</span>;
+            }
+            if (activeTab === "attendance" && column.key === "locationStatus") {
+              const value = String(row.locationStatus || row.geoStatus || "").trim();
+              return value ? <span className={`small fw-semibold ${/outside/i.test(value) ? "text-danger" : "text-success"}`}>{value}</span> : <span className="text-secondary">-</span>;
+            }
+            if (activeTab === "attendance" && column.key === "distanceMeters") {
+              return row.distanceMeters || row.distanceMeters === 0 ? formatDistanceMeters(row.distanceMeters) : <span className="text-secondary">-</span>;
+            }
+            if (activeTab === "attendance" && column.key === "gpsAccuracy") {
+              const accuracy = Number(row.gpsAccuracy);
+              if (!Number.isFinite(accuracy)) {
+                return <span className="text-secondary">-</span>;
+              }
+              return <span className={`small fw-semibold ${accuracy > 200 ? "text-danger" : accuracy > 100 ? "text-warning" : "text-body"}`}>{`${Math.round(accuracy)} m`}</span>;
+            }
+            if (activeTab === "attendance" && column.key === "viewMap") {
+              const mapUrl = String(row.mapUrl || "").trim();
+              return mapUrl ? (
+                <button type="button" className="btn btn-outline-light btn-sm" onClick={() => window.open(mapUrl, "_blank", "noopener,noreferrer")}>
+                  View Map
+                </button>
+              ) : <span className="text-secondary">-</span>;
             }
             if (activeTab === "attendance" && column.key === "attendanceDebit") {
               const debitDetails = getAttendanceDebitDetails(row);

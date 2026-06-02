@@ -357,6 +357,79 @@ class EmployeeSalaryHistory(models.Model):
         return f"{self.organization_id} - {self.employee_name} ({self.effective_from})"
 
 
+class AttendanceGeoSetting(models.Model):
+    organization = models.OneToOneField(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_attendance_geo_setting",
+    )
+    location_name = models.CharField(max_length=160, blank=True, default="")
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    radius_meters = models.PositiveIntegerField(default=100)
+    enabled = models.BooleanField(default=False)
+    allow_outside_fence = models.BooleanField(default=False)
+    require_gps = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"AttendanceGeoSetting(org={self.organization_id})"
+
+
+class AttendanceEntry(models.Model):
+    GEO_STATUS_INSIDE = "INSIDE"
+    GEO_STATUS_OUTSIDE = "OUTSIDE"
+    GEO_STATUS_GPS_NOT_AVAILABLE = "GPS_NOT_AVAILABLE"
+    GEO_STATUS_MANUAL = "MANUAL"
+    GEO_STATUS_CHOICES = (
+        (GEO_STATUS_INSIDE, "Inside"),
+        (GEO_STATUS_OUTSIDE, "Outside"),
+        (GEO_STATUS_GPS_NOT_AVAILABLE, "GPS Not Available"),
+        (GEO_STATUS_MANUAL, "Manual"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_attendance_entries",
+    )
+    employee_membership = models.ForeignKey(
+        OrganizationUser,
+        on_delete=models.CASCADE,
+        related_name="attendance_entries",
+    )
+    employee_name = models.CharField(max_length=160)
+    attendance_date = models.DateField(db_index=True)
+    checkin_time = models.DateTimeField(null=True, blank=True)
+    checkout_time = models.DateTimeField(null=True, blank=True)
+    checkin_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    checkin_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    checkin_accuracy = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    checkout_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    checkout_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    checkout_accuracy = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    checkin_distance_meters = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    checkout_distance_meters = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    checkin_inside_geofence = models.BooleanField(null=True, blank=True)
+    checkout_inside_geofence = models.BooleanField(null=True, blank=True)
+    geo_status = models.CharField(max_length=24, choices=GEO_STATUS_CHOICES, default=GEO_STATUS_MANUAL)
+    outside_reason = models.CharField(max_length=255, blank=True, default="")
+    device_info = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-attendance_date", "-updated_at", "-id")
+        unique_together = ("organization", "employee_membership", "attendance_date")
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.employee_name} ({self.attendance_date})"
+
+
 class PayrollEntry(models.Model):
     STATUS_CHOICES = (
         ("draft", "Draft"),

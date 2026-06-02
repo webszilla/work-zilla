@@ -1239,6 +1239,12 @@ html[data-theme="light"] .wz-attendance-alert-text{
   overflow:auto;
   background: rgba(15,23,42,0.3);
 }
+.wz-data-table-wrap[data-wz-overflow-x="false"]{
+  overflow-x:hidden;
+}
+.wz-data-table-wrap[data-wz-overflow-x="true"]{
+  overflow-x:auto;
+}
 .wz-data-table{
   table-layout:auto !important;
   min-width: 980px;
@@ -1827,6 +1833,12 @@ html[data-theme="light"] .wz-country-picker__empty{
   box-shadow:
     0 12px 24px rgba(2, 6, 23, 0.14),
     inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.app-shell .table-responsive[data-wz-overflow-x="false"]{
+  overflow-x: hidden !important;
+}
+.app-shell .table-responsive[data-wz-overflow-x="true"]{
+  overflow-x: auto !important;
 }
 .app-shell .table:not(.table-borderless){
   margin-bottom: 0;

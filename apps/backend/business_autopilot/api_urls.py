@@ -58,6 +58,9 @@ urlpatterns = [
     path("departments/<int:department_id>", api_views.org_department_detail, name="business_autopilot_department_detail"),
     path("payroll/workspace", api_views.payroll_workspace, name="business_autopilot_payroll_workspace"),
     path("payroll/payslips/<int:payslip_id>/pdf", api_views.payroll_payslip_pdf, name="business_autopilot_payroll_payslip_pdf"),
+    path("attendance/geo-settings", api_views.attendance_geo_settings, name="business_autopilot_attendance_geo_settings"),
+    path("attendance/geo-checkin", api_views.attendance_geo_checkin, name="business_autopilot_attendance_geo_checkin"),
+    path("attendance/geo-checkout", api_views.attendance_geo_checkout, name="business_autopilot_attendance_geo_checkout"),
     path("accounts/workspace", api_views.accounts_workspace, name="business_autopilot_accounts_workspace"),
     path("accounts/subscription-categories", api_views.accounts_subscription_categories, name="business_autopilot_accounts_subscription_categories"),
     path(

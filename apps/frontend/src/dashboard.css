@@ -2243,10 +2243,14 @@ html[data-theme="light"] .saas-admin-product-card__status--coming{
   -webkit-overflow-scrolling:touch;
 }
 .app-shell .table-responsive > .table{
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  width:max-content;
+  max-width:none;
+  min-width:100%;
   table-layout: auto;
+}
+.app-shell .wz-sortable-table th,
+.app-shell .wz-sortable-table td{
+  white-space:nowrap;
 }
 .saas-org-table .table{
   margin-top:0 !important;
