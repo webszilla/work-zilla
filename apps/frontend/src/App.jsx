@@ -453,7 +453,7 @@ const reactPages = [
   { label: "Subscription", path: "/dashboard/subscription", icon: "bi-hdd-network", productOnly: "digital-automation" },
   { label: "Media Library", path: "/media-library", icon: "bi-images", adminOnly: true, productOnly: "whatsapp-automation" },
   { label: "CRM", path: "/crm", icon: "bi-people", productOnly: "business-autopilot-erp", moduleKey: "crm" },
-  { label: "HR", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
+  { label: "HRM", path: "/hrm", icon: "bi-person-badge", productOnly: "business-autopilot-erp", moduleKey: "hrm" },
   { label: "Projects", path: "/projects", icon: "bi-diagram-3", productOnly: "business-autopilot-erp", moduleKey: "projects" },
   { label: "Accounts", path: "/accounts", icon: "bi-calculator", productOnly: "business-autopilot-erp", moduleKey: "accounts" },
   { label: "Subscriptions", path: "/subscriptions", icon: "bi-arrow-repeat", productOnly: "business-autopilot-erp", moduleKey: "subscriptions" },
@@ -1606,7 +1606,7 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/hrm"
             element={renderRouteElement(
               <Suspense fallback={<div className="card p-3">Loading module...</div>}>
-                <BusinessAutopilotModulePage moduleKey="hrm" title="HR" />
+                <BusinessAutopilotModulePage moduleKey="hrm" title="HRM" />
               </Suspense>,
               {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
 import ProductAccessSection from "../components/ProductAccessSection.jsx";
@@ -130,7 +130,7 @@ function safeWriteHrModuleData(nextData) {
   }
 }
 
-function upsertAttendanceRow({ employeeName, isoDate, patch = {} }) {
+function upsertAttendanceRow({ employeeName, isoDate, patch = {}, preserveExistingPunchTimes = false }) {
   const name = String(employeeName || "").trim();
   const date = String(isoDate || "").trim();
   if (!name || !date) {
@@ -163,6 +163,16 @@ function upsertAttendanceRow({ employeeName, isoDate, patch = {} }) {
     taskNotes: "",
   };
   const nextRow = { ...base, is_deleted: false, deleted_at: "", ...patch, employee: name, date };
+  if (preserveExistingPunchTimes) {
+    const baseInTime = String(base?.inTime || "").trim();
+    const baseOutTime = String(base?.outTime || "").trim();
+    if (baseInTime) {
+      nextRow.inTime = baseInTime;
+    }
+    if (baseOutTime) {
+      nextRow.outTime = baseOutTime;
+    }
+  }
   const nextRows = index >= 0
     ? rows.map((row, idx) => (idx === index ? nextRow : row))
     : [nextRow, ...rows];
@@ -421,6 +431,7 @@ export default function BusinessAutopilotDashboardPage({
   const [currentUserName, setCurrentUserName] = useState("");
   const [attendancePunch, setAttendancePunch] = useState({ mode: "in", saving: false, error: "" });
   const [attendanceToday, setAttendanceToday] = useState({ inTime: "", outTime: "", durationLabel: "", hasIn: false, hasOut: false });
+  const attendancePunchLockRef = useRef(false);
   const [attendanceOutModal, setAttendanceOutModal] = useState({
     open: false,
     outTime: "",
@@ -508,33 +519,42 @@ export default function BusinessAutopilotDashboardPage({
       return;
     }
     const todayIso = new Date().toISOString().slice(0, 10);
-    const todayRow = readTodayAttendanceRow(employeeName);
-    if (!String(todayRow?.inTime || "").trim()) {
-      closeAttendanceOutModal();
-      setAttendancePunch((prev) => ({ ...prev, error: "Please punch in first." }));
-      syncAttendanceToday(employeeName);
+    if (attendancePunchLockRef.current) {
       return;
     }
-    if (String(todayRow?.outTime || "").trim()) {
+    attendancePunchLockRef.current = true;
+    try {
+      const todayRow = readTodayAttendanceRow(employeeName);
+      if (!String(todayRow?.inTime || "").trim()) {
+        closeAttendanceOutModal();
+        setAttendancePunch((prev) => ({ ...prev, error: "Please punch in first." }));
+        syncAttendanceToday(employeeName);
+        return;
+      }
+      if (String(todayRow?.outTime || "").trim()) {
+        closeAttendanceOutModal();
+        setAttendancePunch((prev) => ({ ...prev, error: "Attendance already completed for today." }));
+        syncAttendanceToday(employeeName);
+        return;
+      }
+      upsertAttendanceRow({
+        employeeName,
+        isoDate: todayIso,
+        patch: {
+          entryMode: "User Side",
+          outTime: attendanceOutModal.outTime || getCurrentTimeHm(),
+          status: "Present",
+          completedTasks: String(attendanceOutModal.completedTasks || "").trim(),
+          taskNotes: String(attendanceOutModal.taskNotes || "").trim(),
+        },
+        preserveExistingPunchTimes: true,
+      });
       closeAttendanceOutModal();
-      setAttendancePunch((prev) => ({ ...prev, error: "Attendance already completed for today." }));
+      setAttendancePunch((prev) => ({ ...prev, error: "" }));
       syncAttendanceToday(employeeName);
-      return;
+    } finally {
+      attendancePunchLockRef.current = false;
     }
-    upsertAttendanceRow({
-      employeeName,
-      isoDate: todayIso,
-      patch: {
-        entryMode: "User Side",
-        outTime: attendanceOutModal.outTime || getCurrentTimeHm(),
-        status: "Present",
-        completedTasks: String(attendanceOutModal.completedTasks || "").trim(),
-        taskNotes: String(attendanceOutModal.taskNotes || "").trim(),
-      },
-    });
-    closeAttendanceOutModal();
-    setAttendancePunch((prev) => ({ ...prev, error: "" }));
-    syncAttendanceToday(employeeName);
   }
 
   useEffect(() => {
@@ -870,9 +890,13 @@ export default function BusinessAutopilotDashboardPage({
       openAttendanceOutModal();
       return;
     }
+    if (attendancePunchLockRef.current) {
+      return;
+    }
+    attendancePunchLockRef.current = true;
     const todayIso = new Date().toISOString().slice(0, 10);
-    setAttendancePunch((prev) => ({ ...prev, saving: true, error: "" }));
     try {
+      setAttendancePunch((prev) => ({ ...prev, saving: true, error: "" }));
       const hrData = safeReadHrModuleData();
       const attendanceRows = normalizeAttendanceRows(hrData?.attendance);
       const todayRow = attendanceRows.find((row) =>
@@ -894,6 +918,7 @@ export default function BusinessAutopilotDashboardPage({
           employeeName,
           isoDate: todayIso,
           patch: { entryMode: "User Side", inTime: getCurrentTimeHm(), status: "Present" },
+          preserveExistingPunchTimes: true,
         });
         setQuickStats((prev) => ({ ...prev, myAttendance: 1 }));
         setAttendancePunch((prev) => ({ ...prev, saving: false, mode: "out", error: "" }));
@@ -902,6 +927,8 @@ export default function BusinessAutopilotDashboardPage({
       }
     } catch {
       setAttendancePunch((prev) => ({ ...prev, saving: false, error: "Unable to update attendance. Please try again." }));
+    } finally {
+      attendancePunchLockRef.current = false;
     }
   }
 

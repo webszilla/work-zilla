@@ -639,9 +639,9 @@ const HR_TAB_CONFIG = {
       { key: "status", label: "Status" }
     ],
     fields: [
-      { key: "employee", label: "Employee", placeholder: "Enter employee name" },
-      { key: "leaveType", label: "Leave Type", placeholder: "Sick / Casual / Paid" },
-      { key: "status", label: "Status", placeholder: "Pending / Approved / Rejected" }
+      { key: "employee", label: "Employee", placeholder: "Search and select employee" },
+      { key: "leaveType", label: "Leave Type", type: "select", options: ["Sick", "Casual", "Paid", "Emergency", "Half Day"], defaultValue: "Sick" },
+      { key: "status", label: "Status", type: "select", options: ["Pending", "Approved", "Rejected"], defaultValue: "Pending" }
     ]
   },
   payroll: {
@@ -2632,8 +2632,10 @@ function createEmptySalaryHistoryForm(defaultMonth = "") {
 }
 
 function createEmptyPayrollRunForm() {
+  const today = getTodayIsoDate();
   return {
-    month: getTodayIsoDate().slice(0, 7),
+    year: today.slice(0, 4),
+    month: today.slice(5, 7),
   };
 }
 
@@ -5372,6 +5374,23 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   const canViewSalaryHistory = Boolean(workspace.permissions?.can_view_salary_history);
   const canEditSalaryHistory = Boolean(canManagePayroll && canViewSalaryHistory);
   const payrollCurrency = String(workspace.organizationProfile?.currency || getOrgCurrency()).trim().toUpperCase() || getOrgCurrency();
+  const payrollRunDefaults = useMemo(() => createEmptyPayrollRunForm(), []);
+  const payrollRunYear = String(payrollRunForm.year || payrollRunDefaults.year).trim();
+  const payrollRunMonth = String(payrollRunForm.month || payrollRunDefaults.month).trim();
+  const payrollMonthOptions = useMemo(() => ([
+    { value: "01", label: "January" },
+    { value: "02", label: "February" },
+    { value: "03", label: "March" },
+    { value: "04", label: "April" },
+    { value: "05", label: "May" },
+    { value: "06", label: "June" },
+    { value: "07", label: "July" },
+    { value: "08", label: "August" },
+    { value: "09", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+  ]), []);
 
   const employeeOptions = useMemo(() => {
     const map = new Map();
@@ -5521,7 +5540,11 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         setWorkspace(nextWorkspace);
         setOrganizationProfileForm(nextWorkspace.organizationProfile);
         setPayrollSettingsForm(nextWorkspace.payrollSettings);
-        setPayrollRunForm((prev) => ({ ...prev, month: prev.month || createEmptyPayrollRunForm().month }));
+        setPayrollRunForm((prev) => ({
+          ...prev,
+          year: prev.year || payrollRunDefaults.year,
+          month: prev.month || payrollRunDefaults.month,
+        }));
       } catch (error) {
         if (!active) return;
         setSaveError(error?.message || "Unable to load payroll workspace.");
@@ -5657,7 +5680,7 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   function resetSalaryHistoryForm() {
     setEditingHistoryId("");
     setSalaryHistoryForm({
-      ...createEmptySalaryHistoryForm(payrollRunForm.month),
+      ...createEmptySalaryHistoryForm(`${payrollRunYear}-${payrollRunMonth}`),
       salaryStructureId: defaultSalaryStructure?.id ? String(defaultSalaryStructure.id) : "",
     });
     setSalaryHistoryEmployeeSearch("");
@@ -5838,13 +5861,20 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
   async function runPayroll(event) {
     event.preventDefault();
     if (!canManagePayroll) return;
-    const payrollMonth = String(payrollRunForm.month || "").trim();
+    const payrollMonth = `${payrollRunYear}-${payrollRunMonth}`;
     if (!/^\d{4}-\d{2}$/.test(payrollMonth)) {
       setSaveError("Payroll month is required.");
       return;
     }
+    if ((workspace.payrollEntries || []).some((row) => String(row.month || "").trim() === payrollMonth)) {
+      setSaveMessage("");
+      setSaveError(`Payroll for ${monthToLabel(payrollMonth)} is already generated. Remove the existing table data for this month before generating again.`);
+      return;
+    }
     const nextEntries = [...(workspace.payrollEntries || [])];
     const nextPayslips = [...(workspace.payslips || [])];
+    let generatedCount = 0;
+    let skippedCount = 0;
 
     employeeOptions.forEach((employee, index) => {
       const key = payrollEmployeeKey({
@@ -5864,8 +5894,10 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         currency: payrollCurrency,
       });
       if (!computed) {
+        skippedCount += 1;
         return;
       }
+      generatedCount += 1;
       const existingIndex = nextEntries.findIndex((row) => (
         String(row.month || "") === payrollMonth
         && payrollEmployeeKey({ employeeName: row.employeeName, sourceUserId: row.sourceUserId }) === payrollEmployeeKey(computed)
@@ -5901,9 +5933,17 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
       }
     });
 
+    if (!generatedCount) {
+      setSaveMessage("");
+      setSaveError("No payroll entries were generated. Add salary history for employees before calculating payroll.");
+      return;
+    }
+
     await persistWorkspace(
       { ...workspace, payrollEntries: nextEntries, payslips: nextPayslips },
-      `Payroll calculated for ${monthToLabel(payrollMonth)}.`
+      skippedCount
+        ? `Payroll calculated for ${monthToLabel(payrollMonth)}. ${generatedCount} employee(s) processed, ${skippedCount} skipped due to missing salary history or structure.`
+        : `Payroll calculated for ${monthToLabel(payrollMonth)}.`
     );
   }
 
@@ -6783,14 +6823,22 @@ function HrPayrollWorkspacePanel({ activeTab, hrEmployees = [] }) {
         </div>
         <form className="row g-3 align-items-end" onSubmit={runPayroll}>
           <div className="col-12 col-md-4">
-            <label className="form-label small text-secondary mb-1">Month</label>
-            <input type="month" className="form-control" value={payrollRunForm.month || ""} onChange={(e) => setPayrollRunForm((prev) => ({ ...prev, month: e.target.value }))} disabled={!canManagePayroll} />
+            <label className="form-label small text-secondary mb-1">Year</label>
+            <input type="text" className="form-control" value={payrollRunYear} readOnly disabled />
           </div>
           <div className="col-12 col-md-4">
+            <label className="form-label small text-secondary mb-1">Month</label>
+            <select className="form-select" value={payrollRunMonth} onChange={(e) => setPayrollRunForm((prev) => ({ ...prev, year: payrollRunYear, month: e.target.value }))} disabled={!canManagePayroll}>
+              {payrollMonthOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-12 col-md-2">
             <div className="small text-secondary mb-1">Employees Fetched</div>
             <div className="fw-semibold">{employeeOptions.length}</div>
           </div>
-          <div className="col-12 col-md-4 d-flex gap-2">
+          <div className="col-12 col-md-2 d-flex gap-2">
             {canManagePayroll ? <button type="submit" className="btn btn-success btn-sm" disabled={saving}>Calculate Salary</button> : null}
             <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setPayrollRunForm(createEmptyPayrollRunForm())}>Reset</button>
           </div>
@@ -24185,6 +24233,7 @@ export function HrManagementModule({
   const [geoSettingsNotice, setGeoSettingsNotice] = useState("");
   const [geoPunchNotice, setGeoPunchNotice] = useState("");
   const [geoPunchLoading, setGeoPunchLoading] = useState(false);
+  const attendancePunchLockRef = useRef(false);
   const [myAttendanceGeoMeta, setMyAttendanceGeoMeta] = useState(null);
   const [formValues, setFormValues] = useState({
     ...buildEmptyValues(HR_TAB_CONFIG.employees.fields),
@@ -24233,6 +24282,7 @@ export function HrManagementModule({
     open: false,
     mode: "view",
   });
+  const [attendanceLogicReturnTab, setAttendanceLogicReturnTab] = useState("attendance");
   const [attendanceLogicForm, setAttendanceLogicForm] = useState(createEmptyAttendanceLogicRuleForm());
   const [attendanceLogicEditingId, setAttendanceLogicEditingId] = useState("");
   const [attendanceLogicNotice, setAttendanceLogicNotice] = useState("");
@@ -24406,18 +24456,20 @@ export function HrManagementModule({
   }, [shiftAssignReturnTab]);
 
   const openAttendanceLogicPage = useCallback((mode = "view") => {
+    setAttendanceLogicReturnTab(activeTab === "attendanceSettings" ? "attendanceSettings" : "attendance");
     setAttendanceLogicPage({ open: true, mode: mode === "view" ? "view" : "edit" });
     setAttendanceLogicEditingId("");
     setAttendanceLogicForm(mode === "add" ? createEmptyAttendanceLogicRuleForm() : createEmptyAttendanceLogicRuleForm());
     setAttendanceLogicNotice("");
-  }, []);
+  }, [activeTab]);
 
   const closeAttendanceLogicPage = useCallback(() => {
+    setActiveTab(attendanceLogicReturnTab === "attendanceSettings" ? "attendanceSettings" : "attendance");
     setAttendanceLogicPage({ open: false, mode: "view" });
     setAttendanceLogicEditingId("");
     setAttendanceLogicForm(createEmptyAttendanceLogicRuleForm());
     setAttendanceLogicNotice("");
-  }, []);
+  }, [attendanceLogicReturnTab]);
 
   const startEditAttendanceLogicRule = useCallback((rule = {}) => {
     setAttendanceLogicPage({ open: true, mode: "edit" });
@@ -26037,28 +26089,14 @@ export function HrManagementModule({
               </div>
             ) : null}
           </div>
-        ) : activeTab === "leaves" && field.key === "employee" && !hasHrFullAccess ? (
-          <input
-            type="text"
-            name={field.key}
-            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
-            autoComplete="off"
+        ) : activeTab === "leaves" && field.key === "employee" ? (
+          <AutocompleteSelectSm
+            value={formValues[field.key] || (!hasHrFullAccess ? (currentHrEmployeeName || "") : "")}
+            onChange={(nextValue) => onChangeField(field.key, nextValue)}
+            options={hasHrFullAccess ? employeeNameOptions : [currentHrEmployeeName].filter(Boolean)}
             placeholder={field.placeholder}
-            value={formValues[field.key] || currentHrEmployeeName || ""}
-            required={isRequiredField}
-            readOnly
-            maxLength={getBusinessAutopilotMaxLength(field.key)}
-          />
-        ) : activeTab === "leaves" && field.key === "status" && !hasHrFullAccess ? (
-          <input
-            type="text"
-            name={field.key}
-            className={`form-control ${hasFieldError ? "is-invalid" : ""}`}
-            placeholder={field.placeholder}
-            value={formValues[field.key] || "Pending"}
-            required={isRequiredField}
-            readOnly
-            maxLength={getBusinessAutopilotMaxLength(field.key)}
+            ariaLabel="Select leave employee"
+            inputClassName={hasFieldError ? "is-invalid" : ""}
           />
         ) : activeTab === "employees" && field.key === "department" ? (
           <select
@@ -26653,7 +26691,7 @@ export function HrManagementModule({
     onCancelEdit();
   }
 
-  function upsertAttendanceRecord({ employee, date = todayIso, patch = {}, action = "" }) {
+  function upsertAttendanceRecord({ employee, date = todayIso, patch = {}, action = "", preserveExistingPunchTimes = false }) {
     const employeeName = String(employee || "").trim();
     const isoDate = String(date || todayIso).trim() || todayIso;
     if (!employeeName) {
@@ -26680,6 +26718,16 @@ export function HrManagementModule({
         taskNotes: "",
       };
       const nextRow = { ...base, ...patch };
+      if (preserveExistingPunchTimes) {
+        const baseInTime = String(base?.inTime || "").trim();
+        const baseOutTime = String(base?.outTime || "").trim();
+        if (baseInTime) {
+          nextRow.inTime = baseInTime;
+        }
+        if (baseOutTime) {
+          nextRow.outTime = baseOutTime;
+        }
+      }
       nextRow.workedHours = computeWorkedDuration(nextRow.inTime, nextRow.outTime);
       if (nextRow.status !== "Permission") {
         nextRow.permissionHours = "";
@@ -26864,29 +26912,38 @@ export function HrManagementModule({
       // HR/Admin quick punch-out should be instant (no mandatory task popup).
       // The punch-out task modal is meant for org-user self-service flows.
       if (hasHrFullAccess && String(source || "").toLowerCase().includes("hr")) {
-        upsertAttendanceRecord({
-          employee: name,
-          date: todayIso,
-          patch: {
-            entryMode: source,
-            outTime: currentTime,
-            status: "Present",
-            sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "",
-            sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "",
-          },
-          action: "Punch Out",
-        });
-        if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
-          setFormValues((prev) => ({
-            ...prev,
+        if (attendancePunchLockRef.current) {
+          return;
+        }
+        attendancePunchLockRef.current = true;
+        try {
+          upsertAttendanceRecord({
             employee: name,
             date: todayIso,
-            entryMode: source,
-            outTime: currentTime,
-            status: "Present",
-          }));
-          setHrFormNotice("");
-          setHrFieldErrors({});
+            patch: {
+              entryMode: source,
+              outTime: currentTime,
+              status: "Present",
+              sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "",
+              sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "",
+            },
+            action: "Punch Out",
+            preserveExistingPunchTimes: true,
+          });
+          if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
+            setFormValues((prev) => ({
+              ...prev,
+              employee: name,
+              date: todayIso,
+              entryMode: source,
+              outTime: currentTime,
+              status: "Present",
+            }));
+            setHrFormNotice("");
+            setHrFieldErrors({});
+          }
+        } finally {
+          attendancePunchLockRef.current = false;
         }
         return;
       }
@@ -26911,28 +26968,37 @@ export function HrManagementModule({
       });
       return;
     }
-    upsertAttendanceRecord({
-      employee: name,
-      date: todayIso,
-      patch: action === "in"
-        ? { entryMode: source, inTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
-        : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" },
-      action: action === "in" ? "Punch In" : "Punch Out",
-    });
-
-    // Keep the Attendance form in sync for HR instant In/Out buttons
-    // (so user doesn't need to fill mandatory fields just to punch).
-    if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
-      setFormValues((prev) => ({
-        ...prev,
+    if (attendancePunchLockRef.current) {
+      return;
+    }
+    attendancePunchLockRef.current = true;
+    try {
+      upsertAttendanceRecord({
         employee: name,
         date: todayIso,
-        entryMode: source,
-        ...(action === "in" ? { inTime: currentTime } : { outTime: currentTime }),
-        status: "Present",
-      }));
-      setHrFormNotice("");
-      setHrFieldErrors({});
+        patch: action === "in"
+          ? { entryMode: source, inTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" }
+          : { entryMode: source, outTime: currentTime, status: "Present", sourceUserId: ownerIdentity.sourceUserId || currentHrEmployeeSourceUserId || "", sourceUserEmail: ownerIdentity.sourceUserEmail || currentHrEmployeeEmail || "" },
+        action: action === "in" ? "Punch In" : "Punch Out",
+        preserveExistingPunchTimes: true,
+      });
+
+      // Keep the Attendance form in sync for HR instant In/Out buttons
+      // (so user doesn't need to fill mandatory fields just to punch).
+      if (activeTab === "attendance" && String(formValues.employee || "").trim() === name) {
+        setFormValues((prev) => ({
+          ...prev,
+          employee: name,
+          date: todayIso,
+          entryMode: source,
+          ...(action === "in" ? { inTime: currentTime } : { outTime: currentTime }),
+          status: "Present",
+        }));
+        setHrFormNotice("");
+        setHrFieldErrors({});
+      }
+    } finally {
+      attendancePunchLockRef.current = false;
     }
   }
 
@@ -28102,7 +28168,7 @@ export function HrManagementModule({
     <div className="d-flex flex-column gap-3">
       {!showOnlyEmployeeForm ? (
         <div>
-          <h4 className="mb-2">HR</h4>
+          <h4 className="mb-2">HRM</h4>
           <p className="text-secondary mb-3">Handle employees, attendance, leave approvals, and payroll.</p>
           <div className="d-flex flex-wrap gap-2">
             {visibleHrTabs.map((tabValue) => (
@@ -28146,7 +28212,7 @@ export function HrManagementModule({
         <HrPayrollWorkspacePanel activeTab={activeTab} hrEmployees={moduleData.employees || []} />
       ) : (
         <>
-	      {(activeTab !== "attendance" || hasHrFullAccess) && !(activeTab === "attendanceSettings" && !shiftAssignPage.open) && activeTab !== "holidays" && !(activeTab === "attendance" && attendanceLogicPage.open) ? (
+	      {(activeTab !== "attendance" || hasHrFullAccess) && !(activeTab === "attendanceSettings" && !shiftAssignPage.open) && activeTab !== "holidays" && !attendanceLogicPage.open ? (
           (activeTab === "attendance" || activeTab === "attendanceSettings") && hasHrFullAccess && !showOnlyEmployeeForm ? (
             shiftAssignPage.open ? (
               <div>
@@ -28513,7 +28579,7 @@ export function HrManagementModule({
                   <div className="col-12 col-xl-5">
                     <div className="card p-3 h-100">
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                        <h6 className="mb-0">My Attendance (HR)</h6>
+                        <h6 className="mb-0">My Attendance (HRM)</h6>
                         {hasHrFullAccess ? (
                           <div className="d-flex align-items-center gap-2">
                             <label className="small text-secondary mb-0">Employee</label>
@@ -28581,18 +28647,18 @@ export function HrManagementModule({
                               <button
                                 type="button"
                                 className="btn btn-outline-success btn-sm"
-                                disabled={!myAttendanceEmployee || geoPunchLoading}
+                                disabled={!myAttendanceEmployee || geoPunchLoading || Boolean(myAttendanceToday?.inTime)}
                                 onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
                               >
-                                {geoPunchLoading ? "Getting GPS..." : "In"}
+                                {geoPunchLoading ? "Getting GPS..." : (myAttendanceToday?.inTime ? "In Saved" : "In")}
                               </button>
                               <button
                                 type="button"
                                 className="btn btn-outline-info btn-sm"
-                                disabled={!myAttendanceEmployee || geoPunchLoading}
+                                disabled={!myAttendanceEmployee || geoPunchLoading || !myAttendanceToday?.inTime || Boolean(myAttendanceToday?.outTime)}
                                 onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("out") : handleAttendancePunch("out", myAttendanceEmployee, "HR Self"))}
                               >
-                                Out
+                                {myAttendanceToday?.outTime ? "Out Saved" : "Out"}
                               </button>
                             </div>
                           </div>
@@ -28682,7 +28748,7 @@ export function HrManagementModule({
                 <div className="col-12 col-xl-5">
                   <div className="card p-3 h-100">
                     <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                      <h6 className="mb-0">My Attendance (HR)</h6>
+                      <h6 className="mb-0">My Attendance (HRM)</h6>
                       {hasHrFullAccess ? (
                         <div className="d-flex align-items-center gap-2">
                           <label className="small text-secondary mb-0">Employee</label>
@@ -28750,18 +28816,18 @@ export function HrManagementModule({
                             <button
                               type="button"
                               className="btn btn-outline-success btn-sm"
-                              disabled={!myAttendanceEmployee || geoPunchLoading}
+                              disabled={!myAttendanceEmployee || geoPunchLoading || Boolean(myAttendanceToday?.inTime)}
                               onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
                             >
-                              {geoPunchLoading ? "Getting GPS..." : "In"}
+                              {geoPunchLoading ? "Getting GPS..." : (myAttendanceToday?.inTime ? "In Saved" : "In")}
                             </button>
                             <button
                               type="button"
                               className="btn btn-outline-info btn-sm"
-                              disabled={!myAttendanceEmployee || geoPunchLoading}
+                              disabled={!myAttendanceEmployee || geoPunchLoading || !myAttendanceToday?.inTime || Boolean(myAttendanceToday?.outTime)}
                               onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("out") : handleAttendancePunch("out", myAttendanceEmployee, "HR Self"))}
                             >
-                              Out
+                              {myAttendanceToday?.outTime ? "Out Saved" : "Out"}
                             </button>
                           </div>
                         </div>
@@ -28913,7 +28979,7 @@ export function HrManagementModule({
           )
       ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendanceSettings" && hasHrFullAccess ? (
+      {!showOnlyEmployeeForm && activeTab === "attendanceSettings" && hasHrFullAccess && !shiftAssignPage.open && !attendanceLogicPage.open ? (
         <div className="row g-3">
           <div className="col-12">
             <div className="card p-3 h-100">
@@ -29059,14 +29125,14 @@ export function HrManagementModule({
         </div>
       ) : null}
 
-      {!showOnlyEmployeeForm && activeTab === "attendance" && !shiftAssignPage.open && attendanceLogicPage.open ? (
+      {!showOnlyEmployeeForm && (activeTab === "attendance" || activeTab === "attendanceSettings") && !shiftAssignPage.open && attendanceLogicPage.open ? (
         <div className="card p-3 mt-3">
           <div className="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
             <div>
               <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                 <button type="button" className="btn btn-outline-light btn-sm" onClick={closeAttendanceLogicPage}>
                   <i className="bi bi-arrow-left me-1" aria-hidden="true" />
-                  Back to Attendance
+                  {attendanceLogicReturnTab === "attendanceSettings" ? "Back to Attendance Setting" : "Back to Attendance"}
                 </button>
                 <span className="badge text-bg-light border">Attendance Logic Workspace</span>
               </div>
@@ -29270,7 +29336,9 @@ export function HrManagementModule({
                       <textarea className="form-control" rows={4} placeholder="Explain how payroll team should apply this rule." value={attendanceLogicForm.notes} onChange={(event) => setAttendanceLogicForm((prev) => ({ ...prev, notes: event.target.value }))} />
                     </div>
                     <div className="d-flex justify-content-end gap-2">
-                      <button type="button" className="btn btn-outline-light" onClick={closeAttendanceLogicPage}>Back to Attendance</button>
+                      <button type="button" className="btn btn-outline-light" onClick={closeAttendanceLogicPage}>
+                        {attendanceLogicReturnTab === "attendanceSettings" ? "Back to Attendance Setting" : "Back to Attendance"}
+                      </button>
                       <button type="submit" className="btn btn-success">{attendanceLogicEditingId ? "Update Rule" : "Save Rule"}</button>
                     </div>
                   </form>
@@ -30082,7 +30150,7 @@ export function HrManagementModule({
 		        </div>
 		      ) : null}
 
-		      {!showOnlyEmployeeForm && activeTab === "attendance" && shiftModal.open ? (
+		      {!showOnlyEmployeeForm && (activeTab === "attendance" || activeTab === "attendanceSettings") && shiftModal.open ? (
 		        <div
 		          role="dialog"
 		          aria-modal="true"
@@ -30116,7 +30184,7 @@ export function HrManagementModule({
 		                    placeholder="General / Night / Morning"
 		                    value={shiftModal.name}
 		                    maxLength={WORKING_SHIFT_NAME_MAX}
-		                    onChange={(e) => setShiftModal((prev) => ({ ...prev, name: e.target.value }))}
+		                    onChange={(e) => setShiftModal((prev) => ({ ...prev, name: String(e.target.value || "").slice(0, WORKING_SHIFT_NAME_MAX) }))}
 		                    required
 		                  />
 		                  <div className="small text-secondary mt-1">
@@ -30147,7 +30215,6 @@ export function HrManagementModule({
 		                </div>
 		              </div>
 		              <div className="d-flex justify-content-end gap-2">
-		                <button type="button" className="btn btn-outline-light" onClick={closeWorkingShiftModal}>Cancel</button>
 		                <button type="submit" className="btn btn-success">{shiftModal.mode === "edit" ? "Update" : "Save"}</button>
 		              </div>
 		            </form>

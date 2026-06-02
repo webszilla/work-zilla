@@ -72,6 +72,7 @@ class ApiHttpMethodOverrideMiddleware:
             if override in self.ALLOWED_OVERRIDES:
                 request.META["ORIGINAL_REQUEST_METHOD"] = request_method
                 request.META["REQUEST_METHOD"] = override
+                request.method = override
         return self.get_response(request)
 
 
