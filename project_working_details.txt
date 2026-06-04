@@ -144,9 +144,9 @@ VERIFY (AFTER DEPLOY)
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
 - Published at (UTC): `2026-06-04T14:40:18Z`
-- Local SHA: `1b964abb12c81528b287165433f2423e00aac1e1`
-- GitHub main SHA: `1b964abb12c81528b287165433f2423e00aac1e1`
-- Server SHA: `1b964abb12c81528b287165433f2423e00aac1e1`
+- Local SHA: `647f043cf987f724edb7847c63860cfbfc3cf3da`
+- GitHub main SHA: `647f043cf987f724edb7847c63860cfbfc3cf3da`
+- Server SHA: `647f043cf987f724edb7847c63860cfbfc3cf3da`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
